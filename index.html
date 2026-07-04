@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AiBoids — Flocking Simulation</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="app-header">
+        <h1>AiBoids</h1>
+        <p class="subtitle">A flocking simulation with predators</p>
+      </header>
+      <main id="app-main">
+        <canvas id="sim-canvas"></canvas>
+        <aside id="control-panel">
+          <h2>Controls</h2>
+          <div id="control-panel-body"><!-- populated by ControlPanel.ts --></div>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
