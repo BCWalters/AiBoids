@@ -14,6 +14,19 @@ const BOID_PANIC: [number, number, number] = [255, 224, 102]; // warm alarm yell
 const PREDATOR_BASE: [number, number, number] = [255, 90, 90]; // #ff5a5a
 const PREDATOR_HUNT: [number, number, number] = [255, 255, 255]; // hot white lock-on flash
 
+// Cartoony blood-splatter particle burst spawned wherever a predator
+// catches a boid (see Simulation.catchEvents). Purely a client-side
+// visual effect — the sim only records where/when a catch happened.
+const SPLATTER_DURATION = 0.5;
+const SPLATTER_PARTICLES = 10;
+
+interface Splatter {
+  x: number;
+  y: number;
+  elapsed: number;
+  particles: { dx: number; dy: number; r: number }[];
+}
+
 function lerpColor(a: [number, number, number], b: [number, number, number], t: number): string {
   const clamped = Math.max(0, Math.min(1, t));
   const r = Math.round(a[0] + (b[0] - a[0]) * clamped);
@@ -25,6 +38,8 @@ function lerpColor(a: [number, number, number], b: [number, number, number], t: 
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private canvas: HTMLCanvasElement;
+  private splatters: Splatter[] = [];
+  private lastSeenCatchId = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -46,6 +61,41 @@ export class Renderer {
     ctx.fillStyle = fill;
     ctx.fill();
     ctx.restore();
+  }
+
+  private spawnSplattersFromCatches(sim: Simulation): void {
+    for (const catchEvent of sim.catchEvents) {
+      if (catchEvent.id <= this.lastSeenCatchId) continue;
+      this.lastSeenCatchId = catchEvent.id;
+      const particles = [];
+      for (let i = 0; i < SPLATTER_PARTICLES; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 4 + Math.random() * 14;
+        particles.push({ dx: Math.cos(angle) * dist, dy: Math.sin(angle) * dist, r: 1.5 + Math.random() * 2.5 });
+      }
+      this.splatters.push({ x: catchEvent.position.x, y: catchEvent.position.y, elapsed: 0, particles });
+    }
+  }
+
+  private updateAndDrawSplatters(dt: number): void {
+    const ctx = this.ctx;
+    for (let i = this.splatters.length - 1; i >= 0; i--) {
+      const splatter = this.splatters[i];
+      splatter.elapsed += dt;
+      if (splatter.elapsed >= SPLATTER_DURATION) {
+        this.splatters.splice(i, 1);
+        continue;
+      }
+      const t = splatter.elapsed / SPLATTER_DURATION;
+      const alpha = 1 - t;
+      const spread = 1 + t * 1.5; // particles drift outward as they fade
+      ctx.fillStyle = `rgba(214, 40, 40, ${alpha})`;
+      for (const particle of splatter.particles) {
+        ctx.beginPath();
+        ctx.arc(splatter.x + particle.dx * spread, splatter.y + particle.dy * spread, particle.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   render(sim: Simulation): void {
@@ -74,12 +124,13 @@ export class Renderer {
     }
 
     for (const boid of sim.boids) {
+      if (boid.scale <= 0) continue;
       this.drawTriangle(
         boid.position.x,
         boid.position.y,
         boid.headingAngle,
-        BOID_LENGTH,
-        BOID_WIDTH,
+        BOID_LENGTH * boid.scale,
+        BOID_WIDTH * boid.scale,
         lerpColor(BOID_BASE, BOID_PANIC, boid.panicLevel),
       );
     }
@@ -94,5 +145,11 @@ export class Renderer {
         lerpColor(PREDATOR_BASE, PREDATOR_HUNT, predator.huntIntensity),
       );
     }
+
+    this.spawnSplattersFromCatches(sim);
+    // A rough per-frame dt estimate is good enough for a purely cosmetic,
+    // half-second particle fade — no need to thread the sim's real dt
+    // through the render() call just for this.
+    this.updateAndDrawSplatters(1 / 60);
   }
 }

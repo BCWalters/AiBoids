@@ -70,6 +70,13 @@ export interface SimParams {
   // Purely cosmetic.
   dragonPredators: boolean;
 
+  // When true (default), a predator that gets close enough to a boid
+  // catches it — the boid is removed (with a brief cartoony "swallowed"
+  // shrink + blood-splatter effect) and the predator pauses to glide to a
+  // stop and "digest" for a few seconds before resuming the hunt. When
+  // false, predators can chase boids forever but never actually catch them.
+  predatorCatchEnabled: boolean;
+
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
@@ -107,6 +114,7 @@ export const defaultParams: SimParams = {
 
   visualStyle: 'arcade',
   dragonPredators: false,
+  predatorCatchEnabled: true,
 
   running: true,
   showDebugOverlay: false,

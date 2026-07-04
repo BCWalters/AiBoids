@@ -57,6 +57,8 @@ export class ControlPanel {
       }
     }
 
+    this.container.appendChild(this.buildPredatorCatchToggle());
+
     for (const spec of sliderSpecs) {
       this.container.appendChild(this.buildSlider(spec));
     }
@@ -142,7 +144,7 @@ export class ControlPanel {
     wrapper.className = 'control-row control-checkbox-row';
 
     const label = document.createElement('label');
-    label.textContent = 'Predators as purple dragons';
+    label.textContent = 'There be dragons';
     label.htmlFor = 'param-dragon-predators';
 
     const input = document.createElement('input');
@@ -151,6 +153,27 @@ export class ControlPanel {
     input.checked = params.dragonPredators;
     input.addEventListener('change', () => {
       params.dragonPredators = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildPredatorCatchToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = 'Predators can catch prey';
+    label.htmlFor = 'param-predator-catch';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-predator-catch';
+    input.checked = params.predatorCatchEnabled;
+    input.addEventListener('change', () => {
+      params.predatorCatchEnabled = input.checked;
     });
 
     wrapper.appendChild(input);

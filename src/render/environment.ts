@@ -40,6 +40,15 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   // few seconds; 0.0015 was still too fast, so this is another ~6x down,
   // more like real high-altitude clouds drifting over many minutes.
   skyUniforms.cloudSpeed.value = 0.00025;
+  // The Sky shader bakes in its own physically-angled sun disc, rendered
+  // directly onto the (camera-independent, direction-only) sky dome. We
+  // already draw our own custom sun sprite + halo at a finite world
+  // distance for a bigger/warmer look — having both visible at once
+  // caused a confusing second "white circle" that appears to drift
+  // independently of our sprite as the camera orbits (the shader's disc
+  // has zero parallax since it's direction-locked, while our sprite/halo
+  // are finite-distance points that do shift slightly with the camera).
+  skyUniforms.showSunDisc.value = 0;
 
   // Fixed mid-afternoon sun position (elevation ~35°, azimuth ~135°).
   const elevation = THREE.MathUtils.degToRad(35);
@@ -126,6 +135,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       mountains.geometry.dispose();
       (mountains.material as THREE.Material).dispose();
       water.geometry.dispose();
+      (water.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
       (water.material as THREE.Material).dispose();
       (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
       (sunHalo.material as THREE.Material).dispose();
@@ -201,19 +211,98 @@ function createMountainRing(): THREE.Mesh {
   return new THREE.Mesh(geometry, material);
 }
 
-/** A simple flat lake patch — a hint of water on the horizon, cheaper than any real reflection/ripple simulation. */
+/**
+ * A lake patch with a soft, irregular shoreline and a sky-tinted, glinting
+ * surface — a flat, hard-edged, dark-teal circle read as an odd "dark
+ * circle" floating on the ground rather than water. Fixed by: (1) an
+ * irregular (noisy, non-circular) outline instead of a perfect circle,
+ * (2) an alpha map that feathers the edge into the grass rather than
+ * cutting off sharply, (3) a lighter, more sky-reflective blue base color,
+ * and (4) a soft bright "sun glint" patch baked into the alpha-mapped
+ * texture standing in for a specular highlight.
+ */
 function createWaterPatch(): THREE.Mesh {
-  const geometry = new THREE.CircleGeometry(1, 48);
+  const segments = 48;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  // Irregular radius per angle (smoothed noise) so the outline reads as
+  // a natural lake shoreline instead of a perfect drafting-compass circle.
+  const raw: number[] = [];
+  for (let i = 0; i < segments; i++) raw.push(0.78 + Math.random() * 0.32);
+  const radii = raw.map((r, i) => (raw[(i - 1 + segments) % segments] + r * 2 + raw[(i + 1) % segments]) / 4);
+
+  positions.push(0, 0, 0);
+  uvs.push(0.5, 0.5);
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const r = radii[i];
+    const x = Math.cos(angle) * r;
+    const y = Math.sin(angle) * r;
+    positions.push(x, y, 0);
+    uvs.push(x * 0.5 + 0.5, y * 0.5 + 0.5);
+  }
+  for (let i = 0; i < segments; i++) {
+    indices.push(0, 1 + i, 1 + ((i + 1) % segments));
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
   const material = new THREE.MeshStandardMaterial({
-    color: 0x2f6c86,
-    roughness: 0.15,
-    metalness: 0.4,
+    color: 0x5c96b0, // lighter, more sky-reflective blue-teal than the old murky dark teal
+    roughness: 0.1,
+    metalness: 0.25,
     transparent: true,
-    opacity: 0.92,
+    alphaMap: createWaterAlphaTexture(),
+    depthWrite: false,
+    // Extra safety against z-fighting with the ground plane just beneath
+    // it — nudges the water's rendered depth slightly toward the camera
+    // so it never visually "fights" with the grass texture underneath.
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
   return mesh;
+}
+
+/**
+ * Soft radial falloff (feathered shoreline) plus a bright off-center
+ * glint blob, baked as a grayscale alpha map so the water's edges fade
+ * gently into the surrounding grass instead of cutting off sharply.
+ */
+function createWaterAlphaTexture(): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  const base = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  base.addColorStop(0, 'rgba(255,255,255,1)');
+  base.addColorStop(0.72, 'rgba(255,255,255,0.95)');
+  base.addColorStop(0.92, 'rgba(255,255,255,0.45)');
+  base.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+
+  // A soft bright glint (stands in for a specular sun highlight on the
+  // water's surface) — drawn additively so it boosts alpha/brightness in
+  // one spot without a hard edge.
+  ctx.globalCompositeOperation = 'lighter';
+  const glint = ctx.createRadialGradient(size * 0.38, size * 0.42, 0, size * 0.38, size * 0.42, size * 0.22);
+  glint.addColorStop(0, 'rgba(255,255,255,0.9)');
+  glint.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glint;
+  ctx.fillRect(0, 0, size, size);
+
+  return new THREE.CanvasTexture(canvas);
 }
 
 /** A bright, warm sun disc with a soft feathered edge, standing in for the sky shader's near-invisible physical sun disc. */
@@ -321,7 +410,14 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // mountain ring, not overlapping its base.
   const forwardX = -0.55;
   const forwardZ = -0.83;
-  env.water.position.set(center.x + forwardX * flockScale * 1.8, 0.4, center.z + forwardZ * flockScale * 1.8);
+  // The old fixed 0.4-unit lift was negligible next to a flockScale that
+  // can be in the hundreds/thousands, so the water plane sat essentially
+  // coplanar with the ground underneath — causing a shimmering z-fighting
+  // moiré between the two overlapping textures as the camera moved.
+  // Scaling the lift with flockScale keeps a comfortably large, consistent
+  // gap regardless of world size.
+  const waterLift = Math.max(1, flockScale * 0.02);
+  env.water.position.set(center.x + forwardX * flockScale * 1.8, waterLift, center.z + forwardZ * flockScale * 1.8);
   env.water.scale.setScalar(flockScale * 0.55);
 }
 

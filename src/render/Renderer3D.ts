@@ -12,6 +12,7 @@ import type { Predator } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries, createDragonGeometries, type BirdGeometries } from './birdGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
 import { createDriftingClouds, type DriftingClouds } from './clouds';
+import { createBloodEffects, type BloodEffects } from './bloodEffects';
 
 // --- "Arcade" style: bright, saturated emissive colors so the bloom pass
 // has something to glow — base material color stays neutral (driven
@@ -33,8 +34,8 @@ const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked 
 
 // --- Optional "dragon" predator variant (nature style only): much larger,
 // purple, leathery-winged silhouette instead of the hawk geometry.
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x5b2a86); // deep violet-purple scale
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0xb84fe0); // brighter magenta-purple when locked on
+const DRAGON_PREDATOR_BASE = new THREE.Color(0x4a2270); // deep violet-purple scale (darkened slightly from 0x5b2a86)
+const DRAGON_PREDATOR_HUNT = new THREE.Color(0x9c43be); // brighter magenta-purple when locked on (darkened slightly from 0xb84fe0)
 
 const BOID_LENGTH = 7;
 const BOID_WIDTH = 2.6;
@@ -50,6 +51,14 @@ const DRAGON_WIDTH = PREDATOR_WIDTH * 3.2;
 const FLAP_FREQUENCY = 9; // radians/sec-ish; controls flap speed
 const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
+
+// Dragons are ~2.5-3x the size of the hawk predator, so flapping at the
+// same fast hummingbird-like frequency read as a tiny insect (dragonfly/
+// hummingbird) rather than a huge beast — big wings should beat slower
+// and sweep through a wider arc.
+const DRAGON_FLAP_FREQUENCY = 2.6;
+const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
+const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
 // "forward" direction we rotate onto each entity's velocity vector.
@@ -75,6 +84,7 @@ export class Renderer3D {
   private keyLight: THREE.DirectionalLight;
   private natureEnv: NatureEnvironment;
   private driftingClouds: DriftingClouds;
+  private bloodEffects: BloodEffects;
 
   private arcadeBoidGeometries: BirdGeometries;
   private arcadePredatorGeometries: BirdGeometries;
@@ -89,6 +99,7 @@ export class Renderer3D {
   private boundsHelper: THREE.LineSegments | null = null;
   private currentStyle: VisualStyle | null = null;
 
+  private lastSeenCatchId = 0;
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
@@ -120,6 +131,7 @@ export class Renderer3D {
 
     this.natureEnv = createNatureEnvironment(this.scene);
     this.driftingClouds = createDriftingClouds(this.scene);
+    this.bloodEffects = createBloodEffects(this.scene);
 
     this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
     this.arcadePredatorGeometries = createBirdGeometries(PREDATOR_LENGTH, PREDATOR_WIDTH);
@@ -139,7 +151,13 @@ export class Renderer3D {
     this.composer.addPass(new OutputPass());
   }
 
-  private buildInstanceSet(geometries: BirdGeometries, style: VisualStyle, emissive: THREE.Color, count: number): BirdInstanceSet {
+  private buildInstanceSet(
+    geometries: BirdGeometries,
+    style: VisualStyle,
+    emissive: THREE.Color,
+    count: number,
+    isDragon: boolean = false,
+  ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
     const isNature = style === 'nature';
@@ -151,7 +169,12 @@ export class Renderer3D {
       metalness: 0,
     });
     const wingMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
+      // Dragons: tint the membrane/tail material itself darker (multiplies
+      // against the per-instance purple state color set in updateInstances)
+      // so the leathery wings/tail read visibly darker than the scaly body
+      // — a classic bat-wing-on-dragon cue — for free, with no extra
+      // per-instance color bookkeeping.
+      color: isDragon ? 0x554466 : 0xffffff,
       emissive: isNature ? 0x000000 : emissive,
       emissiveIntensity: isNature ? 0 : 1.1,
       roughness: isNature ? 0.9 : 0.5,
@@ -210,7 +233,7 @@ export class Renderer3D {
         : style === 'nature'
           ? this.naturePredatorGeometries
           : this.arcadePredatorGeometries;
-      this.predatorInstances = this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, predatorCount);
+      this.predatorInstances = this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, predatorCount, isDragon);
       this.predatorInstancesKey = predatorKey;
     }
 
@@ -269,21 +292,28 @@ export class Renderer3D {
     baseColor: THREE.Color,
     highlightColor: THREE.Color,
     getIntensity: (entity: Boid | Predator) => number,
+    flapFrequency: number = FLAP_FREQUENCY,
+    flapIdleAmplitude: number = FLAP_IDLE_AMPLITUDE,
+    flapSpeedAmplitude: number = FLAP_SPEED_AMPLITUDE,
+    getScale: (entity: Boid | Predator) => number = () => 1,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
       const pos = entity.position;
       const vel = entity.velocity;
       const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+      const entityScale = getScale(entity);
 
       if (speed > 1e-6) {
         const dir = new THREE.Vector3(vel.x, vel.y, vel.z).multiplyScalar(1 / speed);
         this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, dir);
       }
 
-      // Body: just position + orientation, no flap.
+      // Body: just position + orientation, no flap. Caught boids shrink
+      // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
       this.dummy.position.set(pos.x, pos.y, pos.z);
       this.dummy.quaternion.copy(this.bodyQuat);
+      this.dummy.scale.setScalar(entityScale);
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
       if (set.tail) set.tail.setMatrixAt(i, this.dummy.matrix);
@@ -292,8 +322,8 @@ export class Renderer3D {
       // before combining with the shared body orientation, so both wings
       // swing up/down in sync regardless of which way the bird is heading.
       const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
-      const amplitude = FLAP_IDLE_AMPLITUDE + FLAP_SPEED_AMPLITUDE * speedFrac;
-      const phase = elapsed * FLAP_FREQUENCY + entity.id * 1.7;
+      const amplitude = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
+      const phase = elapsed * flapFrequency + entity.id * 1.7;
       const flapAngle = amplitude * Math.sin(phase);
 
       this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
@@ -326,6 +356,17 @@ export class Renderer3D {
     }
   }
 
+  /** Spawns a 3D blood-splatter burst for every not-yet-seen Simulation.catchEvent. */
+  private spawnBloodFromCatches(sim: Simulation): void {
+    for (const catchEvent of sim.catchEvents) {
+      if (catchEvent.id <= this.lastSeenCatchId) continue;
+      this.lastSeenCatchId = catchEvent.id;
+      const position = new THREE.Vector3(catchEvent.position.x, catchEvent.position.y, catchEvent.position.z);
+      const direction = new THREE.Vector3(catchEvent.direction.x, catchEvent.direction.y, catchEvent.direction.z);
+      this.bloodEffects.spawn(position, direction, BOID_LENGTH * 0.9);
+    }
+  }
+
   resize(width: number, height: number): void {
     this.renderer.setSize(width, height, false);
     this.composer.setSize(width, height);
@@ -345,6 +386,8 @@ export class Renderer3D {
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
     this.natureEnv.update(elapsed);
     this.driftingClouds.update(dt);
+    this.spawnBloodFromCatches(sim);
+    this.bloodEffects.update(dt);
 
     if (this.boidInstances) {
       this.updateInstances(
@@ -355,6 +398,10 @@ export class Renderer3D {
         isNature ? NATURE_BOID_BASE : ARCADE_BOID_BASE,
         isNature ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
         (entity) => (entity as Boid).panicLevel,
+        FLAP_FREQUENCY,
+        FLAP_IDLE_AMPLITUDE,
+        FLAP_SPEED_AMPLITUDE,
+        (entity) => (entity as Boid).scale,
       );
     }
     if (this.predatorInstances) {
@@ -367,6 +414,9 @@ export class Renderer3D {
         isDragon ? DRAGON_PREDATOR_BASE : isNature ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
         isDragon ? DRAGON_PREDATOR_HUNT : isNature ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
         (entity) => (entity as Predator).huntIntensity,
+        isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
+        isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+        isDragon ? DRAGON_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
       );
     }
 
@@ -391,6 +441,7 @@ export class Renderer3D {
     }
     this.natureEnv.dispose();
     this.driftingClouds.dispose();
+    this.bloodEffects.dispose();
     this.controls.dispose();
     this.composer.dispose();
     this.renderer.dispose();

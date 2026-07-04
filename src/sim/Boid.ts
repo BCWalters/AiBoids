@@ -6,6 +6,9 @@ import { boundarySteer, type WorldBounds } from './boundary';
 
 let nextId = 1;
 
+/** How long (seconds) the "caught" shrink-and-slide-into-mouth animation lasts. */
+export const DYING_DURATION = 0.35;
+
 export class Boid {
   readonly id: number;
   position: Vec3;
@@ -18,6 +21,21 @@ export class Boid {
    * panic radius boundary. Read by both renderers to tint boids as they flee.
    */
   panicLevel = 0;
+
+  /**
+   * Set true the instant a predator catches this boid (see
+   * Simulation.checkCatches). While dying, the boid ignores all normal
+   * flocking/steering and instead animates a brief "swallowed" sequence:
+   * shrinking and sliding toward the predator's position. Simulation
+   * removes the boid from the active array once `dyingElapsed` passes
+   * DYING_DURATION; syncPopulation() then naturally spawns a fresh boid
+   * to replace it, keeping the population count stable.
+   */
+  dying = false;
+  dyingElapsed = 0;
+  deathTarget: Vec3 | null = null;
+  /** 1 = full size, shrinks to 0 over the dying animation. Read by renderers. */
+  scale = 1;
 
   constructor(position: Vec3, velocity: Vec3) {
     this.id = nextId++;
@@ -55,6 +73,21 @@ export class Boid {
    * `bounds` is only used in 3D mode for wall steer-away.
    */
   update(dt: number, allBoids: Boid[], predators: Predator[], bounds: WorldBounds): void {
+    if (this.dying) {
+      // Ignore all normal flocking/steering — just slide toward the
+      // predator's mouth and shrink away over DYING_DURATION. Simulation
+      // removes this boid from the active array once dyingElapsed passes
+      // DYING_DURATION.
+      this.dyingElapsed += dt;
+      const t = Math.min(1, this.dyingElapsed / DYING_DURATION);
+      if (this.deathTarget) {
+        this.position = V.add(this.position, V.scale(V.sub(this.deathTarget, this.position), Math.min(1, dt * 10)));
+      }
+      this.scale = Math.max(0, 1 - t);
+      this.velocity = V.create();
+      return;
+    }
+
     const p = params;
     let acceleration = V.create();
 

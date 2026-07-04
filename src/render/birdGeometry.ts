@@ -180,28 +180,36 @@ export function createDragonGeometries(length: number, width: number): BirdGeome
 /**
  * Radially-symmetric body profile with a longer, thicker neck and a
  * pronounced head/jaw bulge compared to the hawk body — reads as a
- * serpentine dragon torso rather than a plump bird chest.
+ * serpentine dragon torso rather than a plump bird chest. Proportions are
+ * deliberately bulkier (wider haunch/chest radii) than the hawk's, and a
+ * sharp backswept horn/frill spike sits just behind the head — a ring
+ * around the neck when lathed, reading like a frill-necked-lizard crest
+ * rather than a smooth bird neck.
  */
 function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = [
-    new THREE.Vector2(width * 0.03, -halfLen * 1.0), // tail root
-    new THREE.Vector2(width * 0.16, -halfLen * 0.68),
-    new THREE.Vector2(width * 0.36, -halfLen * 0.3), // haunch bulge
-    new THREE.Vector2(width * 0.32, halfLen * 0.05), // chest
-    new THREE.Vector2(width * 0.16, halfLen * 0.42), // long neck taper
-    new THREE.Vector2(width * 0.13, halfLen * 0.62), // neck
-    new THREE.Vector2(width * 0.24, halfLen * 0.76), // jaw/head bulge
-    new THREE.Vector2(width * 0.02, halfLen * 0.95), // snout tip
+    new THREE.Vector2(width * 0.04, -halfLen * 1.0), // tail root
+    new THREE.Vector2(width * 0.24, -halfLen * 0.68),
+    new THREE.Vector2(width * 0.52, -halfLen * 0.32), // haunch bulge (bulkier than hawk)
+    new THREE.Vector2(width * 0.46, halfLen * 0.02), // chest
+    new THREE.Vector2(width * 0.24, halfLen * 0.32), // neck taper
+    new THREE.Vector2(width * 0.18, halfLen * 0.5), // neck
+    new THREE.Vector2(width * 0.34, halfLen * 0.62), // horn/frill spike (wide, sharp step)
+    new THREE.Vector2(width * 0.2, halfLen * 0.66), // frill undercut
+    new THREE.Vector2(width * 0.3, halfLen * 0.78), // jaw/head bulge
+    new THREE.Vector2(width * 0.02, halfLen * 0.98), // snout tip
   ];
-  return new THREE.LatheGeometry(profile, 10);
+  return new THREE.LatheGeometry(profile, 12);
 }
 
 /**
  * A single filled leathery wing panel (unlike the hawk's separated
- * feather fingers) spanning from a forearm leading edge out to a splayed
- * set of claw-tipped points, with concave scallops between each claw so
- * the trailing silhouette reads as taut membrane stretched between finger
+ * feather fingers), rooted near the front third of the body like a real
+ * bat/dragon forearm rather than mid-body, with a broader chord (less
+ * "spindly dragonfly wing", more "broad membrane") and a splayed set of
+ * claw-tipped points with concave scallops between each claw so the
+ * trailing silhouette reads as taut membrane stretched between finger
  * bones — the classic bat/dragon wing look.
  */
 function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
@@ -209,25 +217,27 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
   const positions: number[] = [];
   const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
 
-  const root: [number, number] = [0, chord * 0.15];
-  const shoulder: [number, number] = [span * 0.18 * s, chord * 0.5];
+  const root: [number, number] = [0, chord * 0.22];
+  const shoulder: [number, number] = [span * 0.16 * s, chord * 0.58];
   // Claw tip anchor points along the leading arc, each progressively
   // further out and lower (swept back), like bat finger bones fanning
-  // out from the wrist.
+  // out from the wrist. Pulled in a bit closer to the body (vs. the
+  // original) so the wing reads as a broad sail rather than a thin
+  // dragonfly-like sliver.
   const claws: [number, number][] = [
-    [span * 0.46 * s, chord * 0.38],
-    [span * 0.72 * s, chord * 0.12],
-    [span * 0.92 * s, -chord * 0.28],
-    [span * 0.78 * s, -chord * 0.62],
+    [span * 0.4 * s, chord * 0.42],
+    [span * 0.62 * s, chord * 0.14],
+    [span * 0.78 * s, -chord * 0.26],
+    [span * 0.66 * s, -chord * 0.58],
   ];
   // Concave scallop points between claws — pulled in toward the body,
   // giving the trailing edge its taut, clawed-membrane droop.
   const scallops: [number, number][] = [
-    [span * 0.58 * s, chord * 0.02],
-    [span * 0.82 * s, -chord * 0.22],
-    [span * 0.86 * s, -chord * 0.5],
+    [span * 0.5 * s, chord * 0.04],
+    [span * 0.7 * s, -chord * 0.2],
+    [span * 0.72 * s, -chord * 0.48],
   ];
-  const wristAnchor: [number, number] = [span * 0.22 * s, -chord * 0.25];
+  const wristAnchor: [number, number] = [span * 0.26 * s, -chord * 0.22];
 
   const to3 = (p: [number, number]): number[] => [p[0], p[1], 0];
 
@@ -253,18 +263,19 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
 }
 
 /**
- * A long, tapering whip tail (much longer than the hawk's fanned tail)
- * ending in a flat diamond-shaped spade, trailing behind the body toward
- * local -Y.
+ * A long, tapering whip tail (much longer than the hawk's fanned tail),
+ * thicker at the root than the original so it doesn't read as a thin
+ * insect abdomen, ending in a flat diamond-shaped spade, trailing behind
+ * the body toward local -Y.
  */
 function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeometry {
   const root = [0, 0, 0];
-  const midLeft = [-width * 0.22, -length * 0.55, 0];
-  const midRight = [width * 0.22, -length * 0.55, 0];
-  const midPoint = [0, -length * 0.55, 0];
-  const spadeLeft = [-width * 0.55, -length * 1.15, 0];
-  const spadeRight = [width * 0.55, -length * 1.15, 0];
-  const spadeTip = [0, -length * 1.5, 0];
+  const midLeft = [-width * 0.32, -length * 0.5, 0];
+  const midRight = [width * 0.32, -length * 0.5, 0];
+  const midPoint = [0, -length * 0.5, 0];
+  const spadeLeft = [-width * 0.6, -length * 1.1, 0];
+  const spadeRight = [width * 0.6, -length * 1.1, 0];
+  const spadeTip = [0, -length * 1.45, 0];
 
   const positions = new Float32Array([
     ...root,

@@ -1,14 +1,32 @@
 import * as V from './vector';
 import { params } from './params';
-import { Boid } from './Boid';
+import { Boid, DYING_DURATION } from './Boid';
 import { Predator } from './Predator';
 import { clampToBounds, type WorldBounds } from './boundary';
+
+/** A single "predator caught a boid" moment — read by renderers to spawn a one-shot cartoony blood-splatter effect. Capped/pruned so the array never grows unbounded. */
+export interface CatchEvent {
+  id: number;
+  position: V.Vec3;
+  direction: V.Vec3;
+}
+
+// How close a predator must get to a boid to catch it. Deliberately a
+// fixed sim-space distance (not tied to any renderer's visual predator
+// size, since "dragon" predators are just a cosmetic geometry swap) —
+// roughly on the same order as the boids' own separation radius, so a
+// predator has to really close the gap, not just graze the flock.
+const CATCH_RADIUS = 18;
+// Bounded so a long-idle tab doesn't let this grow forever.
+const MAX_CATCH_EVENTS = 16;
 
 export class Simulation {
   width: number;
   height: number;
   boids: Boid[] = [];
   predators: Predator[] = [];
+  catchEvents: CatchEvent[] = [];
+  private nextCatchId = 1;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -66,6 +84,7 @@ export class Simulation {
   reset(): void {
     this.boids = [];
     this.predators = [];
+    this.catchEvents = [];
     this.syncPopulation();
   }
 
@@ -75,6 +94,45 @@ export class Simulation {
     else if (pos.x >= this.width) pos.x -= this.width;
     if (pos.y < 0) pos.y += this.height;
     else if (pos.y >= this.height) pos.y -= this.height;
+  }
+
+  /**
+   * Any predator within CATCH_RADIUS of a (not-already-dying) boid catches
+   * it: the boid enters its shrink-and-slide "swallowed" animation (see
+   * Boid.update) and a CatchEvent is recorded for the renderers to spawn a
+   * one-shot blood-splatter effect at. The catching predator then enters
+   * its own "digesting" state (see Predator.updateDigesting) instead of
+   * immediately continuing the hunt. Skipped entirely if the user has
+   * turned off predatorCatchEnabled, and a predator that's already
+   * digesting can't catch again until it resumes hunting.
+   */
+  private checkCatches(): void {
+    if (!params.predatorCatchEnabled) return;
+
+    for (const predator of this.predators) {
+      if (predator.digesting) continue;
+      for (const boid of this.boids) {
+        if (boid.dying) continue;
+        if (V.distanceSq(predator.position, boid.position) > CATCH_RADIUS * CATCH_RADIUS) continue;
+
+        boid.dying = true;
+        boid.dyingElapsed = 0;
+        boid.deathTarget = { ...predator.position };
+
+        const speed = V.magnitude(predator.velocity);
+        const direction = speed > 1e-6 ? V.scale(predator.velocity, 1 / speed) : V.create(0, 0, 1);
+        this.catchEvents.push({ id: this.nextCatchId++, position: { ...boid.position }, direction });
+        if (this.catchEvents.length > MAX_CATCH_EVENTS) {
+          this.catchEvents.splice(0, this.catchEvents.length - MAX_CATCH_EVENTS);
+        }
+
+        predator.beginDigesting();
+        // A predator only catches one boid per catch check — break out
+        // to its next iteration rather than immediately gobbling every
+        // boid within range in the same frame.
+        break;
+      }
+    }
   }
 
   update(dt: number): void {
@@ -94,5 +152,11 @@ export class Simulation {
       if (is3D) clampToBounds(predator.position, bounds);
       else this.wrap(predator.position);
     }
+
+    this.checkCatches();
+
+    // Remove boids whose "swallowed" animation has finished; syncPopulation
+    // will spawn a fresh replacement boid next frame automatically.
+    this.boids = this.boids.filter((boid) => !boid.dying || boid.dyingElapsed < DYING_DURATION);
   }
 }
