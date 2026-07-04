@@ -11,6 +11,7 @@ import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries, type BirdGeometries } from './birdGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
+import { createDriftingClouds, type DriftingClouds } from './clouds';
 
 // --- "Arcade" style: bright, saturated emissive colors so the bloom pass
 // has something to glow — base material color stays neutral (driven
@@ -64,6 +65,7 @@ export class Renderer3D {
   private ambientLight: THREE.AmbientLight;
   private keyLight: THREE.DirectionalLight;
   private natureEnv: NatureEnvironment;
+  private driftingClouds: DriftingClouds;
 
   private arcadeBoidGeometries: BirdGeometries;
   private arcadePredatorGeometries: BirdGeometries;
@@ -82,6 +84,7 @@ export class Renderer3D {
   private flapQuat = new THREE.Quaternion();
   private stateColor = new THREE.Color();
   private startTime = performance.now();
+  private lastElapsed = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -106,6 +109,7 @@ export class Renderer3D {
     this.scene.add(this.ambientLight, this.keyLight);
 
     this.natureEnv = createNatureEnvironment(this.scene);
+    this.driftingClouds = createDriftingClouds(this.scene);
 
     this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
     this.arcadePredatorGeometries = createBirdGeometries(PREDATOR_LENGTH, PREDATOR_WIDTH);
@@ -199,6 +203,7 @@ export class Renderer3D {
       const isNature = style === 'nature';
       this.bloomPass.enabled = !isNature;
       this.natureEnv.setVisible(isNature);
+      this.driftingClouds.setVisible(isNature);
       if (this.boundsHelper) this.boundsHelper.visible = !isNature;
       this.ambientLight.intensity = isNature ? 0.55 : 0.35;
       this.keyLight.visible = !isNature;
@@ -230,6 +235,7 @@ export class Renderer3D {
       this.controls.update();
 
       placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
+      this.driftingClouds.configure(center, maxDim);
     }
   }
 
@@ -308,12 +314,15 @@ export class Renderer3D {
   render(sim: Simulation): void {
     this.ensureScene(sim);
     const elapsed = (performance.now() - this.startTime) / 1000;
+    const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
+    this.lastElapsed = elapsed;
     const isNature = params.visualStyle === 'nature';
 
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
     this.natureEnv.update(elapsed);
+    this.driftingClouds.update(dt);
 
     if (this.boidInstances) {
       this.updateInstances(
@@ -357,6 +366,7 @@ export class Renderer3D {
       geometries.tail?.dispose();
     }
     this.natureEnv.dispose();
+    this.driftingClouds.dispose();
     this.controls.dispose();
     this.composer.dispose();
     this.renderer.dispose();
