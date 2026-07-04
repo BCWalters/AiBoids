@@ -117,10 +117,22 @@ export class Boid {
       acceleration = V.add(acceleration, V.scale(steer, p.fleeWeight));
     }
 
-    // --- 3D mode: steer away from the bounded world's walls ---
+    // --- 3D mode: steer away from the bounded world's walls, plus a
+    // constant gentle pull toward the center so the flock keeps roaming
+    // through open space instead of settling permanently at a wall/corner.
     if (p.mode === '3d') {
       const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin);
       acceleration = V.add(acceleration, V.scale(wallPush, p.boundaryWeight));
+
+      if (p.centerPullWeight > 0) {
+        const center = V.create(bounds.width / 2, bounds.height / 2, bounds.depth / 2);
+        const toCenter = V.sub(center, this.position);
+        if (V.magnitudeSq(toCenter) > 1e-6) {
+          const desired = V.setMagnitude(toCenter, p.boidMaxSpeed);
+          const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
+          acceleration = V.add(acceleration, V.scale(steer, p.centerPullWeight));
+        }
+      }
     }
 
     // --- Integrate ---

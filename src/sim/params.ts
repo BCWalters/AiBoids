@@ -42,6 +42,13 @@ export interface SimParams {
   boundaryMargin: number; // distance from a wall at which steer-away begins
   boundaryWeight: number; // strength of the steer-away force
 
+  // 3D-only: a gentle, constant seek-to-center force, always active
+  // (unlike boundaryWeight, which only kicks in near a wall). Without
+  // this, cohesion tends to pin the whole flock against a wall or in a
+  // corner once it drifts there, since only entities right at the edge
+  // feel any push back — this keeps the flock cycling through open space.
+  centerPullWeight: number;
+
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
@@ -71,8 +78,9 @@ export const defaultParams: SimParams = {
   predatorPerceptionRadius: 220,
 
   worldDepth: 600,
-  boundaryMargin: 80,
-  boundaryWeight: 3.0,
+  boundaryMargin: 120,
+  boundaryWeight: 3.5,
+  centerPullWeight: 0.1,
 
   running: true,
   showDebugOverlay: false,

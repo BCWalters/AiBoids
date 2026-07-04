@@ -29,6 +29,7 @@ const boundarySliderSpecs: SliderSpec[] = [
   { key: 'worldDepth', label: 'World depth (z)', min: 100, max: 1500, step: 50 },
   { key: 'boundaryMargin', label: 'Wall steer-away margin', min: 10, max: 300, step: 10 },
   { key: 'boundaryWeight', label: 'Wall steer-away strength', min: 0, max: 10, step: 0.5 },
+  { key: 'centerPullWeight', label: 'Center pull (avoids corner-camping)', min: 0, max: 0.5, step: 0.01 },
 ];
 
 export class ControlPanel {
