@@ -103,6 +103,7 @@ export class Renderer3D {
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
+  private tmpVec3 = new THREE.Vector3();
   private stateColor = new THREE.Color();
   private startTime = performance.now();
   private lastElapsed = 0;
@@ -252,6 +253,13 @@ export class Renderer3D {
       if (this.boundsHelper) this.boundsHelper.visible = !isNature;
       this.ambientLight.intensity = isNature ? 0.55 : 0.35;
       this.keyLight.visible = !isNature;
+
+      // Re-apply the zoom clamp for the new style: nature's distance fog
+      // needs a much tighter max zoom-out than arcade's fog-free scene.
+      // flockScale here matches the internal scale placeNatureEnvironment
+      // derives (groundSize / 30 === maxDim) — NOT groundSize itself.
+      const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
+      this.controls.maxDistance = isNature ? maxDim * 5.5 : maxDim * 25;
     }
 
     const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
@@ -281,6 +289,20 @@ export class Renderer3D {
 
       placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
       this.driftingClouds.configure(center, maxDim);
+
+      // Clamp orbit zoom to a sane range for this world's scale: never so
+      // close the camera can slide through the ground/boundary box, and
+      // never so far out that nature style's distance fog reduces the
+      // whole view to a flat, blown-out wall of fog color (which reads as
+      // a rendering glitch rather than "zoomed out"). flockScale matches
+      // the internal scale placeNatureEnvironment derives from groundSize
+      // (groundSize / 30 === maxDim here), which is what fog.near/far are
+      // themselves scaled from — NOT groundSize directly.
+      const flockScale = maxDim;
+      this.controls.minDistance = maxDim * 0.05;
+      this.controls.maxDistance = params.visualStyle === 'nature'
+        ? flockScale * 5.5
+        : maxDim * 25;
     }
   }
 
@@ -304,10 +326,18 @@ export class Renderer3D {
       const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
       const entityScale = getScale(entity);
 
+      // Each entity keeps its own last-known heading (renderHeading)
+      // rather than relying on this.bodyQuat carrying over between loop
+      // iterations — otherwise an entity whose speed drops near zero
+      // (e.g. a predator gliding to a stop / digesting) would silently
+      // inherit whichever heading the *previous* entity in the array had
+      // that frame, causing it to visually snap to an unrelated
+      // direction instead of holding its own last heading.
       if (speed > 1e-6) {
-        const dir = new THREE.Vector3(vel.x, vel.y, vel.z).multiplyScalar(1 / speed);
-        this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, dir);
+        entity.renderHeading = { x: vel.x / speed, y: vel.y / speed, z: vel.z / speed };
       }
+      const dir = entity.renderHeading;
+      this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpVec3.set(dir.x, dir.y, dir.z));
 
       // Body: just position + orientation, no flap. Caught boids shrink
       // (entityScale -> 0) as they're "swallowed" — see Boid.dying.

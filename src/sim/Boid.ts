@@ -36,6 +36,16 @@ export class Boid {
   deathTarget: Vec3 | null = null;
   /** 1 = full size, shrinks to 0 over the dying animation. Read by renderers. */
   scale = 1;
+  /**
+   * Last known non-zero velocity direction (unit vector), read only by
+   * the 3D renderer to orient this boid's model. Kept as its own field
+   * (rather than derived fresh from velocity every frame) so that once
+   * velocity drops to ~0 — e.g. mid-"swallowed" animation — the model
+   * keeps facing the direction it was last actually moving in instead of
+   * snapping to some arbitrary default or bleeding another entity's
+   * heading (see updateInstances in Renderer3D.ts).
+   */
+  renderHeading: Vec3 = { x: 0, y: 1, z: 0 };
 
   constructor(position: Vec3, velocity: Vec3) {
     this.id = nextId++;

@@ -39,6 +39,15 @@ export class Predator {
   digestElapsed = 0;
 
   /**
+   * Last known non-zero velocity direction (unit vector), read only by
+   * the 3D renderer to orient this predator's model — see
+   * Boid.renderHeading for why this needs to be its own per-entity field
+   * rather than derived fresh from velocity every frame (velocity is ~0
+   * for the whole digesting glide-to-stop + rest period).
+   */
+  renderHeading: Vec3 = { x: 0, y: 1, z: 0 };
+
+  /**
    * Unit heading captured at the moment of catching prey (before the
    * glide-to-stop decay begins touching velocity). Used to resume on the
    * same trajectory afterwards instead of picking an arbitrary new one,
