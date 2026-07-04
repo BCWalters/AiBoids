@@ -10,7 +10,7 @@ import * as THREE from 'three';
  */
 export interface DriftingClouds {
   /** Reposition the spawn/despawn region around a given world center + flock scale. */
-  configure(center: THREE.Vector3, flockScale: number, sunDirection: THREE.Vector3): void;
+  configure(center: THREE.Vector3, flockScale: number): void;
   update(dt: number): void;
   setVisible(visible: boolean): void;
   dispose(): void;
@@ -26,40 +26,70 @@ const THROUGH_FLOCK_CHANCE = 0.3;
 interface CloudInstance {
   group: THREE.Group;
   velocity: THREE.Vector3;
-  shadow: THREE.Mesh;
 }
 
+/**
+ * A single puff sprite used to be one perfectly round, flat-white radial
+ * gradient — from a distance (especially on the far side of the sky from
+ * the sun, where there's no warm backlight to sell it) that read as a
+ * featureless "blurry gray blob" rather than a cloud. This version bakes
+ * in an irregular, multi-lobed cumulus silhouette (several overlapping
+ * soft circles, not one) plus a fixed top-lit/bottom-shaded tonal gradient
+ * (light warm-white top, cooler pale-gray underside) so every puff reads
+ * as a small fluffy cloud with real form regardless of which way it faces
+ * relative to the sun.
+ */
 function createPuffTexture(): THREE.Texture {
-  const size = 128;
+  const size = 160;
+
+  // Step 1: build a soft alpha mask from several overlapping radial
+  // gradients — this is the irregular cumulus silhouette.
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = size;
+  maskCanvas.height = size;
+  const maskCtx = maskCanvas.getContext('2d')!;
+
+  const lobes = [
+    { x: 0.5, y: 0.56, r: 0.4 },
+    { x: 0.3, y: 0.62, r: 0.28 },
+    { x: 0.7, y: 0.6, r: 0.3 },
+    { x: 0.4, y: 0.36, r: 0.24 },
+    { x: 0.62, y: 0.38, r: 0.22 },
+  ];
+  for (const lobe of lobes) {
+    const cx = lobe.x * size;
+    const cy = lobe.y * size;
+    const r = lobe.r * size;
+    const gradient = maskCtx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.95)');
+    gradient.addColorStop(0.55, 'rgba(255,255,255,0.55)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    maskCtx.fillStyle = gradient;
+    maskCtx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+
+  // Step 2: paint a top-lit/bottom-shaded tonal gradient onto a fully
+  // opaque canvas, then clip it to the mask's alpha via 'destination-in'
+  // (NOT 'multiply' on the mask directly — multiplying an opaque source
+  // over a mostly-transparent destination forces alpha up to 1 almost
+  // everywhere, turning the soft puff into a solid rectangle).
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, 'rgba(255,255,255,0.95)');
-  gradient.addColorStop(0.45, 'rgba(255,255,255,0.6)');
-  gradient.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gradient;
+  const shade = ctx.createLinearGradient(0, 0, 0, size);
+  shade.addColorStop(0, 'rgba(255,252,240,1)');
+  shade.addColorStop(0.5, 'rgba(248,248,248,1)');
+  shade.addColorStop(1, 'rgba(196,202,212,1)');
+  ctx.fillStyle = shade;
   ctx.fillRect(0, 0, size, size);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(maskCanvas, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
-}
-
-/** Soft, dark radial blob used for the faint shadow a cloud casts on the ground below it. */
-function createShadowTexture(): THREE.Texture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  gradient.addColorStop(0, 'rgba(20,25,20,0.55)');
-  gradient.addColorStop(0.6, 'rgba(20,25,20,0.25)');
-  gradient.addColorStop(1, 'rgba(20,25,20,0)');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, size, size);
-  return new THREE.CanvasTexture(canvas);
 }
 
 export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
@@ -77,14 +107,8 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
     fog: true,
   });
 
-  const shadowTexture = createShadowTexture();
-  const shadowGeometry = new THREE.CircleGeometry(1, 24);
-
   const center = new THREE.Vector3();
   let flockScale = 500;
-  // Default straight-down direction until configure() supplies the real
-  // sun position — keeps shadows sane before the first frame.
-  const sunDirection = new THREE.Vector3(0, 1, 0);
   let spawnTimer = 4;
   const active: CloudInstance[] = [];
   // Gentle prevailing wind, mostly along +X with a slight drift in Z.
@@ -117,48 +141,21 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
     const speed = flockScale * (0.0035 + Math.random() * 0.0018);
     const velocity = windDir.clone().multiplyScalar(speed);
 
-    const shadowMaterial = new THREE.MeshBasicMaterial({
-      map: shadowTexture,
-      transparent: true,
-      depthWrite: false,
-      toneMapped: false,
-    });
-    const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
-    shadow.rotation.x = -Math.PI / 2;
-    shadow.scale.setScalar(clusterRadius * 1.4);
-    updateShadowPosition(shadow, group.position);
-
-    root.add(group, shadow);
-    active.push({ group, velocity, shadow });
-  }
-
-  // Projects a cloud's shadow straight down along the sun direction onto
-  // the ground plane (y = 0), so overhead clouds cast a small, slightly
-  // offset patch of shade that sweeps across the ground as they drift.
-  function updateShadowPosition(shadow: THREE.Mesh, cloudPos: THREE.Vector3): void {
-    if (sunDirection.y > 0.05) {
-      const t = cloudPos.y / sunDirection.y;
-      shadow.position.set(cloudPos.x - sunDirection.x * t, 0.5, cloudPos.z - sunDirection.z * t);
-      (shadow.material as THREE.MeshBasicMaterial).opacity = 0.5;
-    } else {
-      // Sun below/at horizon: no sensible ground projection — hide it.
-      (shadow.material as THREE.MeshBasicMaterial).opacity = 0;
-    }
+    root.add(group);
+    active.push({ group, velocity });
   }
 
   function despawnCloud(cloud: CloudInstance): void {
     // Sprite geometry is a shared module-level singleton in three.js — do
     // not dispose it here, just drop the group (sprites hold no other
     // per-instance GPU resources; the material/texture are shared too).
-    root.remove(cloud.group, cloud.shadow);
-    (cloud.shadow.material as THREE.Material).dispose();
+    root.remove(cloud.group);
   }
 
   return {
-    configure(newCenter: THREE.Vector3, newFlockScale: number, newSunDirection: THREE.Vector3) {
+    configure(newCenter: THREE.Vector3, newFlockScale: number) {
       center.copy(newCenter);
       flockScale = newFlockScale;
-      sunDirection.copy(newSunDirection);
     },
     update(dt: number) {
       if (!root.visible) return;
@@ -173,7 +170,6 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
       for (let i = active.length - 1; i >= 0; i--) {
         const cloud = active[i];
         cloud.group.position.addScaledVector(cloud.velocity, dt);
-        updateShadowPosition(cloud.shadow, cloud.group.position);
         const traveled = (cloud.group.position.x - center.x) * Math.sign(windDir.x || 1);
         if (traveled > Math.abs(despawnX - center.x)) {
           despawnCloud(cloud);
@@ -188,8 +184,6 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
       for (const cloud of active) despawnCloud(cloud);
       active.length = 0;
       scene.remove(root);
-      shadowGeometry.dispose();
-      shadowTexture.dispose();
       material.map?.dispose();
       material.dispose();
     },

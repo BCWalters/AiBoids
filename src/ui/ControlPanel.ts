@@ -52,6 +52,9 @@ export class ControlPanel {
 
     if (params.mode === '3d') {
       this.container.appendChild(this.buildVisualStyleToggle());
+      if (params.visualStyle === 'nature') {
+        this.container.appendChild(this.buildDragonPredatorsToggle());
+      }
     }
 
     for (const spec of sliderSpecs) {
@@ -125,9 +128,33 @@ export class ControlPanel {
     }
     select.addEventListener('change', () => {
       params.visualStyle = select.value as VisualStyle;
+      // Re-render so the dragon-predators toggle (nature-only) appears/
+      // disappears immediately rather than only after some other change.
+      this.render();
     });
 
     wrapper.appendChild(select);
+    return wrapper;
+  }
+
+  private buildDragonPredatorsToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = 'Predators as purple dragons';
+    label.htmlFor = 'param-dragon-predators';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-dragon-predators';
+    input.checked = params.dragonPredators;
+    input.addEventListener('change', () => {
+      params.dragonPredators = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
     return wrapper;
   }
 

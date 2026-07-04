@@ -9,7 +9,7 @@ import { params, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
-import { createBirdGeometries, createRealisticBirdGeometries, type BirdGeometries } from './birdGeometry';
+import { createBirdGeometries, createRealisticBirdGeometries, createDragonGeometries, type BirdGeometries } from './birdGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
 import { createDriftingClouds, type DriftingClouds } from './clouds';
 
@@ -31,10 +31,19 @@ const NATURE_BOID_PANIC = new THREE.Color(0xf2e6c8); // paler alarm plumage
 const NATURE_PREDATOR_BASE = new THREE.Color(0x7a3b22); // hawk rust-brown
 const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked on
 
+// --- Optional "dragon" predator variant (nature style only): much larger,
+// purple, leathery-winged silhouette instead of the hawk geometry.
+const DRAGON_PREDATOR_BASE = new THREE.Color(0x5b2a86); // deep violet-purple scale
+const DRAGON_PREDATOR_HUNT = new THREE.Color(0xb84fe0); // brighter magenta-purple when locked on
+
 const BOID_LENGTH = 7;
 const BOID_WIDTH = 2.6;
 const PREDATOR_LENGTH = 12;
 const PREDATOR_WIDTH = 4.4;
+// Dragons should read as dramatically larger than boids, not just a
+// slightly bigger hawk — roughly 2x the nature-style hawk's footprint.
+const DRAGON_LENGTH = PREDATOR_LENGTH * 2.6;
+const DRAGON_WIDTH = PREDATOR_WIDTH * 3.2;
 
 // Wing-flap tuning: base idle flutter plus extra amplitude proportional to
 // how fast the entity is currently moving (relative to its own max speed).
@@ -71,6 +80,7 @@ export class Renderer3D {
   private arcadePredatorGeometries: BirdGeometries;
   private natureBoidGeometries: BirdGeometries;
   private naturePredatorGeometries: BirdGeometries;
+  private dragonPredatorGeometries: BirdGeometries;
 
   private boidInstances: BirdInstanceSet | null = null;
   private predatorInstances: BirdInstanceSet | null = null;
@@ -118,6 +128,7 @@ export class Renderer3D {
     // scale them up to read clearly at the same viewing distance.
     this.natureBoidGeometries = createRealisticBirdGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
     this.naturePredatorGeometries = createRealisticBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
+    this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -190,10 +201,15 @@ export class Renderer3D {
       this.boidInstancesKey = boidKey;
     }
 
-    const predatorKey = `${predatorCount}:${style}`;
+    const isDragon = style === 'nature' && params.dragonPredators;
+    const predatorKey = `${predatorCount}:${style}:${isDragon}`;
     if (this.predatorInstancesKey !== predatorKey) {
       this.disposeInstanceSet(this.predatorInstances);
-      const geometries = style === 'nature' ? this.naturePredatorGeometries : this.arcadePredatorGeometries;
+      const geometries = isDragon
+        ? this.dragonPredatorGeometries
+        : style === 'nature'
+          ? this.naturePredatorGeometries
+          : this.arcadePredatorGeometries;
       this.predatorInstances = this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, predatorCount);
       this.predatorInstancesKey = predatorKey;
     }
@@ -241,7 +257,7 @@ export class Renderer3D {
       this.controls.update();
 
       placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
-      this.driftingClouds.configure(center, maxDim, this.natureEnv.sunDirection);
+      this.driftingClouds.configure(center, maxDim);
     }
   }
 
@@ -342,13 +358,14 @@ export class Renderer3D {
       );
     }
     if (this.predatorInstances) {
+      const isDragon = isNature && params.dragonPredators;
       this.updateInstances(
         this.predatorInstances,
         sim.predators,
         params.predatorMaxSpeed,
         elapsed,
-        isNature ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
-        isNature ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
+        isDragon ? DRAGON_PREDATOR_BASE : isNature ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
+        isDragon ? DRAGON_PREDATOR_HUNT : isNature ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
         (entity) => (entity as Predator).huntIntensity,
       );
     }
@@ -365,6 +382,7 @@ export class Renderer3D {
       this.arcadePredatorGeometries,
       this.natureBoidGeometries,
       this.naturePredatorGeometries,
+      this.dragonPredatorGeometries,
     ]) {
       geometries.body.dispose();
       geometries.wingLeft.dispose();

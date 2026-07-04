@@ -65,6 +65,11 @@ export interface SimParams {
   // no effect on simulation behavior.
   visualStyle: VisualStyle;
 
+  // Nature-style only: render predators as large purple dragons (bat-like
+  // membrane wings, long whip tail) instead of the default hawk geometry.
+  // Purely cosmetic.
+  dragonPredators: boolean;
+
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
@@ -101,6 +106,7 @@ export const defaultParams: SimParams = {
   trailAmount: 0.82,
 
   visualStyle: 'arcade',
+  dragonPredators: false,
 
   running: true,
   showDebugOverlay: false,

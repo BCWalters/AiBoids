@@ -14,6 +14,8 @@ export interface NatureEnvironment {
   water: THREE.Mesh;
   sunLight: THREE.DirectionalLight;
   sunSprite: THREE.Sprite;
+  /** Larger, softer glow sprite rendered behind the sun disc for a warm corona effect. */
+  sunHalo: THREE.Sprite;
   /** Unit vector pointing from the world toward the sun. */
   sunDirection: THREE.Vector3;
   fog: THREE.Fog;
@@ -51,11 +53,17 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   // The Sky shader technically has a sun disc (showSunDisc uniform), but
   // its physically-accurate angular size is only a couple of screen
   // pixels — easy to miss entirely. A simple additive glow sprite makes
-  // the light source in the sky actually visible.
-  const sunSprite = new THREE.Sprite(createSunMaterial());
+  // the light source in the sky actually visible. A larger, much softer
+  // halo sprite sits just behind it (rendered first, further away) to
+  // give the sun a warm corona/radiance instead of a hard-edged coin.
   const SUN_DISTANCE = 15000; // inside the 20000-radius sky dome
+  const sunHalo = new THREE.Sprite(createSunHaloMaterial());
+  sunHalo.position.copy(sunPosition).multiplyScalar(SUN_DISTANCE - 50);
+  sunHalo.scale.setScalar(6600);
+
+  const sunSprite = new THREE.Sprite(createSunMaterial());
   sunSprite.position.copy(sunPosition).multiplyScalar(SUN_DISTANCE);
-  sunSprite.scale.setScalar(4200);
+  sunSprite.scale.setScalar(5200);
 
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
   ground.rotation.x = -Math.PI / 2;
@@ -73,12 +81,13 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   // into the sky instead of showing a hard, distracting edge.
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
 
-  scene.add(sky, ground, mountains, water, sunLight, sunSprite);
+  scene.add(sky, ground, mountains, water, sunLight, sunHalo, sunSprite);
   sky.visible = false;
   ground.visible = false;
   mountains.visible = false;
   water.visible = false;
   sunLight.visible = false;
+  sunHalo.visible = false;
   sunSprite.visible = false;
 
   return {
@@ -88,6 +97,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
     water,
     sunLight,
     sunSprite,
+    sunHalo,
     sunDirection: sunPosition.clone(),
     fog,
     update(elapsed: number) {
@@ -98,12 +108,13 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       ground.visible = visible;
       mountains.visible = visible;
       water.visible = visible;
+      sunHalo.visible = visible;
       sunLight.visible = visible;
       sunSprite.visible = visible;
       scene.fog = visible ? fog : null;
     },
     dispose() {
-      scene.remove(sky, ground, mountains, water, sunLight, sunSprite);
+      scene.remove(sky, ground, mountains, water, sunLight, sunHalo, sunSprite);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -116,6 +127,8 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       (mountains.material as THREE.Material).dispose();
       water.geometry.dispose();
       (water.material as THREE.Material).dispose();
+      (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
+      (sunHalo.material as THREE.Material).dispose();
       (sunSprite.material as THREE.SpriteMaterial).map?.dispose();
       (sunSprite.material as THREE.Material).dispose();
     },
@@ -214,12 +227,15 @@ function createSunMaterial(): THREE.SpriteMaterial {
   // Normal (alpha) blending, not additive: additive light gets washed out
   // against an already-bright sky, especially near the pale horizon.
   // A solid, opaque-cored disc that just alpha-fades at the edge reads as
-  // a clearly visible sun regardless of what's behind it.
-  gradient.addColorStop(0, 'rgba(255,255,240,1)');
-  gradient.addColorStop(0.16, 'rgba(255,244,190,1)');
-  gradient.addColorStop(0.32, 'rgba(255,210,110,0.9)');
-  gradient.addColorStop(0.6, 'rgba(255,180,70,0.35)');
-  gradient.addColorStop(1, 'rgba(255,160,50,0)');
+  // a clearly visible sun regardless of what's behind it. Stops are more
+  // closely spaced than a simple 3-stop gradient to avoid a visible
+  // banding "ring" where alpha changes too abruptly.
+  gradient.addColorStop(0, 'rgba(255,255,246,1)');
+  gradient.addColorStop(0.18, 'rgba(255,241,199,1)');
+  gradient.addColorStop(0.38, 'rgba(255,215,135,0.97)');
+  gradient.addColorStop(0.6, 'rgba(255,185,90,0.6)');
+  gradient.addColorStop(0.82, 'rgba(255,160,70,0.2)');
+  gradient.addColorStop(1, 'rgba(255,150,60,0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
 
@@ -238,6 +254,44 @@ function createSunMaterial(): THREE.SpriteMaterial {
   });
 }
 
+/**
+ * A much larger, very soft warm glow rendered just behind the sun disc —
+ * gives the light source a sense of radiance/corona instead of looking
+ * like a flat painted coin stuck on the sky dome. Kept fully separate
+ * from the crisp disc sprite so its own gradient can be extremely broad
+ * and soft without diluting the disc's crisp edge.
+ */
+function createSunHaloMaterial(): THREE.SpriteMaterial {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  // Kept deliberately subtle and smoothly tapered — a strong or large
+  // halo reads as a flat washed-out "coin" against the sky rather than a
+  // glow, especially near the pale horizon. Many closely-spaced stops
+  // avoid any visible ring where the falloff rate changes.
+  gradient.addColorStop(0, 'rgba(255,225,165,0.32)');
+  gradient.addColorStop(0.18, 'rgba(255,218,155,0.24)');
+  gradient.addColorStop(0.4, 'rgba(255,208,140,0.14)');
+  gradient.addColorStop(0.65, 'rgba(255,200,130,0.06)');
+  gradient.addColorStop(1, 'rgba(255,195,120,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  return new THREE.SpriteMaterial({
+    map: texture,
+    color: 0xffffff,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+    toneMapped: false,
+  });
+}
+
 /** Repositions the sky dome and ground plane to surround/underlie a given world center + size. */
 export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vector3, groundSize: number): void {
   env.sky.position.set(center.x, 0, center.z);
@@ -246,6 +300,7 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
 
   const SUN_DISTANCE = 15000;
   env.sunSprite.position.copy(env.sunDirection).multiplyScalar(SUN_DISTANCE).add(center);
+  env.sunHalo.position.copy(env.sunDirection).multiplyScalar(SUN_DISTANCE - 50).add(center);
 
   // Fog range scales with the flock's own size (groundSize is the huge,
   // mostly-decorative ground plane, ~30x flockScale) so the ground fades
