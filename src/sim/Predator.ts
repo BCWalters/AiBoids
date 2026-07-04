@@ -1,32 +1,34 @@
 import * as V from './vector';
-import type { Vec2 } from './vector';
+import type { Vec3 } from './vector';
 import { params } from './params';
 import { Boid } from './Boid';
+import { boundarySteer, type WorldBounds } from './boundary';
 
 let nextId = 1;
 
 export class Predator {
   readonly id: number;
-  position: Vec2;
-  velocity: Vec2;
+  position: Vec3;
+  velocity: Vec3;
 
-  constructor(position: Vec2, velocity: Vec2) {
+  constructor(position: Vec3, velocity: Vec3) {
     this.id = nextId++;
     this.position = position;
     this.velocity = velocity;
   }
 
+  /** 2D heading angle, used only by the 2D canvas renderer. */
   get headingAngle(): number {
-    return V.heading(this.velocity);
+    return V.heading2D(this.velocity);
   }
 
   /**
    * Simple pursuit: steer toward the nearest visible boid. If none are
    * within perception range, steer toward the center of mass of visible
    * boids instead. If no boids are visible at all, keep drifting on the
-   * current heading.
+   * current heading. `bounds` is only used in 3D mode for wall steer-away.
    */
-  update(dt: number, boids: Boid[]): void {
+  update(dt: number, boids: Boid[], bounds: WorldBounds): void {
     const p = params;
     let nearest: Boid | null = null;
     let nearestDistSq = p.predatorPerceptionRadius * p.predatorPerceptionRadius;
@@ -56,6 +58,11 @@ export class Predator {
     if (target) {
       const desired = V.setMagnitude(V.sub(target, this.position), p.predatorMaxSpeed);
       acceleration = V.limit(V.sub(desired, this.velocity), p.maxForce);
+    }
+
+    if (p.mode === '3d') {
+      const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin);
+      acceleration = V.add(acceleration, V.scale(wallPush, p.boundaryWeight));
     }
 
     this.velocity = V.limit(

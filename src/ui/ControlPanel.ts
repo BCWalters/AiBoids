@@ -1,4 +1,4 @@
-import { params, resetParams, type SimParams } from '../sim/params';
+import { params, resetParams, type SimParams, type SimMode } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 
 interface SliderSpec {
@@ -24,25 +24,73 @@ const sliderSpecs: SliderSpec[] = [
   { key: 'fleeWeight', label: 'Flee weight', min: 0, max: 8, step: 0.1 },
 ];
 
+// Only meaningful in 3D mode (bounded-box wall steer-away).
+const boundarySliderSpecs: SliderSpec[] = [
+  { key: 'worldDepth', label: 'World depth (z)', min: 100, max: 1500, step: 50 },
+  { key: 'boundaryMargin', label: 'Wall steer-away margin', min: 10, max: 300, step: 10 },
+  { key: 'boundaryWeight', label: 'Wall steer-away strength', min: 0, max: 10, step: 0.5 },
+];
+
 export class ControlPanel {
   private container: HTMLElement;
   private sim: Simulation;
+  private onModeChange: (mode: SimMode) => void;
 
-  constructor(container: HTMLElement, sim: Simulation) {
+  constructor(container: HTMLElement, sim: Simulation, onModeChange: (mode: SimMode) => void) {
     this.container = container;
     this.sim = sim;
+    this.onModeChange = onModeChange;
     this.render();
   }
 
   private render(): void {
     this.container.innerHTML = '';
 
+    this.container.appendChild(this.buildModeToggle());
+
     for (const spec of sliderSpecs) {
       this.container.appendChild(this.buildSlider(spec));
     }
 
+    if (params.mode === '3d') {
+      for (const spec of boundarySliderSpecs) {
+        this.container.appendChild(this.buildSlider(spec));
+      }
+    }
+
     this.container.appendChild(this.buildButtons());
     this.container.appendChild(this.buildDebugToggle());
+  }
+
+  private buildModeToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row';
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'control-label-row';
+    const label = document.createElement('label');
+    label.textContent = 'Mode';
+    labelRow.appendChild(label);
+    wrapper.appendChild(labelRow);
+
+    const select = document.createElement('select');
+    select.id = 'param-mode';
+    for (const mode of ['2d', '3d'] as SimMode[]) {
+      const option = document.createElement('option');
+      option.value = mode;
+      option.textContent = mode === '2d' ? '2D (top-down)' : '3D (orbit camera)';
+      if (mode === params.mode) option.selected = true;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      params.mode = select.value as SimMode;
+      this.sim.reset();
+      this.onModeChange(params.mode);
+      this.render();
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
   }
 
   private buildSlider(spec: SliderSpec): HTMLElement {

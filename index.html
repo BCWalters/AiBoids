@@ -12,7 +12,10 @@
         <p class="subtitle">A flocking simulation with predators</p>
       </header>
       <main id="app-main">
-        <canvas id="sim-canvas"></canvas>
+        <div id="canvas-stack">
+          <canvas id="sim-canvas-2d"></canvas>
+          <canvas id="sim-canvas-3d"></canvas>
+        </div>
         <aside id="control-panel">
           <h2>Controls</h2>
           <div id="control-panel-body"><!-- populated by ControlPanel.ts --></div>

@@ -3,7 +3,12 @@
 // share this object, so slider changes take effect immediately without
 // resetting the simulation.
 
+export type SimMode = '2d' | '3d';
+
 export interface SimParams {
+  // Rendering / dimensionality mode
+  mode: SimMode;
+
   // Population
   boidCount: number;
   predatorCount: number;
@@ -30,12 +35,21 @@ export interface SimParams {
   // Predator perception/behavior
   predatorPerceptionRadius: number;
 
+  // 3D world bounds: a bounded box (not wraparound). Boids/predators steer
+  // away softly as they approach a wall, rather than teleporting like the
+  // 2D torus wraparound does.
+  worldDepth: number; // z-axis size of the 3D world (x/y come from canvas size)
+  boundaryMargin: number; // distance from a wall at which steer-away begins
+  boundaryWeight: number; // strength of the steer-away force
+
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
 }
 
 export const defaultParams: SimParams = {
+  mode: '2d',
+
   boidCount: 150,
   predatorCount: 2,
 
@@ -55,6 +69,10 @@ export const defaultParams: SimParams = {
   fleeWeight: 3.5,
 
   predatorPerceptionRadius: 220,
+
+  worldDepth: 600,
+  boundaryMargin: 80,
+  boundaryWeight: 3.0,
 
   running: true,
   showDebugOverlay: false,

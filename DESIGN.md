@@ -21,6 +21,28 @@ kept fully decoupled from the rendering layer, so a future V2 could swap
 the Canvas2D renderer for a 3D renderer (e.g. Three.js) without touching
 core flocking logic.
 
+### V2 update: 3D mode shipped
+V2 added a live-switchable 3D mode alongside the original 2D mode:
+- Core sim generalized from `Vec2` to `Vec3` (`src/sim/vector.ts`); 2D mode
+  simply keeps `z = 0` throughout, so all flocking rules and steering math
+  are shared, unmodified, between both modes.
+- Vision-cone perception now uses the angle between the heading and
+  direction-to-neighbor vectors (dot-product based), which works
+  identically in 2D and 3D — no more atan2-only logic in the hot path.
+- **Rendering**: `src/render/Renderer3D.ts` (Three.js, instanced meshes,
+  `OrbitControls`) sits behind the same `render(sim)` shape as the 2D
+  `Renderer`. Two `<canvas>` elements are stacked in `index.html`; only the
+  active mode's canvas is shown, since a canvas can't switch WebGL/2D
+  context types after first use.
+- **World boundaries diverge by mode**: 2D keeps torus wraparound (as
+  designed originally). 3D uses a **bounded box with soft steer-away**
+  near walls (see `src/sim/boundary.ts`) instead of wraparound, since
+  teleporting reads as a jarring glitch once the camera can orbit/pan —
+  this was a deliberate behavior change scoped to 3D only.
+- Mode is switchable live from the control panel; switching resets the
+  simulation (repositions entities appropriately for the new
+  dimensionality/boundary model).
+
 ## World Model
 - 2D continuous coordinate space (not a discrete grid) rendered on a
   full-size canvas.

@@ -57,6 +57,24 @@ body {
   height: 100%;
 }
 
+#canvas-stack {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+#canvas-stack canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+}
+
+#canvas-stack canvas.active {
+  display: block;
+}
+
 #control-panel {
   width: 300px;
   flex-shrink: 0;
@@ -92,6 +110,16 @@ body {
 
 .control-row input[type='range'] {
   width: 100%;
+}
+
+.control-row select {
+  width: 100%;
+  padding: 6px 8px;
+  background: #21262d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
 }
 
 .control-checkbox-row {

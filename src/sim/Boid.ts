@@ -1,31 +1,34 @@
 import * as V from './vector';
-import type { Vec2 } from './vector';
+import type { Vec3 } from './vector';
 import { params } from './params';
 import type { Predator } from './Predator';
+import { boundarySteer, type WorldBounds } from './boundary';
 
 let nextId = 1;
 
 export class Boid {
   readonly id: number;
-  position: Vec2;
-  velocity: Vec2;
+  position: Vec3;
+  velocity: Vec3;
 
-  constructor(position: Vec2, velocity: Vec2) {
+  constructor(position: Vec3, velocity: Vec3) {
     this.id = nextId++;
     this.position = position;
     this.velocity = velocity;
   }
 
+  /** 2D heading angle, used only by the 2D canvas renderer. */
   get headingAngle(): number {
-    return V.heading(this.velocity);
+    return V.heading2D(this.velocity);
   }
 
   /**
    * Is `otherPos` within this boid's vision cone (radius + angle, centered
-   * on current heading)? Neighbors directly on top of us (distance ~0) are
-   * always considered visible regardless of angle.
+   * on current heading)? Works in both 2D and 3D since it's based on the
+   * angle between the heading and direction-to-neighbor vectors, not atan2.
+   * Neighbors directly on top of us (distance ~0) are always visible.
    */
-  private canSee(otherPos: Vec2, radius: number, fovDeg: number): boolean {
+  private canSee(otherPos: Vec3, radius: number, fovDeg: number): boolean {
     const toOther = V.sub(otherPos, this.position);
     const distSq = V.magnitudeSq(toOther);
     if (distSq > radius * radius) return false;
@@ -34,18 +37,18 @@ export class Boid {
     const speedSq = V.magnitudeSq(this.velocity);
     if (speedSq < 1e-6) return true; // stationary boid: treat as omnidirectional
 
-    const angleToOther = V.heading(toOther);
-    const diff = Math.abs(V.angleDiff(this.headingAngle, angleToOther));
-    return diff <= (fovDeg * Math.PI) / 180 / 2;
+    const angle = V.angleBetween(this.velocity, toOther);
+    return angle <= (fovDeg * Math.PI) / 180 / 2;
   }
 
   /**
    * Compute one frame of steering + integration for this boid.
    * `allBoids` includes this boid itself (filtered out internally).
+   * `bounds` is only used in 3D mode for wall steer-away.
    */
-  update(dt: number, allBoids: Boid[], predators: Predator[]): void {
+  update(dt: number, allBoids: Boid[], predators: Predator[], bounds: WorldBounds): void {
     const p = params;
-    const acceleration = V.create();
+    let acceleration = V.create();
 
     // --- Gather visible boid neighbors ---
     let sepSum = V.create();
@@ -78,24 +81,21 @@ export class Boid {
     if (sepCount > 0) {
       const desired = V.setMagnitude(V.scale(sepSum, 1 / sepCount), p.boidMaxSpeed);
       const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
-      acceleration.x += steer.x * p.separationWeight;
-      acceleration.y += steer.y * p.separationWeight;
+      acceleration = V.add(acceleration, V.scale(steer, p.separationWeight));
     }
 
     if (alignCount > 0) {
       const avgVel = V.scale(alignSum, 1 / alignCount);
       const desired = V.setMagnitude(avgVel, p.boidMaxSpeed);
       const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
-      acceleration.x += steer.x * p.alignmentWeight;
-      acceleration.y += steer.y * p.alignmentWeight;
+      acceleration = V.add(acceleration, V.scale(steer, p.alignmentWeight));
     }
 
     if (cohesionCount > 0) {
       const center = V.scale(cohesionSum, 1 / cohesionCount);
       const desired = V.setMagnitude(V.sub(center, this.position), p.boidMaxSpeed);
       const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
-      acceleration.x += steer.x * p.cohesionWeight;
-      acceleration.y += steer.y * p.cohesionWeight;
+      acceleration = V.add(acceleration, V.scale(steer, p.cohesionWeight));
     }
 
     // --- Predator avoidance (flee): overrides other rules when close ---
@@ -114,8 +114,13 @@ export class Boid {
     if (fleeCount > 0) {
       const desired = V.setMagnitude(fleeSum, p.boidMaxSpeed);
       const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
-      acceleration.x += steer.x * p.fleeWeight;
-      acceleration.y += steer.y * p.fleeWeight;
+      acceleration = V.add(acceleration, V.scale(steer, p.fleeWeight));
+    }
+
+    // --- 3D mode: steer away from the bounded world's walls ---
+    if (p.mode === '3d') {
+      const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin);
+      acceleration = V.add(acceleration, V.scale(wallPush, p.boundaryWeight));
     }
 
     // --- Integrate ---

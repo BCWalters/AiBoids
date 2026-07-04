@@ -2,6 +2,7 @@ import * as V from './vector';
 import { params } from './params';
 import { Boid } from './Boid';
 import { Predator } from './Predator';
+import { clampToBounds, type WorldBounds } from './boundary';
 
 export class Simulation {
   width: number;
@@ -20,14 +21,26 @@ export class Simulation {
     this.height = height;
   }
 
-  private randomPosition(): { x: number; y: number } {
-    return { x: Math.random() * this.width, y: Math.random() * this.height };
+  /** Current world bounds box, used for 3D wall steer-away. */
+  private get bounds(): WorldBounds {
+    return { width: this.width, height: this.height, depth: params.worldDepth };
   }
 
-  private randomVelocity(maxSpeed: number): { x: number; y: number } {
-    const angle = Math.random() * Math.PI * 2;
+  private randomPosition() {
+    return {
+      x: Math.random() * this.width,
+      y: Math.random() * this.height,
+      z: params.mode === '3d' ? Math.random() * params.worldDepth : 0,
+    };
+  }
+
+  private randomVelocity(maxSpeed: number) {
     const speed = maxSpeed * (0.4 + Math.random() * 0.6);
-    return V.fromAngle(angle, speed);
+    if (params.mode === '3d') {
+      return V.scale(V.randomUnit3D(), speed);
+    }
+    const angle = Math.random() * Math.PI * 2;
+    return V.fromAngle2D(angle, speed);
   }
 
   /** Adds/removes boids and predators to match params.boidCount / predatorCount. */
@@ -56,6 +69,7 @@ export class Simulation {
     this.syncPopulation();
   }
 
+  /** 2D mode only: torus wraparound at the world edges. */
   private wrap(pos: { x: number; y: number }): void {
     if (pos.x < 0) pos.x += this.width;
     else if (pos.x >= this.width) pos.x -= this.width;
@@ -67,13 +81,18 @@ export class Simulation {
     this.syncPopulation();
     if (!params.running) return;
 
+    const bounds = this.bounds;
+    const is3D = params.mode === '3d';
+
     for (const boid of this.boids) {
-      boid.update(dt, this.boids, this.predators);
-      this.wrap(boid.position);
+      boid.update(dt, this.boids, this.predators, bounds);
+      if (is3D) clampToBounds(boid.position, bounds);
+      else this.wrap(boid.position);
     }
     for (const predator of this.predators) {
-      predator.update(dt, this.boids);
-      this.wrap(predator.position);
+      predator.update(dt, this.boids, bounds);
+      if (is3D) clampToBounds(predator.position, bounds);
+      else this.wrap(predator.position);
     }
   }
 }
