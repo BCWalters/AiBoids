@@ -5,6 +5,12 @@
 
 export type SimMode = '2d' | '3d';
 
+// 3D-only visual style: 'arcade' is the original glowing/neon instanced
+// look; 'nature' swaps in a blue sky, drifting clouds, a ground plane,
+// and more bird-like (earth-toned, fingered-wingtip) geometry aiming for
+// "looks plausible from a distance" rather than true photo-realism.
+export type VisualStyle = 'arcade' | 'nature';
+
 export interface SimParams {
   // Rendering / dimensionality mode
   mode: SimMode;
@@ -55,6 +61,10 @@ export interface SimParams {
   // that never fades).
   trailAmount: number;
 
+  // 3D-only: which visual style Renderer3D uses. Purely cosmetic — has
+  // no effect on simulation behavior.
+  visualStyle: VisualStyle;
+
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
@@ -89,6 +99,8 @@ export const defaultParams: SimParams = {
   centerPullWeight: 0.1,
 
   trailAmount: 0.82,
+
+  visualStyle: 'arcade',
 
   running: true,
   showDebugOverlay: false,

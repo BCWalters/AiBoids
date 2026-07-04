@@ -43,6 +43,29 @@ V2 added a live-switchable 3D mode alongside the original 2D mode:
   simulation (repositions entities appropriately for the new
   dimensionality/boundary model).
 
+### V3 update: visual polish (trails, color-by-state, nature style)
+- **Motion trails + color-by-state** (both modes): a shared `trailAmount`
+  param controls a fading-frame effect (translucent overlay in 2D,
+  `AfterimagePass` in 3D) so movement reads more fluidly. Boids/predators
+  now track a smoothed `panicLevel`/`huntIntensity` (0-1) and lerp their
+  color toward a highlight tone as they flee/hunt.
+- **3D-only visual style toggle** (`params.visualStyle`: `'arcade'` |
+  `'nature'`), purely cosmetic:
+  - *Arcade* (default): the original glowing/neon instanced-triangle look
+    with bloom post-processing.
+  - *Nature*: aims for "plausible from a distance," not photo-realism.
+    Adds a physically-based sky dome with a built-in procedural cloud
+    layer (`three/examples/jsm/objects/Sky.js`), a procedurally textured
+    ground plane (`src/render/environment.ts`, canvas-generated, no
+    external image assets), earth-toned matte bird materials, and a more
+    bird-like silhouette (`createRealisticBirdGeometries` in
+    `src/render/birdGeometry.ts`: tapered lathed body, wings with fanned
+    "finger" wingtip feathers, a flat fanned tail). Bloom is disabled and
+    ACES tone mapping is enabled in this style for a natural look.
+  - Both styles reuse the same instancing/steering/animation pipeline;
+    only geometry, materials, lighting, and the sky/ground environment
+    swap based on the selected style.
+
 ## World Model
 - 2D continuous coordinate space (not a discrete grid) rendered on a
   full-size canvas.

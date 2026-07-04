@@ -1,4 +1,4 @@
-import { params, resetParams, type SimParams, type SimMode } from '../sim/params';
+import { params, resetParams, type SimParams, type SimMode, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 
 interface SliderSpec {
@@ -50,6 +50,10 @@ export class ControlPanel {
 
     this.container.appendChild(this.buildModeToggle());
 
+    if (params.mode === '3d') {
+      this.container.appendChild(this.buildVisualStyleToggle());
+    }
+
     for (const spec of sliderSpecs) {
       this.container.appendChild(this.buildSlider(spec));
     }
@@ -89,6 +93,38 @@ export class ControlPanel {
       this.sim.reset();
       this.onModeChange(params.mode);
       this.render();
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
+  }
+
+  private buildVisualStyleToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row';
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'control-label-row';
+    const label = document.createElement('label');
+    label.textContent = 'Visual style';
+    labelRow.appendChild(label);
+    wrapper.appendChild(labelRow);
+
+    const select = document.createElement('select');
+    select.id = 'param-visual-style';
+    const options: { value: VisualStyle; text: string }[] = [
+      { value: 'arcade', text: 'Arcade (neon glow)' },
+      { value: 'nature', text: 'Nature (sky & hawks)' },
+    ];
+    for (const opt of options) {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = opt.text;
+      if (opt.value === params.visualStyle) option.selected = true;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      params.visualStyle = select.value as VisualStyle;
     });
 
     wrapper.appendChild(select);

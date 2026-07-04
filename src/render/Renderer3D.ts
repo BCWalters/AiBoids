@@ -5,25 +5,30 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { params } from '../sim/params';
+import { params, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
-import { createBirdGeometries, type BirdGeometries } from './birdGeometry';
+import { createBirdGeometries, createRealisticBirdGeometries, type BirdGeometries } from './birdGeometry';
+import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
 
-// Bright, saturated emissive colors so the bloom pass has something to
-// glow — the base material color intentionally stays neutral (driven
-// per-instance below) so contrast against the dark background comes
-// mostly from emissive light.
-const BOID_EMISSIVE = new THREE.Color(0x5ad1ff);
-const PREDATOR_EMISSIVE = new THREE.Color(0xff2a2a);
+// --- "Arcade" style: bright, saturated emissive colors so the bloom pass
+// has something to glow — base material color stays neutral (driven
+// per-instance) so contrast against the dark background comes mostly
+// from emissive light.
+const ARCADE_BOID_EMISSIVE = new THREE.Color(0x5ad1ff);
+const ARCADE_PREDATOR_EMISSIVE = new THREE.Color(0xff2a2a);
+const ARCADE_BOID_BASE = new THREE.Color(0x2ab6e8);
+const ARCADE_BOID_PANIC = new THREE.Color(0xffe066);
+const ARCADE_PREDATOR_BASE = new THREE.Color(0xb31f1f);
+const ARCADE_PREDATOR_HUNT = new THREE.Color(0xffffff);
 
-// Base (calm) vs. highlight (state) diffuse colors, lerped per-instance by
-// panicLevel/huntIntensity via InstancedMesh.setColorAt.
-const BOID_BASE = new THREE.Color(0x2ab6e8);
-const BOID_PANIC = new THREE.Color(0xffe066);
-const PREDATOR_BASE = new THREE.Color(0xb31f1f);
-const PREDATOR_HUNT = new THREE.Color(0xffffff);
+// --- "Nature" style: matte, earth-toned plumage. No emissive glow —
+// contrast comes from the sun-lit sky/ground environment instead.
+const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrasts against green ground
+const NATURE_BOID_PANIC = new THREE.Color(0xf2e6c8); // paler alarm plumage
+const NATURE_PREDATOR_BASE = new THREE.Color(0x7a3b22); // hawk rust-brown
+const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked on
 
 const BOID_LENGTH = 7;
 const BOID_WIDTH = 2.6;
@@ -36,29 +41,41 @@ const FLAP_FREQUENCY = 9; // radians/sec-ish; controls flap speed
 const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
 
-// Three.js cones/octahedra point along +Y by default; that's the "forward"
-// direction we rotate onto each entity's velocity vector.
+// Three.js cones/octahedra/lathes point along +Y by default; that's the
+// "forward" direction we rotate onto each entity's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 
 interface BirdInstanceSet {
   body: THREE.InstancedMesh;
   wingLeft: THREE.InstancedMesh;
   wingRight: THREE.InstancedMesh;
+  tail?: THREE.InstancedMesh;
 }
 
 export class Renderer3D {
   private renderer: THREE.WebGLRenderer;
   private composer: EffectComposer;
   private afterimagePass: AfterimagePass;
+  private bloomPass: UnrealBloomPass;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
 
-  private boidGeometries: BirdGeometries;
-  private predatorGeometries: BirdGeometries;
+  private ambientLight: THREE.AmbientLight;
+  private keyLight: THREE.DirectionalLight;
+  private natureEnv: NatureEnvironment;
+
+  private arcadeBoidGeometries: BirdGeometries;
+  private arcadePredatorGeometries: BirdGeometries;
+  private natureBoidGeometries: BirdGeometries;
+  private naturePredatorGeometries: BirdGeometries;
+
   private boidInstances: BirdInstanceSet | null = null;
   private predatorInstances: BirdInstanceSet | null = null;
+  private boidInstancesKey: string | null = null;
+  private predatorInstancesKey: string | null = null;
   private boundsHelper: THREE.LineSegments | null = null;
+  private currentStyle: VisualStyle | null = null;
 
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
@@ -69,40 +86,61 @@ export class Renderer3D {
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // ACES tone mapping keeps the physically-based Sky shader from blowing
+    // out to solid white and gives the nature-style earth tones more depth.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.65;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x05070a);
 
-    this.camera = new THREE.PerspectiveCamera(60, 1, 1, 5000);
+    // Far plane large enough to contain the nature sky dome (scaled 20000).
+    this.camera = new THREE.PerspectiveCamera(60, 1, 1, 30000);
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.35);
-    const directional = new THREE.DirectionalLight(0xffffff, 0.6);
-    directional.position.set(1, 1, 1);
-    this.scene.add(ambient, directional);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
+    this.keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    this.keyLight.position.set(1, 1, 1);
+    this.scene.add(this.ambientLight, this.keyLight);
 
-    this.boidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
-    this.predatorGeometries = createBirdGeometries(PREDATOR_LENGTH, PREDATOR_WIDTH);
+    this.natureEnv = createNatureEnvironment(this.scene);
+
+    this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
+    this.arcadePredatorGeometries = createBirdGeometries(PREDATOR_LENGTH, PREDATOR_WIDTH);
+    // The lathed "nature" body/wings have noticeably less surface area per
+    // unit width/length than the arcade octahedron+flat-triangle shapes, so
+    // scale them up to read clearly at the same viewing distance.
+    this.natureBoidGeometries = createRealisticBirdGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.naturePredatorGeometries = createRealisticBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.afterimagePass = new AfterimagePass();
     this.composer.addPass(this.afterimagePass);
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.4, 0.15);
-    this.composer.addPass(bloomPass);
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.4, 0.15);
+    this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
   }
 
-  private buildInstanceSet(geometries: BirdGeometries, emissive: THREE.Color, count: number): BirdInstanceSet {
+  private buildInstanceSet(geometries: BirdGeometries, style: VisualStyle, emissive: THREE.Color, count: number): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive, emissiveIntensity: 1.4 });
+    const isNature = style === 'nature';
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: isNature ? 0x000000 : emissive,
+      emissiveIntensity: isNature ? 0 : 1.4,
+      roughness: isNature ? 0.9 : 0.5,
+      metalness: 0,
+    });
     const wingMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      emissive,
-      emissiveIntensity: 1.1,
+      emissive: isNature ? 0x000000 : emissive,
+      emissiveIntensity: isNature ? 0 : 1.1,
+      roughness: isNature ? 0.9 : 0.5,
+      metalness: 0,
       side: THREE.DoubleSide,
     });
 
@@ -112,32 +150,58 @@ export class Renderer3D {
     body.count = count;
     wingLeft.count = count;
     wingRight.count = count;
-
     this.scene.add(body, wingLeft, wingRight);
-    return { body, wingLeft, wingRight };
+
+    let tail: THREE.InstancedMesh | undefined;
+    if (geometries.tail) {
+      const tailMaterial = wingMaterial.clone();
+      tail = new THREE.InstancedMesh(geometries.tail, tailMaterial, Math.max(count, 1));
+      tail.count = count;
+      this.scene.add(tail);
+    }
+
+    return { body, wingLeft, wingRight, tail };
   }
 
   private disposeInstanceSet(set: BirdInstanceSet | null): void {
     if (!set) return;
-    for (const mesh of [set.body, set.wingLeft, set.wingRight]) {
+    const meshes = [set.body, set.wingLeft, set.wingRight, ...(set.tail ? [set.tail] : [])];
+    for (const mesh of meshes) {
       this.scene.remove(mesh);
       (mesh.material as THREE.Material).dispose();
     }
   }
 
-  /** Recreates instanced meshes and world-bounds wireframe when population or world size changes. */
+  /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
   private ensureScene(sim: Simulation): void {
+    const style = params.visualStyle;
     const boidCount = sim.boids.length;
     const predatorCount = sim.predators.length;
 
-    if (!this.boidInstances || this.boidInstances.body.count !== boidCount) {
+    const boidKey = `${boidCount}:${style}`;
+    if (this.boidInstancesKey !== boidKey) {
       this.disposeInstanceSet(this.boidInstances);
-      this.boidInstances = this.buildInstanceSet(this.boidGeometries, BOID_EMISSIVE, boidCount);
+      const geometries = style === 'nature' ? this.natureBoidGeometries : this.arcadeBoidGeometries;
+      this.boidInstances = this.buildInstanceSet(geometries, style, ARCADE_BOID_EMISSIVE, boidCount);
+      this.boidInstancesKey = boidKey;
     }
 
-    if (!this.predatorInstances || this.predatorInstances.body.count !== predatorCount) {
+    const predatorKey = `${predatorCount}:${style}`;
+    if (this.predatorInstancesKey !== predatorKey) {
       this.disposeInstanceSet(this.predatorInstances);
-      this.predatorInstances = this.buildInstanceSet(this.predatorGeometries, PREDATOR_EMISSIVE, predatorCount);
+      const geometries = style === 'nature' ? this.naturePredatorGeometries : this.arcadePredatorGeometries;
+      this.predatorInstances = this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, predatorCount);
+      this.predatorInstancesKey = predatorKey;
+    }
+
+    if (this.currentStyle !== style) {
+      this.currentStyle = style;
+      const isNature = style === 'nature';
+      this.bloomPass.enabled = !isNature;
+      this.natureEnv.setVisible(isNature);
+      if (this.boundsHelper) this.boundsHelper.visible = !isNature;
+      this.ambientLight.intensity = isNature ? 0.55 : 0.35;
+      this.keyLight.visible = !isNature;
     }
 
     const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
@@ -153,6 +217,7 @@ export class Renderer3D {
       this.boundsHelper = new THREE.LineSegments(edges, material);
       this.boundsHelper.position.set(sim.width / 2, sim.height / 2, params.worldDepth / 2);
       this.boundsHelper.userData.key = expectedKey;
+      this.boundsHelper.visible = params.visualStyle !== 'nature';
       this.scene.add(this.boundsHelper);
       box.dispose();
 
@@ -163,6 +228,8 @@ export class Renderer3D {
       this.camera.position.set(center.x + maxDim * 0.6, center.y + maxDim * 0.4, center.z + maxDim * 0.9);
       this.controls.target.copy(center);
       this.controls.update();
+
+      placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
     }
   }
 
@@ -191,6 +258,7 @@ export class Renderer3D {
       this.dummy.quaternion.copy(this.bodyQuat);
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
+      if (set.tail) set.tail.setMatrixAt(i, this.dummy.matrix);
 
       // Wings: apply an extra local flap rotation around the forward axis
       // before combining with the shared body orientation, so both wings
@@ -215,6 +283,7 @@ export class Renderer3D {
       set.body.setColorAt(i, this.stateColor);
       set.wingLeft.setColorAt(i, this.stateColor);
       set.wingRight.setColorAt(i, this.stateColor);
+      if (set.tail) set.tail.setColorAt(i, this.stateColor);
     }
 
     set.body.instanceMatrix.needsUpdate = true;
@@ -223,6 +292,10 @@ export class Renderer3D {
     if (set.body.instanceColor) set.body.instanceColor.needsUpdate = true;
     if (set.wingLeft.instanceColor) set.wingLeft.instanceColor.needsUpdate = true;
     if (set.wingRight.instanceColor) set.wingRight.instanceColor.needsUpdate = true;
+    if (set.tail) {
+      set.tail.instanceMatrix.needsUpdate = true;
+      if (set.tail.instanceColor) set.tail.instanceColor.needsUpdate = true;
+    }
   }
 
   resize(width: number, height: number): void {
@@ -235,10 +308,12 @@ export class Renderer3D {
   render(sim: Simulation): void {
     this.ensureScene(sim);
     const elapsed = (performance.now() - this.startTime) / 1000;
+    const isNature = params.visualStyle === 'nature';
 
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
+    this.natureEnv.update(elapsed);
 
     if (this.boidInstances) {
       this.updateInstances(
@@ -246,8 +321,8 @@ export class Renderer3D {
         sim.boids,
         params.boidMaxSpeed,
         elapsed,
-        BOID_BASE,
-        BOID_PANIC,
+        isNature ? NATURE_BOID_BASE : ARCADE_BOID_BASE,
+        isNature ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
         (entity) => (entity as Boid).panicLevel,
       );
     }
@@ -257,8 +332,8 @@ export class Renderer3D {
         sim.predators,
         params.predatorMaxSpeed,
         elapsed,
-        PREDATOR_BASE,
-        PREDATOR_HUNT,
+        isNature ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
+        isNature ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
         (entity) => (entity as Predator).huntIntensity,
       );
     }
@@ -270,12 +345,18 @@ export class Renderer3D {
   dispose(): void {
     this.disposeInstanceSet(this.boidInstances);
     this.disposeInstanceSet(this.predatorInstances);
-    this.boidGeometries.body.dispose();
-    this.boidGeometries.wingLeft.dispose();
-    this.boidGeometries.wingRight.dispose();
-    this.predatorGeometries.body.dispose();
-    this.predatorGeometries.wingLeft.dispose();
-    this.predatorGeometries.wingRight.dispose();
+    for (const geometries of [
+      this.arcadeBoidGeometries,
+      this.arcadePredatorGeometries,
+      this.natureBoidGeometries,
+      this.naturePredatorGeometries,
+    ]) {
+      geometries.body.dispose();
+      geometries.wingLeft.dispose();
+      geometries.wingRight.dispose();
+      geometries.tail?.dispose();
+    }
+    this.natureEnv.dispose();
     this.controls.dispose();
     this.composer.dispose();
     this.renderer.dispose();
