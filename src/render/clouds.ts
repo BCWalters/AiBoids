@@ -10,7 +10,7 @@ import * as THREE from 'three';
  */
 export interface DriftingClouds {
   /** Reposition the spawn/despawn region around a given world center + flock scale. */
-  configure(center: THREE.Vector3, flockScale: number): void;
+  configure(center: THREE.Vector3, flockScale: number, sunDirection: THREE.Vector3): void;
   update(dt: number): void;
   setVisible(visible: boolean): void;
   dispose(): void;
@@ -26,6 +26,7 @@ const THROUGH_FLOCK_CHANCE = 0.3;
 interface CloudInstance {
   group: THREE.Group;
   velocity: THREE.Vector3;
+  shadow: THREE.Mesh;
 }
 
 function createPuffTexture(): THREE.Texture {
@@ -45,6 +46,22 @@ function createPuffTexture(): THREE.Texture {
   return texture;
 }
 
+/** Soft, dark radial blob used for the faint shadow a cloud casts on the ground below it. */
+function createShadowTexture(): THREE.Texture {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, 'rgba(20,25,20,0.55)');
+  gradient.addColorStop(0.6, 'rgba(20,25,20,0.25)');
+  gradient.addColorStop(1, 'rgba(20,25,20,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+
 export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
   const root = new THREE.Group();
   root.visible = false;
@@ -60,8 +77,14 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
     fog: true,
   });
 
+  const shadowTexture = createShadowTexture();
+  const shadowGeometry = new THREE.CircleGeometry(1, 24);
+
   const center = new THREE.Vector3();
   let flockScale = 500;
+  // Default straight-down direction until configure() supplies the real
+  // sun position — keeps shadows sane before the first frame.
+  const sunDirection = new THREE.Vector3(0, 1, 0);
   let spawnTimer = 4;
   const active: CloudInstance[] = [];
   // Gentle prevailing wind, mostly along +X with a slight drift in Z.
@@ -89,24 +112,53 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
       : center.y + flockScale * (0.9 + Math.random() * 0.8); // safely overhead
     group.position.set(startX + (Math.random() - 0.5) * flockScale, startY, startZ + (Math.random() - 0.5) * flockScale);
 
-    const speed = flockScale * (0.012 + Math.random() * 0.006);
+    // A gentle, slow drift — real high-altitude clouds take many minutes
+    // to cross the sky, not seconds.
+    const speed = flockScale * (0.0035 + Math.random() * 0.0018);
     const velocity = windDir.clone().multiplyScalar(speed);
 
-    root.add(group);
-    active.push({ group, velocity });
+    const shadowMaterial = new THREE.MeshBasicMaterial({
+      map: shadowTexture,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.scale.setScalar(clusterRadius * 1.4);
+    updateShadowPosition(shadow, group.position);
+
+    root.add(group, shadow);
+    active.push({ group, velocity, shadow });
+  }
+
+  // Projects a cloud's shadow straight down along the sun direction onto
+  // the ground plane (y = 0), so overhead clouds cast a small, slightly
+  // offset patch of shade that sweeps across the ground as they drift.
+  function updateShadowPosition(shadow: THREE.Mesh, cloudPos: THREE.Vector3): void {
+    if (sunDirection.y > 0.05) {
+      const t = cloudPos.y / sunDirection.y;
+      shadow.position.set(cloudPos.x - sunDirection.x * t, 0.5, cloudPos.z - sunDirection.z * t);
+      (shadow.material as THREE.MeshBasicMaterial).opacity = 0.5;
+    } else {
+      // Sun below/at horizon: no sensible ground projection — hide it.
+      (shadow.material as THREE.MeshBasicMaterial).opacity = 0;
+    }
   }
 
   function despawnCloud(cloud: CloudInstance): void {
     // Sprite geometry is a shared module-level singleton in three.js — do
     // not dispose it here, just drop the group (sprites hold no other
     // per-instance GPU resources; the material/texture are shared too).
-    root.remove(cloud.group);
+    root.remove(cloud.group, cloud.shadow);
+    (cloud.shadow.material as THREE.Material).dispose();
   }
 
   return {
-    configure(newCenter: THREE.Vector3, newFlockScale: number) {
+    configure(newCenter: THREE.Vector3, newFlockScale: number, newSunDirection: THREE.Vector3) {
       center.copy(newCenter);
       flockScale = newFlockScale;
+      sunDirection.copy(newSunDirection);
     },
     update(dt: number) {
       if (!root.visible) return;
@@ -121,6 +173,7 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
       for (let i = active.length - 1; i >= 0; i--) {
         const cloud = active[i];
         cloud.group.position.addScaledVector(cloud.velocity, dt);
+        updateShadowPosition(cloud.shadow, cloud.group.position);
         const traveled = (cloud.group.position.x - center.x) * Math.sign(windDir.x || 1);
         if (traveled > Math.abs(despawnX - center.x)) {
           despawnCloud(cloud);
@@ -135,6 +188,8 @@ export function createDriftingClouds(scene: THREE.Scene): DriftingClouds {
       for (const cloud of active) despawnCloud(cloud);
       active.length = 0;
       scene.remove(root);
+      shadowGeometry.dispose();
+      shadowTexture.dispose();
       material.map?.dispose();
       material.dispose();
     },

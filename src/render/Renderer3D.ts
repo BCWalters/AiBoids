@@ -235,7 +235,7 @@ export class Renderer3D {
       this.controls.update();
 
       placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
-      this.driftingClouds.configure(center, maxDim);
+      this.driftingClouds.configure(center, maxDim, this.natureEnv.sunDirection);
     }
   }
 
