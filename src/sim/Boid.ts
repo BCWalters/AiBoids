@@ -11,6 +11,14 @@ export class Boid {
   position: Vec3;
   velocity: Vec3;
 
+  /**
+   * Smoothed 0..1 "how panicked am I right now" level, driven by proximity
+   * to the nearest threatening predator. Smoothed (rather than instant)
+   * so the color-by-state rendering doesn't flicker as a boid crosses the
+   * panic radius boundary. Read by both renderers to tint boids as they flee.
+   */
+  panicLevel = 0;
+
   constructor(position: Vec3, velocity: Vec3) {
     this.id = nextId++;
     this.position = position;
@@ -101,6 +109,7 @@ export class Boid {
     // --- Predator avoidance (flee): overrides other rules when close ---
     let fleeSum = V.create();
     let fleeCount = 0;
+    let maxProximity = 0;
     for (const predator of predators) {
       const d = V.distance(this.position, predator.position);
       if (d < p.panicRadius && d > 1e-6) {
@@ -109,6 +118,7 @@ export class Boid {
         const away = V.scale(V.sub(this.position, predator.position), proximity / d);
         fleeSum = V.add(fleeSum, away);
         fleeCount++;
+        if (proximity > maxProximity) maxProximity = proximity;
       }
     }
     if (fleeCount > 0) {
@@ -116,6 +126,11 @@ export class Boid {
       const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
       acceleration = V.add(acceleration, V.scale(steer, p.fleeWeight));
     }
+
+    // Smooth panic level toward the current threat level (exponential
+    // smoothing, framerate-independent) rather than snapping instantly.
+    const panicSmoothing = 1 - Math.exp(-dt * 6);
+    this.panicLevel += (maxProximity - this.panicLevel) * panicSmoothing;
 
     // --- 3D mode: steer away from the bounded world's walls, plus a
     // constant gentle pull toward the center so the flock keeps roaming

@@ -6,6 +6,22 @@ const BOID_WIDTH = 5;
 const PREDATOR_LENGTH = 15;
 const PREDATOR_WIDTH = 9;
 
+const BG_COLOR: [number, number, number] = [13, 17, 23]; // #0d1117
+
+// Base (calm) vs. highlight (state) colors, lerped by panicLevel/huntIntensity.
+const BOID_BASE: [number, number, number] = [90, 209, 255]; // #5ad1ff
+const BOID_PANIC: [number, number, number] = [255, 224, 102]; // warm alarm yellow
+const PREDATOR_BASE: [number, number, number] = [255, 90, 90]; // #ff5a5a
+const PREDATOR_HUNT: [number, number, number] = [255, 255, 255]; // hot white lock-on flash
+
+function lerpColor(a: [number, number, number], b: [number, number, number], t: number): string {
+  const clamped = Math.max(0, Math.min(1, t));
+  const r = Math.round(a[0] + (b[0] - a[0]) * clamped);
+  const g = Math.round(a[1] + (b[1] - a[1]) * clamped);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * clamped);
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private canvas: HTMLCanvasElement;
@@ -34,9 +50,12 @@ export class Renderer {
 
   render(sim: Simulation): void {
     const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    ctx.fillStyle = '#0d1117';
+    // Instead of a hard clear, paint a translucent background overlay each
+    // frame: previous frames fade rather than vanish instantly, producing
+    // motion trails. trailAmount=0 behaves like a normal hard clear.
+    const alpha = 1 - Math.max(0, Math.min(0.97, params.trailAmount));
+    ctx.fillStyle = `rgba(${BG_COLOR[0]}, ${BG_COLOR[1]}, ${BG_COLOR[2]}, ${alpha})`;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     if (params.showDebugOverlay) {
@@ -61,7 +80,7 @@ export class Renderer {
         boid.headingAngle,
         BOID_LENGTH,
         BOID_WIDTH,
-        '#5ad1ff',
+        lerpColor(BOID_BASE, BOID_PANIC, boid.panicLevel),
       );
     }
 
@@ -72,7 +91,7 @@ export class Renderer {
         predator.headingAngle,
         PREDATOR_LENGTH,
         PREDATOR_WIDTH,
-        '#ff5a5a',
+        lerpColor(PREDATOR_BASE, PREDATOR_HUNT, predator.huntIntensity),
       );
     }
   }

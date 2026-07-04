@@ -49,6 +49,12 @@ export interface SimParams {
   // feel any push back — this keeps the flock cycling through open space.
   centerPullWeight: number;
 
+  // Visuals (shared by both renderers): how strongly previous frames
+  // persist, producing motion trails behind moving entities. 0 = no
+  // trail (hard clear each frame). Keep below 1 (full persistence, trail
+  // that never fades).
+  trailAmount: number;
+
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
@@ -81,6 +87,8 @@ export const defaultParams: SimParams = {
   boundaryMargin: 120,
   boundaryWeight: 3.5,
   centerPullWeight: 0.1,
+
+  trailAmount: 0.82,
 
   running: true,
   showDebugOverlay: false,

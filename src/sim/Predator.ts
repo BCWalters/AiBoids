@@ -11,6 +11,14 @@ export class Predator {
   position: Vec3;
   velocity: Vec3;
 
+  /**
+   * Smoothed 0..1 "how locked-on am I right now" level, driven by how
+   * close the nearest visible boid is. 0 when no prey is visible at all.
+   * Read by both renderers to make an actively hunting predator visually
+   * more intense than one that's just cruising/searching.
+   */
+  huntIntensity = 0;
+
   constructor(position: Vec3, velocity: Vec3) {
     this.id = nextId++;
     this.position = position;
@@ -59,6 +67,14 @@ export class Predator {
       const desired = V.setMagnitude(V.sub(target, this.position), p.predatorMaxSpeed);
       acceleration = V.limit(V.sub(desired, this.velocity), p.maxForce);
     }
+
+    // Smooth hunt intensity toward how close the nearest prey is (0 if
+    // none visible), so the color-by-state highlight fades in/out smoothly.
+    const targetIntensity = nearest
+      ? 1 - Math.sqrt(nearestDistSq) / p.predatorPerceptionRadius
+      : 0;
+    const huntSmoothing = 1 - Math.exp(-dt * 4);
+    this.huntIntensity += (targetIntensity - this.huntIntensity) * huntSmoothing;
 
     if (p.mode === '3d') {
       const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin);

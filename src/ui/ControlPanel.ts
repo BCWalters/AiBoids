@@ -22,6 +22,7 @@ const sliderSpecs: SliderSpec[] = [
   { key: 'separationRadius', label: 'Separation radius', min: 5, max: 100, step: 1 },
   { key: 'panicRadius', label: 'Predator panic radius', min: 10, max: 300, step: 5 },
   { key: 'fleeWeight', label: 'Flee weight', min: 0, max: 8, step: 0.1 },
+  { key: 'trailAmount', label: 'Motion trail amount', min: 0, max: 0.95, step: 0.01 },
 ];
 
 // Only meaningful in 3D mode (bounded-box wall steer-away).
