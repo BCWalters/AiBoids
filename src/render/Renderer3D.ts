@@ -202,6 +202,12 @@ export class Renderer3D {
       this.currentStyle = style;
       const isNature = style === 'nature';
       this.bloomPass.enabled = !isNature;
+      // The screen-space afterimage/motion-trail effect persists whole
+      // previous frames — great for arcade neon trails, but when the
+      // camera pans in nature mode it drags a ghost trail of the bright
+      // sky (especially the sun disc) across the frame, looking like a
+      // smeary lens flare and leaving "hovering circle" afterimages.
+      this.afterimagePass.enabled = !isNature;
       this.natureEnv.setVisible(isNature);
       this.driftingClouds.setVisible(isNature);
       if (this.boundsHelper) this.boundsHelper.visible = !isNature;

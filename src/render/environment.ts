@@ -10,6 +10,8 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 export interface NatureEnvironment {
   sky: Sky;
   ground: THREE.Mesh;
+  mountains: THREE.Mesh;
+  water: THREE.Mesh;
   sunLight: THREE.DirectionalLight;
   sunSprite: THREE.Sprite;
   /** Unit vector pointing from the world toward the sun. */
@@ -29,7 +31,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   skyUniforms.rayleigh.value = 1.2;
   skyUniforms.mieCoefficient.value = 0.006;
   skyUniforms.mieDirectionalG.value = 0.8;
-  skyUniforms.cloudCoverage.value = 0.45;
+  skyUniforms.cloudCoverage.value = 0.4;
   skyUniforms.cloudDensity.value = 0.45;
   skyUniforms.cloudScale.value = 0.0009;
   // Slow, believable drift — the previous 0.02 crossed the whole sky in a
@@ -53,26 +55,37 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   const sunSprite = new THREE.Sprite(createSunMaterial());
   const SUN_DISTANCE = 15000; // inside the 20000-radius sky dome
   sunSprite.position.copy(sunPosition).multiplyScalar(SUN_DISTANCE);
-  sunSprite.scale.setScalar(2600);
+  sunSprite.scale.setScalar(4200);
 
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
   ground.rotation.x = -Math.PI / 2;
   configureGroundTexture(ground.material as THREE.MeshStandardMaterial);
+
+  // A jagged, low-poly mountain range encircling the horizon and a lake
+  // patch off in the distance — cheap (a few hundred triangles total,
+  // one shared flat-shaded material each) but they break up what would
+  // otherwise be an infinite flat plain.
+  const mountains = createMountainRing();
+  const water = createWaterPatch();
 
   // Pale horizon haze color (roughly matches this sky configuration's
   // horizon tone) — blended in via fog so the ground plane fades smoothly
   // into the sky instead of showing a hard, distracting edge.
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
 
-  scene.add(sky, ground, sunLight, sunSprite);
+  scene.add(sky, ground, mountains, water, sunLight, sunSprite);
   sky.visible = false;
   ground.visible = false;
+  mountains.visible = false;
+  water.visible = false;
   sunLight.visible = false;
   sunSprite.visible = false;
 
   return {
     sky,
     ground,
+    mountains,
+    water,
     sunLight,
     sunSprite,
     sunDirection: sunPosition.clone(),
@@ -83,12 +96,14 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
     setVisible(visible: boolean) {
       sky.visible = visible;
       ground.visible = visible;
+      mountains.visible = visible;
+      water.visible = visible;
       sunLight.visible = visible;
       sunSprite.visible = visible;
       scene.fog = visible ? fog : null;
     },
     dispose() {
-      scene.remove(sky, ground, sunLight, sunSprite);
+      scene.remove(sky, ground, mountains, water, sunLight, sunSprite);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -97,10 +112,95 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       (ground.material as THREE.MeshStandardMaterial).normalMap?.dispose();
       (ground.material as THREE.MeshStandardMaterial).roughnessMap?.dispose();
       (ground.material as THREE.Material).dispose();
+      mountains.geometry.dispose();
+      (mountains.material as THREE.Material).dispose();
+      water.geometry.dispose();
+      (water.material as THREE.Material).dispose();
       (sunSprite.material as THREE.SpriteMaterial).map?.dispose();
       (sunSprite.material as THREE.Material).dispose();
     },
   };
+}
+
+/**
+ * A ring of jagged, flat-shaded triangular peaks encircling the origin,
+ * built in "flock scale" units (radius ~5-5.6) so it can just be
+ * uniformly scaled by the flock's actual size in placeNatureEnvironment.
+ * Modeled as a continuous ridge strip (not isolated spike triangles) with
+ * smoothed random heights, so it reads as a low, rolling distant range
+ * rather than a picket fence of witch-hat peaks. Ridge vertices are
+ * tinted lighter than the base to fake aerial-perspective haze.
+ */
+function createMountainRing(): THREE.Mesh {
+  const segments = 64;
+  const outerRadius = 5.6; // base, flock-scale units
+  const innerRadius = 5.0; // ridge line, pulled slightly inward/forward
+  const baseColor = new THREE.Color(0x8497a8);
+  const peakColor = new THREE.Color(0xd7e1e6);
+
+  // Smooth neighboring random heights so the ridge undulates gently
+  // instead of spiking sharply between adjacent segments.
+  const rawHeights: number[] = [];
+  for (let i = 0; i < segments; i++) rawHeights.push(0.16 + Math.random() * 0.26);
+  const heights = rawHeights.map((h, i) => {
+    const prev = rawHeights[(i - 1 + segments) % segments];
+    const next = rawHeights[(i + 1) % segments];
+    return (prev + h * 2 + next) / 4;
+  });
+
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const pushTri = (a: number[], b: number[], c: number[], ca: THREE.Color, cb: THREE.Color, cc: THREE.Color) => {
+    positions.push(...a, ...b, ...c);
+    colors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+  };
+
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const h0 = heights[i];
+    const h1 = heights[(i + 1) % segments];
+
+    const base0 = [Math.cos(a0) * outerRadius, 0, Math.sin(a0) * outerRadius];
+    const base1 = [Math.cos(a1) * outerRadius, 0, Math.sin(a1) * outerRadius];
+    const ridge0 = [Math.cos(a0) * innerRadius, h0, Math.sin(a0) * innerRadius];
+    const ridge1 = [Math.cos(a1) * innerRadius, h1, Math.sin(a1) * innerRadius];
+
+    // Two triangles per segment forming a continuous sloped strip from
+    // base to ridge — side is set to DoubleSide on the material so
+    // winding order (we're viewed from inside the ring) doesn't matter.
+    pushTri(base0, ridge0, base1, baseColor, peakColor, baseColor);
+    pushTri(ridge0, ridge1, base1, peakColor, peakColor, baseColor);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    roughness: 1,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
+  return new THREE.Mesh(geometry, material);
+}
+
+/** A simple flat lake patch — a hint of water on the horizon, cheaper than any real reflection/ripple simulation. */
+function createWaterPatch(): THREE.Mesh {
+  const geometry = new THREE.CircleGeometry(1, 48);
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x2f6c86,
+    roughness: 0.15,
+    metalness: 0.4,
+    transparent: true,
+    opacity: 0.92,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
 }
 
 /** A bright, warm sun disc with a soft feathered edge, standing in for the sky shader's near-invisible physical sun disc. */
@@ -115,11 +215,11 @@ function createSunMaterial(): THREE.SpriteMaterial {
   // against an already-bright sky, especially near the pale horizon.
   // A solid, opaque-cored disc that just alpha-fades at the edge reads as
   // a clearly visible sun regardless of what's behind it.
-  gradient.addColorStop(0, 'rgba(255,252,235,1)');
-  gradient.addColorStop(0.14, 'rgba(255,247,210,1)');
-  gradient.addColorStop(0.3, 'rgba(255,225,140,0.85)');
-  gradient.addColorStop(0.6, 'rgba(255,205,110,0.3)');
-  gradient.addColorStop(1, 'rgba(255,190,90,0)');
+  gradient.addColorStop(0, 'rgba(255,255,240,1)');
+  gradient.addColorStop(0.16, 'rgba(255,244,190,1)');
+  gradient.addColorStop(0.32, 'rgba(255,210,110,0.9)');
+  gradient.addColorStop(0.6, 'rgba(255,180,70,0.35)');
+  gradient.addColorStop(1, 'rgba(255,160,50,0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
 
@@ -131,6 +231,10 @@ function createSunMaterial(): THREE.SpriteMaterial {
     depthWrite: false,
     depthTest: false,
     fog: false,
+    // Skip tone mapping for this material — ACES + the scene's 0.65
+    // exposure was crushing the sun down to a dim, dull grey blob that
+    // looked like it was permanently behind a haze of cloud.
+    toneMapped: false,
   });
 }
 
@@ -149,6 +253,21 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   const flockScale = groundSize / 30;
   env.fog.near = flockScale * 2;
   env.fog.far = flockScale * 6.5;
+
+  // Mountain ring geometry is authored in flock-scale units (radius ~4),
+  // so a straight uniform scale places it just inside the fog's far
+  // distance — hazy and partially faded, like real distant mountains.
+  env.mountains.position.set(center.x, 0, center.z);
+  env.mountains.scale.setScalar(flockScale);
+
+  // The lake sits off in the same general direction the default camera
+  // looks (see Renderer3D's initial camera offset), so it's visible
+  // without needing to orbit around first — but well inside the
+  // mountain ring, not overlapping its base.
+  const forwardX = -0.55;
+  const forwardZ = -0.83;
+  env.water.position.set(center.x + forwardX * flockScale * 1.8, 0.4, center.z + forwardZ * flockScale * 1.8);
+  env.water.scale.setScalar(flockScale * 0.55);
 }
 
 /**
