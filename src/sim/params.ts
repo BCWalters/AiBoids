@@ -74,6 +74,12 @@ export interface SimParams {
   // Purely cosmetic.
   dragonPredators: boolean;
 
+  // Nature-style only: whether distance fog is applied in the 3D nature
+  // scene. Fog hides seams at the world's edge (ground/mountains/ocean
+  // fading into the sky), but disabling it is useful for inspecting
+  // distant geometry (e.g. the ocean) that's otherwise heavily faded.
+  fogEnabled: boolean;
+
   // When true (default), a predator that gets close enough to a boid
   // catches it — the boid is removed (with a brief cartoony "swallowed"
   // shrink + blood-splatter effect) and the predator pauses to glide to a
@@ -122,6 +128,7 @@ export const defaultParams: SimParams = {
 
   visualStyle: 'nature',
   dragonPredators: true,
+  fogEnabled: true,
   predatorCatchEnabled: true,
 
   running: true,

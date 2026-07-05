@@ -93,6 +93,7 @@ export class ControlPanel {
     const visualSettingsChildren = [this.buildSlider(trailSliderSpec, trailDisabled), this.buildDebugToggle(debugDisabled)];
     if (params.mode === '3d' && params.visualStyle === 'nature') {
       visualSettingsChildren.push(this.buildDragonPredatorsToggle());
+      visualSettingsChildren.push(this.buildFogToggle());
     }
     this.container.appendChild(this.buildSection('Visual settings', visualSettingsChildren, false));
 
@@ -204,6 +205,27 @@ export class ControlPanel {
     input.checked = params.dragonPredators;
     input.addEventListener('change', () => {
       params.dragonPredators = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildFogToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = 'Distance fog';
+    label.htmlFor = 'param-fog-enabled';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-fog-enabled';
+    input.checked = params.fogEnabled;
+    input.addEventListener('change', () => {
+      params.fogEnabled = input.checked;
     });
 
     wrapper.appendChild(input);

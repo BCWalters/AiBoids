@@ -470,6 +470,11 @@ export class Renderer3D {
       this.controls.maxDistance = isNature ? maxDim * 5.5 : maxDim * 25;
     }
 
+    // Applied every frame (cheap) rather than gated on style-change, so
+    // toggling the fog checkbox takes effect immediately without needing
+    // a full style switch.
+    this.natureEnv.setFogEnabled(params.fogEnabled);
+
     const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
     if (this.boundsHelper?.userData.key !== expectedKey) {
       if (this.boundsHelper) {

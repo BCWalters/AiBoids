@@ -25,6 +25,8 @@ export interface NatureEnvironment {
   /** Call once per frame while nature style is active to animate clouds. */
   update(elapsed: number): void;
   setVisible(visible: boolean): void;
+  /** Independently toggle scene fog on/off without affecting overall nature-style visibility. */
+  setFogEnabled(enabled: boolean): void;
   dispose(): void;
 }
 
@@ -103,6 +105,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   // horizon tone) — blended in via fog so the ground plane fades smoothly
   // into the sky instead of showing a hard, distracting edge.
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
+  let fogEnabled = true;
 
   scene.add(sky, ground, mountains, water, ocean, sunLight, sunHalo, sunSprite);
   sky.visible = false;
@@ -137,7 +140,15 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       sunHalo.visible = visible;
       sunLight.visible = visible;
       sunSprite.visible = visible;
-      scene.fog = visible ? fog : null;
+      // Only actually attach fog if the environment is both visible AND
+      // fog hasn't been independently disabled via setFogEnabled — track
+      // the "should fog be on" intent by checking whether it's currently
+      // attached (setFogEnabled sets it null when off).
+      scene.fog = visible && fogEnabled ? fog : null;
+    },
+    setFogEnabled(enabled: boolean) {
+      fogEnabled = enabled;
+      scene.fog = enabled && sky.visible ? fog : null;
     },
     dispose() {
       scene.remove(sky, ground, mountains, water, ocean, sunLight, sunHalo, sunSprite);
