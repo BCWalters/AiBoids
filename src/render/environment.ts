@@ -12,6 +12,9 @@ export interface NatureEnvironment {
   ground: THREE.Mesh;
   mountains: THREE.Mesh;
   water: THREE.Mesh;
+  /** A much larger sea extending toward the horizon, visible through a
+   * deliberate gap/bay in the mountain ring (see createMountainRing). */
+  ocean: THREE.Mesh;
   sunLight: THREE.DirectionalLight;
   sunSprite: THREE.Sprite;
   /** Larger, softer glow sprite rendered behind the sun disc for a warm corona effect. */
@@ -24,6 +27,16 @@ export interface NatureEnvironment {
   setVisible(visible: boolean): void;
   dispose(): void;
 }
+
+// The mountain ring has a deliberate gap/bay opening in this fixed
+// direction (in the ring's own unscaled local space, so it always shows
+// up in the same world-relative compass direction regardless of world
+// size) through which the much-larger ocean plane is visible — reads as
+// "the hills part around a sea inlet" rather than a random flat patch.
+// Placed opposite the small lake's forward direction (see
+// placeNatureEnvironment) so the two water features don't visually compete.
+const OCEAN_GAP_ANGLE = Math.atan2(0.83, 0.55);
+const OCEAN_GAP_HALF_WIDTH = 0.5; // radians, ~29° half-width (~57° full notch)
 
 export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   const sky = new Sky();
@@ -82,19 +95,21 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   // patch off in the distance — cheap (a few hundred triangles total,
   // one shared flat-shaded material each) but they break up what would
   // otherwise be an infinite flat plain.
-  const mountains = createMountainRing();
+  const mountains = createMountainRing(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
   const water = createWaterPatch();
+  const ocean = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
 
   // Pale horizon haze color (roughly matches this sky configuration's
   // horizon tone) — blended in via fog so the ground plane fades smoothly
   // into the sky instead of showing a hard, distracting edge.
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
 
-  scene.add(sky, ground, mountains, water, sunLight, sunHalo, sunSprite);
+  scene.add(sky, ground, mountains, water, ocean, sunLight, sunHalo, sunSprite);
   sky.visible = false;
   ground.visible = false;
   mountains.visible = false;
   water.visible = false;
+  ocean.visible = false;
   sunLight.visible = false;
   sunHalo.visible = false;
   sunSprite.visible = false;
@@ -104,6 +119,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
     ground,
     mountains,
     water,
+    ocean,
     sunLight,
     sunSprite,
     sunHalo,
@@ -117,13 +133,14 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       ground.visible = visible;
       mountains.visible = visible;
       water.visible = visible;
+      ocean.visible = visible;
       sunHalo.visible = visible;
       sunLight.visible = visible;
       sunSprite.visible = visible;
       scene.fog = visible ? fog : null;
     },
     dispose() {
-      scene.remove(sky, ground, mountains, water, sunLight, sunHalo, sunSprite);
+      scene.remove(sky, ground, mountains, water, ocean, sunLight, sunHalo, sunSprite);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -137,6 +154,8 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       water.geometry.dispose();
       (water.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
       (water.material as THREE.Material).dispose();
+      ocean.geometry.dispose();
+      (ocean.material as THREE.Material).dispose();
       (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
       (sunHalo.material as THREE.Material).dispose();
       (sunSprite.material as THREE.SpriteMaterial).map?.dispose();
@@ -154,7 +173,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
  * rather than a picket fence of witch-hat peaks. Ridge vertices are
  * tinted lighter than the base to fake aerial-perspective haze.
  */
-function createMountainRing(): THREE.Mesh {
+function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   const segments = 64;
   const outerRadius = 5.6; // base, flock-scale units
   const innerRadius = 5.0; // ridge line, pulled slightly inward/forward
@@ -171,6 +190,31 @@ function createMountainRing(): THREE.Mesh {
     return (prev + h * 2 + next) / 4;
   });
 
+  // Carve a smooth-edged gap/bay around gapAngle: mountain height drops
+  // to sea-level so the range appears to "part" and reveal the ocean
+  // plane (added separately, see createOceanPatch) rather than showing a
+  // flat low patch of the same hillside. Deliberately does NOT push the
+  // ring's radius outward — fog.far is a fixed multiple of flockScale,
+  // and this ring's radius (~5-5.6) is already tuned to sit just inside
+  // that fog distance; pushing the notch's radius out past it would put
+  // the opening (and the ocean's near shore just beyond it) entirely
+  // past the fog's far distance, rendering as a featureless white/gray
+  // wall instead of a visible gap — a bug caught by direct visual QA.
+  const gapFalloff = gapHalfWidth * 1.6; // wider transition zone than the fully-open notch
+  function angleDelta(a: number): number {
+    let d = a - gapAngle;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d);
+  }
+  function gapFactor(a: number): number {
+    const d = angleDelta(a);
+    if (d >= gapFalloff) return 0;
+    const t = 1 - d / gapFalloff;
+    // smoothstep for a gentle transition rather than a hard edge
+    return t * t * (3 - 2 * t);
+  }
+
   const positions: number[] = [];
   const colors: number[] = [];
   const pushTri = (a: number[], b: number[], c: number[], ca: THREE.Color, cb: THREE.Color, cc: THREE.Color) => {
@@ -181,8 +225,15 @@ function createMountainRing(): THREE.Mesh {
   for (let i = 0; i < segments; i++) {
     const a0 = (i / segments) * Math.PI * 2;
     const a1 = ((i + 1) / segments) * Math.PI * 2;
-    const h0 = heights[i];
-    const h1 = heights[(i + 1) % segments];
+    const g0 = gapFactor(a0);
+    const g1 = gapFactor(a1);
+    // Fully inside the gap's core (both endpoints ~100% gap factor):
+    // skip emitting this segment's geometry entirely, leaving a true
+    // hole rather than a flattened-but-still-present colored strip,
+    // so the ocean plane behind it is completely unobstructed.
+    if (g0 > 0.97 && g1 > 0.97) continue;
+    const h0 = heights[i] * (1 - g0);
+    const h1 = heights[(i + 1) % segments] * (1 - g1);
 
     const base0 = [Math.cos(a0) * outerRadius, 0, Math.sin(a0) * outerRadius];
     const base1 = [Math.cos(a1) * outerRadius, 0, Math.sin(a1) * outerRadius];
@@ -206,6 +257,80 @@ function createMountainRing(): THREE.Mesh {
     flatShading: true,
     roughness: 1,
     metalness: 0,
+    side: THREE.DoubleSide,
+  });
+  return new THREE.Mesh(geometry, material);
+}
+
+/**
+ * A much larger wedge-shaped sea, visible through the deliberate bay
+ * opening carved into createMountainRing (same gapAngle/gapHalfWidth),
+ * extending from just past the receded coastline out to a radius far
+ * beyond the fog's draw distance — its outer edge is never a visible
+ * hard border, just fades into the horizon haze like the ground does.
+ * A shore-to-deep-water vertex color gradient (light turquoise near the
+ * coast, darkening with distance) sells the sense of scale/depth far
+ * more cheaply than any actual wave geometry or shader would.
+ */
+function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
+  // Slightly wider than the mountain notch itself so the ocean is fully
+  // visible through the gap with no sliver of grass peeking through at
+  // the transition edges.
+  const angleSpan = gapHalfWidth * 1.75;
+  const angularSegments = 28;
+  const radialBands = 5;
+  // Starts just inside the mountain ring's own (unmoved) inner/ridge
+  // radius (5.0) so it tucks under the ground right where the ring's
+  // gap begins, with no seam/sliver of grass. Deliberately NOT pushed
+  // out further — fog.far is a fixed multiple of flockScale and this
+  // radius range is tuned to stay well inside it (see the matching note
+  // in createMountainRing); starting the ocean beyond ~6.5 flock-scale
+  // units would put its near shore entirely past the fog's far distance,
+  // rendering as a flat white/gray wall instead of a visible sea.
+  const innerRadius = 4.7;
+  const outerRadius = 26; // "to the horizon" — the far reach fades naturally into fog
+  const shoreColor = new THREE.Color(0x5fa3bd);
+  const deepColor = new THREE.Color(0x0f2e46);
+
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const pushTri = (a: number[], b: number[], c: number[], ca: THREE.Color, cb: THREE.Color, cc: THREE.Color) => {
+    positions.push(...a, ...b, ...c);
+    colors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+  };
+
+  for (let band = 0; band < radialBands; band++) {
+    // Non-linear radial spacing (squared) bunches more geometry/color
+    // detail near the shore, where it's actually visible up close, and
+    // spends fewer triangles on the distant, heavily-fogged-out reaches.
+    const t0 = band / radialBands;
+    const t1 = (band + 1) / radialBands;
+    const r0 = innerRadius + (outerRadius - innerRadius) * t0 * t0;
+    const r1 = innerRadius + (outerRadius - innerRadius) * t1 * t1;
+    const c0 = shoreColor.clone().lerp(deepColor, t0);
+    const c1 = shoreColor.clone().lerp(deepColor, t1);
+
+    for (let seg = 0; seg < angularSegments; seg++) {
+      const a0 = gapAngle - angleSpan + (2 * angleSpan * seg) / angularSegments;
+      const a1 = gapAngle - angleSpan + (2 * angleSpan * (seg + 1)) / angularSegments;
+      const p00 = [Math.cos(a0) * r0, 0, Math.sin(a0) * r0];
+      const p01 = [Math.cos(a1) * r0, 0, Math.sin(a1) * r0];
+      const p10 = [Math.cos(a0) * r1, 0, Math.sin(a0) * r1];
+      const p11 = [Math.cos(a1) * r1, 0, Math.sin(a1) * r1];
+      pushTri(p00, p10, p11, c0, c1, c1);
+      pushTri(p00, p11, p01, c0, c1, c0);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.15,
+    metalness: 0.2,
     side: THREE.DoubleSide,
   });
   return new THREE.Mesh(geometry, material);
@@ -419,6 +544,15 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   const waterLift = Math.max(1, flockScale * 0.02);
   env.water.position.set(center.x + forwardX * flockScale * 1.8, waterLift, center.z + forwardZ * flockScale * 1.8);
   env.water.scale.setScalar(flockScale * 0.55);
+
+  // Ocean is authored in the same flock-scale units as the mountain
+  // ring's radius (~5-7 flock units, extending out to 26), centered on
+  // the flock like the mountains/ground rather than offset like the lake
+  // — its wedge shape (see createOceanPatch) is already aimed at
+  // OCEAN_GAP_ANGLE, matching the bay opening carved into the mountains.
+  const oceanLift = Math.max(1, flockScale * 0.015);
+  env.ocean.position.set(center.x, oceanLift, center.z);
+  env.ocean.scale.setScalar(flockScale);
 }
 
 /**
