@@ -2,7 +2,7 @@ import * as V from './vector';
 import type { Vec3 } from './vector';
 import { params } from './params';
 import { Boid } from './Boid';
-import { boundarySteer, type WorldBounds } from './boundary';
+import { boundarySteer, nearWallAxisCount, type WorldBounds } from './boundary';
 
 let nextId = 1;
 
@@ -47,6 +47,12 @@ export class Predator {
    */
   renderHeading: Vec3 = { x: 0, y: 1, z: 0 };
   /**
+   * Last stable world-up-derived "right" vector — see
+   * Boid.renderRight for why this is needed (near-vertical singularity
+   * stability) and why it's safe against long-term roll drift.
+   */
+  renderRight: Vec3 = { x: 1, y: 0, z: 0 };
+  /**
    * Smoothed roll/bank angle (radians) around the current heading — see
    * Boid.renderBank for details. Kept per-predator for the same reason
    * renderHeading is: distinct entities shouldn't bleed each other's
@@ -71,6 +77,21 @@ export class Predator {
    * smoothly instead of snapping straight to full speed.
    */
   private resuming = false;
+
+  /**
+   * How long (seconds) this predator has continuously been within
+   * boundaryMargin of 2+ walls at once (i.e. genuinely wedged in a
+   * corner/edge, not just briefly grazing one wall). A predator chasing
+   * prey that's itself cornered can otherwise reach a stable equilibrium
+   * there indefinitely: pursuit steering (up to maxForce) toward prey
+   * sitting right in the corner can outweigh the wall-avoidance push
+   * (which maxes out well under maxForce even right at a true corner),
+   * so nothing ever breaks the tie — reported as predators/dragons
+   * getting "stuck in corners". Tracked so update() can force a brief,
+   * decisive escape push once this drags on too long, rather than
+   * fighting it out with pursuit forever.
+   */
+  private cornerStuckTime = 0;
 
   constructor(position: Vec3, velocity: Vec3) {
     this.id = nextId++;
@@ -161,6 +182,16 @@ export class Predator {
     this.huntIntensity += (targetIntensity - this.huntIntensity) * huntSmoothing;
 
     if (p.mode === '3d') {
+      // Track how long we've been genuinely wedged in a corner/edge (2+
+      // walls at once) — see cornerStuckTime's doc comment. Decays twice
+      // as fast as it builds so a predator that only clips a corner
+      // briefly while maneuvering doesn't trigger the escape override.
+      if (nearWallAxisCount(this.position, bounds, p.boundaryMargin) >= 2) {
+        this.cornerStuckTime += dt;
+      } else {
+        this.cornerStuckTime = Math.max(0, this.cornerStuckTime - dt * 2);
+      }
+
       const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin, p.maxForce);
       acceleration = V.add(acceleration, V.scale(wallPush, p.boundaryWeight));
 
@@ -174,6 +205,24 @@ export class Predator {
           // active pursuit, just prevents idle corner-parking when no
           // prey is nearby.
           acceleration = V.add(acceleration, V.scale(steer, p.centerPullWeight * 0.5));
+        }
+      }
+
+      // Genuinely wedged for too long (prey sitting right in the corner
+      // can otherwise make chasing it indefinitely outweigh wall
+      // avoidance, a stable equilibrium that never resolves on its own):
+      // override every other steering force just for this frame with a
+      // decisive push straight back toward the world center. Once clear
+      // of the corner, cornerStuckTime decays and normal pursuit takes
+      // back over — reads as a brief "break off and reposition" rather
+      // than a permanent behavior change.
+      const CORNER_STUCK_ESCAPE_THRESHOLD = 1.2;
+      if (this.cornerStuckTime > CORNER_STUCK_ESCAPE_THRESHOLD) {
+        const center = V.create(bounds.width / 2, bounds.height / 2, bounds.depth / 2);
+        const toCenter = V.sub(center, this.position);
+        if (V.magnitudeSq(toCenter) > 1e-6) {
+          const desired = V.setMagnitude(toCenter, p.predatorMaxSpeed);
+          acceleration = V.limit(V.sub(desired, this.velocity), p.maxForce * 1.5);
         }
       }
     }
@@ -207,8 +256,20 @@ export class Predator {
         this.velocity = V.add(this.velocity, V.scale(wallPush, p.boundaryWeight * dt));
       }
       this.position = V.add(this.position, V.scale(this.velocity, dt));
+    } else if (p.mode === '3d') {
+      // Fully "resting" — no self-driven movement, but still gently
+      // nudge away from a wall/corner if the glide-to-a-stop happened to
+      // land right up against one (prey often gets caught right at the
+      // world's edge, since that's exactly where a fleeing boid runs out
+      // of room). Without this, a predator could sit dead-still wedged
+      // into a corner for the entire multi-second rest — reads as
+      // visually "stuck" rather than just resting. boundarySteer returns
+      // zero once clear of the margin, so this has no effect on a
+      // predator that digested somewhere out in the open.
+      const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin, p.maxForce);
+      this.velocity = V.scale(wallPush, p.boundaryWeight * 0.2);
+      this.position = V.add(this.position, V.scale(this.velocity, dt));
     } else {
-      // Fully stopped and resting/"digesting" — no movement at all.
       this.velocity = V.create();
     }
 

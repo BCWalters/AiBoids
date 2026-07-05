@@ -77,6 +77,24 @@ export class Boid {
    */
   renderHeading: Vec3 = { x: 0, y: 1, z: 0 };
   /**
+   * Last stable world-up-derived "right" vector (see Renderer3D's
+   * updateInstances). Near-vertical headings make a fresh right vector
+   * (cross(WORLD_UP_AXIS, forward)) numerically unstable — not just at
+   * the exact pole, but for a real few-degree cone around it, since
+   * normalizing an already-tiny cross product amplifies ordinary
+   * floating-point noise into visibly different directions frame to
+   * frame (reported as boids flattening/flickering between 2D/3D).
+   * Inside that cone the renderer reuses (and re-orthogonalizes) this
+   * persisted vector instead of recomputing from scratch — this is safe
+   * against long-term roll drift (the failure mode of an earlier,
+   * reverted attempt at persisting orientation state) because it's
+   * discarded and freshly re-anchored to WORLD_UP_AXIS every frame the
+   * heading is *not* in that narrow cone, which is the vast majority of
+   * the time for any entity that isn't holding a near-vertical heading
+   * for a sustained stretch.
+   */
+  renderRight: Vec3 = { x: 1, y: 0, z: 0 };
+  /**
    * Smoothed roll/bank angle (radians) around the current heading,
    * purely cosmetic — read only by the 3D renderer so this entity leans
    * into turns instead of always flying perfectly level, while still

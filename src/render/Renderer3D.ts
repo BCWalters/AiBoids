@@ -110,6 +110,19 @@ const DRAGON_FLAP_FREQUENCY = 2.6;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 
+// Dragons additionally low-pass filter their heading direction (not just
+// their bank angle) before it's used for orientation — see the
+// keepUpright branch in updateInstances for why: near a near-vertical
+// heading, the *raw* per-frame velocity direction itself is unstable
+// (tiny, essentially-noise-level sideways velocity components swing the
+// horizontal/azimuthal component of the direction wildly, the same way a
+// compass spins wildly near the magnetic pole), independent of how
+// robustly "right"/"up" are then derived from it. Smoothing the heading
+// itself removes this jitter at its source rather than just downstream.
+// Non-dragon entities intentionally skip this (see keepUpright) since
+// they don't anchor to world-up and so have no equivalent instability.
+const DRAGON_HEADING_SMOOTHING_RATE = 6;
+
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
 // "forward" direction we rotate onto each entity's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
@@ -118,27 +131,41 @@ const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 // level, used below to build an orientation that stays right-side-up
 // rather than picking an arbitrary roll.
 const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
-// When an entity's heading points (almost) exactly straight up/down,
-// world-up stops being a usable reference for "which way is level" (it
-// becomes parallel to forward, collapsing the cross product below to a
-// zero vector). A blended hand-off to a fallback axis across a wide
-// dot-product *range* (the previous approach here) doesn't actually
-// avoid this — the blended reference can itself become momentarily
-// parallel to forward for various headings *within* that range, since
-// the blend factor only depends on |forward.y| and ignores forward's
-// other components. That reintroduced the exact same
-// flatten-then-flicker singularity bug for ordinary (non-dragon)
-// entities any time their heading passed through the blend zone, not
-// just steep dives — reported as boids/predators losing their mass and
-// flickering between 2D/3D. Fixed by using the same technique
-// THREE.Matrix4.lookAt uses internally: keep WORLD_UP_AXIS as the
-// reference everywhere, and only when forward and WORLD_UP_AXIS are
-// (numerically) exactly parallel — the true, single-point singularity —
-// nudge forward by a tiny fixed epsilon so the cross product is
-// well-defined again. This never blends or snaps visibly; the nudge is
-// imperceptibly small and only ever triggers at the literal degenerate
-// point.
-const UP_REFERENCE_EPSILON = 1e-4;
+// When an entity's heading points anywhere near straight up/down,
+// world-up stops being a good reference for "which way is level": the
+// cross product used to derive "right" (cross(WORLD_UP_AXIS, forward))
+// shrinks toward zero as forward approaches parallel to WORLD_UP_AXIS.
+// The earlier fix here only special-cased the *exact* zero-length case
+// (a literal, single-point singularity essentially never hit by a real
+// heading) and otherwise always normalized whatever tiny cross product
+// resulted — but normalizing an already-tiny vector amplifies ordinary
+// per-frame floating-point noise into a visibly different direction each
+// frame, which reads as boids/predators flattening/flickering between
+// 2D/3D any time a heading spent a while within roughly this many
+// degrees of vertical, not just at the literal pole. A prior attempt to
+// smooth this out by blending WORLD_UP_AXIS with a fallback axis across
+// this whole range reintroduced its own, differently-located version of
+// the same problem (see git history) since the blended reference could
+// itself land parallel to forward for various headings inside the range.
+//
+// Fixed instead by keeping a per-entity persisted "right" vector
+// (Boid/Predator.renderRight): outside this cone, it's discarded and
+// freshly recomputed straight from WORLD_UP_AXIS every single frame (no
+// blending, no drift). Only *inside* the cone does the renderer reuse
+// last frame's right vector (re-orthogonalized against the current
+// forward via Gram-Schmidt) rather than recomputing a numerically
+// unstable one from scratch — a form of parallel transport, but one
+// that's safe against the long-term roll drift that sank the earlier
+// persisted-state attempt, since it only ever runs for the brief stretch
+// an entity's heading actually stays inside this narrow near-vertical
+// cone, immediately re-anchoring to WORLD_UP_AXIS the instant it exits.
+const NEAR_POLE_RIGHT_LENGTH_THRESHOLD = 0.15; // ~= sin(8.6°) from vertical
+const NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ = NEAR_POLE_RIGHT_LENGTH_THRESHOLD * NEAR_POLE_RIGHT_LENGTH_THRESHOLD;
+// Only used as a last-ditch fallback when even the re-orthogonalized
+// persisted right vector has collapsed (forward changed so much frame to
+// frame that it's no longer even approximately valid) — vanishingly rare
+// in practice, but keeps the math well-defined in all cases.
+const UP_REFERENCE_FALLBACK_AXIS = new THREE.Vector3(0, 0, 1);
 // Roll (bank) applied when turning is smoothed and clamped well short of
 // fully inverted — a dramatic-but-still-clearly-banking lean, not a
 // literal flip, per the "prefer to be right-side up" request.
@@ -282,7 +309,7 @@ export class Renderer3D {
   private tmpForward = new THREE.Vector3();
   private tmpRight = new THREE.Vector3();
   private tmpUp = new THREE.Vector3();
-  private tmpNudgedForward = new THREE.Vector3();
+  private tmpPersistedRight = new THREE.Vector3();
   private tmpPrevDir = new THREE.Vector3();
   private tmpBasisMatrix = new THREE.Matrix4();
   private stateColor = new THREE.Color();
@@ -577,6 +604,7 @@ export class Renderer3D {
     getScale: (entity: Boid | Predator) => number = () => 1,
     individualVariation: boolean = false,
     getSpeciesColors?: (entity: Boid | Predator) => SpeciesColorSet | null,
+    keepUpright: boolean = false,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -594,61 +622,114 @@ export class Renderer3D {
       // direction instead of holding its own last heading.
       this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
       if (speed > 1e-6) {
-        entity.renderHeading = { x: vel.x / speed, y: vel.y / speed, z: vel.z / speed };
+        const invSpeed = 1 / speed;
+        const targetX = vel.x * invSpeed;
+        const targetY = vel.y * invSpeed;
+        const targetZ = vel.z * invSpeed;
+        if (keepUpright) {
+          // Low-pass filter the heading itself for dragons — see
+          // DRAGON_HEADING_SMOOTHING_RATE above for why this is needed
+          // in addition to the near-pole "right" vector stabilization.
+          const rate = 1 - Math.exp(-dt * DRAGON_HEADING_SMOOTHING_RATE);
+          let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
+          let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
+          let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
+          const len = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
+          entity.renderHeading = { x: hx / len, y: hy / len, z: hz / len };
+        } else {
+          entity.renderHeading = { x: targetX, y: targetY, z: targetZ };
+        }
       }
       const dir = entity.renderHeading;
       this.tmpForward.set(dir.x, dir.y, dir.z);
 
-      // Build an orientation that keeps the model right-side-up by
-      // construction, instead of the shortest-arc rotation previously
-      // used (Quaternion.setFromUnitVectors(FORWARD_AXIS, dir)) — that
-      // approach has an entire free degree of roll around `dir` that it
-      // resolves arbitrarily, which is exactly why birds/dragons were
-      // "happy" flying upside-down for long stretches rather than just
-      // transiently while banking.
-      //
-      // Roll is always anchored to WORLD_UP_AXIS so entities settle back
-      // to level rather than free-drifting/precessing over time — an
-      // earlier attempt derived right/up from each entity's own previous
-      // frame instead of a fixed world reference, which avoided a hard
-      // snap but had no anchor to correct back to level, so roll could
-      // wander until an entity's heading happened to pass near its own
-      // current up vector, hitting the exact same singularity at an
-      // unpredictable, arbitrary orientation (reported as random jumpy
-      // flips and entities going edge-on/"2D").
-      //
-      // A later attempt tried to soften the near-vertical singularity
-      // (forward parallel to WORLD_UP_AXIS) by blending WORLD_UP_AXIS
-      // with a fallback axis across a dot-product *range*. That backfired:
-      // the blend factor only depends on |forward.y|, so the blended
-      // reference can itself land parallel to forward for various
-      // headings anywhere inside that range (not just at forward.y ~
-      // ±1), collapsing the cross product to ~zero and flattening the
-      // model — visible as boids/predators losing their mass and
-      // flickering between 2D/3D, and not limited to steep dives/climbs.
-      //
-      // Fixed with the same technique THREE.Matrix4.lookAt uses
-      // internally: keep a single fixed reference (WORLD_UP_AXIS)
-      // everywhere, and only when forward and that reference are
-      // (numerically) exactly parallel — the one true, single-point
-      // singularity, which floating-point headings essentially never
-      // hit exactly — nudge forward by a tiny fixed epsilon so the cross
-      // product is well-defined again. This never blends or snaps
-      // visibly.
-      this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpForward);
-      if (this.tmpRight.lengthSq() < UP_REFERENCE_EPSILON * UP_REFERENCE_EPSILON) {
-        this.tmpNudgedForward.copy(this.tmpForward);
-        this.tmpNudgedForward.x += UP_REFERENCE_EPSILON;
-        this.tmpNudgedForward.normalize();
-        this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpNudgedForward);
+      if (keepUpright) {
+        // Dragons only: build an orientation that keeps the model
+        // right-side-up by construction, instead of the shortest-arc
+        // rotation used below for everything else
+        // (Quaternion.setFromUnitVectors(FORWARD_AXIS, dir)) — that
+        // approach has an entire free degree of roll around `dir` that it
+        // resolves arbitrarily, which reads as flying upside-down for long
+        // stretches rather than just transiently while banking. Ordinary
+        // boids/predators are fine flying upside-down sometimes (their
+        // geometry doesn't make it obvious), but dragons are large and
+        // wing-heavy enough that it looks very wrong, and the "hover-y,
+        // always-upright" look is closer to how TV/movie dragons read
+        // anyway — so this is applied to dragons only.
+        //
+        // Roll is always anchored to WORLD_UP_AXIS so dragons settle back
+        // to level rather than free-drifting/precessing over time — an
+        // earlier attempt derived right/up from each entity's own previous
+        // frame instead of a fixed world reference, which avoided a hard
+        // snap but had no anchor to correct back to level, so roll could
+        // wander until an entity's heading happened to pass near its own
+        // current up vector, hitting the exact same singularity at an
+        // unpredictable, arbitrary orientation (reported as random jumpy
+        // flips and entities going edge-on/"2D").
+        //
+        // A later attempt tried to soften the near-vertical singularity
+        // (forward parallel to WORLD_UP_AXIS) by blending WORLD_UP_AXIS
+        // with a fallback axis across a dot-product *range*. That backfired:
+        // the blend factor only depends on |forward.y|, so the blended
+        // reference can itself land parallel to forward for various
+        // headings anywhere inside that range, collapsing the cross
+        // product to ~zero and flattening the model.
+        //
+        // A third attempt only special-cased the *exact* zero-length cross
+        // product (a literal single-point singularity real headings
+        // essentially never hit) and otherwise always normalized whatever
+        // tiny cross product resulted. That still flickered/flattened,
+        // because normalizing an already-tiny vector amplifies ordinary
+        // per-frame floating-point noise into a visibly different
+        // direction each frame — a real problem for a several-degree cone
+        // around the pole, not just the exact point.
+        //
+        // Fixed by keeping a per-entity persisted "right" vector
+        // (entity.renderRight): outside the near-pole cone, it's discarded
+        // and freshly recomputed straight from WORLD_UP_AXIS every frame
+        // (no blending, no drift). Only inside the cone do we reuse last
+        // frame's right vector, re-orthogonalized against the *current*
+        // forward via Gram-Schmidt — smooth and numerically stable, and
+        // safe against long-term drift since it's discarded the instant
+        // the heading exits the cone.
+        //
+        // Restricting this whole approach to dragons also sidesteps the
+        // original motivation for the wider rollout: since regular boids
+        // are allowed to fly upside-down again, they no longer need (or
+        // hit the singularity of) a world-up-anchored basis at all.
+        this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpForward);
+        if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
+          this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
+          // Re-orthogonalize: remove any component along the *current*
+          // forward so the persisted vector stays a valid "right" even as
+          // forward keeps moving through the cone.
+          this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
+          if (this.tmpPersistedRight.lengthSq() < 1e-10) {
+            // Last-ditch fallback: the persisted vector itself has
+            // collapsed (forward jumped drastically frame to frame) —
+            // vanishingly rare, but keep the math well-defined.
+            this.tmpPersistedRight.crossVectors(UP_REFERENCE_FALLBACK_AXIS, this.tmpForward);
+          }
+          this.tmpRight.copy(this.tmpPersistedRight);
+        }
+        this.tmpRight.normalize();
+        entity.renderRight = { x: this.tmpRight.x, y: this.tmpRight.y, z: this.tmpRight.z };
+        this.tmpUp.crossVectors(this.tmpForward, this.tmpRight).normalize();
+        // Columns are where each local axis (X, Y, Z) maps to in world
+        // space: local X -> right, local Y -> forward (matches
+        // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
+        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+      } else {
+        // Everyone else: simple shortest-arc rotation from the model's
+        // rest forward axis to the current heading. This has a free
+        // degree of roll around `dir` (so these entities can end up
+        // flying upside-down sometimes), but it has no near-pole
+        // singularity to speak of, so it never flickers/flattens —
+        // acceptable here since non-dragon geometry doesn't read as
+        // obviously "wrong side up" the way a large dragon does.
+        this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpForward);
       }
-      this.tmpRight.normalize();
-      this.tmpUp.crossVectors(this.tmpForward, this.tmpRight).normalize();
-      // Columns are where each local axis (X, Y, Z) maps to in world
-      // space: local X -> right, local Y -> forward (matches
-      // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
-      this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
-      this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
 
 
       // Cosmetic bank/roll: lean into turns rather than always flying
@@ -906,6 +987,10 @@ export class Renderer3D {
         isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
         isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
         isDragon ? DRAGON_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+        undefined,
+        undefined,
+        undefined,
+        isDragon,
       );
     }
 
