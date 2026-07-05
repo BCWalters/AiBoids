@@ -96,6 +96,46 @@ body {
   margin-bottom: 14px;
 }
 
+.control-section {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1c2128;
+}
+
+.control-section summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  list-style: none;
+  user-select: none;
+}
+
+.control-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.control-section summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+
+.control-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.control-section[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.control-section-body {
+  padding: 12px 10px 2px;
+}
+
 .control-label-row {
   display: flex;
   justify-content: space-between;
@@ -131,6 +171,15 @@ body {
 .control-checkbox-row label {
   font-size: 13px;
   margin: 0;
+}
+
+.control-row-disabled {
+  opacity: 0.45;
+}
+
+.control-row-disabled label,
+.control-row-disabled .control-value {
+  cursor: not-allowed;
 }
 
 .control-buttons {

@@ -9,11 +9,24 @@ interface SliderSpec {
   step: number;
 }
 
-const sliderSpecs: SliderSpec[] = [
-  { key: 'boidCount', label: 'Boid count', min: 0, max: 500, step: 1 },
+// Population/speed: the settings the user tunes most often — shown
+// ungrouped at the top (always visible, not tucked behind a collapsible
+// section) rather than folded away with everything else.
+const populationSpeedSpecs: SliderSpec[] = [
+  { key: 'boidCount', label: 'Boid count (sparrows)', min: 0, max: 500, step: 1 },
+  { key: 'parrotCount', label: 'Parrot count', min: 0, max: 300, step: 1 },
+  { key: 'goldfinchCount', label: 'Goldfinch count', min: 0, max: 300, step: 1 },
+  { key: 'cardinalCount', label: 'Cardinal count', min: 0, max: 300, step: 1 },
+  { key: 'bluejayCount', label: 'Blue jay count', min: 0, max: 300, step: 1 },
   { key: 'predatorCount', label: 'Predator count', min: 0, max: 10, step: 1 },
   { key: 'boidMaxSpeed', label: 'Boid max speed', min: 20, max: 300, step: 5 },
   { key: 'predatorMaxSpeed', label: 'Predator max speed', min: 20, max: 350, step: 5 },
+];
+
+// Flocking-rule tuning: perception, the three classic boid rule weights,
+// and predator-panic response. Collapsed by default — fiddly to tune but
+// nowhere near as frequently touched as population/speed.
+const behaviorSpecs: SliderSpec[] = [
   { key: 'perceptionRadius', label: 'Perception radius', min: 10, max: 200, step: 5 },
   { key: 'perceptionAngleDeg', label: 'Perception angle (°)', min: 30, max: 360, step: 10 },
   { key: 'separationWeight', label: 'Separation weight', min: 0, max: 4, step: 0.1 },
@@ -22,16 +35,24 @@ const sliderSpecs: SliderSpec[] = [
   { key: 'separationRadius', label: 'Separation radius', min: 5, max: 100, step: 1 },
   { key: 'panicRadius', label: 'Predator panic radius', min: 10, max: 300, step: 5 },
   { key: 'fleeWeight', label: 'Flee weight', min: 0, max: 8, step: 0.1 },
-  { key: 'trailAmount', label: 'Motion trail amount', min: 0, max: 0.95, step: 0.01 },
 ];
 
-// Only meaningful in 3D mode (bounded-box wall steer-away).
+// 3D-mode-only world settings, kept separate from the wall/boundary
+// steer-away tuning below since they're conceptually different (world
+// size vs. how entities react near its edges). Just world depth for now
+// — room to grow without cluttering the population/speed section.
+const threeDSliderSpecs: SliderSpec[] = [{ key: 'worldDepth', label: 'World depth (z)', min: 100, max: 1500, step: 50 }];
+
+// 3D-only: bounded-box wall steer-away behavior.
 const boundarySliderSpecs: SliderSpec[] = [
-  { key: 'worldDepth', label: 'World depth (z)', min: 100, max: 1500, step: 50 },
   { key: 'boundaryMargin', label: 'Wall steer-away margin', min: 10, max: 300, step: 10 },
   { key: 'boundaryWeight', label: 'Wall steer-away strength', min: 0, max: 10, step: 0.5 },
   { key: 'centerPullWeight', label: 'Center pull (avoids corner-camping)', min: 0, max: 0.5, step: 0.01 },
 ];
+
+// Cosmetic motion-trail effect (afterimage fade) — not a "behavior" setting,
+// kept ungrouped near the top alongside the mode/style toggles.
+const trailSliderSpec: SliderSpec = { key: 'trailAmount', label: 'Motion trail amount', min: 0, max: 0.95, step: 0.01 };
 
 export class ControlPanel {
   private container: HTMLElement;
@@ -52,25 +73,55 @@ export class ControlPanel {
 
     if (params.mode === '3d') {
       this.container.appendChild(this.buildVisualStyleToggle());
-      if (params.visualStyle === 'nature') {
-        this.container.appendChild(this.buildDragonPredatorsToggle());
-      }
     }
 
-    this.container.appendChild(this.buildPredatorCatchToggle());
+    this.container.appendChild(
+      this.buildSection(
+        'Population & speed',
+        populationSpeedSpecs.map((spec) => this.buildSlider(spec)),
+        true,
+      ),
+    );
 
-    for (const spec of sliderSpecs) {
-      this.container.appendChild(this.buildSlider(spec));
+    // Motion trail only has a visible effect in 2D and 3D-arcade — the
+    // nature style's afterimage/bloom pass is disabled outright (see
+    // Renderer3D's currentStyle switch), so grey it out there rather than
+    // let it silently do nothing. Perception/panic radii are drawn only by
+    // the 2D canvas renderer, so grey that out whenever 3D mode is active.
+    const trailDisabled = params.mode === '3d' && params.visualStyle === 'nature';
+    const debugDisabled = params.mode === '3d';
+    const visualSettingsChildren = [this.buildSlider(trailSliderSpec, trailDisabled), this.buildDebugToggle(debugDisabled)];
+    if (params.mode === '3d' && params.visualStyle === 'nature') {
+      visualSettingsChildren.push(this.buildDragonPredatorsToggle());
     }
+    this.container.appendChild(this.buildSection('Visual settings', visualSettingsChildren, false));
+
+    this.container.appendChild(
+      this.buildSection(
+        'Behavior',
+        [this.buildPredatorCatchToggle(), ...behaviorSpecs.map((spec) => this.buildSlider(spec))],
+        false,
+      ),
+    );
 
     if (params.mode === '3d') {
-      for (const spec of boundarySliderSpecs) {
-        this.container.appendChild(this.buildSlider(spec));
-      }
+      this.container.appendChild(
+        this.buildSection(
+          '3D settings',
+          threeDSliderSpecs.map((spec) => this.buildSlider(spec)),
+          false,
+        ),
+      );
+      this.container.appendChild(
+        this.buildSection(
+          'Boundary behavior',
+          boundarySliderSpecs.map((spec) => this.buildSlider(spec)),
+          false,
+        ),
+      );
     }
 
     this.container.appendChild(this.buildButtons());
-    this.container.appendChild(this.buildDebugToggle());
   }
 
   private buildModeToggle(): HTMLElement {
@@ -181,9 +232,30 @@ export class ControlPanel {
     return wrapper;
   }
 
-  private buildSlider(spec: SliderSpec): HTMLElement {
+  /** A native <details>/<summary> collapsible group — no extra JS state, resets to defaultOpen on full re-render. */
+  private buildSection(title: string, children: HTMLElement[], defaultOpen: boolean): HTMLElement {
+    const details = document.createElement('details');
+    details.className = 'control-section';
+    details.open = defaultOpen;
+
+    const summary = document.createElement('summary');
+    summary.textContent = title;
+    details.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'control-section-body';
+    for (const child of children) {
+      body.appendChild(child);
+    }
+    details.appendChild(body);
+
+    return details;
+  }
+
+  private buildSlider(spec: SliderSpec, disabled: boolean = false): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-row';
+    if (disabled) wrapper.classList.add('control-row-disabled');
 
     const labelRow = document.createElement('div');
     labelRow.className = 'control-label-row';
@@ -206,6 +278,7 @@ export class ControlPanel {
     input.max = String(spec.max);
     input.step = String(spec.step);
     input.value = String(params[spec.key]);
+    input.disabled = disabled;
 
     input.addEventListener('input', () => {
       const value = Number(input.value);
@@ -248,9 +321,10 @@ export class ControlPanel {
     return wrapper;
   }
 
-  private buildDebugToggle(): HTMLElement {
+  private buildDebugToggle(disabled: boolean = false): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-row control-checkbox-row';
+    if (disabled) wrapper.classList.add('control-row-disabled');
 
     const label = document.createElement('label');
     label.textContent = 'Show perception/panic radii';
@@ -260,6 +334,7 @@ export class ControlPanel {
     input.type = 'checkbox';
     input.id = 'param-debug';
     input.checked = params.showDebugOverlay;
+    input.disabled = disabled;
     input.addEventListener('change', () => {
       params.showDebugOverlay = input.checked;
     });
