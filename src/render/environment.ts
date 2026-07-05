@@ -89,7 +89,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   sunSprite.position.copy(sunPosition).multiplyScalar(SUN_DISTANCE);
   sunSprite.scale.setScalar(5200);
 
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
+  const ground = new THREE.Mesh(createGroundGeometry(), new THREE.MeshStandardMaterial());
   ground.rotation.x = -Math.PI / 2;
   configureGroundTexture(ground.material as THREE.MeshStandardMaterial);
 
@@ -173,6 +173,99 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       (sunSprite.material as THREE.Material).dispose();
     },
   };
+}
+
+// Cheap hash-based 2D value noise (no external noise library) — smoothed
+// with a Hermite (smoothstep) interpolation between lattice corners so it
+// reads as gentle rolling terrain rather than blocky/faceted steps.
+function hash2(x: number, y: number): number {
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+  return n - Math.floor(n);
+}
+
+function valueNoise2(x: number, y: number): number {
+  const xi = Math.floor(x);
+  const yi = Math.floor(y);
+  const xf = x - xi;
+  const yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi);
+  const b = hash2(xi + 1, yi);
+  const c = hash2(xi, yi + 1);
+  const d = hash2(xi + 1, yi + 1);
+  const top = a + (b - a) * u;
+  const bottom = c + (d - c) * u;
+  return (top + (bottom - top) * v) * 2 - 1; // remap 0..1 -> -1..1
+}
+
+// Fractal Brownian motion: layers several octaves of the base noise at
+// increasing frequency/decreasing amplitude for a more organic, less
+// obviously-periodic result than a single noise layer would give. A
+// slightly irregular lacunarity (2.15 rather than a clean 2.0) helps
+// avoid the higher octaves ever realigning into a visible repeating grid.
+function fbm2(x: number, y: number, octaves: number): number {
+  let total = 0;
+  let amplitude = 1;
+  let frequency = 1;
+  let maxAmplitude = 0;
+  for (let i = 0; i < octaves; i++) {
+    total += valueNoise2(x * frequency, y * frequency) * amplitude;
+    maxAmplitude += amplitude;
+    amplitude *= 0.5;
+    frequency *= 2.15;
+  }
+  return total / maxAmplitude;
+}
+
+// Ground plane's local units span -0.5..0.5 (unscaled PlaneGeometry),
+// but get scaled by groundSize = flockScale * 30 in placeNatureEnvironment
+// — multiplying local coords by this constant converts them into the
+// same "flock-scale units" the mountain ring/ocean are authored in, so
+// noise frequencies below can be reasoned about in those same terms
+// (e.g. "a hill every ~2 flock-units") regardless of the plane's huge
+// absolute local:world scale ratio.
+const GROUND_UNIT_SCALE = 30;
+
+/**
+ * Builds the ground plane with real vertex-displaced terrain (rolling
+ * hills, shallow valleys, occasional flatter plateaus) instead of a
+ * perfectly flat plane — a flat plane read as an unconvincingly solid
+ * "green carpet" once the rest of the scene's fidelity improved. Only
+ * the region near the play area actually matters visually (the plane's
+ * outer reaches are hundreds of times larger and get fully fog-hidden),
+ * so segment density is concentrated by using a modest, uniform grid
+ * fine enough to resolve terrain detail within that inner region without
+ * an excessive vertex count for the huge outer skirt.
+ */
+function createGroundGeometry(): THREE.PlaneGeometry {
+  const segments = 200;
+  const geometry = new THREE.PlaneGeometry(1, 1, segments, segments);
+  const position = geometry.attributes.position as THREE.BufferAttribute;
+
+  for (let i = 0; i < position.count; i++) {
+    const lx = position.getX(i);
+    const ly = position.getY(i);
+    const fx = lx * GROUND_UNIT_SCALE;
+    const fy = ly * GROUND_UNIT_SCALE;
+
+    // Broad, slow rolling hills/valleys (low frequency, largest amplitude
+    // but still gentle — this is meant to read as rolling grassland near
+    // the flock, not foothills or mountains, which are handled entirely
+    // separately by createMountainRing).
+    const broad = fbm2(fx * 0.06, fy * 0.06, 3) * 0.045;
+    // Medium bumps break up any remaining large flat-looking stretches.
+    const medium = fbm2(fx * 0.22 + 40.7, fy * 0.22 + 12.3, 2) * 0.016;
+    // Fine surface texture, subtle — mostly noticeable close to camera.
+    const fine = fbm2(fx * 0.85 + 91.1, fy * 0.85 + 5.9, 2) * 0.005;
+
+    // Local plane Z becomes world Y (up) once the mesh is rotated -90°
+    // about X in createNatureEnvironment.
+    position.setZ(i, broad + medium + fine);
+  }
+
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 /**
