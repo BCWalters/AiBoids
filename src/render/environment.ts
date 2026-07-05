@@ -11,7 +11,10 @@ export interface NatureEnvironment {
   sky: Sky;
   ground: THREE.Mesh;
   mountains: THREE.Mesh;
-  water: THREE.Mesh;
+  /** Several small lake patches, each independently sized/placed and
+   * height-matched to the terrain directly beneath it (see
+   * placeNatureEnvironment) so none of them appear to float. */
+  lakes: THREE.Mesh[];
   /** A much larger sea extending toward the horizon, visible through a
    * deliberate gap/bay in the mountain ring (see createMountainRing). */
   ocean: THREE.Mesh;
@@ -39,6 +42,17 @@ export interface NatureEnvironment {
 // placeNatureEnvironment) so the two water features don't visually compete.
 const OCEAN_GAP_ANGLE = Math.atan2(0.83, 0.55);
 const OCEAN_GAP_HALF_WIDTH = 0.5; // radians, ~29° half-width (~57° full notch)
+
+// Several small lakes rather than just one, each in its own compass
+// direction (forwardX/forwardZ, a unit-ish vector) at its own distance
+// and size — chosen to stay well clear of both the ocean's bay opening
+// (~28-85° around OCEAN_GAP_ANGLE) and each other. distanceScale/sizeScale
+// multiply flockScale exactly like the original single lake did.
+const LAKE_DEFS = [
+  { forwardX: -0.55, forwardZ: -0.83, distanceScale: 1.8, sizeScale: 0.55 },
+  { forwardX: -0.87, forwardZ: 0.5, distanceScale: 2.3, sizeScale: 0.4 },
+  { forwardX: 0.77, forwardZ: -0.64, distanceScale: 2.7, sizeScale: 0.35 },
+];
 
 export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   const sky = new Sky();
@@ -91,6 +105,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
 
   const ground = new THREE.Mesh(createGroundGeometry(), new THREE.MeshStandardMaterial());
   ground.rotation.x = -Math.PI / 2;
+  (ground.material as THREE.MeshStandardMaterial).vertexColors = true;
   configureGroundTexture(ground.material as THREE.MeshStandardMaterial);
 
   // A jagged, low-poly mountain range encircling the horizon and a lake
@@ -98,7 +113,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   // one shared flat-shaded material each) but they break up what would
   // otherwise be an infinite flat plain.
   const mountains = createMountainRing(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
-  const water = createWaterPatch();
+  const lakes = LAKE_DEFS.map(() => createWaterPatch());
   const ocean = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
 
   // Pale horizon haze color (roughly matches this sky configuration's
@@ -107,11 +122,11 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
   let fogEnabled = true;
 
-  scene.add(sky, ground, mountains, water, ocean, sunLight, sunHalo, sunSprite);
+  scene.add(sky, ground, mountains, ...lakes, ocean, sunLight, sunHalo, sunSprite);
   sky.visible = false;
   ground.visible = false;
   mountains.visible = false;
-  water.visible = false;
+  lakes.forEach((lake) => { lake.visible = false; });
   ocean.visible = false;
   sunLight.visible = false;
   sunHalo.visible = false;
@@ -121,7 +136,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
     sky,
     ground,
     mountains,
-    water,
+    lakes,
     ocean,
     sunLight,
     sunSprite,
@@ -135,7 +150,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       sky.visible = visible;
       ground.visible = visible;
       mountains.visible = visible;
-      water.visible = visible;
+      lakes.forEach((lake) => { lake.visible = visible; });
       ocean.visible = visible;
       sunHalo.visible = visible;
       sunLight.visible = visible;
@@ -151,7 +166,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       scene.fog = enabled && sky.visible ? fog : null;
     },
     dispose() {
-      scene.remove(sky, ground, mountains, water, ocean, sunLight, sunHalo, sunSprite);
+      scene.remove(sky, ground, mountains, ...lakes, ocean, sunLight, sunHalo, sunSprite);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -162,9 +177,11 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
       (ground.material as THREE.Material).dispose();
       mountains.geometry.dispose();
       (mountains.material as THREE.Material).dispose();
-      water.geometry.dispose();
-      (water.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
-      (water.material as THREE.Material).dispose();
+      for (const lake of lakes) {
+        lake.geometry.dispose();
+        (lake.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
+        (lake.material as THREE.Material).dispose();
+      }
       ocean.geometry.dispose();
       (ocean.material as THREE.Material).dispose();
       (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
@@ -228,6 +245,60 @@ function fbm2(x: number, y: number, octaves: number): number {
 const GROUND_UNIT_SCALE = 30;
 
 /**
+ * Ground displacement height (in local, unscaled plane units — multiply
+ * by groundSize/flockScale to get world-space height) at a given point in
+ * flock-scale units. Shared by createGroundGeometry (to displace terrain
+ * vertices) and placeNatureEnvironment (to sit lakes directly on the
+ * terrain surface instead of at a fixed height that ignores it — see the
+ * "floating lake" fix in placeNatureEnvironment).
+ */
+function terrainHeightAt(fx: number, fy: number): number {
+  // Broad, slow rolling hills/valleys (low frequency, largest amplitude
+  // but still gentle — this is meant to read as rolling grassland near
+  // the flock, not foothills or mountains, which are handled entirely
+  // separately by createMountainRing).
+  const broad = fbm2(fx * 0.06, fy * 0.06, 3) * 0.045;
+  // Medium bumps break up any remaining large flat-looking stretches.
+  const medium = fbm2(fx * 0.22 + 40.7, fy * 0.22 + 12.3, 2) * 0.016;
+  // Fine surface texture, subtle — mostly noticeable close to camera.
+  const fine = fbm2(fx * 0.85 + 91.1, fy * 0.85 + 5.9, 2) * 0.005;
+  return broad + medium + fine;
+}
+
+// Large-scale "biome" tint colors blended per-vertex across the ground
+// (see createGroundGeometry) — lush shaded green in hollows, dry
+// sun-baked gold on higher/exposed ground, and occasional bare-earth
+// patches. Distinct from the tileable canvas texture's own blotches:
+// this variation is computed once across the *entire* finite plane at
+// vertex resolution (not a repeating tile), so it never repeats and
+// breaks up the texture's tiling seams with genuinely non-periodic color
+// regions — the same "biome/splat blending" real terrain renderers use,
+// chosen over literal Carcassonne-style discrete tiles because it needs
+// no edge-matching constraints between tiles and scales to any view
+// distance without introducing a *new* tiling period of its own.
+//
+// Kept close to white (subtle hue/brightness bias only) rather than
+// saturated colors: vertex colors *multiply* the already-colored diffuse
+// texture in MeshStandardMaterial, so a saturated dark-green tint like
+// the original 0x3a6b34 compounded with the texture's own dark greens
+// and crushed the whole ground down to near-black instead of adding a
+// gentle regional variation.
+const LUSH_TINT = new THREE.Color(0xdceacf);
+const DRY_TINT = new THREE.Color(0xf2e8ae);
+const DIRT_TINT = new THREE.Color(0xd9c9a3);
+
+function biomeTintAt(fx: number, fy: number): THREE.Color {
+  const moisture = fbm2(fx * 0.035 + 300, fy * 0.035 + 150, 3); // -1..1
+  const dirtiness = fbm2(fx * 0.05 + 700, fy * 0.05 + 900, 2); // -1..1
+  const color = LUSH_TINT.clone().lerp(DRY_TINT, THREE.MathUtils.smoothstep(moisture, -0.15, 0.5));
+  // Bare-earth patches only show up where dirtiness peaks sharply, so
+  // they read as occasional worn spots rather than a third uniform band.
+  const dirtFactor = THREE.MathUtils.smoothstep(dirtiness, 0.55, 0.85);
+  if (dirtFactor > 0) color.lerp(DIRT_TINT, dirtFactor * 0.6);
+  return color;
+}
+
+/**
  * Builds the ground plane with real vertex-displaced terrain (rolling
  * hills, shallow valleys, occasional flatter plateaus) instead of a
  * perfectly flat plane — a flat plane read as an unconvincingly solid
@@ -237,11 +308,19 @@ const GROUND_UNIT_SCALE = 30;
  * so segment density is concentrated by using a modest, uniform grid
  * fine enough to resolve terrain detail within that inner region without
  * an excessive vertex count for the huge outer skirt.
+ *
+ * Also carries two anti-tiling measures alongside the displacement:
+ * per-vertex biome-tint vertex colors (see biomeTintAt) that multiply
+ * against the tileable diffuse texture with genuinely non-repeating
+ * large-scale color regions, and a small per-vertex UV warp so the
+ * texture's own tile grid doesn't line up into visible straight seams.
  */
 function createGroundGeometry(): THREE.PlaneGeometry {
   const segments = 200;
   const geometry = new THREE.PlaneGeometry(1, 1, segments, segments);
   const position = geometry.attributes.position as THREE.BufferAttribute;
+  const uv = geometry.attributes.uv as THREE.BufferAttribute;
+  const colors = new Float32Array(position.count * 3);
 
   for (let i = 0; i < position.count; i++) {
     const lx = position.getX(i);
@@ -249,21 +328,24 @@ function createGroundGeometry(): THREE.PlaneGeometry {
     const fx = lx * GROUND_UNIT_SCALE;
     const fy = ly * GROUND_UNIT_SCALE;
 
-    // Broad, slow rolling hills/valleys (low frequency, largest amplitude
-    // but still gentle — this is meant to read as rolling grassland near
-    // the flock, not foothills or mountains, which are handled entirely
-    // separately by createMountainRing).
-    const broad = fbm2(fx * 0.06, fy * 0.06, 3) * 0.045;
-    // Medium bumps break up any remaining large flat-looking stretches.
-    const medium = fbm2(fx * 0.22 + 40.7, fy * 0.22 + 12.3, 2) * 0.016;
-    // Fine surface texture, subtle — mostly noticeable close to camera.
-    const fine = fbm2(fx * 0.85 + 91.1, fy * 0.85 + 5.9, 2) * 0.005;
-
     // Local plane Z becomes world Y (up) once the mesh is rotated -90°
     // about X in createNatureEnvironment.
-    position.setZ(i, broad + medium + fine);
+    position.setZ(i, terrainHeightAt(fx, fy));
+
+    const tint = biomeTintAt(fx, fy);
+    colors[i * 3] = tint.r;
+    colors[i * 3 + 1] = tint.g;
+    colors[i * 3 + 2] = tint.b;
+
+    // Warp the UV lookup by a smooth, low-frequency offset so the
+    // texture's repeat grid bends rather than lining up into visible
+    // straight tile seams when viewed from afar.
+    const warpU = fbm2(fx * 0.03 + 555, fy * 0.03 + 222, 2) * 0.4;
+    const warpV = fbm2(fx * 0.03 + 111, fy * 0.03 + 888, 2) * 0.4;
+    uv.setXY(i, uv.getX(i) + warpU, uv.getY(i) + warpV);
   }
 
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -398,10 +480,15 @@ function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh 
 function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   // Slightly wider than the mountain notch itself so the ocean is fully
   // visible through the gap with no sliver of grass peeking through at
-  // the transition edges.
+  // the transition edges. Segment counts raised well above the original
+  // (28 angular / 5 radial) — at that density the wedge's shore and
+  // outer edges read as distinctly straight-faceted/"squarish" polygon
+  // edges even at a distance; finer subdivision plus the per-angle
+  // jitter below (a natural, uneven coastline rather than dead-straight
+  // wedge facets) reads much more like a real receding coastline.
   const angleSpan = gapHalfWidth * 1.75;
-  const angularSegments = 28;
-  const radialBands = 5;
+  const angularSegments = 96;
+  const radialBands = 9;
   // Starts just inside the mountain ring's own inner/ridge radius (5.4)
   // so it tucks under the ground right where the ring's gap begins,
   // with no seam/sliver of grass. Extended out closer to fog.far (see
@@ -428,6 +515,19 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   // the sea visually dissolves into the sky at the horizon exactly like
   // the ground/mountains do, with or without fog enabled.
   const horizonColor = new THREE.Color(0xd7e0e2);
+
+  // Smoothed per-angular-vertex radius jitter, applied consistently
+  // across every radial band (rather than independently per band) so
+  // the whole coastline undulates coherently outward like a real shore
+  // instead of each concentric ring wiggling on its own.
+  const jitterCount = angularSegments + 1;
+  const rawJitter: number[] = [];
+  for (let i = 0; i < jitterCount; i++) rawJitter.push((Math.random() - 0.5) * 2);
+  const jitter = rawJitter.map((v, i) => {
+    const prev = rawJitter[Math.max(0, i - 1)];
+    const next = rawJitter[Math.min(jitterCount - 1, i + 1)];
+    return (prev + v * 2 + next) / 4;
+  });
 
   const positions: number[] = [];
   const colors: number[] = [];
@@ -459,10 +559,12 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
     for (let seg = 0; seg < angularSegments; seg++) {
       const a0 = gapAngle - angleSpan + (2 * angleSpan * seg) / angularSegments;
       const a1 = gapAngle - angleSpan + (2 * angleSpan * (seg + 1)) / angularSegments;
-      const p00 = [Math.cos(a0) * r0, 0, Math.sin(a0) * r0];
-      const p01 = [Math.cos(a1) * r0, 0, Math.sin(a1) * r0];
-      const p10 = [Math.cos(a0) * r1, 0, Math.sin(a0) * r1];
-      const p11 = [Math.cos(a1) * r1, 0, Math.sin(a1) * r1];
+      const j0 = 1 + jitter[seg] * 0.05;
+      const j1 = 1 + jitter[seg + 1] * 0.05;
+      const p00 = [Math.cos(a0) * r0 * j0, 0, Math.sin(a0) * r0 * j0];
+      const p01 = [Math.cos(a1) * r0 * j1, 0, Math.sin(a1) * r0 * j1];
+      const p10 = [Math.cos(a0) * r1 * j0, 0, Math.sin(a0) * r1 * j0];
+      const p11 = [Math.cos(a1) * r1 * j1, 0, Math.sin(a1) * r1 * j1];
       pushTri(p00, p10, p11, c0, c1, c1);
       pushTri(p00, p11, p01, c0, c1, c0);
     }
@@ -597,13 +699,17 @@ function createSunMaterial(): THREE.SpriteMaterial {
   // A solid, opaque-cored disc that just alpha-fades at the edge reads as
   // a clearly visible sun regardless of what's behind it. Stops are more
   // closely spaced than a simple 3-stop gradient to avoid a visible
-  // banding "ring" where alpha changes too abruptly.
-  gradient.addColorStop(0, 'rgba(255,255,246,1)');
-  gradient.addColorStop(0.18, 'rgba(255,241,199,1)');
-  gradient.addColorStop(0.38, 'rgba(255,215,135,0.97)');
-  gradient.addColorStop(0.6, 'rgba(255,185,90,0.6)');
-  gradient.addColorStop(0.82, 'rgba(255,160,70,0.2)');
-  gradient.addColorStop(1, 'rgba(255,150,60,0)');
+  // banding "ring" where alpha changes too abruptly. Brighter/more opaque
+  // throughout than the original pass (higher alpha at every stop past
+  // the core, lighter colors) — the previous stops dropped alpha and
+  // saturation quickly enough that the disc read as a fairly dim, dull
+  // orange smudge rather than a bright sun.
+  gradient.addColorStop(0, 'rgba(255,255,250,1)');
+  gradient.addColorStop(0.22, 'rgba(255,247,214,1)');
+  gradient.addColorStop(0.42, 'rgba(255,230,160,1)');
+  gradient.addColorStop(0.65, 'rgba(255,205,120,0.85)');
+  gradient.addColorStop(0.85, 'rgba(255,185,95,0.45)');
+  gradient.addColorStop(1, 'rgba(255,170,80,0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
 
@@ -639,12 +745,15 @@ function createSunHaloMaterial(): THREE.SpriteMaterial {
   // Kept deliberately subtle and smoothly tapered — a strong or large
   // halo reads as a flat washed-out "coin" against the sky rather than a
   // glow, especially near the pale horizon. Many closely-spaced stops
-  // avoid any visible ring where the falloff rate changes.
-  gradient.addColorStop(0, 'rgba(255,225,165,0.32)');
-  gradient.addColorStop(0.18, 'rgba(255,218,155,0.24)');
-  gradient.addColorStop(0.4, 'rgba(255,208,140,0.14)');
-  gradient.addColorStop(0.65, 'rgba(255,200,130,0.06)');
-  gradient.addColorStop(1, 'rgba(255,195,120,0)');
+  // avoid any visible ring where the falloff rate changes. Nudged up
+  // slightly alongside the brighter sun disc so the two still read as
+  // one consistent, brighter light source rather than a bright disc
+  // sitting on a comparatively dim glow.
+  gradient.addColorStop(0, 'rgba(255,230,175,0.4)');
+  gradient.addColorStop(0.18, 'rgba(255,222,160,0.3)');
+  gradient.addColorStop(0.4, 'rgba(255,212,145,0.18)');
+  gradient.addColorStop(0.65, 'rgba(255,204,135,0.08)');
+  gradient.addColorStop(1, 'rgba(255,198,125,0)');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
 
@@ -673,19 +782,17 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // Fog range scales with the flock's own size (groundSize is the huge,
   // mostly-decorative ground plane, ~30x flockScale) so the ground fades
   // out well before its physical edge, hiding the seam at the horizon.
-  // Pushed near further out (2 -> 4.5x) so nearby scenery/boids read
-  // crisp and clear rather than slightly hazy ("fog is too strong") —
-  // the fog now only kicks in fairly close to the mountain ring itself
-  // (outer radius 6.1x), rather than starting to haze things from
-  // halfway across the whole visible world. Far is tightened close to
-  // the mountain ring's own radius (was 6.5, now 6.8, just past the
-  // 6.1 ring) so the previously-visible strip of flat, lightly-fogged
-  // ground beyond the ridge (read as "a ridge, then an open plain, then
-  // the sky") fogs out fully in a short span right past the peaks,
-  // instead of drifting on for another full unit of visible flat plain.
+  // Pushed out a bit further still (was 4.5/6.8) — even after the
+  // previous pass, fog was reported as still too thick, hazing scenery
+  // sooner than it should. Widening the near/far band both delays when
+  // fog starts and stretches out how gradually it thickens. Far is kept
+  // just a little past the mountain ring's own radius (6.1x) rather than
+  // pushed out much further, since that's what previously fixed a
+  // "visible flat plain beyond the ridge before the fog hides it" bug —
+  // going much past ~7.2x would reopen that gap.
   const flockScale = groundSize / 30;
-  env.fog.near = flockScale * 4.5;
-  env.fog.far = flockScale * 6.8;
+  env.fog.near = flockScale * 5.3;
+  env.fog.far = flockScale * 7.2;
 
   // Mountain ring geometry is authored in flock-scale units (radius ~6),
   // so a straight uniform scale places it just inside the fog's far
@@ -693,21 +800,30 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   env.mountains.position.set(center.x, 0, center.z);
   env.mountains.scale.setScalar(flockScale);
 
-  // The lake sits off in the same general direction the default camera
-  // looks (see Renderer3D's initial camera offset), so it's visible
-  // without needing to orbit around first — but well inside the
-  // mountain ring, not overlapping its base.
-  const forwardX = -0.55;
-  const forwardZ = -0.83;
-  // The old fixed 0.4-unit lift was negligible next to a flockScale that
-  // can be in the hundreds/thousands, so the water plane sat essentially
-  // coplanar with the ground underneath — causing a shimmering z-fighting
-  // moiré between the two overlapping textures as the camera moved.
-  // Scaling the lift with flockScale keeps a comfortably large, consistent
-  // gap regardless of world size.
+  // Each lake sits in its own compass direction (see LAKE_DEFS) so they
+  // spread naturally around the play area instead of clustering. Height
+  // is sampled directly from the same terrain displacement function used
+  // to build the ground mesh (terrainHeightAt) rather than a fixed lift —
+  // previously the lake used a constant small offset regardless of the
+  // actual terrain height beneath it, so once the ground gained real
+  // rolling hills/valleys the lake would either sink into a hill or
+  // visibly float above a hollow. Sampling the real terrain height at
+  // the lake's own position and adding only a small consistent lift on
+  // top (to avoid z-fighting with the grass) keeps it sitting right on
+  // the surface everywhere.
   const waterLift = Math.max(1, flockScale * 0.02);
-  env.water.position.set(center.x + forwardX * flockScale * 1.8, waterLift, center.z + forwardZ * flockScale * 1.8);
-  env.water.scale.setScalar(flockScale * 0.55);
+  env.lakes.forEach((lake, i) => {
+    const def = LAKE_DEFS[i];
+    const fx = def.forwardX * def.distanceScale;
+    const fy = def.forwardZ * def.distanceScale;
+    const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale * GROUND_UNIT_SCALE;
+    lake.position.set(
+      center.x + fx * flockScale,
+      terrainWorldHeight + waterLift,
+      center.z + fy * flockScale,
+    );
+    lake.scale.setScalar(flockScale * def.sizeScale);
+  });
 
   // Ocean is authored in the same flock-scale units as the mountain
   // ring's radius (~5-7 flock units, extending out to 9), centered on
