@@ -17,6 +17,10 @@ export interface SimParams {
 
   // Population
   boidCount: number;
+  parrotCount: number;
+  goldfinchCount: number;
+  cardinalCount: number;
+  bluejayCount: number;
   predatorCount: number;
 
   // Movement
@@ -83,9 +87,13 @@ export interface SimParams {
 }
 
 export const defaultParams: SimParams = {
-  mode: '2d',
+  mode: '3d',
 
   boidCount: 150,
+  parrotCount: 30,
+  goldfinchCount: 25,
+  cardinalCount: 25,
+  bluejayCount: 25,
   predatorCount: 2,
 
   boidMaxSpeed: 120,
@@ -112,8 +120,8 @@ export const defaultParams: SimParams = {
 
   trailAmount: 0.82,
 
-  visualStyle: 'arcade',
-  dragonPredators: false,
+  visualStyle: 'nature',
+  dragonPredators: true,
   predatorCatchEnabled: true,
 
   running: true,

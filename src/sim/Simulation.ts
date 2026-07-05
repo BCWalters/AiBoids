@@ -1,6 +1,6 @@
 import * as V from './vector';
 import { params } from './params';
-import { Boid, DYING_DURATION } from './Boid';
+import { Boid, DYING_DURATION, type BoidSpecies } from './Boid';
 import { Predator } from './Predator';
 import { clampToBounds, type WorldBounds } from './boundary';
 
@@ -61,14 +61,38 @@ export class Simulation {
     return V.fromAngle2D(angle, speed);
   }
 
-  /** Adds/removes boids and predators to match params.boidCount / predatorCount. */
+  /**
+   * Adds/removes boids of one species to match a target count, leaving
+   * the other species' boids untouched. Removals splice out matching-
+   * species boids from wherever they happen to sit in the shared array
+   * (order doesn't matter to the simulation or renderers) rather than
+   * assuming they're contiguous.
+   */
+  private syncSpecies(species: BoidSpecies, targetCount: number): void {
+    let count = 0;
+    for (const boid of this.boids) if (boid.species === species) count++;
+
+    while (count < targetCount) {
+      this.boids.push(new Boid(this.randomPosition(), this.randomVelocity(params.boidMaxSpeed), species));
+      count++;
+    }
+
+    let toRemove = count - targetCount;
+    for (let i = this.boids.length - 1; i >= 0 && toRemove > 0; i--) {
+      if (this.boids[i].species === species) {
+        this.boids.splice(i, 1);
+        toRemove--;
+      }
+    }
+  }
+
+  /** Adds/removes boids and predators to match params.<species>Count / predatorCount. */
   syncPopulation(): void {
-    while (this.boids.length < params.boidCount) {
-      this.boids.push(new Boid(this.randomPosition(), this.randomVelocity(params.boidMaxSpeed)));
-    }
-    while (this.boids.length > params.boidCount) {
-      this.boids.pop();
-    }
+    this.syncSpecies('sparrow', params.boidCount);
+    this.syncSpecies('parrot', params.parrotCount);
+    this.syncSpecies('goldfinch', params.goldfinchCount);
+    this.syncSpecies('cardinal', params.cardinalCount);
+    this.syncSpecies('bluejay', params.bluejayCount);
 
     while (this.predators.length < params.predatorCount) {
       this.predators.push(

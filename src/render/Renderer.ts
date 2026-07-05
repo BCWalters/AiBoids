@@ -11,6 +11,27 @@ const BG_COLOR: [number, number, number] = [13, 17, 23]; // #0d1117
 // Base (calm) vs. highlight (state) colors, lerped by panicLevel/huntIntensity.
 const BOID_BASE: [number, number, number] = [90, 209, 255]; // #5ad1ff
 const BOID_PANIC: [number, number, number] = [255, 224, 102]; // warm alarm yellow
+// Each additional species gets its own vivid base color (echoing real
+// plumage) so mixed-species scenes read as visually distinct sub-flocks —
+// same panic-alarm highlight lerp so the "fleeing" cue reads consistently
+// across every species.
+const PARROT_BASE: [number, number, number] = [45, 189, 156]; // teal-turquoise (macaw chest)
+const GOLDFINCH_BASE: [number, number, number] = [245, 211, 39]; // bright yellow
+const CARDINAL_BASE: [number, number, number] = [204, 41, 54]; // vivid red
+const BLUEJAY_BASE: [number, number, number] = [74, 128, 192]; // blue jay blue
+const SPECIES_BASE: Record<string, [number, number, number]> = {
+  sparrow: BOID_BASE,
+  parrot: PARROT_BASE,
+  goldfinch: GOLDFINCH_BASE,
+  cardinal: CARDINAL_BASE,
+  bluejay: BLUEJAY_BASE,
+};
+// Sparrows render a bit smaller than the other species (matching
+// SPARROW_SIZE_SCALE in Renderer3D.ts) — everything else stays at the
+// "reference" boid size.
+const SPECIES_SIZE_SCALE: Record<string, number> = {
+  sparrow: 0.7,
+};
 const PREDATOR_BASE: [number, number, number] = [255, 90, 90]; // #ff5a5a
 const PREDATOR_HUNT: [number, number, number] = [255, 255, 255]; // hot white lock-on flash
 
@@ -125,13 +146,14 @@ export class Renderer {
 
     for (const boid of sim.boids) {
       if (boid.scale <= 0) continue;
+      const sizeScale = SPECIES_SIZE_SCALE[boid.species] ?? 1;
       this.drawTriangle(
         boid.position.x,
         boid.position.y,
         boid.headingAngle,
-        BOID_LENGTH * boid.scale,
-        BOID_WIDTH * boid.scale,
-        lerpColor(BOID_BASE, BOID_PANIC, boid.panicLevel),
+        BOID_LENGTH * boid.scale * sizeScale,
+        BOID_WIDTH * boid.scale * sizeScale,
+        lerpColor(SPECIES_BASE[boid.species] ?? BOID_BASE, BOID_PANIC, boid.panicLevel),
       );
     }
 

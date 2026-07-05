@@ -9,8 +9,20 @@ let nextId = 1;
 /** How long (seconds) the "caught" shrink-and-slide-into-mouth animation lasts. */
 export const DYING_DURATION = 0.35;
 
+/**
+ * Which flock a boid belongs to. Boids only align/cohere with same-species
+ * neighbors (see the flocking loop in update()) — a mixed sparrow+parrot
+ * scene reads as two independently-flocking groups sharing the same sky,
+ * rather than one uniform flock, which is both more visually interesting
+ * and closer to how real mixed-species bird gatherings behave. Separation
+ * (basic collision avoidance) still applies across species, since birds of
+ * any species still dodge each other rather than flying straight through.
+ */
+export type BoidSpecies = 'sparrow' | 'parrot' | 'goldfinch' | 'cardinal' | 'bluejay';
+
 export class Boid {
   readonly id: number;
+  readonly species: BoidSpecies;
   position: Vec3;
   velocity: Vec3;
 
@@ -47,8 +59,9 @@ export class Boid {
    */
   renderHeading: Vec3 = { x: 0, y: 1, z: 0 };
 
-  constructor(position: Vec3, velocity: Vec3) {
+  constructor(position: Vec3, velocity: Vec3, species: BoidSpecies = 'sparrow') {
     this.id = nextId++;
+    this.species = species;
     this.position = position;
     this.velocity = velocity;
   }
@@ -116,11 +129,18 @@ export class Boid {
       const d = V.distance(this.position, other.position);
 
       if (d < p.separationRadius && d > 1e-6) {
-        // Push away, weighted more strongly the closer the neighbor is.
+        // Basic collision avoidance applies regardless of species — a
+        // sparrow still dodges a nearby parrot, it just doesn't try to
+        // align/flock with it.
         const away = V.scale(V.sub(this.position, other.position), 1 / d);
         sepSum = V.add(sepSum, away);
         sepCount++;
       }
+
+      // Alignment/cohesion ("flocking" proper) only counts same-species
+      // neighbors, so mixed-species scenes read as separate flocks sharing
+      // the same sky rather than one uniform blended flock.
+      if (other.species !== this.species) continue;
 
       alignSum = V.add(alignSum, other.velocity);
       alignCount++;
