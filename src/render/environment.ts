@@ -200,7 +200,17 @@ function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh 
   // the opening (and the ocean's near shore just beyond it) entirely
   // past the fog's far distance, rendering as a featureless white/gray
   // wall instead of a visible gap — a bug caught by direct visual QA.
-  const gapFalloff = gapHalfWidth * 1.6; // wider transition zone than the fully-open notch
+  // Transition width is a short blend zone *beyond* the fully-open core,
+  // not spread across the whole notch — a pure distance-based smoothstep
+  // (the old approach) only reaches ~100% open in a razor-thin sliver at
+  // the exact center angle, leaving most of the intended gap as a
+  // partial-height ridge. Because that partial ridge is nearly uniform
+  // height across a wide arc, it reads as a flat-topped plateau (a mesa)
+  // rather than parting to reveal the sea — this is the bug a "mesa"
+  // sighting report was tracking down. Giving the core a genuine flat
+  // factor=1 plateau across gapHalfWidth, with the smoothstep blend only
+  // in a short zone beyond it, produces a true fully-open notch.
+  const transitionWidth = gapHalfWidth * 0.6;
   function angleDelta(a: number): number {
     let d = a - gapAngle;
     while (d > Math.PI) d -= Math.PI * 2;
@@ -209,8 +219,9 @@ function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh 
   }
   function gapFactor(a: number): number {
     const d = angleDelta(a);
-    if (d >= gapFalloff) return 0;
-    const t = 1 - d / gapFalloff;
+    if (d <= gapHalfWidth) return 1;
+    if (d >= gapHalfWidth + transitionWidth) return 0;
+    const t = 1 - (d - gapHalfWidth) / transitionWidth;
     // smoothstep for a gentle transition rather than a hard edge
     return t * t * (3 - 2 * t);
   }
@@ -287,10 +298,26 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   // in createMountainRing); starting the ocean beyond ~6.5 flock-scale
   // units would put its near shore entirely past the fog's far distance,
   // rendering as a flat white/gray wall instead of a visible sea.
+  // outerRadius was previously 26 ("to the horizon"), but fog.far sits
+  // at ~6.5 flock-units — everything past that renders as pure fog
+  // color regardless of vertex color, so a gradient stretched out to 26
+  // spent ~90% of its shore-to-deep range in territory that's already
+  // 100% fog and never actually visible. The whole ocean read as one
+  // flat gray fog-colored wedge with hard angular edges — a "mesa"
+  // rather than a sea. Keeping the gradient's full range inside (or
+  // just past) the fog-far distance means the color actually progresses
+  // from shore to deep before fog takes over, so a real blue gradient is
+  // visible before it naturally fades to match the horizon haze.
   const innerRadius = 4.7;
-  const outerRadius = 26; // "to the horizon" — the far reach fades naturally into fog
-  const shoreColor = new THREE.Color(0x5fa3bd);
-  const deepColor = new THREE.Color(0x0f2e46);
+  const outerRadius = 9;
+  // Lighter, more sky-reflective blues than the old shore/deep pair
+  // (0x5fa3bd/0x0f2e46) — the deep color in particular was dark enough
+  // to read as a flat near-black slab once fog dimmed the little bit of
+  // shore color visible near it, rather than a sunlit sea. Matches the
+  // same "lighter, sky-tinted over murky-dark" fix already applied to
+  // the small lake in createWaterPatch.
+  const shoreColor = new THREE.Color(0x6fb0c9);
+  const deepColor = new THREE.Color(0x1d4a63);
 
   const positions: number[] = [];
   const colors: number[] = [];
@@ -329,8 +356,16 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
 
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
-    roughness: 0.15,
-    metalness: 0.2,
+    // A shiny/metallic material (roughness 0.15, metalness 0.2) with no
+    // environment map for IBL renders almost entirely unlit except for a
+    // tiny direct-light specular hotspot — the vertex color gradient
+    // barely showed through, so most of the wedge read as a uniform
+    // dark, flat shape (the reported "mesa") rather than graduated water.
+    // A matte, fully-diffuse material (matching the ground/mountains)
+    // actually lets the sun + ambient light show the shore-to-deep
+    // gradient and fog blending as intended.
+    roughness: 1,
+    metalness: 0,
     side: THREE.DoubleSide,
   });
   return new THREE.Mesh(geometry, material);
@@ -546,7 +581,7 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   env.water.scale.setScalar(flockScale * 0.55);
 
   // Ocean is authored in the same flock-scale units as the mountain
-  // ring's radius (~5-7 flock units, extending out to 26), centered on
+  // ring's radius (~5-7 flock units, extending out to 9), centered on
   // the flock like the mountains/ground rather than offset like the lake
   // — its wedge shape (see createOceanPatch) is already aimed at
   // OCEAN_GAP_ANGLE, matching the bay opening carved into the mountains.
