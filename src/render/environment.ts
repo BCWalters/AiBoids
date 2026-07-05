@@ -186,15 +186,23 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
  */
 function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   const segments = 64;
-  const outerRadius = 5.6; // base, flock-scale units
-  const innerRadius = 5.0; // ridge line, pulled slightly inward/forward
+  const outerRadius = 6.1; // base, flock-scale units
+  const innerRadius = 5.4; // ridge line, pulled slightly inward/forward
   const baseColor = new THREE.Color(0x8497a8);
   const peakColor = new THREE.Color(0xd7e1e6);
 
   // Smooth neighboring random heights so the ridge undulates gently
-  // instead of spiking sharply between adjacent segments.
+  // instead of spiking sharply between adjacent segments. Heights are
+  // deliberately much taller than the original 0.16-0.42 range: at the
+  // old height the ridge silhouette sat well below the screen-space row
+  // where the (infinite, flat) ground plane's own vanishing horizon
+  // line appeared, so a visible strip of flat, lightly-fogged ground
+  // showed *above* the ridge before the fog fully whited it out — read
+  // as "a ridge, then an open plain, then the sky" instead of the
+  // mountains being the last thing visible on the horizon. Taller peaks
+  // push the silhouette up into that gap.
   const rawHeights: number[] = [];
-  for (let i = 0; i < segments; i++) rawHeights.push(0.16 + Math.random() * 0.26);
+  for (let i = 0; i < segments; i++) rawHeights.push(0.55 + Math.random() * 0.7);
   const heights = rawHeights.map((h, i) => {
     const prev = rawHeights[(i - 1 + segments) % segments];
     const next = rawHeights[(i + 1) % segments];
@@ -301,26 +309,18 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   const angleSpan = gapHalfWidth * 1.75;
   const angularSegments = 28;
   const radialBands = 5;
-  // Starts just inside the mountain ring's own (unmoved) inner/ridge
-  // radius (5.0) so it tucks under the ground right where the ring's
-  // gap begins, with no seam/sliver of grass. Deliberately NOT pushed
-  // out further — fog.far is a fixed multiple of flockScale and this
-  // radius range is tuned to stay well inside it (see the matching note
-  // in createMountainRing); starting the ocean beyond ~6.5 flock-scale
-  // units would put its near shore entirely past the fog's far distance,
-  // rendering as a flat white/gray wall instead of a visible sea.
-  // outerRadius was previously 26 ("to the horizon"), but fog.far sits
-  // at ~6.5 flock-units — everything past that renders as pure fog
-  // color regardless of vertex color, so a gradient stretched out to 26
-  // spent ~90% of its shore-to-deep range in territory that's already
-  // 100% fog and never actually visible. The whole ocean read as one
-  // flat gray fog-colored wedge with hard angular edges — a "mesa"
-  // rather than a sea. Keeping the gradient's full range inside (or
-  // just past) the fog-far distance means the color actually progresses
-  // from shore to deep before fog takes over, so a real blue gradient is
-  // visible before it naturally fades to match the horizon haze.
-  const innerRadius = 4.7;
-  const outerRadius = 9;
+  // Starts just inside the mountain ring's own inner/ridge radius (5.4)
+  // so it tucks under the ground right where the ring's gap begins,
+  // with no seam/sliver of grass. Extended out closer to fog.far (see
+  // placeNatureEnvironment) than before so the sea's gradient actually
+  // reaches (and blends into) the fog-matching horizon color rather
+  // than stopping short and leaving a visible gap between "last visible
+  // ocean" and "the horizon" — this was the "ocean doesn't go out to
+  // the horizon" bug. A dedicated horizonColor lerp stage (see below)
+  // eases the deep-water color into the fog tone right at the edge so
+  // there's no hard seam even where the fog itself is turned off.
+  const innerRadius = 5.1;
+  const outerRadius = 12;
   // Lighter, more sky-reflective blues than the old shore/deep pair
   // (0x5fa3bd/0x0f2e46) — the deep color in particular was dark enough
   // to read as a flat near-black slab once fog dimmed the little bit of
@@ -329,12 +329,27 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   // the small lake in createWaterPatch.
   const shoreColor = new THREE.Color(0x6fb0c9);
   const deepColor = new THREE.Color(0x1d4a63);
+  // Pale, slightly blue-grey horizon tone close to the sky/fog color —
+  // the final stretch of ocean eases toward this instead of staying a
+  // saturated deep blue right up to its (otherwise arbitrary) edge, so
+  // the sea visually dissolves into the sky at the horizon exactly like
+  // the ground/mountains do, with or without fog enabled.
+  const horizonColor = new THREE.Color(0xd7e0e2);
 
   const positions: number[] = [];
   const colors: number[] = [];
   const pushTri = (a: number[], b: number[], c: number[], ca: THREE.Color, cb: THREE.Color, cc: THREE.Color) => {
     positions.push(...a, ...b, ...c);
     colors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+  };
+
+  // Shore -> deep for the first 55% of the span, then deep -> horizon
+  // haze for the remaining 45%, so distant water genuinely fades to sky
+  // tone instead of holding a hard deep-blue color all the way to the
+  // (invisible) mesh edge.
+  const colorAt = (t: number): THREE.Color => {
+    if (t < 0.55) return shoreColor.clone().lerp(deepColor, t / 0.55);
+    return deepColor.clone().lerp(horizonColor, (t - 0.55) / 0.45);
   };
 
   for (let band = 0; band < radialBands; band++) {
@@ -345,8 +360,8 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
     const t1 = (band + 1) / radialBands;
     const r0 = innerRadius + (outerRadius - innerRadius) * t0 * t0;
     const r1 = innerRadius + (outerRadius - innerRadius) * t1 * t1;
-    const c0 = shoreColor.clone().lerp(deepColor, t0);
-    const c1 = shoreColor.clone().lerp(deepColor, t1);
+    const c0 = colorAt(t0);
+    const c1 = colorAt(t1);
 
     for (let seg = 0; seg < angularSegments; seg++) {
       const a0 = gapAngle - angleSpan + (2 * angleSpan * seg) / angularSegments;
@@ -565,11 +580,21 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // Fog range scales with the flock's own size (groundSize is the huge,
   // mostly-decorative ground plane, ~30x flockScale) so the ground fades
   // out well before its physical edge, hiding the seam at the horizon.
+  // Pushed near further out (2 -> 4.5x) so nearby scenery/boids read
+  // crisp and clear rather than slightly hazy ("fog is too strong") —
+  // the fog now only kicks in fairly close to the mountain ring itself
+  // (outer radius 6.1x), rather than starting to haze things from
+  // halfway across the whole visible world. Far is tightened close to
+  // the mountain ring's own radius (was 6.5, now 6.8, just past the
+  // 6.1 ring) so the previously-visible strip of flat, lightly-fogged
+  // ground beyond the ridge (read as "a ridge, then an open plain, then
+  // the sky") fogs out fully in a short span right past the peaks,
+  // instead of drifting on for another full unit of visible flat plain.
   const flockScale = groundSize / 30;
-  env.fog.near = flockScale * 2;
-  env.fog.far = flockScale * 6.5;
+  env.fog.near = flockScale * 4.5;
+  env.fog.far = flockScale * 6.8;
 
-  // Mountain ring geometry is authored in flock-scale units (radius ~4),
+  // Mountain ring geometry is authored in flock-scale units (radius ~6),
   // so a straight uniform scale places it just inside the fog's far
   // distance — hazy and partially faded, like real distant mountains.
   env.mountains.position.set(center.x, 0, center.z);
