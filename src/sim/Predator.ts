@@ -46,6 +46,13 @@ export class Predator {
    * for the whole digesting glide-to-stop + rest period).
    */
   renderHeading: Vec3 = { x: 0, y: 1, z: 0 };
+  /**
+   * Smoothed roll/bank angle (radians) around the current heading — see
+   * Boid.renderBank for details. Kept per-predator for the same reason
+   * renderHeading is: distinct entities shouldn't bleed each other's
+   * transient render-only state.
+   */
+  renderBank = 0;
 
   /**
    * Unit heading captured at the moment of catching prey (before the

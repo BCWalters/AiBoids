@@ -58,6 +58,14 @@ export class Boid {
    * heading (see updateInstances in Renderer3D.ts).
    */
   renderHeading: Vec3 = { x: 0, y: 1, z: 0 };
+  /**
+   * Smoothed roll/bank angle (radians) around the current heading,
+   * purely cosmetic — read only by the 3D renderer so this entity leans
+   * into turns instead of always flying perfectly level, while still
+   * settling back to upright (0) once flying straight. See
+   * updateInstances in Renderer3D.ts for how it's derived and applied.
+   */
+  renderBank = 0;
 
   constructor(position: Vec3, velocity: Vec3, species: BoidSpecies = 'sparrow') {
     this.id = nextId++;

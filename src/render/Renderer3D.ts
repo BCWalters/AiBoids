@@ -111,6 +111,22 @@ const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
 // "forward" direction we rotate onto each entity's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
+// The bodies' wings lie flat in the local Z=0 plane (see birdGeometry.ts)
+// — local +Z is therefore the model's own "dorsal/up" direction when
+// level, used below to build an orientation that stays right-side-up
+// rather than picking an arbitrary roll.
+const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
+// When an entity's heading points nearly straight up/down, world-up
+// stops being a usable reference for "which way is level" (it becomes
+// parallel to forward) — fall back to this axis instead so orientation
+// stays stable rather than snapping/spinning near-vertical dives/climbs.
+const UP_REFERENCE_FALLBACK_AXIS = new THREE.Vector3(0, 0, 1);
+// Roll (bank) applied when turning is smoothed and clamped well short of
+// fully inverted — a dramatic-but-still-clearly-banking lean, not a
+// literal flip, per the "prefer to be right-side up" request.
+const MAX_BANK_RADIANS = THREE.MathUtils.degToRad(42);
+const BANK_GAIN = 2.6;
+const BANK_SMOOTHING_RATE = 5;
 
 /**
  * Cheap deterministic pseudo-random hash from an integer id + a small
@@ -242,7 +258,13 @@ export class Renderer3D {
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
+  private rollQuat = new THREE.Quaternion();
   private tmpVec3 = new THREE.Vector3();
+  private tmpForward = new THREE.Vector3();
+  private tmpRight = new THREE.Vector3();
+  private tmpUp = new THREE.Vector3();
+  private tmpPrevDir = new THREE.Vector3();
+  private tmpBasisMatrix = new THREE.Matrix4();
   private stateColor = new THREE.Color();
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
@@ -524,6 +546,7 @@ export class Renderer3D {
     entities: (Boid | Predator)[],
     maxSpeed: number,
     elapsed: number,
+    dt: number,
     baseColor: THREE.Color,
     highlightColor: THREE.Color,
     getIntensity: (entity: Boid | Predator) => number,
@@ -548,11 +571,45 @@ export class Renderer3D {
       // inherit whichever heading the *previous* entity in the array had
       // that frame, causing it to visually snap to an unrelated
       // direction instead of holding its own last heading.
+      this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
       if (speed > 1e-6) {
         entity.renderHeading = { x: vel.x / speed, y: vel.y / speed, z: vel.z / speed };
       }
       const dir = entity.renderHeading;
-      this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpVec3.set(dir.x, dir.y, dir.z));
+      this.tmpForward.set(dir.x, dir.y, dir.z);
+
+      // Build an orientation that keeps the model right-side-up by
+      // construction, instead of the shortest-arc rotation previously
+      // used (Quaternion.setFromUnitVectors(FORWARD_AXIS, dir)) — that
+      // approach has an entire free degree of roll around `dir` that it
+      // resolves arbitrarily, which is exactly why birds/dragons were
+      // "happy" flying upside-down for long stretches rather than just
+      // transiently while banking. Deriving right/up explicitly from a
+      // world-up reference (with a fallback axis for the near-vertical
+      // singularity where forward and world-up are parallel) pins roll
+      // to a stable, level default that only ever changes via the
+      // deliberate banking term added below.
+      const referenceUp = Math.abs(this.tmpForward.dot(WORLD_UP_AXIS)) > 0.985 ? UP_REFERENCE_FALLBACK_AXIS : WORLD_UP_AXIS;
+      this.tmpRight.crossVectors(referenceUp, this.tmpForward).normalize();
+      this.tmpUp.crossVectors(this.tmpForward, this.tmpRight).normalize();
+      // Columns are where each local axis (X, Y, Z) maps to in world
+      // space: local X -> right, local Y -> forward (matches
+      // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
+      this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+      this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+
+      // Cosmetic bank/roll: lean into turns rather than always flying
+      // perfectly level. Estimated from how much the heading direction
+      // rotated around the world-up axis since last frame (a simple
+      // yaw-rate proxy), then smoothed and clamped well short of a full
+      // flip — "it's fine if they bank hard, but they should prefer to
+      // be right-side up" the rest of the time.
+      const turnSignal = this.tmpPrevDir.cross(this.tmpForward).y;
+      const targetBank = THREE.MathUtils.clamp(-turnSignal * BANK_GAIN, -MAX_BANK_RADIANS, MAX_BANK_RADIANS);
+      const bankSmoothing = 1 - Math.exp(-dt * BANK_SMOOTHING_RATE);
+      entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
+      this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
+      this.bodyQuat.multiply(this.rollQuat);
 
       // Body: just position + orientation, no flap. Caught boids shrink
       // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
@@ -761,6 +818,7 @@ export class Renderer3D {
           entities,
           params.boidMaxSpeed,
           elapsed,
+          dt,
           isNature ? config.natureBase : config.arcadeBase,
           isNature ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
           (entity) => (entity as Boid).panicLevel,
@@ -780,6 +838,7 @@ export class Renderer3D {
         sim.predators,
         params.predatorMaxSpeed,
         elapsed,
+        dt,
         isDragon ? DRAGON_PREDATOR_BASE : isNature ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
         isDragon ? DRAGON_PREDATOR_HUNT : isNature ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
         (entity) => (entity as Predator).huntIntensity,
