@@ -199,7 +199,7 @@ export class Boid {
     // constant gentle pull toward the center so the flock keeps roaming
     // through open space instead of settling permanently at a wall/corner.
     if (p.mode === '3d') {
-      const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin);
+      const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin, p.maxForce);
       acceleration = V.add(acceleration, V.scale(wallPush, p.boundaryWeight));
 
       if (p.centerPullWeight > 0) {

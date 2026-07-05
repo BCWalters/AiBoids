@@ -154,7 +154,7 @@ export class Predator {
     this.huntIntensity += (targetIntensity - this.huntIntensity) * huntSmoothing;
 
     if (p.mode === '3d') {
-      const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin);
+      const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin, p.maxForce);
       acceleration = V.add(acceleration, V.scale(wallPush, p.boundaryWeight));
 
       if (p.centerPullWeight > 0) {
@@ -196,7 +196,7 @@ export class Predator {
       // predator that catches prey right at the world's edge doesn't
       // visually clip through it.
       if (p.mode === '3d') {
-        const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin);
+        const wallPush = boundarySteer(this.position, bounds, p.boundaryMargin, p.maxForce);
         this.velocity = V.add(this.velocity, V.scale(wallPush, p.boundaryWeight * dt));
       }
       this.position = V.add(this.position, V.scale(this.velocity, dt));
