@@ -78,7 +78,7 @@ export class ControlPanel {
     this.container.appendChild(
       this.buildSection(
         'Population & speed',
-        populationSpeedSpecs.map((spec) => this.buildSlider(spec)),
+        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec)), this.buildAlienInvasionButton()],
         true,
       ),
     );
@@ -230,6 +230,26 @@ export class ControlPanel {
 
     wrapper.appendChild(input);
     wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildAlienInvasionButton(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-buttons';
+
+    const disabled = params.mode !== '3d';
+    const button = document.createElement('button');
+    button.textContent = 'Send alien invasion 🛸';
+    button.disabled = disabled;
+    button.title = disabled
+      ? 'Switch to 3D mode to send a flying saucer'
+      : 'A flying saucer descends, tractor-beams nearby boids aboard, then departs';
+    button.addEventListener('click', () => {
+      this.sim.spawnUFO();
+    });
+    if (disabled) wrapper.classList.add('control-row-disabled');
+
+    wrapper.appendChild(button);
     return wrapper;
   }
 

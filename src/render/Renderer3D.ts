@@ -14,6 +14,8 @@ import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment
 import { createDriftingClouds, type DriftingClouds } from './clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
 import { createFireBreathEffects, type FireBreathEffects } from './fireBreath';
+import { createUFOVisual, type UFOVisual } from './ufoEffects';
+import { UFO_BEAM_REACH } from '../sim/UFO';
 
 // --- "Arcade" style: bright, saturated emissive colors so the bloom pass
 // has something to glow — base material color stays neutral (driven
@@ -237,6 +239,7 @@ export class Renderer3D {
   private driftingClouds: DriftingClouds;
   private bloodEffects: BloodEffects;
   private fireBreathEffects: FireBreathEffects;
+  private ufoVisual: UFOVisual;
 
   private arcadeBoidGeometries: BirdGeometries;
   private arcadeSparrowGeometries: BirdGeometries;
@@ -299,6 +302,7 @@ export class Renderer3D {
     this.driftingClouds = createDriftingClouds(this.scene);
     this.bloodEffects = createBloodEffects(this.scene);
     this.fireBreathEffects = createFireBreathEffects(this.scene);
+    this.ufoVisual = createUFOVisual(this.scene);
 
     this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
     this.arcadeSparrowGeometries = createBirdGeometries(BOID_LENGTH * SPARROW_SIZE_SCALE, BOID_WIDTH * SPARROW_SIZE_SCALE);
@@ -801,6 +805,14 @@ export class Renderer3D {
     this.spawnFireFromDragons(sim, elapsed);
     this.fireBreathEffects.update(dt);
 
+    if (sim.ufo) {
+      this.tmpVec3.set(sim.ufo.position.x, sim.ufo.position.y, sim.ufo.position.z);
+      this.ufoVisual.setState(true, this.tmpVec3, sim.ufo.beamStrength, UFO_BEAM_REACH);
+    } else {
+      this.ufoVisual.setState(false, this.tmpVec3, 0, 0);
+    }
+    this.ufoVisual.update(dt);
+
     const anySpeciesInstances = BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
     if (anySpeciesInstances) {
       const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
@@ -876,6 +888,7 @@ export class Renderer3D {
     this.driftingClouds.dispose();
     this.bloodEffects.dispose();
     this.fireBreathEffects.dispose();
+    this.ufoVisual.dispose();
     this.controls.dispose();
     this.composer.dispose();
     this.renderer.dispose();

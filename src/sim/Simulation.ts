@@ -3,6 +3,7 @@ import { params } from './params';
 import { Boid, DYING_DURATION, type BoidSpecies } from './Boid';
 import { Predator } from './Predator';
 import { clampToBounds, type WorldBounds } from './boundary';
+import { UFO, createUFO } from './UFO';
 
 /** A single "predator caught a boid" moment — read by renderers to spawn a one-shot cartoony blood-splatter effect. Capped/pruned so the array never grows unbounded. */
 export interface CatchEvent {
@@ -26,6 +27,8 @@ export class Simulation {
   boids: Boid[] = [];
   predators: Predator[] = [];
   catchEvents: CatchEvent[] = [];
+  /** Active "Alien Invasion" saucer, or null between invasions. Read directly by Renderer3D. */
+  ufo: UFO | null = null;
   private nextCatchId = 1;
 
   constructor(width: number, height: number) {
@@ -109,7 +112,21 @@ export class Simulation {
     this.boids = [];
     this.predators = [];
     this.catchEvents = [];
+    this.ufo = null;
     this.syncPopulation();
+  }
+
+  /**
+   * Triggers a one-shot "Alien Invasion": a flying saucer descends from
+   * high above at a somewhat random angle, hovers over the flock,
+   * tractor-beams nearby boids aboard for a few seconds, then leaves.
+   * 3D-mode only (a saucer "descending from above" has no sensible
+   * meaning in the top-down 2D view) and a no-op if one is already active
+   * — only one saucer at a time.
+   */
+  spawnUFO(): void {
+    if (params.mode !== '3d' || this.ufo) return;
+    this.ufo = createUFO(this.boids, this.bounds);
   }
 
   /** 2D mode only: torus wraparound at the world edges. */
@@ -178,6 +195,11 @@ export class Simulation {
     }
 
     this.checkCatches();
+
+    if (this.ufo) {
+      this.ufo.update(dt, this.boids, bounds);
+      if (this.ufo.done) this.ufo = null;
+    }
 
     // Remove boids whose "swallowed" animation has finished; syncPopulation
     // will spawn a fresh replacement boid next frame automatically.
