@@ -7,12 +7,13 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { params, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
-import type { Boid } from '../sim/Boid';
+import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries, createDragonGeometries, type BirdGeometries } from './birdGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
 import { createDriftingClouds, type DriftingClouds } from './clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
+import { createFireBreathEffects, type FireBreathEffects } from './fireBreath';
 
 // --- "Arcade" style: bright, saturated emissive colors so the bloom pass
 // has something to glow — base material color stays neutral (driven
@@ -25,12 +26,55 @@ const ARCADE_BOID_PANIC = new THREE.Color(0xffe066);
 const ARCADE_PREDATOR_BASE = new THREE.Color(0xb31f1f);
 const ARCADE_PREDATOR_HUNT = new THREE.Color(0xffffff);
 
+// Parrots get their own vivid magenta/pink emissive (distinct from the
+// sparrow-type boid's cyan glow) so arcade style's bloom-dominated look
+// still reads as two visually distinct flocks, not just two identically-
+// glowing clusters — the per-instance diffuse tint alone isn't enough to
+// tell them apart once bloom is added on top.
+const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
+const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
+
 // --- "Nature" style: matte, earth-toned plumage. No emissive glow —
 // contrast comes from the sun-lit sky/ground environment instead.
 const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrasts against green ground
 const NATURE_BOID_PANIC = new THREE.Color(0xf2e6c8); // paler alarm plumage
 const NATURE_PREDATOR_BASE = new THREE.Color(0x7a3b22); // hawk rust-brown
 const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked on
+
+// --- Parrot boid species: vivid multi-hued macaw-style plumage instead of
+// the sparrow-type boid's earth tones. Body/wing/tail get distinct colors
+// (rather than one flat tint) since that's the single biggest visual cue
+// that reads as "parrot" vs. "sparrow" from a distance — see updateInstances'
+// getSpeciesColors handling. Rendered via their own InstancedMesh set (see
+// parrotInstances) rather than sharing the sparrow-type boid's instances,
+// specifically so arcade style can give them a distinct emissive color too
+// (emissive is a material-level property — shared instances would force
+// identical bloom-glow color regardless of per-instance diffuse tint).
+const PARROT_BODY_BASE = new THREE.Color(0x1f9e78); // emerald-teal chest/back
+const PARROT_WING_BASE = new THREE.Color(0xa632a0); // magenta-purple wings
+const PARROT_TAIL_BASE = new THREE.Color(0x2f6fdc); // cobalt-blue tail accent
+
+// --- Three more songbird species, each with distinct multi-part plumage
+// (body/wing/tail) and their own arcade emissive/base color so every
+// species reads as visually distinct in both visual styles. Each gets its
+// own InstancedMesh set for the same reason parrots do (see above).
+const GOLDFINCH_BODY_BASE = new THREE.Color(0xf5d327); // bright yellow chest/back
+const GOLDFINCH_WING_BASE = new THREE.Color(0x1c1c1c); // black wings with contrast
+const GOLDFINCH_TAIL_BASE = new THREE.Color(0x1c1c1c); // black tail
+const ARCADE_GOLDFINCH_EMISSIVE = new THREE.Color(0xffe017);
+const ARCADE_GOLDFINCH_BASE = new THREE.Color(0xc7b21a);
+
+const CARDINAL_BODY_BASE = new THREE.Color(0xcc2936); // vivid red body
+const CARDINAL_WING_BASE = new THREE.Color(0x8f1f28); // darker red wings
+const CARDINAL_TAIL_BASE = new THREE.Color(0x3d0f14); // near-black red tail
+const ARCADE_CARDINAL_EMISSIVE = new THREE.Color(0xff8c1a); // orange-red, distinct from predator red
+const ARCADE_CARDINAL_BASE = new THREE.Color(0xcc5c14);
+
+const BLUEJAY_BODY_BASE = new THREE.Color(0x3b6fa0); // jay blue back
+const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
+const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
+const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
+const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 
 // --- Optional "dragon" predator variant (nature style only): much larger,
 // purple, leathery-winged silhouette instead of the hawk geometry.
@@ -39,12 +83,16 @@ const DRAGON_PREDATOR_HUNT = new THREE.Color(0x9c43be); // brighter magenta-purp
 
 const BOID_LENGTH = 7;
 const BOID_WIDTH = 2.6;
+// Sparrows render a bit smaller than parrots — parrots keep the
+// "reference" boid size, sparrows are scaled down from it (see
+// arcadeSparrowGeometries/natureSparrowGeometries below).
+const SPARROW_SIZE_SCALE = 0.7;
 const PREDATOR_LENGTH = 12;
 const PREDATOR_WIDTH = 4.4;
 // Dragons should read as dramatically larger than boids, not just a
 // slightly bigger hawk — roughly 2x the nature-style hawk's footprint.
-const DRAGON_LENGTH = PREDATOR_LENGTH * 2.6;
-const DRAGON_WIDTH = PREDATOR_WIDTH * 3.2;
+const DRAGON_LENGTH = PREDATOR_LENGTH * 3.0;
+const DRAGON_WIDTH = PREDATOR_WIDTH * 3.6;
 
 // Wing-flap tuning: base idle flutter plus extra amplitude proportional to
 // how fast the entity is currently moving (relative to its own max speed).
@@ -64,12 +112,99 @@ const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 // "forward" direction we rotate onto each entity's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 
+/**
+ * Cheap deterministic pseudo-random hash from an integer id + a small
+ * "salt" (so multiple independent random-ish values can be derived from
+ * the same id) into [0, 1). Used to give each boid a *stable* (no
+ * per-frame flicker, no extra state to track) individual color variation
+ * derived purely from its id — real flocks aren't perfectly uniform in
+ * plumage, and a small per-individual jitter plus occasional distinct
+ * "morphs" reads as much more natural than one flat color repeated
+ * hundreds of times.
+ */
+function idHash(id: number, salt: number): number {
+  const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** Distinct body/wing/tail base colors for a boid species with non-uniform
+ * plumage (e.g. the parrot's macaw-style coloring), used by updateInstances
+ * in place of its default single-baseColor scheme. */
+interface SpeciesColorSet {
+  body: THREE.Color;
+  wing: THREE.Color;
+  tail: THREE.Color;
+}
+
 interface BirdInstanceSet {
   body: THREE.InstancedMesh;
   wingLeft: THREE.InstancedMesh;
   wingRight: THREE.InstancedMesh;
   tail?: THREE.InstancedMesh;
+  legs?: THREE.InstancedMesh;
 }
+
+/** Per-species rendering config: which population param drives its count,
+ * which colors/geometry it uses, and whether it gets the sparrow's
+ * shrunken geometry or the "reference" (parrot) size. Non-'sparrow'
+ * multi-colored species reuse the parrot's getSpeciesColors mechanism for
+ * distinct body/wing/tail plumage instead of one flat tint. */
+interface BoidSpeciesConfig {
+  species: BoidSpecies;
+  countParam: 'boidCount' | 'parrotCount' | 'goldfinchCount' | 'cardinalCount' | 'bluejayCount';
+  arcadeEmissive: THREE.Color;
+  arcadeBase: THREE.Color;
+  natureBase: THREE.Color;
+  colors?: SpeciesColorSet;
+  useSmallGeometry: boolean;
+}
+
+const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
+  {
+    species: 'sparrow',
+    countParam: 'boidCount',
+    arcadeEmissive: ARCADE_BOID_EMISSIVE,
+    arcadeBase: ARCADE_BOID_BASE,
+    natureBase: NATURE_BOID_BASE,
+    useSmallGeometry: true,
+  },
+  {
+    species: 'parrot',
+    countParam: 'parrotCount',
+    arcadeEmissive: ARCADE_PARROT_EMISSIVE,
+    arcadeBase: ARCADE_PARROT_BASE,
+    natureBase: PARROT_BODY_BASE,
+    colors: { body: PARROT_BODY_BASE, wing: PARROT_WING_BASE, tail: PARROT_TAIL_BASE },
+    useSmallGeometry: false,
+  },
+  {
+    species: 'goldfinch',
+    countParam: 'goldfinchCount',
+    arcadeEmissive: ARCADE_GOLDFINCH_EMISSIVE,
+    arcadeBase: ARCADE_GOLDFINCH_BASE,
+    natureBase: GOLDFINCH_BODY_BASE,
+    colors: { body: GOLDFINCH_BODY_BASE, wing: GOLDFINCH_WING_BASE, tail: GOLDFINCH_TAIL_BASE },
+    useSmallGeometry: false,
+  },
+  {
+    species: 'cardinal',
+    countParam: 'cardinalCount',
+    arcadeEmissive: ARCADE_CARDINAL_EMISSIVE,
+    arcadeBase: ARCADE_CARDINAL_BASE,
+    natureBase: CARDINAL_BODY_BASE,
+    colors: { body: CARDINAL_BODY_BASE, wing: CARDINAL_WING_BASE, tail: CARDINAL_TAIL_BASE },
+    useSmallGeometry: false,
+  },
+  {
+    species: 'bluejay',
+    countParam: 'bluejayCount',
+    arcadeEmissive: ARCADE_BLUEJAY_EMISSIVE,
+    arcadeBase: ARCADE_BLUEJAY_BASE,
+    natureBase: BLUEJAY_BODY_BASE,
+    colors: { body: BLUEJAY_BODY_BASE, wing: BLUEJAY_WING_BASE, tail: BLUEJAY_TAIL_BASE },
+    useSmallGeometry: false,
+  },
+];
 
 export class Renderer3D {
   private renderer: THREE.WebGLRenderer;
@@ -85,26 +220,34 @@ export class Renderer3D {
   private natureEnv: NatureEnvironment;
   private driftingClouds: DriftingClouds;
   private bloodEffects: BloodEffects;
+  private fireBreathEffects: FireBreathEffects;
 
   private arcadeBoidGeometries: BirdGeometries;
+  private arcadeSparrowGeometries: BirdGeometries;
   private arcadePredatorGeometries: BirdGeometries;
   private natureBoidGeometries: BirdGeometries;
+  private natureSparrowGeometries: BirdGeometries;
   private naturePredatorGeometries: BirdGeometries;
   private dragonPredatorGeometries: BirdGeometries;
 
-  private boidInstances: BirdInstanceSet | null = null;
+  private speciesInstances = new Map<BoidSpecies, BirdInstanceSet | null>();
+  private speciesInstanceKeys = new Map<BoidSpecies, string | null>();
   private predatorInstances: BirdInstanceSet | null = null;
-  private boidInstancesKey: string | null = null;
   private predatorInstancesKey: string | null = null;
   private boundsHelper: THREE.LineSegments | null = null;
   private currentStyle: VisualStyle | null = null;
 
   private lastSeenCatchId = 0;
+  private nextFireBreathTime = new WeakMap<Predator, number>();
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
   private tmpVec3 = new THREE.Vector3();
   private stateColor = new THREE.Color();
+  private variantColor = new THREE.Color();
+  private wingColor = new THREE.Color();
+  private tailColor = new THREE.Color();
+  private hsl = { h: 0, s: 0, l: 0 };
   private startTime = performance.now();
   private lastElapsed = 0;
 
@@ -133,13 +276,19 @@ export class Renderer3D {
     this.natureEnv = createNatureEnvironment(this.scene);
     this.driftingClouds = createDriftingClouds(this.scene);
     this.bloodEffects = createBloodEffects(this.scene);
+    this.fireBreathEffects = createFireBreathEffects(this.scene);
 
     this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
+    this.arcadeSparrowGeometries = createBirdGeometries(BOID_LENGTH * SPARROW_SIZE_SCALE, BOID_WIDTH * SPARROW_SIZE_SCALE);
     this.arcadePredatorGeometries = createBirdGeometries(PREDATOR_LENGTH, PREDATOR_WIDTH);
     // The lathed "nature" body/wings have noticeably less surface area per
     // unit width/length than the arcade octahedron+flat-triangle shapes, so
     // scale them up to read clearly at the same viewing distance.
     this.natureBoidGeometries = createRealisticBirdGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.natureSparrowGeometries = createRealisticBirdGeometries(
+      BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
+      BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
+    );
     this.naturePredatorGeometries = createRealisticBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
 
@@ -199,12 +348,53 @@ export class Renderer3D {
       this.scene.add(tail);
     }
 
-    return { body, wingLeft, wingRight, tail };
+    let legs: THREE.InstancedMesh | undefined;
+    if (geometries.legs) {
+      // Legs are scaly like the body, not membranous like wings/tail, so
+      // clone the body material (not the wing material) to pick up matching
+      // per-instance scale-color tinting.
+      const legsMaterial = bodyMaterial.clone();
+      legs = new THREE.InstancedMesh(geometries.legs, legsMaterial, Math.max(count, 1));
+      legs.count = count;
+      this.scene.add(legs);
+    }
+
+    return { body, wingLeft, wingRight, tail, legs };
+  }
+
+  /**
+   * Nudges `target` to a small, stable-per-id HSL jitter around `base`
+   * (mutates `target` in place so callers can reuse a scratch THREE.Color
+   * without allocating). Shared by the sparrow-type "shades of brown"
+   * individual variation and the parrot species' per-individual jitter —
+   * only the base color and jitter magnitudes differ between the two.
+   */
+  private jitterHSL(
+    target: THREE.Color,
+    base: THREE.Color,
+    id: number,
+    salt: number,
+    hueAmt: number,
+    satAmt: number,
+    lightAmt: number,
+  ): void {
+    base.getHSL(this.hsl);
+    let { h, s, l } = this.hsl;
+    h = (h + (idHash(id, salt) - 0.5) * hueAmt + 1) % 1;
+    s = Math.max(0, Math.min(1, s + (idHash(id, salt + 10) - 0.5) * satAmt));
+    l = Math.max(0, Math.min(1, l + (idHash(id, salt + 20) - 0.5) * lightAmt));
+    target.setHSL(h, s, l);
   }
 
   private disposeInstanceSet(set: BirdInstanceSet | null): void {
     if (!set) return;
-    const meshes = [set.body, set.wingLeft, set.wingRight, ...(set.tail ? [set.tail] : [])];
+    const meshes = [
+      set.body,
+      set.wingLeft,
+      set.wingRight,
+      ...(set.tail ? [set.tail] : []),
+      ...(set.legs ? [set.legs] : []),
+    ];
     for (const mesh of meshes) {
       this.scene.remove(mesh);
       (mesh.material as THREE.Material).dispose();
@@ -214,15 +404,33 @@ export class Renderer3D {
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
   private ensureScene(sim: Simulation): void {
     const style = params.visualStyle;
-    const boidCount = sim.boids.length;
+    const countsBySpecies = new Map<BoidSpecies, number>();
+    for (const boid of sim.boids) {
+      countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
+    }
     const predatorCount = sim.predators.length;
 
-    const boidKey = `${boidCount}:${style}`;
-    if (this.boidInstancesKey !== boidKey) {
-      this.disposeInstanceSet(this.boidInstances);
-      const geometries = style === 'nature' ? this.natureBoidGeometries : this.arcadeBoidGeometries;
-      this.boidInstances = this.buildInstanceSet(geometries, style, ARCADE_BOID_EMISSIVE, boidCount);
-      this.boidInstancesKey = boidKey;
+    // Each species gets its own InstancedMesh set — separate materials so
+    // arcade style can give each a distinct emissive bloom color (emissive
+    // is a material-level property; shared instances would force identical
+    // bloom-glow color regardless of per-instance diffuse tint) — and
+    // sparrows use the shrunken geometry while everything else uses the
+    // "reference" (parrot) size.
+    for (const config of BOID_SPECIES_CONFIGS) {
+      const count = countsBySpecies.get(config.species) ?? 0;
+      const key = `${count}:${style}`;
+      if (this.speciesInstanceKeys.get(config.species) !== key) {
+        this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
+        const geometries = config.useSmallGeometry
+          ? style === 'nature'
+            ? this.natureSparrowGeometries
+            : this.arcadeSparrowGeometries
+          : style === 'nature'
+            ? this.natureBoidGeometries
+            : this.arcadeBoidGeometries;
+        this.speciesInstances.set(config.species, this.buildInstanceSet(geometries, style, config.arcadeEmissive, count));
+        this.speciesInstanceKeys.set(config.species, key);
+      }
     }
 
     const isDragon = style === 'nature' && params.dragonPredators;
@@ -318,6 +526,8 @@ export class Renderer3D {
     flapIdleAmplitude: number = FLAP_IDLE_AMPLITUDE,
     flapSpeedAmplitude: number = FLAP_SPEED_AMPLITUDE,
     getScale: (entity: Boid | Predator) => number = () => 1,
+    individualVariation: boolean = false,
+    getSpeciesColors?: (entity: Boid | Predator) => SpeciesColorSet | null,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -347,6 +557,7 @@ export class Renderer3D {
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
       if (set.tail) set.tail.setMatrixAt(i, this.dummy.matrix);
+      if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
 
       // Wings: apply an extra local flap rotation around the forward axis
       // before combining with the shared body orientation, so both wings
@@ -367,11 +578,79 @@ export class Renderer3D {
       set.wingRight.setMatrixAt(i, this.dummy.matrix);
 
       // Color-by-state: lerp toward the highlight color as intensity rises.
-      this.stateColor.copy(baseColor).lerp(highlightColor, getIntensity(entity));
+      // Three coloring modes, checked in priority order:
+      //  1. getSpeciesColors: a species with distinct, non-uniform plumage
+      //     (e.g. the parrot's macaw-style body/wing/tail colors) — each
+      //     part gets its own small id-derived jitter for individual
+      //     variety, but the three parts stay distinctly different hues
+      //     from each other (that contrast IS the "parrot" visual cue).
+      //  2. individualVariation: the sparrow-type "shades of brown" jitter
+      //     around one shared base color, with occasional distinct morphs.
+      //  3. Flat: every entity in this set renders identically.
+      const speciesColors = getSpeciesColors?.(entity);
+      let effectiveBase = baseColor;
+      let effectiveWing: THREE.Color | null = null;
+      let effectiveTail: THREE.Color | null = null;
+
+      if (speciesColors) {
+        this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
+        effectiveBase = this.variantColor;
+        effectiveWing = this.wingColor;
+        effectiveTail = this.tailColor;
+      } else if (individualVariation) {
+        baseColor.getHSL(this.hsl);
+        let { h, s, l } = this.hsl;
+        h = (h + (idHash(entity.id, 1) - 0.5) * 0.05 + 1) % 1;
+        s = Math.max(0, Math.min(1, s + (idHash(entity.id, 2) - 0.5) * 0.16));
+        l = Math.max(0, Math.min(1, l + (idHash(entity.id, 3) - 0.5) * 0.18));
+        const morphRoll = idHash(entity.id, 4);
+        if (morphRoll < 0.06) {
+          // Pale/leucistic-like morph: much lighter, slightly desaturated.
+          l = Math.max(0, Math.min(0.92, l + 0.28));
+          s *= 0.6;
+        } else if (morphRoll < 0.1) {
+          // Dark/melanistic-like morph: noticeably darker.
+          l = Math.max(0.05, l - 0.22);
+        } else if (morphRoll < 0.16) {
+          // Warmer, rustier-toned morph: shift hue toward red-orange.
+          h = (h + 0.03) % 1;
+          s = Math.min(1, s + 0.15);
+        }
+        this.variantColor.setHSL(h, s, l);
+        effectiveBase = this.variantColor;
+      }
+      this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
       set.body.setColorAt(i, this.stateColor);
-      set.wingLeft.setColorAt(i, this.stateColor);
-      set.wingRight.setColorAt(i, this.stateColor);
-      if (set.tail) set.tail.setColorAt(i, this.stateColor);
+      if (effectiveWing) {
+        // Species with their own distinct wing/tail base colors keep those
+        // hues rather than just darkening the body color.
+        this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
+        set.wingLeft.setColorAt(i, this.wingColor);
+        set.wingRight.setColorAt(i, this.wingColor);
+        if (set.tail) {
+          if (effectiveTail) {
+            this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
+            set.tail.setColorAt(i, this.tailColor);
+          } else {
+            set.tail.setColorAt(i, this.wingColor);
+          }
+        }
+      } else if (individualVariation) {
+        // Wings/tail render a touch darker than the body — real bird wing
+        // feathers are almost always a shade or two darker than the breast/
+        // body plumage, and this reads clearly even at a distance.
+        this.wingColor.copy(this.stateColor).multiplyScalar(0.82);
+        set.wingLeft.setColorAt(i, this.wingColor);
+        set.wingRight.setColorAt(i, this.wingColor);
+        if (set.tail) set.tail.setColorAt(i, this.wingColor);
+      } else {
+        set.wingLeft.setColorAt(i, this.stateColor);
+        set.wingRight.setColorAt(i, this.stateColor);
+        if (set.tail) set.tail.setColorAt(i, this.stateColor);
+      }
+      if (set.legs) set.legs.setColorAt(i, this.stateColor);
     }
 
     set.body.instanceMatrix.needsUpdate = true;
@@ -384,6 +663,10 @@ export class Renderer3D {
       set.tail.instanceMatrix.needsUpdate = true;
       if (set.tail.instanceColor) set.tail.instanceColor.needsUpdate = true;
     }
+    if (set.legs) {
+      set.legs.instanceMatrix.needsUpdate = true;
+      if (set.legs.instanceColor) set.legs.instanceColor.needsUpdate = true;
+    }
   }
 
   /** Spawns a 3D blood-splatter burst for every not-yet-seen Simulation.catchEvent. */
@@ -394,6 +677,41 @@ export class Renderer3D {
       const position = new THREE.Vector3(catchEvent.position.x, catchEvent.position.y, catchEvent.position.z);
       const direction = new THREE.Vector3(catchEvent.direction.x, catchEvent.direction.y, catchEvent.direction.z);
       this.bloodEffects.spawn(position, direction, BOID_LENGTH * 0.9);
+    }
+  }
+
+  /**
+   * Periodically breathes fire from each actively-hunting dragon. Each
+   * dragon keeps its own randomized next-trigger time (desynced so a pack
+   * of dragons doesn't all breathe fire in unison), only fires while
+   * actually pursuing prey (huntIntensity above a threshold) and never
+   * while digesting/resting.
+   */
+  private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
+    if (!(params.visualStyle === 'nature' && params.dragonPredators)) return;
+    for (const predator of sim.predators) {
+      if (predator.digesting) continue;
+      let nextTime = this.nextFireBreathTime.get(predator);
+      if (nextTime === undefined) {
+        nextTime = elapsed + 1 + Math.random() * 2.5;
+        this.nextFireBreathTime.set(predator, nextTime);
+      }
+      if (elapsed < nextTime) continue;
+      if (predator.huntIntensity < 0.45) {
+        // Not excited enough to breathe fire right now — check again soon
+        // rather than firing the instant intensity crosses the threshold.
+        this.nextFireBreathTime.set(predator, elapsed + 0.5);
+        continue;
+      }
+      const dir = predator.renderHeading;
+      const direction = this.tmpVec3.set(dir.x, dir.y, dir.z).clone();
+      const origin = new THREE.Vector3(
+        predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
+        predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
+        predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
+      );
+      this.fireBreathEffects.spawn(origin, direction, DRAGON_LENGTH * 0.5);
+      this.nextFireBreathTime.set(predator, elapsed + 2 + Math.random() * 2.5);
     }
   }
 
@@ -418,21 +736,37 @@ export class Renderer3D {
     this.driftingClouds.update(dt);
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
+    this.spawnFireFromDragons(sim, elapsed);
+    this.fireBreathEffects.update(dt);
 
-    if (this.boidInstances) {
-      this.updateInstances(
-        this.boidInstances,
-        sim.boids,
-        params.boidMaxSpeed,
-        elapsed,
-        isNature ? NATURE_BOID_BASE : ARCADE_BOID_BASE,
-        isNature ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
-        (entity) => (entity as Boid).panicLevel,
-        FLAP_FREQUENCY,
-        FLAP_IDLE_AMPLITUDE,
-        FLAP_SPEED_AMPLITUDE,
-        (entity) => (entity as Boid).scale,
-      );
+    const anySpeciesInstances = BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
+    if (anySpeciesInstances) {
+      const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
+      for (const boid of sim.boids) {
+        const bucket = boidsBySpecies.get(boid.species);
+        if (bucket) bucket.push(boid);
+        else boidsBySpecies.set(boid.species, [boid]);
+      }
+      for (const config of BOID_SPECIES_CONFIGS) {
+        const instances = this.speciesInstances.get(config.species);
+        if (!instances) continue;
+        const entities = boidsBySpecies.get(config.species) ?? [];
+        this.updateInstances(
+          instances,
+          entities,
+          params.boidMaxSpeed,
+          elapsed,
+          isNature ? config.natureBase : config.arcadeBase,
+          isNature ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
+          (entity) => (entity as Boid).panicLevel,
+          FLAP_FREQUENCY,
+          FLAP_IDLE_AMPLITUDE,
+          FLAP_SPEED_AMPLITUDE,
+          (entity) => (entity as Boid).scale,
+          config.colors ? true : isNature,
+          config.colors ? () => config.colors! : undefined,
+        );
+      }
     }
     if (this.predatorInstances) {
       const isDragon = isNature && params.dragonPredators;
@@ -455,12 +789,16 @@ export class Renderer3D {
   }
 
   dispose(): void {
-    this.disposeInstanceSet(this.boidInstances);
+    for (const config of BOID_SPECIES_CONFIGS) {
+      this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
+    }
     this.disposeInstanceSet(this.predatorInstances);
     for (const geometries of [
       this.arcadeBoidGeometries,
+      this.arcadeSparrowGeometries,
       this.arcadePredatorGeometries,
       this.natureBoidGeometries,
+      this.natureSparrowGeometries,
       this.naturePredatorGeometries,
       this.dragonPredatorGeometries,
     ]) {
@@ -468,10 +806,12 @@ export class Renderer3D {
       geometries.wingLeft.dispose();
       geometries.wingRight.dispose();
       geometries.tail?.dispose();
+      geometries.legs?.dispose();
     }
     this.natureEnv.dispose();
     this.driftingClouds.dispose();
     this.bloodEffects.dispose();
+    this.fireBreathEffects.dispose();
     this.controls.dispose();
     this.composer.dispose();
     this.renderer.dispose();
