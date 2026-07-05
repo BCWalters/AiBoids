@@ -118,11 +118,27 @@ const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 // level, used below to build an orientation that stays right-side-up
 // rather than picking an arbitrary roll.
 const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
-// When an entity's heading points nearly straight up/down, world-up
-// stops being a usable reference for "which way is level" (it becomes
-// parallel to forward) — fall back to this axis instead so orientation
-// stays stable rather than snapping/spinning near-vertical dives/climbs.
-const UP_REFERENCE_FALLBACK_AXIS = new THREE.Vector3(0, 0, 1);
+// When an entity's heading points (almost) exactly straight up/down,
+// world-up stops being a usable reference for "which way is level" (it
+// becomes parallel to forward, collapsing the cross product below to a
+// zero vector). A blended hand-off to a fallback axis across a wide
+// dot-product *range* (the previous approach here) doesn't actually
+// avoid this — the blended reference can itself become momentarily
+// parallel to forward for various headings *within* that range, since
+// the blend factor only depends on |forward.y| and ignores forward's
+// other components. That reintroduced the exact same
+// flatten-then-flicker singularity bug for ordinary (non-dragon)
+// entities any time their heading passed through the blend zone, not
+// just steep dives — reported as boids/predators losing their mass and
+// flickering between 2D/3D. Fixed by using the same technique
+// THREE.Matrix4.lookAt uses internally: keep WORLD_UP_AXIS as the
+// reference everywhere, and only when forward and WORLD_UP_AXIS are
+// (numerically) exactly parallel — the true, single-point singularity —
+// nudge forward by a tiny fixed epsilon so the cross product is
+// well-defined again. This never blends or snaps visibly; the nudge is
+// imperceptibly small and only ever triggers at the literal degenerate
+// point.
+const UP_REFERENCE_EPSILON = 1e-4;
 // Roll (bank) applied when turning is smoothed and clamped well short of
 // fully inverted — a dramatic-but-still-clearly-banking lean, not a
 // literal flip, per the "prefer to be right-side up" request.
@@ -266,6 +282,7 @@ export class Renderer3D {
   private tmpForward = new THREE.Vector3();
   private tmpRight = new THREE.Vector3();
   private tmpUp = new THREE.Vector3();
+  private tmpNudgedForward = new THREE.Vector3();
   private tmpPrevDir = new THREE.Vector3();
   private tmpBasisMatrix = new THREE.Matrix4();
   private stateColor = new THREE.Color();
@@ -588,19 +605,51 @@ export class Renderer3D {
       // approach has an entire free degree of roll around `dir` that it
       // resolves arbitrarily, which is exactly why birds/dragons were
       // "happy" flying upside-down for long stretches rather than just
-      // transiently while banking. Deriving right/up explicitly from a
-      // world-up reference (with a fallback axis for the near-vertical
-      // singularity where forward and world-up are parallel) pins roll
-      // to a stable, level default that only ever changes via the
-      // deliberate banking term added below.
-      const referenceUp = Math.abs(this.tmpForward.dot(WORLD_UP_AXIS)) > 0.985 ? UP_REFERENCE_FALLBACK_AXIS : WORLD_UP_AXIS;
-      this.tmpRight.crossVectors(referenceUp, this.tmpForward).normalize();
+      // transiently while banking.
+      //
+      // Roll is always anchored to WORLD_UP_AXIS so entities settle back
+      // to level rather than free-drifting/precessing over time — an
+      // earlier attempt derived right/up from each entity's own previous
+      // frame instead of a fixed world reference, which avoided a hard
+      // snap but had no anchor to correct back to level, so roll could
+      // wander until an entity's heading happened to pass near its own
+      // current up vector, hitting the exact same singularity at an
+      // unpredictable, arbitrary orientation (reported as random jumpy
+      // flips and entities going edge-on/"2D").
+      //
+      // A later attempt tried to soften the near-vertical singularity
+      // (forward parallel to WORLD_UP_AXIS) by blending WORLD_UP_AXIS
+      // with a fallback axis across a dot-product *range*. That backfired:
+      // the blend factor only depends on |forward.y|, so the blended
+      // reference can itself land parallel to forward for various
+      // headings anywhere inside that range (not just at forward.y ~
+      // ±1), collapsing the cross product to ~zero and flattening the
+      // model — visible as boids/predators losing their mass and
+      // flickering between 2D/3D, and not limited to steep dives/climbs.
+      //
+      // Fixed with the same technique THREE.Matrix4.lookAt uses
+      // internally: keep a single fixed reference (WORLD_UP_AXIS)
+      // everywhere, and only when forward and that reference are
+      // (numerically) exactly parallel — the one true, single-point
+      // singularity, which floating-point headings essentially never
+      // hit exactly — nudge forward by a tiny fixed epsilon so the cross
+      // product is well-defined again. This never blends or snaps
+      // visibly.
+      this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpForward);
+      if (this.tmpRight.lengthSq() < UP_REFERENCE_EPSILON * UP_REFERENCE_EPSILON) {
+        this.tmpNudgedForward.copy(this.tmpForward);
+        this.tmpNudgedForward.x += UP_REFERENCE_EPSILON;
+        this.tmpNudgedForward.normalize();
+        this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpNudgedForward);
+      }
+      this.tmpRight.normalize();
       this.tmpUp.crossVectors(this.tmpForward, this.tmpRight).normalize();
       // Columns are where each local axis (X, Y, Z) maps to in world
       // space: local X -> right, local Y -> forward (matches
       // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
       this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
       this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+
 
       // Cosmetic bank/roll: lean into turns rather than always flying
       // perfectly level. Estimated from how much the heading direction
