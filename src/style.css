@@ -200,6 +200,15 @@ body {
   font-size: 13px;
 }
 
+.control-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .control-buttons button:hover {
   background: #30363d;
+}
+
+.control-buttons button:disabled:hover {
+  background: #21262d;
 }

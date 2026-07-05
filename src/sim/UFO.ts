@@ -119,6 +119,7 @@ export class UFO {
           boid.dying = true;
           boid.dyingElapsed = 0;
           boid.deathTarget = { ...this.position };
+          boid.abductedByUFO = true;
           this.abductedCount++;
           continue;
         }

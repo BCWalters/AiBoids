@@ -46,8 +46,26 @@ export class Boid {
   dying = false;
   dyingElapsed = 0;
   deathTarget: Vec3 | null = null;
+  /**
+   * Set true only when this boid was abducted by the UFO's tractor beam
+   * (see UFO.ts), never by a predator catch. Simulation checks this flag
+   * at the moment the "swallowed" animation finishes and the boid is
+   * removed, so it can route replacement through the delayed
+   * coop-respawn queue instead of the instant respawn predator catches
+   * still use — see Simulation.pendingRespawns / spawnFromCoop.
+   */
+  abductedByUFO = false;
   /** 1 = full size, shrinks to 0 over the dying animation. Read by renderers. */
   scale = 1;
+  /**
+   * Counts down from SPAWN_BURST_DURATION (see Simulation.spawnFromCoop)
+   * after this boid is (re)spawned from the coop. While > 0, this boid
+   * ignores alignment/cohesion so it visibly flies outward on its own
+   * initial heading rather than snapping straight into the existing
+   * flock — separation and predator-flee still apply so it doesn't fly
+   * through its coop-mates or ignore nearby threats.
+   */
+  spawnBurstRemaining = 0;
   /**
    * Last known non-zero velocity direction (unit vector), read only by
    * the 3D renderer to orient this boid's model. Kept as its own field
@@ -119,6 +137,10 @@ export class Boid {
       return;
     }
 
+    if (this.spawnBurstRemaining > 0) {
+      this.spawnBurstRemaining = Math.max(0, this.spawnBurstRemaining - dt);
+    }
+
     const p = params;
     let acceleration = V.create();
 
@@ -147,8 +169,12 @@ export class Boid {
 
       // Alignment/cohesion ("flocking" proper) only counts same-species
       // neighbors, so mixed-species scenes read as separate flocks sharing
-      // the same sky rather than one uniform blended flock.
+      // the same sky rather than one uniform blended flock. Also skipped
+      // entirely while spawnBurstRemaining is active (see field comment)
+      // so a freshly coop-respawned boid flies its own outward heading
+      // for a moment instead of snapping straight back into the flock.
       if (other.species !== this.species) continue;
+      if (this.spawnBurstRemaining > 0) continue;
 
       alignSum = V.add(alignSum, other.velocity);
       alignCount++;

@@ -21,6 +21,25 @@ const CATCH_RADIUS = 18;
 // Bounded so a long-idle tab doesn't let this grow forever.
 const MAX_CATCH_EVENTS = 16;
 
+// How long a UFO-abducted boid stays "gone" before flying back out of the
+// coop — instant respawn (still used for ordinary predator catches, which
+// weren't part of this complaint) read as barely-noticeable population
+// churn, but for a dramatic "the flock gets sucked into a spaceship" event
+// popping a replacement back in immediately undercut it entirely.
+const UFO_RESPAWN_DELAY = 15;
+// How long a freshly coop-spawned boid keeps its own outward heading (see
+// Boid.spawnBurstRemaining) before rejoining normal flocking.
+const SPAWN_BURST_DURATION = 2;
+// Speed range (as a fraction of boidMaxSpeed) for the coop "fly-out" burst.
+const SPAWN_BURST_SPEED_MIN = 0.5;
+const SPAWN_BURST_SPEED_MAX = 0.8;
+
+/** A boid removed via UFO abduction, waiting to fly back out of the coop. */
+interface PendingRespawn {
+  species: BoidSpecies;
+  readyAt: number;
+}
+
 export class Simulation {
   width: number;
   height: number;
@@ -29,6 +48,10 @@ export class Simulation {
   catchEvents: CatchEvent[] = [];
   /** Active "Alien Invasion" saucer, or null between invasions. Read directly by Renderer3D. */
   ufo: UFO | null = null;
+  /** Total sim time elapsed (seconds), used to time delayed coop respawns. Only advances while running. */
+  elapsedTime = 0;
+  /** Boids abducted by the UFO, waiting on their delayed coop respawn. Read by the UI to enable a manual "respawn now" action. */
+  pendingRespawns: PendingRespawn[] = [];
   private nextCatchId = 1;
 
   constructor(width: number, height: number) {
@@ -70,10 +93,17 @@ export class Simulation {
    * species boids from wherever they happen to sit in the shared array
    * (order doesn't matter to the simulation or renderers) rather than
    * assuming they're contiguous.
+   *
+   * Pending coop respawns (see pendingRespawns) count toward the target
+   * just like live boids do — otherwise, the instant a UFO-abducted boid
+   * is actually removed from `this.boids`, this would see the population
+   * dip below target and spawn an *immediate* replacement, defeating the
+   * whole point of the delayed coop respawn.
    */
   private syncSpecies(species: BoidSpecies, targetCount: number): void {
     let count = 0;
     for (const boid of this.boids) if (boid.species === species) count++;
+    for (const pending of this.pendingRespawns) if (pending.species === species) count++;
 
     while (count < targetCount) {
       this.boids.push(new Boid(this.randomPosition(), this.randomVelocity(params.boidMaxSpeed), species));
@@ -81,12 +111,78 @@ export class Simulation {
     }
 
     let toRemove = count - targetCount;
+    // Cancel pending respawns first — they don't exist as boids yet, so
+    // dropping one is cheaper/less disruptive than despawning a live boid.
+    for (let i = this.pendingRespawns.length - 1; i >= 0 && toRemove > 0; i--) {
+      if (this.pendingRespawns[i].species === species) {
+        this.pendingRespawns.splice(i, 1);
+        toRemove--;
+      }
+    }
     for (let i = this.boids.length - 1; i >= 0 && toRemove > 0; i--) {
       if (this.boids[i].species === species) {
         this.boids.splice(i, 1);
         toRemove--;
       }
     }
+  }
+
+  /**
+   * Spawns one boid at the ground-level "coop" location with an outward,
+   * randomized-direction burst velocity and a brief spawnBurstRemaining
+   * window (flocking suspended — see Boid.spawnBurstRemaining) rather
+   * than just popping into a random spot mid-air already flocking.
+   */
+  private spawnFromCoop(species: BoidSpecies): void {
+    const bounds = this.bounds;
+    // Ground level, roughly centered — a fixed, single "coop" spot rather
+    // than a random position, so it reads as one consistent place birds
+    // fly out from rather than scattered mid-air pop-ins.
+    const coopPosition: V.Vec3 = {
+      x: bounds.width / 2 + (Math.random() - 0.5) * 20,
+      y: Math.max(5, bounds.height * 0.05),
+      z: bounds.depth / 2 + (Math.random() - 0.5) * 20,
+    };
+
+    // Mostly-horizontal random direction with a bit of upward tilt, so
+    // the burst reads as birds scattering outward from the coop rather
+    // than shooting straight up or staying flat along the ground.
+    const angle = Math.random() * Math.PI * 2;
+    const upBias = 0.25 + Math.random() * 0.35;
+    const horizontalScale = Math.sqrt(Math.max(0, 1 - upBias * upBias));
+    const dir = V.normalize(
+      V.create(Math.cos(angle) * horizontalScale, upBias, Math.sin(angle) * horizontalScale),
+    );
+    const speed = params.boidMaxSpeed * (SPAWN_BURST_SPEED_MIN + Math.random() * (SPAWN_BURST_SPEED_MAX - SPAWN_BURST_SPEED_MIN));
+
+    const boid = new Boid(coopPosition, V.scale(dir, speed), species);
+    boid.spawnBurstRemaining = SPAWN_BURST_DURATION;
+    this.boids.push(boid);
+  }
+
+  /** Moves any pending coop respawns whose delay has elapsed into actual boids. */
+  private processPendingRespawns(): void {
+    if (this.pendingRespawns.length === 0) return;
+    const remaining: PendingRespawn[] = [];
+    for (const pending of this.pendingRespawns) {
+      if (pending.readyAt <= this.elapsedTime) {
+        this.spawnFromCoop(pending.species);
+      } else {
+        remaining.push(pending);
+      }
+    }
+    this.pendingRespawns = remaining;
+  }
+
+  /**
+   * Manual "respawn now" action — immediately flies every currently
+   * pending abducted boid back out of the coop, instead of waiting out
+   * UFO_RESPAWN_DELAY. A no-op when nothing is pending.
+   */
+  respawnPendingNow(): void {
+    if (this.pendingRespawns.length === 0) return;
+    for (const pending of this.pendingRespawns) this.spawnFromCoop(pending.species);
+    this.pendingRespawns = [];
   }
 
   /** Adds/removes boids and predators to match params.<species>Count / predatorCount. */
@@ -113,6 +209,7 @@ export class Simulation {
     this.predators = [];
     this.catchEvents = [];
     this.ufo = null;
+    this.pendingRespawns = [];
     this.syncPopulation();
   }
 
@@ -177,6 +274,10 @@ export class Simulation {
   }
 
   update(dt: number): void {
+    if (params.running) {
+      this.elapsedTime += dt;
+      this.processPendingRespawns();
+    }
     this.syncPopulation();
     if (!params.running) return;
 
@@ -201,8 +302,18 @@ export class Simulation {
       if (this.ufo.done) this.ufo = null;
     }
 
-    // Remove boids whose "swallowed" animation has finished; syncPopulation
-    // will spawn a fresh replacement boid next frame automatically.
-    this.boids = this.boids.filter((boid) => !boid.dying || boid.dyingElapsed < DYING_DURATION);
+    // Remove boids whose "swallowed" animation has finished. UFO-abducted
+    // ones go into the delayed coop-respawn queue (see pendingRespawns/
+    // spawnFromCoop) instead of syncPopulation instantly refilling them
+    // next frame the way ordinary predator catches still do.
+    const stillAlive: Boid[] = [];
+    for (const boid of this.boids) {
+      const finishedDying = boid.dying && boid.dyingElapsed >= DYING_DURATION;
+      if (finishedDying && boid.abductedByUFO) {
+        this.pendingRespawns.push({ species: boid.species, readyAt: this.elapsedTime + UFO_RESPAWN_DELAY });
+      }
+      if (!finishedDying) stillAlive.push(boid);
+    }
+    this.boids = stillAlive;
   }
 }

@@ -58,6 +58,8 @@ export class ControlPanel {
   private container: HTMLElement;
   private sim: Simulation;
   private onModeChange: (mode: SimMode) => void;
+  private alienButton: HTMLButtonElement | null = null;
+  private respawnButton: HTMLButtonElement | null = null;
 
   constructor(container: HTMLElement, sim: Simulation, onModeChange: (mode: SimMode) => void) {
     this.container = container;
@@ -237,20 +239,66 @@ export class ControlPanel {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-buttons';
 
-    const disabled = params.mode !== '3d';
     const button = document.createElement('button');
     button.textContent = 'Send alien invasion 🛸';
-    button.disabled = disabled;
-    button.title = disabled
-      ? 'Switch to 3D mode to send a flying saucer'
-      : 'A flying saucer descends, tractor-beams nearby boids aboard, then departs';
     button.addEventListener('click', () => {
       this.sim.spawnUFO();
     });
-    if (disabled) wrapper.classList.add('control-row-disabled');
-
+    this.alienButton = button;
     wrapper.appendChild(button);
+
+    // Abducted boids wait out a delay before flying back out of the coop
+    // (see Simulation.pendingRespawns) — this lets the user skip the wait
+    // instead of only ever watching a timer. Greyed out/disabled whenever
+    // nothing is currently pending.
+    const respawnButton = document.createElement('button');
+    respawnButton.addEventListener('click', () => {
+      this.sim.respawnPendingNow();
+    });
+    this.respawnButton = respawnButton;
+    wrapper.appendChild(respawnButton);
+
+    this.syncAlienInvasionButton();
+    this.syncRespawnButton();
     return wrapper;
+  }
+
+  /**
+   * Refreshes the invasion button's disabled/title state to reflect
+   * whether a saucer is currently active — called every animation frame
+   * from main.ts rather than only on control-panel re-render, so the
+   * button greys out immediately when spawned and re-enables the moment
+   * it flies off, without needing a full (state-resetting) re-render.
+   */
+  syncAlienInvasionButton(): void {
+    const button = this.alienButton;
+    if (!button) return;
+    const wrongMode = params.mode !== '3d';
+    const shipActive = this.sim.ufo !== null;
+    const disabled = wrongMode || shipActive;
+    button.disabled = disabled;
+    button.title = wrongMode
+      ? 'Switch to 3D mode to send a flying saucer'
+      : shipActive
+        ? 'A saucer is already out there — wait for it to fly off'
+        : 'A flying saucer descends, tractor-beams nearby boids aboard, then departs';
+  }
+
+  /**
+   * Refreshes the "respawn now" button's label/disabled state every
+   * frame (see main.ts) to reflect how many abducted boids are currently
+   * waiting out their coop-respawn delay.
+   */
+  syncRespawnButton(): void {
+    const button = this.respawnButton;
+    if (!button) return;
+    const pendingCount = this.sim.pendingRespawns.length;
+    button.disabled = pendingCount === 0;
+    button.textContent = pendingCount > 0 ? `Respawn now (${pendingCount}) 🐣` : 'Respawn now 🐣';
+    button.title =
+      pendingCount > 0
+        ? 'Skip the wait and fly the abducted birds back out of the coop immediately'
+        : 'No abducted birds are waiting to respawn right now';
   }
 
   private buildPredatorCatchToggle(): HTMLElement {

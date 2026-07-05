@@ -39,7 +39,7 @@ function resizeCanvases(): void {
   sim.resize(width, height);
 }
 
-new ControlPanel(controlPanelBody, sim, applyMode);
+const controlPanel = new ControlPanel(controlPanelBody, sim, applyMode);
 applyMode(params.mode);
 
 window.addEventListener('resize', resizeCanvases);
@@ -51,6 +51,8 @@ function loop(now: number): void {
   lastTime = now;
 
   sim.update(dt);
+  controlPanel.syncAlienInvasionButton();
+  controlPanel.syncRespawnButton();
 
   if (params.mode === '3d') {
     renderer3D?.render(sim);
