@@ -14,8 +14,11 @@ const BEAM_DURATION = 8;
 // the saucer — boids inside this radius (and below the saucer) get
 // dragged upward/inward regardless of their own flocking urges. Kept
 // fairly tight so the beam reads as a focused shaft rather than
-// vacuuming the whole sky at once.
-const BEAM_RADIUS = 85;
+// vacuuming the whole sky at once. Sized so the beam's catchment *area*
+// (∝ radius²) is 1.5x the original 85 — i.e. radius * sqrt(1.5) — to
+// abduct ~50% more boids per invasion on average, assuming roughly even
+// boid density under the beam.
+const BEAM_RADIUS = 104;
 // Acceleration applied to boids caught in the beam, scaled by the beam's
 // smoothed on/off strength so the pull ramps in rather than snapping on.
 // Tuned to be a strong, unmistakable pull without being so fast that a
@@ -30,8 +33,10 @@ const ABDUCTION_RADIUS = 40;
 // fresh boid elsewhere to replace each abducted one, a long beam session
 // would cycle through (and visually scatter) far more boids than the
 // flock actually contains, reading as chaotic rather than a dramatic
-// "the flock gets sucked up" moment.
-const MAX_ABDUCTIONS = 40;
+// "the flock gets sucked up" moment. Raised in step with BEAM_RADIUS
+// (1.5x the original 40) so the wider beam's higher catch rate isn't
+// artificially capped back down to the old ceiling.
+const MAX_ABDUCTIONS = 60;
 // How far above the flock's altitude the saucer hovers while beaming —
 // high enough to look like it's scooping them up from above, not just
 // sitting in the middle of the flock.

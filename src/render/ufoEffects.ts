@@ -3,10 +3,12 @@ import * as THREE from 'three';
 /**
  * Classic flying-saucer visual (metallic lens-shaped hull, glass dome,
  * a ring of rim lights, and a downward tractor beam) for the "Alien
- * Invasion" feature. There's only ever one saucer at a time (see
- * Simulation.ufo), so this is a single persistent object toggled
- * visible/invisible and repositioned each frame, rather than an
- * instanced/pooled set like the boid/predator geometry.
+ * Invasion" feature. Renderer3D instantiates one of these per
+ * concurrent-UFO slot (see Simulation.ufos / MAX_CONCURRENT_UFOS) and
+ * maps each to an active UFO by index, so each instance is a single
+ * persistent object toggled visible/invisible and repositioned each
+ * frame, rather than an instanced/pooled set like the boid/predator
+ * geometry.
  */
 export interface UFOVisual {
   /**

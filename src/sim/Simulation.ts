@@ -21,6 +21,11 @@ const CATCH_RADIUS = 18;
 // Bounded so a long-idle tab doesn't let this grow forever.
 const MAX_CATCH_EVENTS = 16;
 
+// How many alien-invasion saucers can be active at once. Each one is
+// fully independent (its own descend/beam/ascend lifecycle and flock-
+// centroid tracking), so multiple can be in flight simultaneously.
+export const MAX_CONCURRENT_UFOS = 3;
+
 // How long a UFO-abducted boid stays "gone" before flying back out of the
 // coop — instant respawn (still used for ordinary predator catches, which
 // weren't part of this complaint) read as barely-noticeable population
@@ -46,8 +51,8 @@ export class Simulation {
   boids: Boid[] = [];
   predators: Predator[] = [];
   catchEvents: CatchEvent[] = [];
-  /** Active "Alien Invasion" saucer, or null between invasions. Read directly by Renderer3D. */
-  ufo: UFO | null = null;
+  /** Active "Alien Invasion" saucers (up to MAX_CONCURRENT_UFOS at once). Read directly by Renderer3D. */
+  ufos: UFO[] = [];
   /** Total sim time elapsed (seconds), used to time delayed coop respawns. Only advances while running. */
   elapsedTime = 0;
   /** Boids abducted by the UFO, waiting on their delayed coop respawn. Read by the UI to enable a manual "respawn now" action. */
@@ -208,7 +213,7 @@ export class Simulation {
     this.boids = [];
     this.predators = [];
     this.catchEvents = [];
-    this.ufo = null;
+    this.ufos = [];
     this.pendingRespawns = [];
     this.syncPopulation();
   }
@@ -218,12 +223,13 @@ export class Simulation {
    * high above at a somewhat random angle, hovers over the flock,
    * tractor-beams nearby boids aboard for a few seconds, then leaves.
    * 3D-mode only (a saucer "descending from above" has no sensible
-   * meaning in the top-down 2D view) and a no-op if one is already active
-   * — only one saucer at a time.
+   * meaning in the top-down 2D view). Up to MAX_CONCURRENT_UFOS saucers
+   * can be active at once — a no-op once that many are already in
+   * flight.
    */
   spawnUFO(): void {
-    if (params.mode !== '3d' || this.ufo) return;
-    this.ufo = createUFO(this.boids, this.bounds);
+    if (params.mode !== '3d' || this.ufos.length >= MAX_CONCURRENT_UFOS) return;
+    this.ufos.push(createUFO(this.boids, this.bounds));
   }
 
   /** 2D mode only: torus wraparound at the world edges. */
@@ -297,9 +303,9 @@ export class Simulation {
 
     this.checkCatches();
 
-    if (this.ufo) {
-      this.ufo.update(dt, this.boids, bounds);
-      if (this.ufo.done) this.ufo = null;
+    if (this.ufos.length > 0) {
+      for (const ufo of this.ufos) ufo.update(dt, this.boids, bounds);
+      this.ufos = this.ufos.filter((ufo) => !ufo.done);
     }
 
     // Remove boids whose "swallowed" animation has finished. UFO-abducted

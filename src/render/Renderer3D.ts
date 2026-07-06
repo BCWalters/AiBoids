@@ -7,6 +7,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { params, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
+import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries, createDragonGeometries, type BirdGeometries } from './birdGeometry';
@@ -291,7 +292,7 @@ export class Renderer3D {
   private driftingClouds: DriftingClouds;
   private bloodEffects: BloodEffects;
   private fireBreathEffects: FireBreathEffects;
-  private ufoVisual: UFOVisual;
+  private ufoVisuals: UFOVisual[];
 
   private arcadeBoidGeometries: BirdGeometries;
   private arcadeSparrowGeometries: BirdGeometries;
@@ -372,7 +373,7 @@ export class Renderer3D {
     this.driftingClouds = createDriftingClouds(this.scene);
     this.bloodEffects = createBloodEffects(this.scene);
     this.fireBreathEffects = createFireBreathEffects(this.scene);
-    this.ufoVisual = createUFOVisual(this.scene);
+    this.ufoVisuals = Array.from({ length: MAX_CONCURRENT_UFOS }, () => createUFOVisual(this.scene));
 
     this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
     this.arcadeSparrowGeometries = createBirdGeometries(BOID_LENGTH * SPARROW_SIZE_SCALE, BOID_WIDTH * SPARROW_SIZE_SCALE);
@@ -979,13 +980,19 @@ export class Renderer3D {
     this.spawnFireFromDragons(sim, elapsed);
     this.fireBreathEffects.update(dt);
 
-    if (sim.ufo) {
-      this.tmpVec3.set(sim.ufo.position.x, sim.ufo.position.y, sim.ufo.position.z);
-      this.ufoVisual.setState(true, this.tmpVec3, sim.ufo.beamStrength, UFO_BEAM_REACH);
-    } else {
-      this.ufoVisual.setState(false, this.tmpVec3, 0, 0);
+    // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
+    // slots beyond the current active count are simply hidden.
+    for (let i = 0; i < this.ufoVisuals.length; i++) {
+      const ufo = sim.ufos[i];
+      const visual = this.ufoVisuals[i];
+      if (ufo) {
+        this.tmpVec3.set(ufo.position.x, ufo.position.y, ufo.position.z);
+        visual.setState(true, this.tmpVec3, ufo.beamStrength, UFO_BEAM_REACH);
+      } else {
+        visual.setState(false, this.tmpVec3, 0, 0);
+      }
+      visual.update(dt);
     }
-    this.ufoVisual.update(dt);
 
     const anySpeciesInstances = BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
     if (anySpeciesInstances) {
@@ -1066,7 +1073,7 @@ export class Renderer3D {
     this.driftingClouds.dispose();
     this.bloodEffects.dispose();
     this.fireBreathEffects.dispose();
-    this.ufoVisual.dispose();
+    this.ufoVisuals.forEach((visual) => visual.dispose());
     this.controls.dispose();
     this.composer.dispose();
     this.renderer.dispose();

@@ -119,7 +119,7 @@ export const defaultParams: SimParams = {
 
   predatorPerceptionRadius: 220,
 
-  worldDepth: 600,
+  worldDepth: 1000,
   boundaryMargin: 120,
   boundaryWeight: 3.5,
   centerPullWeight: 0.1,
