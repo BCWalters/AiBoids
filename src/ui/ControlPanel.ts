@@ -1,5 +1,6 @@
 import { params, resetParams, type SimParams, type SimMode, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
+import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 
 interface SliderSpec {
   key: keyof SimParams;
@@ -265,22 +266,23 @@ export class ControlPanel {
 
   /**
    * Refreshes the invasion button's disabled/title state to reflect
-   * whether a saucer is currently active — called every animation frame
-   * from main.ts rather than only on control-panel re-render, so the
-   * button greys out immediately when spawned and re-enables the moment
-   * it flies off, without needing a full (state-resetting) re-render.
+   * whether the max number of concurrent saucers is already active —
+   * called every animation frame from main.ts rather than only on
+   * control-panel re-render, so the button greys out immediately when
+   * spawned and re-enables the moment one flies off, without needing a
+   * full (state-resetting) re-render.
    */
   syncAlienInvasionButton(): void {
     const button = this.alienButton;
     if (!button) return;
     const wrongMode = params.mode !== '3d';
-    const shipActive = this.sim.ufo !== null;
-    const disabled = wrongMode || shipActive;
+    const atCapacity = this.sim.ufos.length >= MAX_CONCURRENT_UFOS;
+    const disabled = wrongMode || atCapacity;
     button.disabled = disabled;
     button.title = wrongMode
       ? 'Switch to 3D mode to send a flying saucer'
-      : shipActive
-        ? 'A saucer is already out there — wait for it to fly off'
+      : atCapacity
+        ? `Up to ${MAX_CONCURRENT_UFOS} saucers can be out at once — wait for one to fly off`
         : 'A flying saucer descends, tractor-beams nearby boids aboard, then departs';
   }
 
