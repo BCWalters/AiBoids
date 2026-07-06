@@ -1158,8 +1158,15 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
   // A different, smaller cell frequency than GROUND_TEXTURE_REPEAT for
   // the procedural blotch field, so its pattern doesn't line up with
   // (and reinforce the visibility of) the fine canvas texture's own
-  // repeat grid.
-  const blotchCellsPerRepeat = 23 / GROUND_TEXTURE_REPEAT;
+  // repeat grid. Halved from 23 to 11.5 per user preference for larger
+  // blotches — halving the cell frequency doubles every blob's size
+  // since radius is expressed as a fraction of cell size.
+  const blotchCellsPerRepeat = 11.5 / GROUND_TEXTURE_REPEAT;
+  // A second, much coarser field for a handful of very large regional
+  // patches (see groundBigBlotchField) — ~3.2 cells across the entire
+  // ground plane (not the fine texture's repeat grid), so roughly
+  // 3.2*3.2 ≈ 10 of these show up across the whole map.
+  const bigBlotchCellsPerRepeat = 3.2 / GROUND_TEXTURE_REPEAT;
 
   const helperGLSL = `
     vec2 groundBombHash(vec2 p) {
@@ -1227,6 +1234,34 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
       }
       return vec4(bestColor, bestAlpha);
     }
+    // A handful (~10 across the whole ground) of very large, soft,
+    // brownish-green regional patches — same Worley-style approach as
+    // groundBlotchField but at a much coarser cell frequency, near-full
+    // presence (almost every cell shows one), and a single muted
+    // brownish-green tone rather than the smaller field's varied
+    // palette, so these read as broad terrain-scale color regions
+    // underneath the smaller/medium blotches rather than another
+    // distinct "spot" pattern.
+    vec4 groundBigBlotchField(vec2 uv) {
+      vec2 baseCell = floor(uv);
+      float bestAlpha = 0.0;
+      for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+          vec2 neighborCell = baseCell + vec2(float(dx), float(dy));
+          float presence = groundBombHash(neighborCell + vec2(88.1, 41.7)).x;
+          if (presence < 0.1) continue;
+          vec2 jitter = groundBombHash(neighborCell + vec2(5.3, 71.9));
+          vec2 center = neighborCell + jitter;
+          float radiusPick = groundBombHash(neighborCell + vec2(63.2, 12.5)).x;
+          float radius = mix(0.55, 0.95, radiusPick);
+          float d = distance(uv, center);
+          float a = 1.0 - smoothstep(radius * 0.3, radius, d);
+          if (a > bestAlpha) bestAlpha = a;
+        }
+      }
+      vec3 brownishGreen = vec3(79.0, 84.0, 48.0) / 255.0;
+      return vec4(brownishGreen, bestAlpha);
+    }
   `;
 
   material.onBeforeCompile = (shader) => {
@@ -1240,6 +1275,9 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
           sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
         #endif
         diffuseColor *= sampledDiffuseColor;
+
+        vec4 groundBigBlotch = groundBigBlotchField( vMapUv * ${bigBlotchCellsPerRepeat.toFixed(8)} );
+        diffuseColor.rgb = mix( diffuseColor.rgb, groundBigBlotch.rgb, groundBigBlotch.a * 0.45 );
 
         vec4 groundBlotch = groundBlotchField( vMapUv * ${blotchCellsPerRepeat.toFixed(8)} );
         diffuseColor.rgb = mix( diffuseColor.rgb, groundBlotch.rgb, groundBlotch.a * 0.6 );
