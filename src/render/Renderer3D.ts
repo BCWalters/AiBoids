@@ -122,6 +122,15 @@ const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 // Non-dragon entities intentionally skip this (see keepUpright) since
 // they don't anchor to world-up and so have no equivalent instability.
 const DRAGON_HEADING_SMOOTHING_RATE = 6;
+// Final safety net: caps how fast a dragon's *displayed* orientation can
+// rotate per second, regardless of how the target orientation for this
+// frame was computed — see dragonDisplayQuats' doc comment for why this
+// structurally prevents any visible instant flip/flatten. Generous
+// enough that legitimate sharp turns/dives still look immediate (a
+// 180-degree reversal completes in a small fraction of a second), but
+// bounded so a computational glitch can only ever show up as a brief,
+// smooth correction rather than a snap.
+const DRAGON_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(720);
 
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
 // "forward" direction we rotate onto each entity's velocity vector.
@@ -296,6 +305,23 @@ export class Renderer3D {
   private speciesInstanceKeys = new Map<BoidSpecies, string | null>();
   private predatorInstances: BirdInstanceSet | null = null;
   private predatorInstancesKey: string | null = null;
+  /**
+   * Persisted, per-dragon *displayed* orientation — see the keepUpright
+   * branch in updateInstances for why this exists as a final safety net
+   * on top of the heading smoothing / near-pole "right" vector logic:
+   * no matter how the ideal target orientation for a given frame was
+   * computed (and no matter what instability that computation might
+   * still have in some edge case we haven't found yet), the mesh is
+   * only ever allowed to rotate toward it at a bounded angular rate, via
+   * THREE.Quaternion.rotateTowards. A valid unit quaternion can't
+   * represent a "flattened" orientation, and interpolating between two
+   * valid quaternions can't pass through one either — so bounding the
+   * turn rate this way makes any remaining glitch show up as, at worst,
+   * a brief pause before the model continues turning smoothly, never a
+   * visible instant flip or flattening snap. Cleared whenever the
+   * predator instance set is rebuilt (species/count/dragon-mode change).
+   */
+  private dragonDisplayQuats = new Map<number, THREE.Quaternion>();
   private boundsHelper: THREE.LineSegments | null = null;
   private currentStyle: VisualStyle | null = null;
 
@@ -514,6 +540,7 @@ export class Renderer3D {
           : this.arcadePredatorGeometries;
       this.predatorInstances = this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, predatorCount, isDragon);
       this.predatorInstancesKey = predatorKey;
+      this.dragonDisplayQuats.clear();
     }
 
     if (this.currentStyle !== style) {
@@ -744,6 +771,23 @@ export class Renderer3D {
       entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
       this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
       this.bodyQuat.multiply(this.rollQuat);
+
+      if (keepUpright) {
+        // Final safety net (see dragonDisplayQuats doc comment): never
+        // let the *displayed* orientation jump straight to this frame's
+        // target — only rotate toward it at a bounded rate. This can't
+        // eliminate a bad target computation, but it guarantees any such
+        // glitch is never visible as an instant flip/flatten, only ever
+        // as a smooth (if momentarily oddly-directed) turn.
+        let displayQuat = this.dragonDisplayQuats.get(entity.id);
+        if (!displayQuat) {
+          displayQuat = this.bodyQuat.clone();
+          this.dragonDisplayQuats.set(entity.id, displayQuat);
+        } else {
+          displayQuat.rotateTowards(this.bodyQuat, DRAGON_MAX_TURN_RADIANS_PER_SEC * dt);
+        }
+        this.bodyQuat.copy(displayQuat);
+      }
 
       // Body: just position + orientation, no flap. Caught boids shrink
       // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
