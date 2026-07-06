@@ -1182,10 +1182,17 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
       return r + 0.5;
     }
     vec3 groundBlotchPalette(float idx) {
-      if (idx < 1.0) return vec3(150.0, 150.0, 70.0) / 255.0;
-      else if (idx < 2.0) return vec3(30.0, 55.0, 28.0) / 255.0;
-      else if (idx < 3.0) return vec3(107.0, 84.0, 46.0) / 255.0;
-      return vec3(52.0, 110.0, 58.0) / 255.0;
+      // Original four variants recolored halfway toward the base tile
+      // green (#3d6b35 / rgb(61,107,53)) so they read as gentler
+      // regional variation rather than distinctly different patches,
+      // plus two new darker-than-base variants (deep moss, dark earthy
+      // shadow) added for extra variety at the other end of the range.
+      if (idx < 1.0) return vec3(105.5, 128.5, 61.5) / 255.0; // dry yellow-green, halfway to base
+      else if (idx < 2.0) return vec3(45.5, 81.0, 40.5) / 255.0; // shaded deep green, halfway to base
+      else if (idx < 3.0) return vec3(84.0, 95.5, 49.5) / 255.0; // warm olive-brown, halfway to base
+      else if (idx < 4.0) return vec3(56.5, 108.5, 55.5) / 255.0; // richer emerald, halfway to base
+      else if (idx < 5.0) return vec3(22.0, 36.0, 20.0) / 255.0; // deep moss shadow, darker than base
+      return vec3(34.0, 30.0, 18.0) / 255.0; // dark earthy shadow, darker than base
     }
     // Worley/cellular-noise-style scattered blob field: checks the
     // current cell plus all 8 neighbors so a blob jittered anywhere
@@ -1209,7 +1216,7 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
           vec2 center = neighborCell + jitter;
           float radiusPick = groundBombHash(neighborCell + vec2(21.4, 6.8)).x;
           float radius = mix(0.22, 0.85, radiusPick * radiusPick);
-          float paletteIdx = floor(groundBombHash(neighborCell + vec2(14.2, 47.6)).x * 4.0);
+          float paletteIdx = floor(groundBombHash(neighborCell + vec2(14.2, 47.6)).x * 6.0);
           float d = distance(uv, center);
           float a = 1.0 - smoothstep(radius * 0.2, radius, d);
           if (a > bestAlpha) {
