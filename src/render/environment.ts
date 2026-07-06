@@ -1025,37 +1025,17 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
     }
   };
 
-  // Large, low-frequency patches — these are the features that actually
-  // survive mipmapping at a distance and read as ground texture rather
-  // than a solid fill. Four color variants now instead of two (dry
-  // yellow-green and shaded dark green only) — added a warm olive-brown
-  // (worn/autumnal grass) and a richer emerald (fresh growth) so the
-  // base texture itself reads as more varied ground cover even before
-  // the separate large-scale biome tint (see biomeTintAt) is applied on
-  // top. Each patch is also stamped onto the height canvas (raised for
-  // dry/tall clumps, sunken for shaded hollows) so the normal map
-  // derived below gives the same patches real, sun-catching relief.
-  const blotchPalette = [
-    { color: '150, 150, 70', bump: '210, 210, 210' }, // dry yellow-green
-    { color: '30, 55, 28', bump: '90, 90, 90' }, // shaded deep green
-    { color: '107, 84, 46', bump: '170, 160, 140' }, // warm olive-brown, worn grass
-    { color: '52, 110, 58', bump: '200, 205, 195' }, // richer emerald, fresh growth
-  ];
-  for (let i = 0; i < 55; i++) {
-    // Kept well clear of the tile edge (margin >= max radius + padding)
-    // so every cell reads as plain background near its border — this is
-    // what lets the fragment-shader-side stochastic tiling below rotate
-    // or mirror each repeat-cell independently without any visible seam,
-    // since neighboring cells always meet background-to-background
-    // regardless of their individual orientation.
-    const margin = 100;
-    const x = margin + Math.random() * (size - margin * 2);
-    const y = margin + Math.random() * (size - margin * 2);
-    const radius = 30 + Math.random() * 60;
-    const variant = blotchPalette[Math.floor(Math.random() * blotchPalette.length)];
-    drawBlob(ctx, x, y, radius, variant.color, 0.22 + Math.random() * 0.1);
-    drawBlob(heightCtx, x, y, radius * 0.85, variant.bump, 0.35);
-  }
+  // Large-scale color patches are now generated procedurally per-pixel
+  // in the fragment shader instead of baked into this canvas — see
+  // applyGroundTextureBombing's Worley-noise-style blotch field for why:
+  // a baked circular blob looks visually identical after any of the 8
+  // dihedral "bombing" transforms (rotating/mirroring a circle changes
+  // nothing), and keeping blobs clear of the tile edge (so translation
+  // tiling wouldn't show seams) left every single repeat cell with the
+  // same unvarying plain border — which itself reads as an obvious
+  // repeating "picture frame" grid, exactly the problem being solved
+  // here. A per-pixel procedural field has no cell-aligned "frame" and
+  // no baked shape to repeat, so it can't produce a perceptible grid.
 
   // Medium-scale mottling for mid-distance variation.
   for (let i = 0; i < 200; i++) {
@@ -1159,16 +1139,28 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
  * so there's no seam artifact from triangles straddling a cell boundary
  * on this mesh's comparatively coarse vertex grid.
  *
- * This only works cleanly because configureGroundTexture keeps all of
- * its blotches/flecks within a margin of the tile edge, leaving a plain
- * solid-color border — so any two adjacent cells always meet
- * background-to-background at their shared edge regardless of which of
- * the 8 orientations each one independently rolled, and the *only*
- * variation between repeats is which orientation of the interior
- * blob pattern shows, which reads as genuine non-repetition rather than
- * a stamped copy-paste grid.
+ * The dominant large-scale color patches are NOT part of the baked
+ * canvas texture at all (see configureGroundTexture's comment) — they're
+ * generated here as a true per-pixel procedural field: each pixel checks
+ * its own repeat-cell and all 8 neighbors, and each of those cells
+ * independently rolls (from a hash of its integer coordinate) a blob
+ * center placed anywhere within that cell — including right at its
+ * edges — plus a radius and a palette color. The nearest/strongest blob
+ * within reach tints the pixel. Because blobs are generated from the
+ * *cell containing their own center* and evaluated identically by every
+ * neighboring pixel that's within reach, a blob straddling a cell
+ * boundary is computed the same way from both sides — there's no seam,
+ * and critically no fixed per-cell "shape" to rotate or frame to leave
+ * blank, so it can't read as a repeating grid the way the two earlier,
+ * baked-texture-based attempts did.
  */
 function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
+  // A different, smaller cell frequency than GROUND_TEXTURE_REPEAT for
+  // the procedural blotch field, so its pattern doesn't line up with
+  // (and reinforce the visibility of) the fine canvas texture's own
+  // repeat grid.
+  const blotchCellsPerRepeat = 23 / GROUND_TEXTURE_REPEAT;
+
   const helperGLSL = `
     vec2 groundBombHash(vec2 p) {
       p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
@@ -1189,6 +1181,45 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
       else r = vec2(-f.y, -f.x);
       return r + 0.5;
     }
+    vec3 groundBlotchPalette(float idx) {
+      if (idx < 1.0) return vec3(150.0, 150.0, 70.0) / 255.0;
+      else if (idx < 2.0) return vec3(30.0, 55.0, 28.0) / 255.0;
+      else if (idx < 3.0) return vec3(107.0, 84.0, 46.0) / 255.0;
+      return vec3(52.0, 110.0, 58.0) / 255.0;
+    }
+    // Worley/cellular-noise-style scattered blob field: checks the
+    // current cell plus all 8 neighbors so a blob jittered anywhere
+    // within a cell (even right at its edge) still gets evaluated
+    // correctly by pixels in the adjacent cell, with no seam.
+    vec4 groundBlotchField(vec2 uv) {
+      vec2 baseCell = floor(uv);
+      vec3 bestColor = vec3(0.0);
+      float bestAlpha = 0.0;
+      for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+          vec2 neighborCell = baseCell + vec2(float(dx), float(dy));
+          // Roughly a third of cells contribute no blob at all (and
+          // radius varies over a wide range) so blobs cluster and thin
+          // out irregularly instead of reading as an even polka-dot
+          // grid — real terrain patches vary in both size and density,
+          // not just position.
+          float presence = groundBombHash(neighborCell + vec2(58.3, 2.6)).x;
+          if (presence < 0.32) continue;
+          vec2 jitter = groundBombHash(neighborCell + vec2(3.7, 9.1));
+          vec2 center = neighborCell + jitter;
+          float radiusPick = groundBombHash(neighborCell + vec2(21.4, 6.8)).x;
+          float radius = mix(0.22, 0.85, radiusPick * radiusPick);
+          float paletteIdx = floor(groundBombHash(neighborCell + vec2(14.2, 47.6)).x * 4.0);
+          float d = distance(uv, center);
+          float a = 1.0 - smoothstep(radius * 0.2, radius, d);
+          if (a > bestAlpha) {
+            bestAlpha = a;
+            bestColor = groundBlotchPalette(paletteIdx);
+          }
+        }
+      }
+      return vec4(bestColor, bestAlpha);
+    }
   `;
 
   material.onBeforeCompile = (shader) => {
@@ -1202,6 +1233,9 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
           sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
         #endif
         diffuseColor *= sampledDiffuseColor;
+
+        vec4 groundBlotch = groundBlotchField( vMapUv * ${blotchCellsPerRepeat.toFixed(8)} );
+        diffuseColor.rgb = mix( diffuseColor.rgb, groundBlotch.rgb, groundBlotch.a * 0.6 );
       #endif
       `
     );
