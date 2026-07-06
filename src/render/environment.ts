@@ -840,17 +840,29 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // Fog range scales with the flock's own size (groundSize is the huge,
   // mostly-decorative ground plane, ~30x flockScale) so the ground fades
   // out well before its physical edge, hiding the seam at the horizon.
-  // Pushed out a bit further still (was 4.5/6.8) — even after the
-  // previous pass, fog was reported as still too thick, hazing scenery
-  // sooner than it should. Widening the near/far band both delays when
-  // fog starts and stretches out how gradually it thickens. Far is kept
-  // just a little past the mountain ring's own radius (6.1x) rather than
-  // pushed out much further, since that's what previously fixed a
-  // "visible flat plain beyond the ridge before the fog hides it" bug —
-  // going much past ~7.2x would reopen that gap.
+  //
+  // Far was previously kept just past the mountain ring's own radius
+  // (7.2x) to avoid a "visible flat plain beyond the ridge" gap — but
+  // the ocean wedge (createOceanPatch) actually extends out to radius
+  // 12x flockScale, so most of the ocean's surface (everything past
+  // 7.2x) sat beyond fog.far and rendered as a completely solid wall of
+  // fog color. Pushing far out to just past the ocean's own outer edge
+  // (~13x) lets its already-built-in shore->deep->horizon color gradient
+  // (see createOceanPatch) do the final blend into the sky, with engine
+  // fog only adding gentle atmospheric haze on top rather than a hard
+  // cutoff.
+  //
+  // But pulling near out to 6.5x (past the mountain ring's own 5.4-6.1x
+  // radius) left the ring with *zero* haze at all — crisp enough that
+  // its low-poly faceted silhouette became distractingly obvious rather
+  // than reading as a hazy, softened distant ridge. Pulling near back in
+  // to 3.5x (well before the ring) puts the mountains partway into the
+  // fog gradient again — a light-but-present haze that rounds off the
+  // facets — while still keeping far out near the ocean's true edge so
+  // the "solid wall blocking the ocean" bug doesn't return.
   const flockScale = groundSize / 30;
-  env.fog.near = flockScale * 5.3;
-  env.fog.far = flockScale * 7.2;
+  env.fog.near = flockScale * 3.5;
+  env.fog.far = flockScale * 13.5;
 
   // Mountain ring geometry is authored in flock-scale units (radius ~6),
   // so a straight uniform scale places it just inside the fog's far
