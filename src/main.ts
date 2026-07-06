@@ -4,6 +4,8 @@ import { Renderer } from './render/Renderer';
 import { Renderer3D } from './render/Renderer3D';
 import { ControlPanel } from './ui/ControlPanel';
 import { params, type SimMode } from './sim/params';
+import { onLanguageChange } from './i18n/language';
+import { t } from './i18n/translations';
 
 const canvas2D = document.querySelector<HTMLCanvasElement>('#sim-canvas-2d')!;
 const canvas3D = document.querySelector<HTMLCanvasElement>('#sim-canvas-3d')!;
@@ -11,6 +13,25 @@ const controlPanelBody = document.querySelector<HTMLElement>('#control-panel-bod
 const controlPanel_el = document.querySelector<HTMLElement>('#control-panel')!;
 const controlPanelToggle = document.querySelector<HTMLButtonElement>('#control-panel-toggle')!;
 const canvasStack = document.querySelector<HTMLElement>('#canvas-stack')!;
+const appSubtitle = document.querySelector<HTMLElement>('#app-subtitle')!;
+const controlPanelHeading = document.querySelector<HTMLElement>('#control-panel-heading')!;
+
+/**
+ * Applies the current language to the handful of static (non-ControlPanel)
+ * DOM strings that live directly in index.html. Called once at startup
+ * and again on every language change (see onLanguageChange below) — the
+ * ControlPanel handles its own re-render for everything inside it.
+ */
+function applyStaticTranslations(): void {
+  document.title = t('documentTitle');
+  appSubtitle.textContent = t('subtitle');
+  controlPanelHeading.textContent = t('controlsHeading');
+  controlPanelToggle.title = t('togglePanelTitle');
+  controlPanelToggle.setAttribute('aria-label', t('togglePanelTitle'));
+}
+
+applyStaticTranslations();
+onLanguageChange(applyStaticTranslations);
 
 const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight || 600);
 

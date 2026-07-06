@@ -1,10 +1,12 @@
 import { params, resetParams, type SimParams, type SimMode, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
+import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES, type Language } from '../i18n/language';
+import { t, type TranslationKey } from '../i18n/translations';
 
 interface SliderSpec {
   key: keyof SimParams;
-  label: string;
+  labelKey: TranslationKey;
   min: number;
   max: number;
   step: number;
@@ -14,46 +16,46 @@ interface SliderSpec {
 // ungrouped at the top (always visible, not tucked behind a collapsible
 // section) rather than folded away with everything else.
 const populationSpeedSpecs: SliderSpec[] = [
-  { key: 'boidCount', label: 'Boid count (sparrows)', min: 0, max: 500, step: 1 },
-  { key: 'parrotCount', label: 'Parrot count', min: 0, max: 300, step: 1 },
-  { key: 'goldfinchCount', label: 'Goldfinch count', min: 0, max: 300, step: 1 },
-  { key: 'cardinalCount', label: 'Cardinal count', min: 0, max: 300, step: 1 },
-  { key: 'bluejayCount', label: 'Blue jay count', min: 0, max: 300, step: 1 },
-  { key: 'predatorCount', label: 'Predator count', min: 0, max: 10, step: 1 },
-  { key: 'boidMaxSpeed', label: 'Boid max speed', min: 20, max: 300, step: 5 },
-  { key: 'predatorMaxSpeed', label: 'Predator max speed', min: 20, max: 350, step: 5 },
+  { key: 'boidCount', labelKey: 'boidCount', min: 0, max: 500, step: 1 },
+  { key: 'parrotCount', labelKey: 'parrotCount', min: 0, max: 300, step: 1 },
+  { key: 'goldfinchCount', labelKey: 'goldfinchCount', min: 0, max: 300, step: 1 },
+  { key: 'cardinalCount', labelKey: 'cardinalCount', min: 0, max: 300, step: 1 },
+  { key: 'bluejayCount', labelKey: 'bluejayCount', min: 0, max: 300, step: 1 },
+  { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 10, step: 1 },
+  { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
+  { key: 'predatorMaxSpeed', labelKey: 'predatorMaxSpeed', min: 20, max: 350, step: 5 },
 ];
 
 // Flocking-rule tuning: perception, the three classic boid rule weights,
 // and predator-panic response. Collapsed by default — fiddly to tune but
 // nowhere near as frequently touched as population/speed.
 const behaviorSpecs: SliderSpec[] = [
-  { key: 'perceptionRadius', label: 'Perception radius', min: 10, max: 200, step: 5 },
-  { key: 'perceptionAngleDeg', label: 'Perception angle (°)', min: 30, max: 360, step: 10 },
-  { key: 'separationWeight', label: 'Separation weight', min: 0, max: 4, step: 0.1 },
-  { key: 'alignmentWeight', label: 'Alignment weight', min: 0, max: 4, step: 0.1 },
-  { key: 'cohesionWeight', label: 'Cohesion weight', min: 0, max: 4, step: 0.1 },
-  { key: 'separationRadius', label: 'Separation radius', min: 5, max: 100, step: 1 },
-  { key: 'panicRadius', label: 'Predator panic radius', min: 10, max: 300, step: 5 },
-  { key: 'fleeWeight', label: 'Flee weight', min: 0, max: 8, step: 0.1 },
+  { key: 'perceptionRadius', labelKey: 'perceptionRadius', min: 10, max: 200, step: 5 },
+  { key: 'perceptionAngleDeg', labelKey: 'perceptionAngleDeg', min: 30, max: 360, step: 10 },
+  { key: 'separationWeight', labelKey: 'separationWeight', min: 0, max: 4, step: 0.1 },
+  { key: 'alignmentWeight', labelKey: 'alignmentWeight', min: 0, max: 4, step: 0.1 },
+  { key: 'cohesionWeight', labelKey: 'cohesionWeight', min: 0, max: 4, step: 0.1 },
+  { key: 'separationRadius', labelKey: 'separationRadius', min: 5, max: 100, step: 1 },
+  { key: 'panicRadius', labelKey: 'panicRadius', min: 10, max: 300, step: 5 },
+  { key: 'fleeWeight', labelKey: 'fleeWeight', min: 0, max: 8, step: 0.1 },
 ];
 
 // 3D-mode-only world settings, kept separate from the wall/boundary
 // steer-away tuning below since they're conceptually different (world
 // size vs. how entities react near its edges). Just world depth for now
 // — room to grow without cluttering the population/speed section.
-const threeDSliderSpecs: SliderSpec[] = [{ key: 'worldDepth', label: 'World depth (z)', min: 100, max: 1500, step: 50 }];
+const threeDSliderSpecs: SliderSpec[] = [{ key: 'worldDepth', labelKey: 'worldDepth', min: 100, max: 1500, step: 50 }];
 
 // 3D-only: bounded-box wall steer-away behavior.
 const boundarySliderSpecs: SliderSpec[] = [
-  { key: 'boundaryMargin', label: 'Wall steer-away margin', min: 10, max: 300, step: 10 },
-  { key: 'boundaryWeight', label: 'Wall steer-away strength', min: 0, max: 10, step: 0.5 },
-  { key: 'centerPullWeight', label: 'Center pull (avoids corner-camping)', min: 0, max: 0.5, step: 0.01 },
+  { key: 'boundaryMargin', labelKey: 'boundaryMargin', min: 10, max: 300, step: 10 },
+  { key: 'boundaryWeight', labelKey: 'boundaryWeight', min: 0, max: 10, step: 0.5 },
+  { key: 'centerPullWeight', labelKey: 'centerPullWeight', min: 0, max: 0.5, step: 0.01 },
 ];
 
 // Cosmetic motion-trail effect (afterimage fade) — not a "behavior" setting,
 // kept ungrouped near the top alongside the mode/style toggles.
-const trailSliderSpec: SliderSpec = { key: 'trailAmount', label: 'Motion trail amount', min: 0, max: 0.95, step: 0.01 };
+const trailSliderSpec: SliderSpec = { key: 'trailAmount', labelKey: 'trailAmount', min: 0, max: 0.95, step: 0.01 };
 
 export class ControlPanel {
   private container: HTMLElement;
@@ -61,17 +63,28 @@ export class ControlPanel {
   private onModeChange: (mode: SimMode) => void;
   private alienButton: HTMLButtonElement | null = null;
   private respawnButton: HTMLButtonElement | null = null;
+  private unsubscribeLanguage: () => void;
 
   constructor(container: HTMLElement, sim: Simulation, onModeChange: (mode: SimMode) => void) {
     this.container = container;
     this.sim = sim;
     this.onModeChange = onModeChange;
+    // Full re-render on language change — simplest way to refresh every
+    // label/title in the panel, consistent with how other setting
+    // changes (mode, visual style) already trigger a re-render.
+    this.unsubscribeLanguage = onLanguageChange(() => this.render());
     this.render();
+  }
+
+  /** Call when the panel is being torn down, to avoid a leaked language-change subscription. */
+  dispose(): void {
+    this.unsubscribeLanguage();
   }
 
   private render(): void {
     this.container.innerHTML = '';
 
+    this.container.appendChild(this.buildLanguageToggle());
     this.container.appendChild(this.buildModeToggle());
 
     if (params.mode === '3d') {
@@ -80,7 +93,7 @@ export class ControlPanel {
 
     this.container.appendChild(
       this.buildSection(
-        'Population & speed',
+        t('sectionPopulationSpeed'),
         [...populationSpeedSpecs.map((spec) => this.buildSlider(spec)), this.buildAlienInvasionButton()],
         true,
       ),
@@ -98,11 +111,11 @@ export class ControlPanel {
       visualSettingsChildren.push(this.buildDragonPredatorsToggle());
       visualSettingsChildren.push(this.buildFogToggle());
     }
-    this.container.appendChild(this.buildSection('Visual settings', visualSettingsChildren, false));
+    this.container.appendChild(this.buildSection(t('sectionVisualSettings'), visualSettingsChildren, false));
 
     this.container.appendChild(
       this.buildSection(
-        'Behavior',
+        t('sectionBehavior'),
         [this.buildPredatorCatchToggle(), ...behaviorSpecs.map((spec) => this.buildSlider(spec))],
         false,
       ),
@@ -111,14 +124,14 @@ export class ControlPanel {
     if (params.mode === '3d') {
       this.container.appendChild(
         this.buildSection(
-          '3D settings',
+          t('section3DSettings'),
           threeDSliderSpecs.map((spec) => this.buildSlider(spec)),
           false,
         ),
       );
       this.container.appendChild(
         this.buildSection(
-          'Boundary behavior',
+          t('sectionBoundaryBehavior'),
           boundarySliderSpecs.map((spec) => this.buildSlider(spec)),
           false,
         ),
@@ -128,6 +141,38 @@ export class ControlPanel {
     this.container.appendChild(this.buildButtons());
   }
 
+  private buildLanguageToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row';
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'control-label-row';
+    const label = document.createElement('label');
+    label.textContent = t('languageLabel');
+    labelRow.appendChild(label);
+    wrapper.appendChild(labelRow);
+
+    const select = document.createElement('select');
+    select.id = 'param-language';
+    const currentLanguage = getLanguage();
+    for (const { value, nativeName } of SUPPORTED_LANGUAGES) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = nativeName;
+      if (value === currentLanguage) option.selected = true;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      setLanguage(select.value as Language);
+      // No explicit render() call here — setLanguage() notifies the
+      // onLanguageChange subscription set up in the constructor, which
+      // re-renders the whole panel (and main.ts's own static strings).
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
+  }
+
   private buildModeToggle(): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-row';
@@ -135,7 +180,7 @@ export class ControlPanel {
     const labelRow = document.createElement('div');
     labelRow.className = 'control-label-row';
     const label = document.createElement('label');
-    label.textContent = 'Mode';
+    label.textContent = t('modeLabel');
     labelRow.appendChild(label);
     wrapper.appendChild(labelRow);
 
@@ -144,7 +189,7 @@ export class ControlPanel {
     for (const mode of ['2d', '3d'] as SimMode[]) {
       const option = document.createElement('option');
       option.value = mode;
-      option.textContent = mode === '2d' ? '2D (top-down)' : '3D (orbit camera)';
+      option.textContent = mode === '2d' ? t('mode2d') : t('mode3d');
       if (mode === params.mode) option.selected = true;
       select.appendChild(option);
     }
@@ -166,20 +211,20 @@ export class ControlPanel {
     const labelRow = document.createElement('div');
     labelRow.className = 'control-label-row';
     const label = document.createElement('label');
-    label.textContent = 'Visual style';
+    label.textContent = t('visualStyleLabel');
     labelRow.appendChild(label);
     wrapper.appendChild(labelRow);
 
     const select = document.createElement('select');
     select.id = 'param-visual-style';
-    const options: { value: VisualStyle; text: string }[] = [
-      { value: 'arcade', text: 'Arcade (neon glow)' },
-      { value: 'nature', text: 'Nature (sky & hawks)' },
+    const options: { value: VisualStyle; textKey: TranslationKey }[] = [
+      { value: 'arcade', textKey: 'visualStyleArcade' },
+      { value: 'nature', textKey: 'visualStyleNature' },
     ];
     for (const opt of options) {
       const option = document.createElement('option');
       option.value = opt.value;
-      option.textContent = opt.text;
+      option.textContent = t(opt.textKey);
       if (opt.value === params.visualStyle) option.selected = true;
       select.appendChild(option);
     }
@@ -199,7 +244,7 @@ export class ControlPanel {
     wrapper.className = 'control-row control-checkbox-row';
 
     const label = document.createElement('label');
-    label.textContent = 'There be dragons';
+    label.textContent = t('dragonPredatorsLabel');
     label.htmlFor = 'param-dragon-predators';
 
     const input = document.createElement('input');
@@ -220,7 +265,7 @@ export class ControlPanel {
     wrapper.className = 'control-row control-checkbox-row';
 
     const label = document.createElement('label');
-    label.textContent = 'Distance fog';
+    label.textContent = t('fogEnabledLabel');
     label.htmlFor = 'param-fog-enabled';
 
     const input = document.createElement('input');
@@ -241,7 +286,7 @@ export class ControlPanel {
     wrapper.className = 'control-buttons';
 
     const button = document.createElement('button');
-    button.textContent = 'Send alien invasion 🛸';
+    button.textContent = t('alienInvasionButton');
     button.addEventListener('click', () => {
       this.sim.spawnUFO();
     });
@@ -280,10 +325,10 @@ export class ControlPanel {
     const disabled = wrongMode || atCapacity;
     button.disabled = disabled;
     button.title = wrongMode
-      ? 'Switch to 3D mode to send a flying saucer'
+      ? t('alienInvasionTitleWrongMode')
       : atCapacity
-        ? `Up to ${MAX_CONCURRENT_UFOS} saucers can be out at once — wait for one to fly off`
-        : 'A flying saucer descends, tractor-beams nearby boids aboard, then departs';
+        ? t('alienInvasionTitleAtCapacity', { max: MAX_CONCURRENT_UFOS })
+        : t('alienInvasionTitleReady');
   }
 
   /**
@@ -296,11 +341,8 @@ export class ControlPanel {
     if (!button) return;
     const pendingCount = this.sim.pendingRespawns.length;
     button.disabled = pendingCount === 0;
-    button.textContent = pendingCount > 0 ? `Respawn now (${pendingCount}) 🐣` : 'Respawn now 🐣';
-    button.title =
-      pendingCount > 0
-        ? 'Skip the wait and fly the abducted birds back out of the coop immediately'
-        : 'No abducted birds are waiting to respawn right now';
+    button.textContent = pendingCount > 0 ? t('respawnButtonPending', { count: pendingCount }) : t('respawnButtonIdle');
+    button.title = pendingCount > 0 ? t('respawnTitlePending') : t('respawnTitleIdle');
   }
 
   private buildPredatorCatchToggle(): HTMLElement {
@@ -308,7 +350,7 @@ export class ControlPanel {
     wrapper.className = 'control-row control-checkbox-row';
 
     const label = document.createElement('label');
-    label.textContent = 'Predators can catch prey';
+    label.textContent = t('predatorCatchLabel');
     label.htmlFor = 'param-predator-catch';
 
     const input = document.createElement('input');
@@ -353,7 +395,7 @@ export class ControlPanel {
     labelRow.className = 'control-label-row';
 
     const label = document.createElement('label');
-    label.textContent = spec.label;
+    label.textContent = t(spec.labelKey);
     label.htmlFor = `param-${spec.key}`;
 
     const valueOut = document.createElement('span');
@@ -388,20 +430,20 @@ export class ControlPanel {
     wrapper.className = 'control-buttons';
 
     const playPause = document.createElement('button');
-    playPause.textContent = params.running ? 'Pause' : 'Play';
+    playPause.textContent = params.running ? t('pauseButton') : t('playButton');
     playPause.addEventListener('click', () => {
       params.running = !params.running;
-      playPause.textContent = params.running ? 'Pause' : 'Play';
+      playPause.textContent = params.running ? t('pauseButton') : t('playButton');
     });
 
     const reset = document.createElement('button');
-    reset.textContent = 'Reset';
+    reset.textContent = t('resetButton');
     reset.addEventListener('click', () => {
       this.sim.reset();
     });
 
     const restoreDefaults = document.createElement('button');
-    restoreDefaults.textContent = 'Restore defaults';
+    restoreDefaults.textContent = t('restoreDefaultsButton');
     restoreDefaults.addEventListener('click', () => {
       resetParams();
       this.render();
@@ -419,7 +461,7 @@ export class ControlPanel {
     if (disabled) wrapper.classList.add('control-row-disabled');
 
     const label = document.createElement('label');
-    label.textContent = 'Show perception/panic radii';
+    label.textContent = t('debugToggleLabel');
     label.htmlFor = 'param-debug';
 
     const input = document.createElement('input');
