@@ -368,7 +368,7 @@ export class Renderer3D {
     this.keyLight.position.set(1, 1, 1);
     this.scene.add(this.ambientLight, this.keyLight);
 
-    this.natureEnv = createNatureEnvironment(this.scene);
+    this.natureEnv = createNatureEnvironment(this.scene, this.renderer);
     this.driftingClouds = createDriftingClouds(this.scene);
     this.bloodEffects = createBloodEffects(this.scene);
     this.fireBreathEffects = createFireBreathEffects(this.scene);

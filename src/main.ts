@@ -21,6 +21,7 @@ function applyMode(mode: SimMode): void {
 
   if (mode === '3d') {
     if (!renderer3D) renderer3D = new Renderer3D(canvas3D);
+    (window as unknown as { __debugRenderer3D: unknown }).__debugRenderer3D = renderer3D;
   } else {
     if (!renderer2D) renderer2D = new Renderer(canvas2D);
   }

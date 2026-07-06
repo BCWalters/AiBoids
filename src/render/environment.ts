@@ -54,7 +54,7 @@ const LAKE_DEFS = [
   { forwardX: 0.77, forwardZ: -0.64, distanceScale: 2.7, sizeScale: 0.35 },
 ];
 
-export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
+export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer): NatureEnvironment {
   const sky = new Sky();
   sky.scale.setScalar(20000);
   const skyUniforms = sky.material.uniforms;
@@ -113,7 +113,8 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
   // one shared flat-shaded material each) but they break up what would
   // otherwise be an infinite flat plain.
   const mountains = createMountainRing(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
-  const lakes = LAKE_DEFS.map(() => createWaterPatch());
+  const skyEnvMap = createSkyEnvMap(renderer, skyUniforms);
+  const lakes = LAKE_DEFS.map(() => createWaterPatch(skyEnvMap));
   const ocean = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
 
   // Pale horizon haze color (roughly matches this sky configuration's
@@ -182,6 +183,7 @@ export function createNatureEnvironment(scene: THREE.Scene): NatureEnvironment {
         (lake.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
         (lake.material as THREE.Material).dispose();
       }
+      skyEnvMap.dispose();
       ocean.geometry.dispose();
       (ocean.material as THREE.Material).dispose();
       (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
@@ -245,12 +247,14 @@ function fbm2(x: number, y: number, octaves: number): number {
 const GROUND_UNIT_SCALE = 30;
 
 /**
- * Ground displacement height (in local, unscaled plane units — multiply
- * by groundSize/flockScale to get world-space height) at a given point in
- * flock-scale units. Shared by createGroundGeometry (to displace terrain
- * vertices) and placeNatureEnvironment (to sit lakes directly on the
- * terrain surface instead of at a fixed height that ignores it — see the
- * "floating lake" fix in placeNatureEnvironment).
+ * Ground displacement height (in flock-scale units — multiply by
+ * flockScale to get world-space height) at a given point in flock-scale
+ * units. Shared by createGroundGeometry (which additionally divides by
+ * GROUND_UNIT_SCALE before storing this in the plane's local Z, to
+ * cancel out the plane's own huge groundSize scale-up — see that
+ * function's comment) and placeNatureEnvironment (to sit lakes directly
+ * on the terrain surface instead of at a fixed height that ignores it —
+ * see the "floating lake" fix in placeNatureEnvironment).
  */
 function terrainHeightAt(fx: number, fy: number): number {
   // Broad, slow rolling hills/valleys (low frequency, largest amplitude
@@ -329,8 +333,20 @@ function createGroundGeometry(): THREE.PlaneGeometry {
     const fy = ly * GROUND_UNIT_SCALE;
 
     // Local plane Z becomes world Y (up) once the mesh is rotated -90°
-    // about X in createNatureEnvironment.
-    position.setZ(i, terrainHeightAt(fx, fy));
+    // about X in createNatureEnvironment. terrainHeightAt's amplitude
+    // constants (~0.066 max) were tuned as a fraction of flockScale (the
+    // actual play-area size), but the whole plane — including this local
+    // Z displacement — later gets uniformly scaled by groundSize
+    // (flockScale * GROUND_UNIT_SCALE, the huge decorative-skirt scale),
+    // which without this /GROUND_UNIT_SCALE correction blew the real
+    // world-space height amplitude up by another full GROUND_UNIT_SCALE
+    // factor (measured: -1241..+611 world units, dwarfing the ~700-unit
+    // world box entirely). Dividing here cancels that back out so the
+    // final world-space amplitude matches what was actually intended:
+    // terrainHeightAt(fx,fy) * flockScale. See terrainHeightAt's and
+    // placeNatureEnvironment's lake-placement comments for the matching
+    // half of this fix.
+    position.setZ(i, terrainHeightAt(fx, fy) / GROUND_UNIT_SCALE);
 
     const tint = biomeTintAt(fx, fy);
     colors[i * 3] = tint.r;
@@ -593,16 +609,56 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
 }
 
 /**
- * A lake patch with a soft, irregular shoreline and a sky-tinted, glinting
- * surface — a flat, hard-edged, dark-teal circle read as an odd "dark
- * circle" floating on the ground rather than water. Fixed by: (1) an
+ * Bakes a static, roughly-hemispherical reflection environment map from
+ * the actual Sky shader (same turbidity/rayleigh/sun-position uniforms
+ * as the real sky dome) using THREE.PMREMGenerator, so the lakes' subtle
+ * reflectivity actually shows blue sky / horizon tones rather than a
+ * generic gray IBL default. Done once, in a throwaway scene containing
+ * only a cloned Sky mesh (never added to the real scene), so it costs a
+ * single extra render at startup and never touches the per-frame render
+ * loop — intentional, since the sky's color doesn't change enough
+ * frame-to-frame (only slow cloud drift) to justify a live-updating
+ * reflection for gently rippling lake water.
+ */
+function createSkyEnvMap(renderer: THREE.WebGLRenderer, skyUniforms: Sky['material']['uniforms']): THREE.Texture {
+  const envScene = new THREE.Scene();
+  const envSky = new Sky();
+  envSky.scale.setScalar(20000);
+  const envUniforms = envSky.material.uniforms;
+  envUniforms.turbidity.value = skyUniforms.turbidity.value;
+  envUniforms.rayleigh.value = skyUniforms.rayleigh.value;
+  envUniforms.mieCoefficient.value = skyUniforms.mieCoefficient.value;
+  envUniforms.mieDirectionalG.value = skyUniforms.mieDirectionalG.value;
+  envUniforms.cloudCoverage.value = skyUniforms.cloudCoverage.value;
+  envUniforms.cloudDensity.value = skyUniforms.cloudDensity.value;
+  envUniforms.cloudScale.value = skyUniforms.cloudScale.value;
+  envUniforms.sunPosition.value.copy(skyUniforms.sunPosition.value);
+  envUniforms.showSunDisc.value = 0;
+  envScene.add(envSky);
+
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  pmremGenerator.compileEquirectangularShader();
+  const renderTarget = pmremGenerator.fromScene(envScene, 0, 1, 30000);
+  pmremGenerator.dispose();
+  envSky.geometry.dispose();
+  envSky.material.dispose();
+  return renderTarget.texture;
+}
+
+/**
+ * A lake patch with a soft, irregular shoreline and a darker, partially
+ * reflective surface — a flat, hard-edged, dark-teal circle read as an odd
+ * "dark circle" floating on the ground rather than water. Fixed by: (1) an
  * irregular (noisy, non-circular) outline instead of a perfect circle,
  * (2) an alpha map that feathers the edge into the grass rather than
- * cutting off sharply, (3) a lighter, more sky-reflective blue base color,
- * and (4) a soft bright "sun glint" patch baked into the alpha-mapped
- * texture standing in for a specular highlight.
+ * cutting off sharply, (3) a darker base color plus a static sky
+ * reflection (envMap, baked once from the actual Sky shader via
+ * createSkyEnvMap — see that function) so it reads as reflective water
+ * rather than a flat paint swatch, and (4) a soft bright "sun glint"
+ * patch baked into the alpha-mapped texture standing in for a specular
+ * highlight.
  */
-function createWaterPatch(): THREE.Mesh {
+function createWaterPatch(envMap: THREE.Texture): THREE.Mesh {
   const segments = 48;
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -635,9 +691,11 @@ function createWaterPatch(): THREE.Mesh {
   geometry.computeVertexNormals();
 
   const material = new THREE.MeshStandardMaterial({
-    color: 0x5c96b0, // lighter, more sky-reflective blue-teal than the old murky dark teal
-    roughness: 0.1,
-    metalness: 0.25,
+    color: 0x1f4152, // darker blue-teal than the old flat medium blue, per feedback
+    roughness: 0.18,
+    metalness: 0.35,
+    envMap,
+    envMapIntensity: 0.55,
     transparent: true,
     alphaMap: createWaterAlphaTexture(),
     depthWrite: false,
@@ -816,7 +874,15 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
     const def = LAKE_DEFS[i];
     const fx = def.forwardX * def.distanceScale;
     const fy = def.forwardZ * def.distanceScale;
-    const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale * GROUND_UNIT_SCALE;
+    // World-space terrain height at this point = terrainHeightAt() *
+    // flockScale (matches the ground mesh's own local-Z / GROUND_UNIT_SCALE
+    // correction in createGroundGeometry — see that function's comment).
+    // This used to multiply by flockScale * GROUND_UNIT_SCALE instead,
+    // a stray extra GROUND_UNIT_SCALE (30x) factor that placed lakes
+    // hundreds to over a thousand world units below/above the actual
+    // terrain surface beneath them (measured as low as y ≈ -968 in a
+    // ~700-unit-tall world) — invisible, buried lakes, not floating ones.
+    const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale;
     lake.position.set(
       center.x + fx * flockScale,
       terrainWorldHeight + waterLift,
