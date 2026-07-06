@@ -82,14 +82,64 @@ body {
   background: var(--panel-bg);
   padding: 16px;
   overflow-y: auto;
+  transition: width 0.15s ease, padding 0.15s ease;
+}
+
+#control-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
 }
 
 #control-panel h2 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 15px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+#control-panel-toggle {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: #21262d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+#control-panel-toggle:hover {
+  background: #30363d;
+}
+
+/* Collapsed state: shrink the panel down to just the toggle button so
+ * the 3D scene gets nearly the full viewport width — used both for the
+ * manual toggle and as the smart default when the panel would otherwise
+ * cover too much of a narrow window (see main.ts). */
+#control-panel.collapsed {
+  width: 44px;
+  padding: 16px 8px;
+  overflow: hidden;
+}
+
+#control-panel.collapsed #control-panel-header {
+  margin-bottom: 0;
+  justify-content: center;
+}
+
+#control-panel.collapsed h2,
+#control-panel.collapsed #control-panel-body {
+  display: none;
+}
+
+#control-panel.collapsed #control-panel-toggle {
+  transform: rotate(180deg);
 }
 
 .control-row {
