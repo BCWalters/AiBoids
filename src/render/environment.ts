@@ -1037,14 +1037,23 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
   // here. A per-pixel procedural field has no cell-aligned "frame" and
   // no baked shape to repeat, so it can't produce a perceptible grid.
 
-  // Medium-scale mottling for mid-distance variation.
+  // Medium-scale mottling for mid-distance variation. Made larger and
+  // pulled 25% closer to the base tile green (#3d6b35 / rgb(61,107,53))
+  // per feedback that these patches read too obviously when looking
+  // toward the sun near the lake.
   for (let i = 0; i < 200; i++) {
     const margin = 40;
     const x = margin + Math.random() * (size - margin * 2);
     const y = margin + Math.random() * (size - margin * 2);
-    const radius = 10 + Math.random() * 22;
+    const radius = 20 + Math.random() * 44;
     const green = 70 + Math.random() * 80;
-    const color = `${45 + green * 0.2}, ${green}, ${40 + green * 0.15}`;
+    const rawR = 45 + green * 0.2;
+    const rawG = green;
+    const rawB = 40 + green * 0.15;
+    const r = rawR * 0.75 + 61 * 0.25;
+    const g = rawG * 0.75 + 107 * 0.25;
+    const b = rawB * 0.75 + 53 * 0.25;
+    const color = `${r}, ${g}, ${b}`;
     drawBlob(ctx, x, y, radius, color, 0.28 + Math.random() * 0.15);
     drawBlob(heightCtx, x, y, radius * 0.7, '190, 190, 190', 0.18);
   }
