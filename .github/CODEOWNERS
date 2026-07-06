@@ -1,0 +1,5 @@
+# Require @BCWalters as a reviewer on all pull requests.
+# This pairs with the "Require review from Code Owners" branch
+# protection setting on main. Update/expand this file when adding
+# other trusted reviewers as the project grows.
+* @BCWalters
