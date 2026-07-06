@@ -84,7 +84,6 @@ export class ControlPanel {
   private render(): void {
     this.container.innerHTML = '';
 
-    this.container.appendChild(this.buildLanguageToggle());
     this.container.appendChild(this.buildModeToggle());
 
     if (params.mode === '3d') {
@@ -138,6 +137,7 @@ export class ControlPanel {
       );
     }
 
+    this.container.appendChild(this.buildLanguageToggle());
     this.container.appendChild(this.buildButtons());
   }
 
