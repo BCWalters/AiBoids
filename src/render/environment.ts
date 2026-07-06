@@ -283,6 +283,11 @@ function terrainHeightAt(fx: number, fy: number): number {
 }
 
 // Large-scale "biome" tint colors blended per-vertex across the ground
+// Shared with configureGroundTexture's texture.repeat and the UV warp in
+// createGroundGeometry, which needs this to convert its warp amplitude
+// (authored in raw pre-repeat UV space) into an actual on-texture offset.
+const GROUND_TEXTURE_REPEAT = 120;
+
 // (see createGroundGeometry) — lush shaded green in hollows, dry
 // sun-baked gold on higher/exposed ground, and occasional bare-earth
 // patches. Distinct from the tileable canvas texture's own blotches:
@@ -405,8 +410,21 @@ function createGroundGeometry(): THREE.PlaneGeometry {
     // bombing needs either a per-pixel fragment-shader implementation or
     // much denser geometry to do safely; reverted to this cheaper,
     // seam-free smooth warp instead.
-    const warpU = fbm2(fx * 0.03 + 555, fy * 0.03 + 222, 2) * 0.4;
-    const warpV = fbm2(fx * 0.03 + 111, fy * 0.03 + 888, 2) * 0.4;
+    //
+    // Amplitude is expressed as a fraction of one texture repeat-tile
+    // (~0.35 tile-widths of wobble) and only converted to raw pre-repeat
+    // UV units here by dividing by GROUND_TEXTURE_REPEAT. Multiplying
+    // the raw fbm output directly (as a previous version of this code
+    // did) ignored the repeat scaling entirely: at repeat=120 that made
+    // the warp's real on-texture displacement up to ~48 whole tiles,
+    // which doesn't "bend" the tile grid so much as scramble neighboring
+    // vertices onto unrelated, uncorrelated parts of the texture —
+    // exactly the kind of high-frequency noise that vanishes into a flat
+    // mipmapped average and was silently erasing all of the large-scale
+    // blotches/flecks added in configureGroundTexture.
+    const warpAmount = (0.35 / GROUND_TEXTURE_REPEAT);
+    const warpU = fbm2(fx * 0.03 + 555, fy * 0.03 + 222, 2) * warpAmount;
+    const warpV = fbm2(fx * 0.03 + 111, fy * 0.03 + 888, 2) * warpAmount;
     uv.setXY(i, uv.getX(i) + warpU, uv.getY(i) + warpV);
   }
 
@@ -1079,7 +1097,7 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial): void {
   texture.wrapT = THREE.RepeatWrapping;
   // Lower repeat than before (was 400) so the large-scale blotches above
   // stay visibly sized on the ground instead of tiling into fine noise.
-  texture.repeat.set(120, 120);
+  texture.repeat.set(GROUND_TEXTURE_REPEAT, GROUND_TEXTURE_REPEAT);
   texture.colorSpace = THREE.SRGBColorSpace;
 
   const normalTexture = heightMapToNormalTexture(heightCtx, size);
