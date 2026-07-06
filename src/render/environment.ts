@@ -106,7 +106,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const ground = new THREE.Mesh(createGroundGeometry(), new THREE.MeshStandardMaterial());
   ground.rotation.x = -Math.PI / 2;
   (ground.material as THREE.MeshStandardMaterial).vertexColors = true;
-  configureGroundTexture(ground.material as THREE.MeshStandardMaterial);
+  configureGroundTexture(ground.material as THREE.MeshStandardMaterial, renderer);
 
   // A jagged, low-poly mountain range encircling the horizon and a lake
   // patch off in the distance — cheap (a few hundred triangles total,
@@ -990,7 +990,7 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
  * normal map from the same blotch layout adds real (if subtle) relief
  * that catches the sun light instead of looking like a flat painted mat.
  */
-function configureGroundTexture(material: THREE.MeshStandardMaterial): void {
+function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: THREE.WebGLRenderer): void {
   const size = 512;
   const diffuseCanvas = document.createElement('canvas');
   diffuseCanvas.width = size;
@@ -1099,11 +1099,24 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial): void {
   // stay visibly sized on the ground instead of tiling into fine noise.
   texture.repeat.set(GROUND_TEXTURE_REPEAT, GROUND_TEXTURE_REPEAT);
   texture.colorSpace = THREE.SRGBColorSpace;
+  // The ground is viewed at a shallow, grazing angle from the default
+  // orbit camera (looking mostly along the plane rather than straight
+  // down), which is exactly the case anisotropic filtering exists for:
+  // without it, the GPU picks a mip level based on the *most*
+  // foreshortened UV axis, so the whole texture — including the large
+  // blotches/flecks above — gets blurred down to a flat average color
+  // even though it isn't actually that minified in the other direction.
+  // This was very likely the dominant reason the ground still read as a
+  // flat, featureless "plastic" green at normal viewing distance even
+  // after the blotch palette and UV-warp fixes.
+  const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
+  texture.anisotropy = maxAnisotropy;
 
   const normalTexture = heightMapToNormalTexture(heightCtx, size);
   normalTexture.wrapS = THREE.RepeatWrapping;
   normalTexture.wrapT = THREE.RepeatWrapping;
   normalTexture.repeat.copy(texture.repeat);
+  normalTexture.anisotropy = maxAnisotropy;
 
   // Reuse the same height canvas as a roughness map: raised dry clumps
   // read a little glossier (fresh grass catching light), sunken hollows
@@ -1113,6 +1126,7 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial): void {
   roughnessTexture.wrapS = THREE.RepeatWrapping;
   roughnessTexture.wrapT = THREE.RepeatWrapping;
   roughnessTexture.repeat.copy(texture.repeat);
+  roughnessTexture.anisotropy = maxAnisotropy;
 
   material.map = texture;
   material.normalMap = normalTexture;
