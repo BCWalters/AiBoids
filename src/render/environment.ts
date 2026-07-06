@@ -261,11 +261,24 @@ function terrainHeightAt(fx: number, fy: number): number {
   // but still gentle — this is meant to read as rolling grassland near
   // the flock, not foothills or mountains, which are handled entirely
   // separately by createMountainRing).
-  const broad = fbm2(fx * 0.06, fy * 0.06, 3) * 0.045;
+  // Amplitude constants tripled from their original values (0.045,
+  // 0.016, 0.005) after the lake/terrain height-scaling bugfix above
+  // reduced world-space amplitude much further than intended — dividing
+  // out the stray extra GROUND_UNIT_SCALE factor also flattened the
+  // hills/valleys down to a barely-there ~60 world-unit range (in a
+  // ~700-unit-tall world), when the pre-bugfix look (despite its wildly
+  // out-of-range extremes elsewhere) read as pleasantly rolling near the
+  // play area. This restores a comparable, but sane and proportionate,
+  // amplitude (~185 world units peak-to-peak) without reintroducing the
+  // underground/floating-lake bug, since both createGroundGeometry and
+  // placeNatureEnvironment's lake placement share this same function and
+  // scale it identically (* flockScale) — raising these constants raises
+  // both consistently, so lakes still sit exactly on the terrain surface.
+  const broad = fbm2(fx * 0.06, fy * 0.06, 3) * 0.13;
   // Medium bumps break up any remaining large flat-looking stretches.
-  const medium = fbm2(fx * 0.22 + 40.7, fy * 0.22 + 12.3, 2) * 0.016;
+  const medium = fbm2(fx * 0.22 + 40.7, fy * 0.22 + 12.3, 2) * 0.045;
   // Fine surface texture, subtle — mostly noticeable close to camera.
-  const fine = fbm2(fx * 0.85 + 91.1, fy * 0.85 + 5.9, 2) * 0.005;
+  const fine = fbm2(fx * 0.85 + 91.1, fy * 0.85 + 5.9, 2) * 0.014;
   return broad + medium + fine;
 }
 
@@ -290,6 +303,27 @@ function terrainHeightAt(fx: number, fy: number): number {
 const LUSH_TINT = new THREE.Color(0xdceacf);
 const DRY_TINT = new THREE.Color(0xf2e8ae);
 const DIRT_TINT = new THREE.Color(0xd9c9a3);
+// Rocky/scree tint for steep slopes — real hillsides lose their grass
+// cover and show bare rock/scree wherever the ground gets too steep for
+// soil to hold, which is both a very standard terrain-shading technique
+// (slope-based splatting) and a natural-looking source of variety that
+// isn't tied to any repeating noise pattern, since it's driven directly
+// by the actual terrain geometry (see slopeAt) rather than another
+// independent noise field.
+const ROCK_TINT = new THREE.Color(0xb3aa9c);
+
+// Central-difference slope magnitude (rise/run, scale-invariant since
+// both terrainHeightAt's output and fx/fy are already in the same
+// flock-scale units) at a point, used to blend in bare rock on steep
+// terrain. eps is deliberately larger than the vertex spacing so the
+// estimate reflects the local hillside's overall steepness rather than
+// reacting to the finest noise octave.
+function slopeAt(fx: number, fy: number): number {
+  const eps = 0.35;
+  const dhdx = (terrainHeightAt(fx + eps, fy) - terrainHeightAt(fx - eps, fy)) / (2 * eps);
+  const dhdy = (terrainHeightAt(fx, fy + eps) - terrainHeightAt(fx, fy - eps)) / (2 * eps);
+  return Math.sqrt(dhdx * dhdx + dhdy * dhdy);
+}
 
 function biomeTintAt(fx: number, fy: number): THREE.Color {
   const moisture = fbm2(fx * 0.035 + 300, fy * 0.035 + 150, 3); // -1..1
@@ -299,6 +333,8 @@ function biomeTintAt(fx: number, fy: number): THREE.Color {
   // they read as occasional worn spots rather than a third uniform band.
   const dirtFactor = THREE.MathUtils.smoothstep(dirtiness, 0.55, 0.85);
   if (dirtFactor > 0) color.lerp(DIRT_TINT, dirtFactor * 0.6);
+  const rockFactor = THREE.MathUtils.smoothstep(slopeAt(fx, fy), 0.12, 0.3);
+  if (rockFactor > 0) color.lerp(ROCK_TINT, rockFactor * 0.75);
   return color;
 }
 
@@ -356,6 +392,19 @@ function createGroundGeometry(): THREE.PlaneGeometry {
     // Warp the UV lookup by a smooth, low-frequency offset so the
     // texture's repeat grid bends rather than lining up into visible
     // straight tile seams when viewed from afar.
+    //
+    // (A per-repeat-cell rotation/mirror "texture bombing" scheme was
+    // tried here instead — genuinely eliminates the periodic look in
+    // theory — but baking independently-transformed UVs onto this
+    // mesh's actual vertices (only ~1.5-2x denser than the texture's own
+    // repeat-cell size) meant adjacent vertices frequently landed in
+    // different cells, so triangles straddling a cell boundary
+    // interpolated between two unrelated UV regions instead of a
+    // rotated copy of the same cell — visible as diagonal glitch seams
+    // across the ground, confirmed via direct visual QA. True texture
+    // bombing needs either a per-pixel fragment-shader implementation or
+    // much denser geometry to do safely; reverted to this cheaper,
+    // seam-free smooth warp instead.
     const warpU = fbm2(fx * 0.03 + 555, fy * 0.03 + 222, 2) * 0.4;
     const warpV = fbm2(fx * 0.03 + 111, fy * 0.03 + 888, 2) * 0.4;
     uv.setXY(i, uv.getX(i) + warpU, uv.getY(i) + warpV);
@@ -958,21 +1007,29 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial): void {
     }
   };
 
-  // Large, low-frequency patches (dry yellow-green and shaded deep green)
-  // — these are the features that actually survive mipmapping at a
-  // distance and read as ground texture rather than a solid fill. Each
-  // patch is also stamped onto the height canvas (raised for dry/tall
-  // clumps, sunken for shaded hollows) so the normal map derived below
-  // gives the same patches real, sun-catching relief.
+  // Large, low-frequency patches — these are the features that actually
+  // survive mipmapping at a distance and read as ground texture rather
+  // than a solid fill. Four color variants now instead of two (dry
+  // yellow-green and shaded dark green only) — added a warm olive-brown
+  // (worn/autumnal grass) and a richer emerald (fresh growth) so the
+  // base texture itself reads as more varied ground cover even before
+  // the separate large-scale biome tint (see biomeTintAt) is applied on
+  // top. Each patch is also stamped onto the height canvas (raised for
+  // dry/tall clumps, sunken for shaded hollows) so the normal map
+  // derived below gives the same patches real, sun-catching relief.
+  const blotchPalette = [
+    { color: '150, 150, 70', bump: '210, 210, 210' }, // dry yellow-green
+    { color: '30, 55, 28', bump: '90, 90, 90' }, // shaded deep green
+    { color: '107, 84, 46', bump: '170, 160, 140' }, // warm olive-brown, worn grass
+    { color: '52, 110, 58', bump: '200, 205, 195' }, // richer emerald, fresh growth
+  ];
   for (let i = 0; i < 55; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
     const radius = 40 + Math.random() * 90;
-    const dry = Math.random() < 0.5;
-    const color = dry ? '150, 150, 70' : '30, 55, 28';
-    drawBlob(ctx, x, y, radius, color, 0.22 + Math.random() * 0.1);
-    const bump = dry ? '210, 210, 210' : '90, 90, 90';
-    drawBlob(heightCtx, x, y, radius * 0.85, bump, 0.35);
+    const variant = blotchPalette[Math.floor(Math.random() * blotchPalette.length)];
+    drawBlob(ctx, x, y, radius, variant.color, 0.22 + Math.random() * 0.1);
+    drawBlob(heightCtx, x, y, radius * 0.85, variant.bump, 0.35);
   }
 
   // Medium-scale mottling for mid-distance variation.
@@ -995,6 +1052,26 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial): void {
     const green = 90 + Math.floor(Math.random() * 60);
     ctx.fillStyle = `rgba(${40 + shade * 0.3}, ${green}, ${35 + shade * 0.3}, 0.5)`;
     ctx.fillRect(x, y, 1.5, 1.5);
+  }
+
+  // Sparse wildflower/clover flecks — small, bright, saturated dots
+  // (unlike everything else in this texture, which is soft-edged and
+  // desaturated) so they read as tiny points of visual interest catching
+  // the eye up close, like real scattered wildflowers in a meadow,
+  // without being dense/bright enough to disturb the overall color
+  // balance from a distance.
+  const flowerColors = ['255, 244, 214', '255, 250, 250', '221, 196, 255', '255, 214, 120'];
+  for (let i = 0; i < 90; i++) {
+    const cx = Math.random() * size;
+    const cy = Math.random() * size;
+    const clusterSize = 2 + Math.floor(Math.random() * 4);
+    const color = flowerColors[Math.floor(Math.random() * flowerColors.length)];
+    for (let j = 0; j < clusterSize; j++) {
+      const x = cx + (Math.random() - 0.5) * 14;
+      const y = cy + (Math.random() - 0.5) * 14;
+      ctx.fillStyle = `rgba(${color}, ${0.55 + Math.random() * 0.25})`;
+      ctx.fillRect(x, y, 2, 2);
+    }
   }
 
   const texture = new THREE.CanvasTexture(diffuseCanvas);
