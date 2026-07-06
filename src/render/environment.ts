@@ -1042,9 +1042,16 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
     { color: '52, 110, 58', bump: '200, 205, 195' }, // richer emerald, fresh growth
   ];
   for (let i = 0; i < 55; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const radius = 40 + Math.random() * 90;
+    // Kept well clear of the tile edge (margin >= max radius + padding)
+    // so every cell reads as plain background near its border — this is
+    // what lets the fragment-shader-side stochastic tiling below rotate
+    // or mirror each repeat-cell independently without any visible seam,
+    // since neighboring cells always meet background-to-background
+    // regardless of their individual orientation.
+    const margin = 100;
+    const x = margin + Math.random() * (size - margin * 2);
+    const y = margin + Math.random() * (size - margin * 2);
+    const radius = 30 + Math.random() * 60;
     const variant = blotchPalette[Math.floor(Math.random() * blotchPalette.length)];
     drawBlob(ctx, x, y, radius, variant.color, 0.22 + Math.random() * 0.1);
     drawBlob(heightCtx, x, y, radius * 0.85, variant.bump, 0.35);
@@ -1052,8 +1059,9 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
 
   // Medium-scale mottling for mid-distance variation.
   for (let i = 0; i < 200; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
+    const margin = 40;
+    const x = margin + Math.random() * (size - margin * 2);
+    const y = margin + Math.random() * (size - margin * 2);
     const radius = 10 + Math.random() * 22;
     const green = 70 + Math.random() * 80;
     const color = `${45 + green * 0.2}, ${green}, ${40 + green * 0.15}`;
@@ -1064,8 +1072,9 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
   // Fine speckle for close-up detail (diffuse only — too small to matter
   // for the normal map, and would just add noise).
   for (let i = 0; i < 4000; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
+    const margin = 20;
+    const x = margin + Math.random() * (size - margin * 2);
+    const y = margin + Math.random() * (size - margin * 2);
     const shade = 20 + Math.random() * 40;
     const green = 90 + Math.floor(Math.random() * 60);
     ctx.fillStyle = `rgba(${40 + shade * 0.3}, ${green}, ${35 + shade * 0.3}, 0.5)`;
@@ -1080,8 +1089,9 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
   // balance from a distance.
   const flowerColors = ['255, 244, 214', '255, 250, 250', '221, 196, 255', '255, 214, 120'];
   for (let i = 0; i < 90; i++) {
-    const cx = Math.random() * size;
-    const cy = Math.random() * size;
+    const margin = 30;
+    const cx = margin + Math.random() * (size - margin * 2);
+    const cy = margin + Math.random() * (size - margin * 2);
     const clusterSize = 2 + Math.floor(Math.random() * 4);
     const color = flowerColors[Math.floor(Math.random() * flowerColors.length)];
     for (let j = 0; j < clusterSize; j++) {
@@ -1134,6 +1144,78 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
   material.roughnessMap = roughnessTexture;
   material.roughness = 1;
   material.metalness = 0;
+
+  applyGroundTextureBombing(material);
+}
+
+/**
+ * Per-pixel "texture bombing": patches the compiled fragment shader so
+ * that each texture repeat-cell independently picks one of 8 dihedral
+ * transforms (4 rotations x optional mirror) of the SAME tile, keyed by
+ * a hash of that cell's integer coordinate. Doing this in the fragment
+ * shader (rather than baking a per-vertex UV transform, which was tried
+ * earlier and reverted — see the warp comment in createGroundGeometry)
+ * means every pixel independently samples the correct cell/orientation,
+ * so there's no seam artifact from triangles straddling a cell boundary
+ * on this mesh's comparatively coarse vertex grid.
+ *
+ * This only works cleanly because configureGroundTexture keeps all of
+ * its blotches/flecks within a margin of the tile edge, leaving a plain
+ * solid-color border — so any two adjacent cells always meet
+ * background-to-background at their shared edge regardless of which of
+ * the 8 orientations each one independently rolled, and the *only*
+ * variation between repeats is which orientation of the interior
+ * blob pattern shows, which reads as genuine non-repetition rather than
+ * a stamped copy-paste grid.
+ */
+function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
+  const helperGLSL = `
+    vec2 groundBombHash(vec2 p) {
+      p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+      return fract(sin(p) * 43758.5453123);
+    }
+    vec2 groundBombUV(vec2 uv) {
+      vec2 cell = floor(uv);
+      vec2 f = fract(uv) - 0.5;
+      float variant = floor(groundBombHash(cell).x * 8.0);
+      vec2 r;
+      if (variant < 1.0) r = f;
+      else if (variant < 2.0) r = vec2(-f.y, f.x);
+      else if (variant < 3.0) r = vec2(-f.x, -f.y);
+      else if (variant < 4.0) r = vec2(f.y, -f.x);
+      else if (variant < 5.0) r = vec2(-f.x, f.y);
+      else if (variant < 6.0) r = vec2(f.x, -f.y);
+      else if (variant < 7.0) r = vec2(f.y, f.x);
+      else r = vec2(-f.y, -f.x);
+      return r + 0.5;
+    }
+  `;
+
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = helperGLSL + shader.fragmentShader;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <map_fragment>',
+      `
+      #ifdef USE_MAP
+        vec4 sampledDiffuseColor = texture2D( map, groundBombUV( vMapUv ) );
+        #ifdef DECODE_VIDEO_TEXTURE
+          sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
+        #endif
+        diffuseColor *= sampledDiffuseColor;
+      #endif
+      `
+    );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <roughnessmap_fragment>',
+      `
+      float roughnessFactor = roughness;
+      #ifdef USE_ROUGHNESSMAP
+        vec4 texelRoughness = texture2D( roughnessMap, groundBombUV( vRoughnessMapUv ) );
+        roughnessFactor *= texelRoughness.g;
+      #endif
+      `
+    );
+  };
 }
 
 /** Converts a grayscale height canvas into a tangent-space normal map via a Sobel-style gradient. */
