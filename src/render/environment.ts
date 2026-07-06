@@ -1108,11 +1108,32 @@ function configureGroundTexture(material: THREE.MeshStandardMaterial, renderer: 
   normalTexture.repeat.copy(texture.repeat);
   normalTexture.anisotropy = maxAnisotropy;
 
-  // Reuse the same height canvas as a roughness map: raised dry clumps
-  // read a little glossier (fresh grass catching light), sunken hollows
-  // a little rougher (shadowed, matte dirt) — subtle, but breaks up the
-  // otherwise perfectly uniform specular response of a flat plane.
-  const roughnessTexture = new THREE.CanvasTexture(heightCanvas);
+  // Derive a roughness map from the same height canvas, but remapped
+  // into a narrow, high band (~0.8-0.95) instead of using the raw height
+  // values (~0.4-0.75) directly. The raw values made large areas of the
+  // ground read as mid-glossy (roughness ~0.5), which produced an
+  // obvious metal-like specular highlight when looking toward the sun.
+  // Real grass/dirt is almost fully matte, so keep the base roughness
+  // high and only use the height detail for a little subtle variation
+  // (raised dry clumps read a hair glossier, hollows a hair more matte)
+  // rather than driving the overall shininess of the ground.
+  const roughnessCanvas = document.createElement('canvas');
+  roughnessCanvas.width = size;
+  roughnessCanvas.height = size;
+  const roughnessCtx = roughnessCanvas.getContext('2d')!;
+  roughnessCtx.drawImage(heightCanvas, 0, 0);
+  const roughnessImageData = roughnessCtx.getImageData(0, 0, size, size);
+  const roughnessData = roughnessImageData.data;
+  for (let i = 0; i < roughnessData.length; i += 4) {
+    const heightSample = roughnessData[i] / 255;
+    const roughnessValue = 0.85 + (heightSample - 0.5) * 0.2;
+    const byte = Math.max(0, Math.min(255, Math.round(roughnessValue * 255)));
+    roughnessData[i] = byte;
+    roughnessData[i + 1] = byte;
+    roughnessData[i + 2] = byte;
+  }
+  roughnessCtx.putImageData(roughnessImageData, 0, 0);
+  const roughnessTexture = new THREE.CanvasTexture(roughnessCanvas);
   roughnessTexture.wrapS = THREE.RepeatWrapping;
   roughnessTexture.wrapT = THREE.RepeatWrapping;
   roughnessTexture.repeat.copy(texture.repeat);
