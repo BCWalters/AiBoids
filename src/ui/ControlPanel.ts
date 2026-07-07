@@ -1,4 +1,4 @@
-import { params, resetParams, type SimParams, type SimMode, type VisualStyle } from '../sim/params';
+import { params, resetParams, type SimParams, type SimMode, type VisualStyle, type GalleryCreature } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES, type Language } from '../i18n/language';
@@ -82,6 +82,17 @@ export class ControlPanel {
     this.unsubscribeLanguage();
   }
 
+  /**
+   * Public re-render, for callers outside the panel (main.ts) that
+   * change params in ways the panel needs to reflect immediately — e.g.
+   * entering/exiting the Model Gallery, which rewrites several
+   * population/mode/style params at once outside of any control the
+   * panel itself owns.
+   */
+  refresh(): void {
+    this.render();
+  }
+
   private render(): void {
     this.container.innerHTML = '';
 
@@ -89,12 +100,18 @@ export class ControlPanel {
 
     if (params.mode === '3d') {
       this.container.appendChild(this.buildVisualStyleToggle());
+      this.container.appendChild(this.buildSection(t('sectionModelGallery'), [this.buildGalleryDropdown()], false));
     }
 
+    // Population sliders are greyed out (not removed) while the Model
+    // Gallery has isolated a single creature — main.ts zeroes these
+    // params itself while active, so a live slider drag would otherwise
+    // silently fight the isolation until Gallery is exited.
+    const galleryActive = params.galleryCreature !== null;
     this.container.appendChild(
       this.buildSection(
         t('sectionPopulationSpeed'),
-        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec)), this.buildAlienInvasionButton()],
+        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec, galleryActive)), this.buildAlienInvasionButton()],
         true,
       ),
     );
@@ -234,6 +251,56 @@ export class ControlPanel {
       // Re-render so the dragon-predators toggle (nature-only) appears/
       // disappears immediately rather than only after some other change.
       this.render();
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
+  }
+
+  /**
+   * Model Gallery: isolates a single creature front-and-center (all
+   * other populations temporarily zeroed, sim frozen, camera framed on
+   * it), for inspecting/orbiting/screenshotting one model's geometry
+   * cleanly — reused across creature kinds so any future addition (e.g.
+   * dragons being iterated on in parallel) gets this for free. Picking
+   * "None" restores exactly the population/mode/style params that were
+   * active before entering (see main.ts's enterGallery/exitGallery).
+   */
+  private buildGalleryDropdown(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row';
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'control-label-row';
+    const label = document.createElement('label');
+    label.textContent = t('galleryLabel');
+    labelRow.appendChild(label);
+    wrapper.appendChild(labelRow);
+
+    const select = document.createElement('select');
+    select.id = 'param-gallery-creature';
+    const options: { value: GalleryCreature | 'none'; textKey: TranslationKey }[] = [
+      { value: 'none', textKey: 'galleryNone' },
+      { value: 'unicorn', textKey: 'galleryUnicorn' },
+      { value: 'dragon', textKey: 'galleryDragon' },
+      { value: 'hawk', textKey: 'galleryHawk' },
+      { value: 'parrot', textKey: 'galleryParrot' },
+      { value: 'goldfinch', textKey: 'galleryGoldfinch' },
+      { value: 'cardinal', textKey: 'galleryCardinal' },
+      { value: 'bluejay', textKey: 'galleryBluejay' },
+    ];
+    for (const opt of options) {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = t(opt.textKey);
+      if (opt.value === (params.galleryCreature ?? 'none')) option.selected = true;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      // main.ts's per-frame loop notices this change and does the actual
+      // snapshot/isolate (or restore) + camera framing work — this
+      // control only ever writes the one param.
+      params.galleryCreature = select.value === 'none' ? null : (select.value as GalleryCreature);
     });
 
     wrapper.appendChild(select);
