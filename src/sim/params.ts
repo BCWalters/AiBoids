@@ -91,7 +91,17 @@ export interface SimParams {
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
+
+  // Model Gallery: when set, isolates a single instance of the chosen
+  // creature kind front-and-center (all other populations zeroed, sim
+  // frozen so it holds a steady flying pose while wings/tail still
+  // animate) so it can be inspected/orbited/screenshotted cleanly. Also
+  // drivable via the `?galleryCreature=<kind>` URL param for automated
+  // screenshot tooling (see main.ts). null = normal simulation.
+  galleryCreature: GalleryCreature | null;
 }
+
+export type GalleryCreature = 'unicorn' | 'dragon' | 'hawk' | 'parrot' | 'goldfinch' | 'cardinal' | 'bluejay';
 
 export const defaultParams: SimParams = {
   mode: '3d',
@@ -138,6 +148,8 @@ export const defaultParams: SimParams = {
 
   running: true,
   showDebugOverlay: false,
+
+  galleryCreature: null,
 };
 
 /** Mutable shared params instance. Mutate fields directly; do not reassign. */

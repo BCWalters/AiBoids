@@ -3,7 +3,7 @@ import { Simulation } from './sim/Simulation';
 import { Renderer } from './render/Renderer';
 import { Renderer3D } from './render/Renderer3D';
 import { ControlPanel } from './ui/ControlPanel';
-import { params, type SimMode } from './sim/params';
+import { params, type SimMode, type SimParams, type GalleryCreature } from './sim/params';
 import { onLanguageChange } from './i18n/language';
 import { t } from './i18n/translations';
 
@@ -37,6 +37,161 @@ const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight ||
 
 let renderer2D: Renderer | null = null;
 let renderer3D: Renderer3D | null = null;
+
+/**
+ * Model Gallery: isolates a single creature (zeroing every other
+ * population), freezes it mid-flight at the world center with a fixed
+ * pose, and frames the 3D camera on it — makes it trivial to inspect,
+ * orbit (OrbitControls stays fully interactive), or screenshot a single
+ * creature's geometry without fighting flocking/wander motion or camera
+ * drift. Useful for comparing geometry against a reference image, or
+ * simply showing off a model. Reused across creature kinds (unicorns,
+ * dragons, hawks, boid species) rather than being unicorn-specific, so
+ * any future creature gets this for free.
+ *
+ * Driven by `params.galleryCreature` (see sim/params.ts), settable two
+ * ways:
+ *  - Interactively, via the "Model Gallery" dropdown in the control
+ *    panel (see ui/ControlPanel.ts) — pick a creature, inspect it, pick
+ *    "None" to return to the normal simulation.
+ *  - Via the `?galleryCreature=<kind>` URL param (optionally paired with
+ *    `?galleryDistance=<number>` to override the default camera
+ *    distance) — meant for scripted/automated screenshot tooling (e.g. a
+ *    short Playwright script) that needs a stable, repeatable framing
+ *    without clicking through the UI.
+ *
+ * Entering the gallery snapshots the current population/mode/style
+ * params so exiting (setting galleryCreature back to null) restores
+ * exactly what the user had running before.
+ */
+const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['unicorn', 'dragon', 'hawk']);
+const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['parrot', 'goldfinch', 'cardinal', 'bluejay']);
+
+function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number } | null {
+  const searchParams = new URLSearchParams(window.location.search);
+  const kind = searchParams.get('galleryCreature')?.toLowerCase() ?? null;
+  if (!kind || !(GALLERY_PREDATOR_KINDS.has(kind as GalleryCreature) || GALLERY_BOID_SPECIES.has(kind as GalleryCreature))) {
+    return null;
+  }
+  const distanceParam = Number(searchParams.get('galleryDistance'));
+  const distance = Number.isFinite(distanceParam) && distanceParam > 0 ? distanceParam : 220;
+  return { kind: kind as GalleryCreature, distance };
+}
+
+const galleryFromURL = readGalleryCreatureFromURL();
+// Only URL-driven entry auto-collapses the panel (clean shot for
+// automation) — the interactive dropdown leaves the panel exactly as
+// the user had it, since they need it open to use the dropdown itself.
+const galleryLaunchedFromURL = galleryFromURL !== null;
+let galleryDistance = galleryFromURL?.distance ?? 220;
+if (galleryFromURL) params.galleryCreature = galleryFromURL.kind;
+
+let previousGalleryCreature: GalleryCreature | null = null;
+let galleryPosed = false;
+let gallerySnapshot: Pick<
+  SimParams,
+  | 'mode'
+  | 'visualStyle'
+  | 'boidCount'
+  | 'parrotCount'
+  | 'goldfinchCount'
+  | 'cardinalCount'
+  | 'bluejayCount'
+  | 'predatorCount'
+  | 'unicornCount'
+  | 'dragonPredators'
+  | 'running'
+> | null = null;
+
+function enterGallery(kind: GalleryCreature): void {
+  gallerySnapshot = {
+    mode: params.mode,
+    visualStyle: params.visualStyle,
+    boidCount: params.boidCount,
+    parrotCount: params.parrotCount,
+    goldfinchCount: params.goldfinchCount,
+    cardinalCount: params.cardinalCount,
+    bluejayCount: params.bluejayCount,
+    predatorCount: params.predatorCount,
+    unicornCount: params.unicornCount,
+    dragonPredators: params.dragonPredators,
+    running: params.running,
+  };
+
+  params.mode = '3d';
+  params.visualStyle = 'nature';
+  params.boidCount = 0;
+  params.parrotCount = 0;
+  params.goldfinchCount = 0;
+  params.cardinalCount = 0;
+  params.bluejayCount = 0;
+  params.predatorCount = 0;
+  params.unicornCount = 0;
+  params.dragonPredators = false;
+
+  if (kind === 'unicorn') params.unicornCount = 1;
+  else if (kind === 'dragon') {
+    params.predatorCount = 1;
+    params.dragonPredators = true;
+  } else if (kind === 'hawk') params.predatorCount = 1;
+  else if (kind === 'parrot') params.parrotCount = 1;
+  else if (kind === 'goldfinch') params.goldfinchCount = 1;
+  else if (kind === 'cardinal') params.cardinalCount = 1;
+  else if (kind === 'bluejay') params.bluejayCount = 1;
+
+  galleryPosed = false;
+  applyMode(params.mode);
+  controlPanel.refresh();
+}
+
+function exitGallery(): void {
+  if (gallerySnapshot) Object.assign(params, gallerySnapshot);
+  gallerySnapshot = null;
+  galleryPosed = false;
+  applyMode(params.mode);
+  renderer3D?.resetCameraFraming(sim);
+  controlPanel.refresh();
+}
+
+/**
+ * Runs once per gallery visit, as soon as the isolated creature has
+ * actually spawned (syncPopulation runs synchronously inside
+ * sim.update, so this is typically ready by the very first frame after
+ * entering). Poses it at world center with a fixed, camera-friendly
+ * velocity (facing right/slightly up, for a 3/4 climbing-flight look),
+ * then freezes the whole sim (params.running = false) so the pose and
+ * camera framing hold steady. Wing/tail flap animation still plays
+ * (it's driven by elapsed time, not sim.update), so the creature doesn't
+ * look like a static prop. The camera stays fully orbit/zoom-able
+ * afterward via OrbitControls.
+ */
+function poseGalleryEntityIfReady(): void {
+  if (!params.galleryCreature || galleryPosed || !renderer3D) return;
+  const kind = params.galleryCreature;
+  const entity = GALLERY_PREDATOR_KINDS.has(kind) ? sim.predators[0] : sim.boids[0];
+  if (!entity) return;
+
+  const center = { x: sim.width / 2, y: sim.height / 2, z: params.worldDepth / 2 };
+  entity.position.x = center.x;
+  entity.position.y = center.y;
+  entity.position.z = center.z;
+
+  const speed = GALLERY_PREDATOR_KINDS.has(kind) ? params.predatorMaxSpeed : params.boidMaxSpeed;
+  entity.velocity.x = speed * 0.9;
+  entity.velocity.y = speed * 0.12;
+  entity.velocity.z = speed * 0.35;
+
+  params.running = false;
+  galleryPosed = true;
+
+  renderer3D.debugFrameCamera(center.x, center.y, center.z, galleryDistance);
+
+  // Exposed for an external screenshot/automation script to poll for
+  // readiness and to inspect/tweak the posed entity directly.
+  (window as unknown as { __debugEntity?: unknown; __debugPosed?: boolean; __debugRenderer?: unknown }).__debugEntity = entity;
+  (window as unknown as { __debugPosed?: boolean }).__debugPosed = true;
+  (window as unknown as { __debugRenderer?: unknown }).__debugRenderer = renderer3D;
+}
 
 // Once the user manually toggles the panel, their choice is respected on
 // future resizes — only before that do we keep auto-collapsing/expanding
@@ -104,6 +259,18 @@ function resizeCanvases(): void {
 const controlPanel = new ControlPanel(controlPanelBody, sim, applyMode);
 applyMode(params.mode);
 
+if (galleryLaunchedFromURL) {
+  // Collapsing the panel gives a clean, unobstructed shot and a wider
+  // canvas for the debugFrameCamera framing — done after applyMode so
+  // resizeCanvases (called by setPanelCollapsed) sees the final,
+  // gallery-mode canvas. userToggledPanel = true so the width-based
+  // auto-collapse/expand logic below never fights this deliberate
+  // choice. Only applies to the URL-driven entry point — the
+  // interactive dropdown leaves the panel exactly as the user had it.
+  userToggledPanel = true;
+  setPanelCollapsed(true);
+}
+
 window.addEventListener('resize', () => {
   applySmartPanelDefault();
   resizeCanvases();
@@ -115,6 +282,18 @@ function loop(now: number): void {
   const dt = Math.min((now - lastTime) / 1000, 1 / 20); // clamp dt to avoid big jumps on tab-away
   lastTime = now;
 
+  // Detect Model Gallery selection changes (from the control panel
+  // dropdown or the initial `?galleryCreature=` URL param) and
+  // snapshot/isolate or restore population params accordingly. Polled
+  // here rather than via a params change-event system (none exists for
+  // most of SimParams) since this is the one place already running
+  // every frame.
+  if (params.galleryCreature !== previousGalleryCreature) {
+    if (params.galleryCreature) enterGallery(params.galleryCreature);
+    else exitGallery();
+    previousGalleryCreature = params.galleryCreature;
+  }
+
   sim.update(dt);
   controlPanel.syncAlienInvasionButton();
   controlPanel.syncRespawnButton();
@@ -124,6 +303,13 @@ function loop(now: number): void {
   } else {
     renderer2D?.render(sim);
   }
+
+  // Posed/camera-framed *after* this frame's render() call — render()'s
+  // internal ensureScene does a one-time initial camera auto-frame the
+  // very first time it runs (guarded by a world-size key, not by frame
+  // count), which would otherwise clobber debugFrameCamera's framing if
+  // this ran first on the same frame render() first initializes things.
+  poseGalleryEntityIfReady();
 
   requestAnimationFrame(loop);
 }

@@ -570,6 +570,21 @@ export class Renderer3D {
     body.count = count;
     wingLeft.count = count;
     wingRight.count = count;
+    // InstancedMesh's default frustum culling tests the *mesh's own*
+    // (identity/near-origin) transform + geometry.boundingSphere against
+    // the view frustum — it has no idea individual instances are
+    // scattered all over the world via per-instance matrices. Since our
+    // instances can be anywhere in a large world box, that culling sphere
+    // essentially never lines up with where the entities actually are,
+    // so the whole population can wrongly vanish depending on camera
+    // angle/framing (most obvious with a tightly-framed camera, e.g. the
+    // Model Gallery, but the same wrong culling can affect the normal
+    // orbit camera too). Disable it — with population counts this small
+    // (at most a few hundred instances total), per-instance culling
+    // isn't worth the complexity/risk of getting it wrong again.
+    body.frustumCulled = false;
+    wingLeft.frustumCulled = false;
+    wingRight.frustumCulled = false;
     this.scene.add(body, wingLeft, wingRight);
 
     let tail: THREE.InstancedMesh | undefined;
@@ -584,6 +599,7 @@ export class Renderer3D {
       tailMaterial.needsUpdate = true;
       tail = new THREE.InstancedMesh(geometries.tail, tailMaterial, Math.max(count, 1));
       tail.count = count;
+      tail.frustumCulled = false;
       this.scene.add(tail);
     }
 
@@ -595,6 +611,7 @@ export class Renderer3D {
       const legsMaterial = bodyMaterial.clone();
       legs = new THREE.InstancedMesh(geometries.legs, legsMaterial, Math.max(count, 1));
       legs.count = count;
+      legs.frustumCulled = false;
       this.scene.add(legs);
     }
 
@@ -1254,6 +1271,50 @@ export class Renderer3D {
     this.composer.setSize(width, height);
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Model Gallery / debug-QA helper: point the camera at a fixed
+   * world-space position from a pleasant, fixed elevated 3/4 angle
+   * (roughly matching a typical reference-photo framing of a flying
+   * creature) and hold it there. Used by main.ts's Model Gallery feature
+   * (`params.galleryCreature`, also drivable via the `?galleryCreature=`
+   * URL param) which isolates a single creature, freezes the sim, and
+   * poses it at a known position — the combination gives a clean,
+   * well-framed view/screenshot for comparing a creature's geometry
+   * against a reference image, and for orbiting it with the mouse
+   * (OrbitControls stays enabled/interactive throughout).
+   *
+   * Safe to call any time: it has no effect on ensureScene's own camera
+   * auto-framing, which only runs once per distinct world size (not
+   * every frame), so a framing set here persists across subsequent
+   * render() calls as long as the world dimensions don't change. The
+   * user can still freely orbit/zoom from here via OrbitControls.
+   */
+  debugFrameCamera(x: number, y: number, z: number, distance: number): void {
+    const target = new THREE.Vector3(x, y, z);
+    this.camera.position.set(target.x + distance * 0.7, target.y + distance * 0.35, target.z + distance * 0.9);
+    this.camera.updateProjectionMatrix();
+    this.controls.target.copy(target);
+    this.controls.update();
+  }
+
+  /**
+   * Restores the default whole-world camera framing (same computation
+   * ensureScene applies the first time it sees a given world size) —
+   * used when exiting the Model Gallery to put the camera back where a
+   * normal, non-isolated simulation view expects it, since
+   * debugFrameCamera's close-up framing would otherwise persist
+   * (ensureScene only re-frames automatically when world dimensions
+   * change, which exiting the gallery doesn't do).
+   */
+  resetCameraFraming(sim: Simulation): void {
+    const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
+    this.camera.position.set(center.x + maxDim * 0.6, center.y + maxDim * 0.4, center.z + maxDim * 0.9);
+    this.camera.updateProjectionMatrix();
+    this.controls.target.copy(center);
+    this.controls.update();
   }
 
   render(sim: Simulation): void {
