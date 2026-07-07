@@ -6,6 +6,18 @@ import { boundarySteer, nearWallAxisCount, type WorldBounds } from './boundary';
 
 let nextId = 1;
 
+/**
+ * Which kind of predator this is. 'hawk' is the default chase-and-catch
+ * predator (its geometry is further swapped to a "dragon" look by the
+ * cosmetic params.dragonPredators toggle — that toggle never changes
+ * behavior, only rendering). 'unicorn' is a separate, independent
+ * population that chases boids the same way but never catches them (see
+ * Simulation.checkCatches, which skips unicorns entirely) and only
+ * triggers a much weaker flee response in boids (see Boid.update's flee
+ * loop) — a gentle, playful pursuit rather than a real threat.
+ */
+export type PredatorKind = 'hawk' | 'unicorn';
+
 // How long (seconds) a predator takes to glide to a full stop after
 // catching prey, and how long it then rests in place "digesting" before
 // resuming the hunt. Kept as module-level tuning constants rather than
@@ -14,8 +26,24 @@ let nextId = 1;
 export const DIGEST_GLIDE_DURATION = 0.6;
 export const DIGEST_WAIT_DURATION = 3.5;
 
+// Predators have no mutual-avoidance force of their own otherwise, unlike
+// boids (which separate from each other). Without this, several
+// predators can end up converging on and overlapping the exact same
+// point — most visibly when no boids are around to chase at all: every
+// predator's only remaining steering input in 3D is the constant,
+// always-on centerPullWeight seek toward the exact world-center point
+// (see the 3D branch below), which every predator independently steers
+// toward with no force pushing them apart once there, so they stack on
+// top of each other. This mirrors the boid separation rule closely
+// enough to reuse the same steering shape, just with its own fixed
+// radius/weight rather than a user-tunable param, since it's meant purely
+// as an anti-stacking floor, not a tunable behavior.
+const PREDATOR_MUTUAL_SEPARATION_RADIUS = 60;
+const PREDATOR_MUTUAL_SEPARATION_WEIGHT = 2.2;
+
 export class Predator {
   readonly id: number;
+  readonly kind: PredatorKind;
   position: Vec3;
   velocity: Vec3;
 
@@ -93,8 +121,9 @@ export class Predator {
    */
   private cornerStuckTime = 0;
 
-  constructor(position: Vec3, velocity: Vec3) {
+  constructor(position: Vec3, velocity: Vec3, kind: PredatorKind = 'hawk') {
     this.id = nextId++;
+    this.kind = kind;
     this.position = position;
     this.velocity = velocity;
   }
@@ -121,9 +150,11 @@ export class Predator {
    * Simple pursuit: steer toward the nearest visible boid. If none are
    * within perception range, steer toward the center of mass of visible
    * boids instead. If no boids are visible at all, keep drifting on the
-   * current heading. `bounds` is only used in 3D mode for wall steer-away.
+   * current heading (plus mutual separation from other predators — see
+   * PREDATOR_MUTUAL_SEPARATION_RADIUS). `bounds` is only used in 3D mode
+   * for wall steer-away.
    */
-  update(dt: number, boids: Boid[], bounds: WorldBounds): void {
+  update(dt: number, boids: Boid[], predators: Predator[], bounds: WorldBounds): void {
     if (this.digesting) {
       this.updateDigesting(dt, boids, bounds);
       return;
@@ -171,6 +202,26 @@ export class Predator {
       if (V.magnitude(this.velocity) >= p.predatorMaxSpeed * 0.9) {
         this.resuming = false;
       }
+    }
+
+    // Mutual predator separation — see PREDATOR_MUTUAL_SEPARATION_RADIUS's
+    // doc comment for why this exists. Applies regardless of mode/target,
+    // so predators piling onto the same chased boid (or, with none to
+    // chase, the same center-pull point) still push apart from each other.
+    let sepSum = V.create();
+    let sepCount = 0;
+    for (const other of predators) {
+      if (other === this) continue;
+      const d = V.distance(this.position, other.position);
+      if (d < PREDATOR_MUTUAL_SEPARATION_RADIUS && d > 1e-6) {
+        sepSum = V.add(sepSum, V.scale(V.sub(this.position, other.position), 1 / d));
+        sepCount++;
+      }
+    }
+    if (sepCount > 0) {
+      const desired = V.setMagnitude(V.scale(sepSum, 1 / sepCount), p.predatorMaxSpeed);
+      const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
+      acceleration = V.add(acceleration, V.scale(steer, PREDATOR_MUTUAL_SEPARATION_WEIGHT));
     }
 
     // Smooth hunt intensity toward how close the nearest prey is (0 if
