@@ -65,6 +65,16 @@ export class ControlPanel {
   private alienButton: HTMLButtonElement | null = null;
   private respawnButton: HTMLButtonElement | null = null;
   private unsubscribeLanguage: () => void;
+  // Tracks each collapsible section's open/closed state across re-renders
+  // (keyed by a stable section id, not the translated title — titles
+  // change with language). Without this, buildSection's `defaultOpen`
+  // was re-applied on every single render() call, so any change that
+  // triggers a full re-render (e.g. selecting a Model Gallery creature,
+  // which calls refresh() from main.ts) would snap every section back to
+  // its default state, closing sections the user had deliberately opened
+  // — most noticeably the Model Gallery section itself right after
+  // picking a creature from its own dropdown.
+  private sectionOpenState = new Map<string, boolean>();
 
   constructor(container: HTMLElement, sim: Simulation, onModeChange: (mode: SimMode) => void) {
     this.container = container;
@@ -100,7 +110,7 @@ export class ControlPanel {
 
     if (params.mode === '3d') {
       this.container.appendChild(this.buildVisualStyleToggle());
-      this.container.appendChild(this.buildSection(t('sectionModelGallery'), [this.buildGalleryDropdown()], false));
+      this.container.appendChild(this.buildSection('modelGallery', t('sectionModelGallery'), [this.buildGalleryDropdown()], false));
     }
 
     // Population sliders are greyed out (not removed) while the Model
@@ -110,6 +120,7 @@ export class ControlPanel {
     const galleryActive = params.galleryCreature !== null;
     this.container.appendChild(
       this.buildSection(
+        'populationSpeed',
         t('sectionPopulationSpeed'),
         [...populationSpeedSpecs.map((spec) => this.buildSlider(spec, galleryActive)), this.buildAlienInvasionButton()],
         true,
@@ -128,10 +139,11 @@ export class ControlPanel {
       visualSettingsChildren.push(this.buildDragonPredatorsToggle());
       visualSettingsChildren.push(this.buildFogToggle());
     }
-    this.container.appendChild(this.buildSection(t('sectionVisualSettings'), visualSettingsChildren, false));
+    this.container.appendChild(this.buildSection('visualSettings', t('sectionVisualSettings'), visualSettingsChildren, false));
 
     this.container.appendChild(
       this.buildSection(
+        'behavior',
         t('sectionBehavior'),
         [this.buildPredatorCatchToggle(), ...behaviorSpecs.map((spec) => this.buildSlider(spec))],
         false,
@@ -141,6 +153,7 @@ export class ControlPanel {
     if (params.mode === '3d') {
       this.container.appendChild(
         this.buildSection(
+          '3dSettings',
           t('section3DSettings'),
           threeDSliderSpecs.map((spec) => this.buildSlider(spec)),
           false,
@@ -148,6 +161,7 @@ export class ControlPanel {
       );
       this.container.appendChild(
         this.buildSection(
+          'boundaryBehavior',
           t('sectionBoundaryBehavior'),
           boundarySliderSpecs.map((spec) => this.buildSlider(spec)),
           false,
@@ -452,10 +466,11 @@ export class ControlPanel {
   }
 
   /** A native <details>/<summary> collapsible group — no extra JS state, resets to defaultOpen on full re-render. */
-  private buildSection(title: string, children: HTMLElement[], defaultOpen: boolean): HTMLElement {
+  private buildSection(sectionKey: string, title: string, children: HTMLElement[], defaultOpen: boolean): HTMLElement {
     const details = document.createElement('details');
     details.className = 'control-section';
-    details.open = defaultOpen;
+    details.open = this.sectionOpenState.get(sectionKey) ?? defaultOpen;
+    details.addEventListener('toggle', () => this.sectionOpenState.set(sectionKey, details.open));
 
     const summary = document.createElement('summary');
     summary.textContent = title;

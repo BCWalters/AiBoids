@@ -11,6 +11,7 @@ import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
+import { createParrotGeometries } from './geometry/parrotGeometry';
 import { createDragonGeometries } from './geometry/dragonGeometry';
 import { createUnicornGeometries } from './geometry/unicornGeometry';
 import type { CreatureGeometries } from './geometry/creatureGeometry';
@@ -32,14 +33,6 @@ const ARCADE_BOID_PANIC = new THREE.Color(0xffe066);
 const ARCADE_PREDATOR_BASE = new THREE.Color(0xb31f1f);
 const ARCADE_PREDATOR_HUNT = new THREE.Color(0xffffff);
 
-// Parrots get their own vivid magenta/pink emissive (distinct from the
-// sparrow-type boid's cyan glow) so arcade style's bloom-dominated look
-// still reads as two visually distinct flocks, not just two identically-
-// glowing clusters — the per-instance diffuse tint alone isn't enough to
-// tell them apart once bloom is added on top.
-const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
-const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
-
 // --- "Nature" style: matte, earth-toned plumage. No emissive glow —
 // contrast comes from the sun-lit sky/ground environment instead.
 const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrasts against green ground
@@ -56,9 +49,27 @@ const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked 
 // specifically so arcade style can give them a distinct emissive color too
 // (emissive is a material-level property — shared instances would force
 // identical bloom-glow color regardless of per-instance diffuse tint).
-const PARROT_BODY_BASE = new THREE.Color(0x1f9e78); // emerald-teal chest/back
-const PARROT_WING_BASE = new THREE.Color(0xa632a0); // magenta-purple wings
-const PARROT_TAIL_BASE = new THREE.Color(0x2f6fdc); // cobalt-blue tail accent
+//
+// Rather than one flat parrot palette, pick from a handful of real-world
+// macaw/parrot color patterns per-individual (see PARROT_COLOR_PATTERNS'
+// use in getParrotColors below) so the flock reads as visually diverse
+// rather than a uniform species, the way small songbirds do (goldfinch/
+// cardinal/bluejay are each their own distinct color already; a single-
+// hue parrot stood out as flatter/less varied than those by comparison).
+const PARROT_COLOR_PATTERNS: SpeciesColorSet[] = [
+  // Blue-and-gold macaw
+  { body: new THREE.Color(0xf0b429), wing: new THREE.Color(0x2f6fdc), tail: new THREE.Color(0x1c4fb0) },
+  // Scarlet macaw
+  { body: new THREE.Color(0xd8202a), wing: new THREE.Color(0x1f6fd8), tail: new THREE.Color(0xf0b429) },
+  // Green-wing (military) macaw
+  { body: new THREE.Color(0xc0242f), wing: new THREE.Color(0x1f9e58), tail: new THREE.Color(0x2f6fdc) },
+  // Sun conure
+  { body: new THREE.Color(0xf5d327), wing: new THREE.Color(0xe8791a), tail: new THREE.Color(0xd8202a) },
+  // Hyacinth macaw
+  { body: new THREE.Color(0x2f4fa0), wing: new THREE.Color(0x1c3878), tail: new THREE.Color(0xf0b429) },
+];
+const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
+const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
 
 // --- Three more songbird species, each with distinct multi-part plumage
 // (body/wing/tail) and their own arcade emissive/base color so every
@@ -299,6 +310,20 @@ interface SpeciesColorSet {
 const NATURE_UNICORN_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_WING, tail: NATURE_UNICORN_BODY };
 const ARCADE_UNICORN_COLORS: SpeciesColorSet = { body: ARCADE_UNICORN_BASE, wing: ARCADE_UNICORN_BASE, tail: ARCADE_UNICORN_BASE };
 
+/**
+ * Deterministically picks one of PARROT_COLOR_PATTERNS per individual
+ * (stable across frames since it's keyed only on the entity's own id, not
+ * time) so the parrot flock reads as several distinct real-world macaw/
+ * conure color patterns rather than one uniform hue jittered slightly —
+ * updateInstances layers its own small per-individual jitter on top of
+ * whichever pattern this returns, for the same "no two look identical"
+ * variety the other species get.
+ */
+function getParrotColors(entity: Boid | Predator): SpeciesColorSet {
+  const index = Math.floor(idHash(entity.id, 42) * PARROT_COLOR_PATTERNS.length) % PARROT_COLOR_PATTERNS.length;
+  return PARROT_COLOR_PATTERNS[index];
+}
+
 interface BirdInstanceSet {
   body: THREE.InstancedMesh;
   wingLeft: THREE.InstancedMesh;
@@ -309,9 +334,11 @@ interface BirdInstanceSet {
 
 /** Per-species rendering config: which population param drives its count,
  * which colors/geometry it uses, and whether it gets the sparrow's
- * shrunken geometry or the "reference" (parrot) size. Non-'sparrow'
- * multi-colored species reuse the parrot's getSpeciesColors mechanism for
- * distinct body/wing/tail plumage instead of one flat tint. */
+ * shrunken geometry, the parrot's dedicated macaw-style geometry, or the
+ * shared "reference" small-bird geometry (goldfinch/cardinal/bluejay).
+ * Non-'sparrow' multi-colored species use either a static `colors` set or
+ * a per-entity `getColors` function (parrot only, for its multi-pattern
+ * flock) for distinct body/wing/tail plumage instead of one flat tint. */
 interface BoidSpeciesConfig {
   species: BoidSpecies;
   countParam: 'boidCount' | 'parrotCount' | 'goldfinchCount' | 'cardinalCount' | 'bluejayCount';
@@ -319,7 +346,9 @@ interface BoidSpeciesConfig {
   arcadeBase: THREE.Color;
   natureBase: THREE.Color;
   colors?: SpeciesColorSet;
+  getColors?: (entity: Boid | Predator) => SpeciesColorSet;
   useSmallGeometry: boolean;
+  useParrotGeometry?: boolean;
 }
 
 const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
@@ -336,9 +365,10 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     countParam: 'parrotCount',
     arcadeEmissive: ARCADE_PARROT_EMISSIVE,
     arcadeBase: ARCADE_PARROT_BASE,
-    natureBase: PARROT_BODY_BASE,
-    colors: { body: PARROT_BODY_BASE, wing: PARROT_WING_BASE, tail: PARROT_TAIL_BASE },
+    natureBase: PARROT_COLOR_PATTERNS[0].body,
+    getColors: getParrotColors,
     useSmallGeometry: false,
+    useParrotGeometry: true,
   },
   {
     species: 'goldfinch',
@@ -388,9 +418,11 @@ export class Renderer3D {
 
   private arcadeBoidGeometries: CreatureGeometries;
   private arcadeSparrowGeometries: CreatureGeometries;
+  private arcadeParrotGeometries: CreatureGeometries;
   private arcadePredatorGeometries: CreatureGeometries;
   private natureBoidGeometries: CreatureGeometries;
   private natureSparrowGeometries: CreatureGeometries;
+  private natureParrotGeometries: CreatureGeometries;
   private naturePredatorGeometries: CreatureGeometries;
   private dragonPredatorGeometries: CreatureGeometries;
   private unicornPredatorGeometries: CreatureGeometries;
@@ -504,6 +536,7 @@ export class Renderer3D {
 
     this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
     this.arcadeSparrowGeometries = createBirdGeometries(BOID_LENGTH * SPARROW_SIZE_SCALE, BOID_WIDTH * SPARROW_SIZE_SCALE);
+    this.arcadeParrotGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
     this.arcadePredatorGeometries = createBirdGeometries(PREDATOR_LENGTH, PREDATOR_WIDTH);
     // The lathed "nature" body/wings have noticeably less surface area per
     // unit width/length than the arcade octahedron+flat-triangle shapes, so
@@ -513,6 +546,11 @@ export class Renderer3D {
       BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
       BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
     );
+    // Parrot's dedicated macaw-style geometry (curved beak, rounder body,
+    // long tail streamers) — only used in nature style; arcade style still
+    // shares the simple flat-diamond silhouette with every other species
+    // (arcade's whole aesthetic is bloom-glow blobs, not anatomical detail).
+    this.natureParrotGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
     this.naturePredatorGeometries = createRealisticBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
     this.unicornPredatorGeometries = createUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
@@ -674,9 +712,10 @@ export class Renderer3D {
     // Each species gets its own InstancedMesh set — separate materials so
     // arcade style can give each a distinct emissive bloom color (emissive
     // is a material-level property; shared instances would force identical
-    // bloom-glow color regardless of per-instance diffuse tint) — and
-    // sparrows use the shrunken geometry while everything else uses the
-    // "reference" (parrot) size.
+    // bloom-glow color regardless of per-instance diffuse tint). Sparrows
+    // use the shrunken geometry, parrots use their own dedicated macaw-
+    // style geometry (nature style only), and everything else uses the
+    // shared "reference" small-bird size/shape.
     for (const config of BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
       const key = `${count}:${style}`;
@@ -686,10 +725,18 @@ export class Renderer3D {
           ? style === 'nature'
             ? this.natureSparrowGeometries
             : this.arcadeSparrowGeometries
-          : style === 'nature'
-            ? this.natureBoidGeometries
-            : this.arcadeBoidGeometries;
-        this.speciesInstances.set(config.species, this.buildInstanceSet(geometries, style, config.arcadeEmissive, count));
+          : config.useParrotGeometry
+            ? style === 'nature'
+              ? this.natureParrotGeometries
+              : this.arcadeParrotGeometries
+            : style === 'nature'
+              ? this.natureBoidGeometries
+              : this.arcadeBoidGeometries;
+        const bodyVertexColors = !!config.useParrotGeometry && style === 'nature';
+        this.speciesInstances.set(
+          config.species,
+          this.buildInstanceSet(geometries, style, config.arcadeEmissive, count, false, false, bodyVertexColors),
+        );
         this.speciesInstanceKeys.set(config.species, key);
       }
     }
@@ -1379,8 +1426,8 @@ export class Renderer3D {
           FLAP_IDLE_AMPLITUDE,
           FLAP_SPEED_AMPLITUDE,
           (entity) => (entity as Boid).scale,
-          config.colors ? true : isNature,
-          config.colors ? () => config.colors! : undefined,
+          config.colors || config.getColors ? true : isNature,
+          config.getColors ?? (config.colors ? () => config.colors! : undefined),
         );
       }
     }
@@ -1453,9 +1500,11 @@ export class Renderer3D {
     for (const geometries of [
       this.arcadeBoidGeometries,
       this.arcadeSparrowGeometries,
+      this.arcadeParrotGeometries,
       this.arcadePredatorGeometries,
       this.natureBoidGeometries,
       this.natureSparrowGeometries,
+      this.natureParrotGeometries,
       this.naturePredatorGeometries,
       this.dragonPredatorGeometries,
       this.unicornPredatorGeometries,
