@@ -1188,10 +1188,11 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
   // A different, smaller cell frequency than GROUND_TEXTURE_REPEAT for
   // the procedural blotch field, so its pattern doesn't line up with
   // (and reinforce the visibility of) the fine canvas texture's own
-  // repeat grid. Halved from 23 to 11.5 per user preference for larger
-  // blotches — halving the cell frequency doubles every blob's size
-  // since radius is expressed as a fraction of cell size.
-  const blotchCellsPerRepeat = 11.5 / GROUND_TEXTURE_REPEAT;
+  // repeat grid. Halved again from 11.5 to 5.75 per user preference for
+  // the original blotches to be twice as big again — halving the cell
+  // frequency doubles every blob's size since radius is expressed as a
+  // fraction of cell size.
+  const blotchCellsPerRepeat = 5.75 / GROUND_TEXTURE_REPEAT;
   // A second, much coarser field for a handful of very large regional
   // patches (see groundBigBlotchField) — ~3.2 cells across the entire
   // ground plane (not the fine texture's repeat grid), so roughly
@@ -1242,13 +1243,14 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
       for (int dx = -1; dx <= 1; dx++) {
         for (int dy = -1; dy <= 1; dy++) {
           vec2 neighborCell = baseCell + vec2(float(dx), float(dy));
-          // Roughly a third of cells contribute no blob at all (and
-          // radius varies over a wide range) so blobs cluster and thin
-          // out irregularly instead of reading as an even polka-dot
-          // grid — real terrain patches vary in both size and density,
-          // not just position.
+          // Only about 12% of cells are skipped now (was ~a third) per
+          // user preference for even more splotches; radius still
+          // varies over a wide range so blobs cluster and thin out
+          // irregularly instead of reading as an even polka-dot grid —
+          // real terrain patches vary in both size and density, not
+          // just position.
           float presence = groundBombHash(neighborCell + vec2(58.3, 2.6)).x;
-          if (presence < 0.32) continue;
+          if (presence < 0.12) continue;
           vec2 jitter = groundBombHash(neighborCell + vec2(3.7, 9.1));
           vec2 center = neighborCell + jitter;
           float radiusPick = groundBombHash(neighborCell + vec2(21.4, 6.8)).x;
