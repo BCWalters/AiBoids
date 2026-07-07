@@ -18,6 +18,10 @@ export interface NatureEnvironment {
   /** A much larger sea extending toward the horizon, visible through a
    * deliberate gap/bay in the mountain ring (see createMountainRing). */
   ocean: THREE.Mesh;
+  /** A narrow tan sand strip tracking the ocean's shoreline (see
+   * createBeachStrip), sharing the exact same coastline jitter as the
+   * ocean mesh so the two edges align precisely. */
+  beach: THREE.Mesh;
   /** Small clusters of low-poly boulders scattered past the lakes'
    * shorelines and along the outer hillside (see ROCK_CLUSTER_DEFS),
    * each height-matched to the terrain beneath it like the lakes. */
@@ -478,7 +482,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const mountains = createMountainRing(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
   const skyEnvMap = createSkyEnvMap(renderer, skyUniforms);
   const lakes = LAKE_DEFS.map(() => createWaterPatch(skyEnvMap));
-  const ocean = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
+  const { ocean, beach } = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
   const rocks = ROCK_CLUSTER_DEFS.map(() => createRockCluster());
   const forestPatches = FOREST_PATCH_DEFS.map(() => createForestPatch());
 
@@ -488,12 +492,13 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
   let fogEnabled = true;
 
-  scene.add(sky, ground, mountains, ...lakes, ocean, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
+  scene.add(sky, ground, mountains, ...lakes, ocean, beach, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
   sky.visible = false;
   ground.visible = false;
   mountains.visible = false;
   lakes.forEach((lake) => { lake.visible = false; });
   ocean.visible = false;
+  beach.visible = false;
   rocks.forEach((rock) => { rock.visible = false; });
   forestPatches.forEach((patch) => { patch.visible = false; });
   sunLight.visible = false;
@@ -506,6 +511,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
     mountains,
     lakes,
     ocean,
+    beach,
     rocks,
     forestPatches,
     sunLight,
@@ -522,6 +528,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       mountains.visible = visible;
       lakes.forEach((lake) => { lake.visible = visible; });
       ocean.visible = visible;
+      beach.visible = visible;
       rocks.forEach((rock) => { rock.visible = visible; });
       forestPatches.forEach((patch) => { patch.visible = visible; });
       sunHalo.visible = visible;
@@ -538,7 +545,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       scene.fog = enabled && sky.visible ? fog : null;
     },
     dispose() {
-      scene.remove(sky, ground, mountains, ...lakes, ocean, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
+      scene.remove(sky, ground, mountains, ...lakes, ocean, beach, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -557,6 +564,8 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       skyEnvMap.dispose();
       ocean.geometry.dispose();
       (ocean.material as THREE.Material).dispose();
+      beach.geometry.dispose();
+      (beach.material as THREE.Material).dispose();
       for (const rock of rocks) {
         rock.geometry.dispose();
         (rock.material as THREE.Material).dispose();
@@ -941,7 +950,7 @@ function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh 
  * coast, darkening with distance) sells the sense of scale/depth far
  * more cheaply than any actual wave geometry or shader would.
  */
-function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
+function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocean: THREE.Mesh; beach: THREE.Mesh } {
   // Slightly wider than the mountain notch itself so the ocean is fully
   // visible through the gap with no sliver of grass peeking through at
   // the transition edges. Segment counts raised well above the original
@@ -983,7 +992,10 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
   // Smoothed per-angular-vertex radius jitter, applied consistently
   // across every radial band (rather than independently per band) so
   // the whole coastline undulates coherently outward like a real shore
-  // instead of each concentric ring wiggling on its own.
+  // instead of each concentric ring wiggling on its own. The beach strip
+  // (see below) reuses this exact same jitter array so its own shoreline
+  // edge lines up perfectly with the ocean's — two independently jittered
+  // coastlines would drift apart and either overlap or leave gaps.
   const jitterCount = angularSegments + 1;
   const rawJitter: number[] = [];
   for (let i = 0; i < jitterCount; i++) rawJitter.push((Math.random() - 0.5) * 2);
@@ -1052,6 +1064,99 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): THREE.Mesh {
     roughness: 1,
     metalness: 0,
     side: THREE.DoubleSide,
+  });
+  const ocean = new THREE.Mesh(geometry, material);
+  const beach = createBeachStrip(gapAngle, angleSpan, angularSegments, jitter, innerRadius);
+  return { ocean, beach };
+}
+
+/**
+ * A narrow strip of tan sand tracking the ocean's shoreline, sitting
+ * just outside the water's inner edge (innerRadius) on the land side.
+ * Reuses the exact same per-angle jitter array as the ocean wedge (see
+ * createOceanPatch) so the beach's water-side edge follows the ocean's
+ * actual undulating shore precisely instead of drifting apart from it.
+ */
+function createBeachStrip(
+  gapAngle: number,
+  angleSpan: number,
+  angularSegments: number,
+  jitter: number[],
+  shoreRadius: number,
+): THREE.Mesh {
+  // Deliberately narrow relative to the ocean's own scale (shoreRadius
+  // ~5.1) — a "beach line" rather than a wide coastal plain.
+  const beachWidth = 0.32;
+  const innerRadius = shoreRadius - beachWidth;
+  const outerRadius = shoreRadius;
+
+  // Wet sand (darker, closer to the water) grading to dry sand (lighter,
+  // closer to the grass) so the strip itself reads as a gradient rather
+  // than one flat tan slab.
+  const wetSandColor = new THREE.Color(0xc2a366);
+  const drySandColor = new THREE.Color(0xe0c896);
+
+  // A second, independently-smoothed jitter for the inner (grass-side)
+  // edge — same neighbor-averaging technique as the ocean's own jitter,
+  // rather than raw uncorrelated per-vertex noise, which produced a
+  // harsh sawtooth edge (adjacent vertices jumping independently in and
+  // out) instead of a gently uneven, natural-looking grass/sand border.
+  const jitterCount = angularSegments + 1;
+  const rawInnerJitter: number[] = [];
+  for (let i = 0; i < jitterCount; i++) rawInnerJitter.push((Math.random() - 0.5) * 2);
+  const innerJitter = rawInnerJitter.map((v, i) => {
+    const prev = rawInnerJitter[Math.max(0, i - 1)];
+    const next = rawInnerJitter[Math.min(jitterCount - 1, i + 1)];
+    return (prev + v * 2 + next) / 4;
+  });
+
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const pushTri = (a: number[], b: number[], c: number[], ca: THREE.Color, cb: THREE.Color, cc: THREE.Color) => {
+    positions.push(...a, ...b, ...c);
+    colors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
+  };
+
+  for (let seg = 0; seg < angularSegments; seg++) {
+    const a0 = gapAngle - angleSpan + (2 * angleSpan * seg) / angularSegments;
+    const a1 = gapAngle - angleSpan + (2 * angleSpan * (seg + 1)) / angularSegments;
+    const j0 = 1 + jitter[seg] * 0.05;
+    const j1 = 1 + jitter[seg + 1] * 0.05;
+    // Gentle, smoothed extra width jitter on the grass-side edge only
+    // (the water-side edge already tracks the ocean's own jitter
+    // exactly) so the beach's width varies a little along the shore
+    // without a jagged, sawtooth boundary.
+    const wobble0 = 1 + innerJitter[seg] * 0.12;
+    const wobble1 = 1 + innerJitter[seg + 1] * 0.12;
+    const rOuter0 = outerRadius * j0;
+    const rOuter1 = outerRadius * j1;
+    const rInner0 = innerRadius * j0 * wobble0;
+    const rInner1 = innerRadius * j1 * wobble1;
+    const pInner0 = [Math.cos(a0) * rInner0, 0, Math.sin(a0) * rInner0];
+    const pInner1 = [Math.cos(a1) * rInner1, 0, Math.sin(a1) * rInner1];
+    const pOuter0 = [Math.cos(a0) * rOuter0, 0, Math.sin(a0) * rOuter0];
+    const pOuter1 = [Math.cos(a1) * rOuter1, 0, Math.sin(a1) * rOuter1];
+    pushTri(pInner0, pOuter0, pOuter1, drySandColor, wetSandColor, wetSandColor);
+    pushTri(pInner0, pOuter1, pInner1, drySandColor, wetSandColor, drySandColor);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 1,
+    metalness: 0,
+    side: THREE.DoubleSide,
+    // Nudge the beach just toward the camera relative to the ground
+    // beneath it — same z-fighting safety margin used for the forest
+    // patches — since it sits at nearly the same height as the ground
+    // plane right where they meet.
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
   return new THREE.Mesh(geometry, material);
 }
@@ -1359,6 +1464,14 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   const oceanLift = Math.max(1, flockScale * 0.015);
   env.ocean.position.set(center.x, oceanLift, center.z);
   env.ocean.scale.setScalar(flockScale);
+
+  // Beach sits right at the same fixed lift as the ocean, matched to the
+  // same center/scale so its shared-jitter shoreline (see
+  // createBeachStrip) lines up with the ocean's edge exactly. A hair
+  // higher than the ocean lift so the sand doesn't get submerged under
+  // the water plane at their shared boundary.
+  env.beach.position.set(center.x, oceanLift * 1.2, center.z);
+  env.beach.scale.setScalar(flockScale);
 
   // Rock clusters follow the exact same terrain-following placement as
   // the lakes (sample terrainHeightAt at the cluster's own position
