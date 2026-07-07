@@ -18,6 +18,10 @@ export interface NatureEnvironment {
   /** A much larger sea extending toward the horizon, visible through a
    * deliberate gap/bay in the mountain ring (see createMountainRing). */
   ocean: THREE.Mesh;
+  /** Small clusters of low-poly boulders scattered past the lakes'
+   * shorelines and along the outer hillside (see ROCK_CLUSTER_DEFS),
+   * each height-matched to the terrain beneath it like the lakes. */
+  rocks: THREE.Mesh[];
   sunLight: THREE.DirectionalLight;
   sunSprite: THREE.Sprite;
   /** Larger, softer glow sprite rendered behind the sun disc for a warm corona effect. */
@@ -53,6 +57,141 @@ const LAKE_DEFS = [
   { forwardX: -0.87, forwardZ: 0.5, distanceScale: 2.3, sizeScale: 0.4 },
   { forwardX: 0.77, forwardZ: -0.64, distanceScale: 2.7, sizeScale: 0.35 },
 ];
+
+interface RockClusterDef {
+  forwardX: number;
+  forwardZ: number;
+  distanceScale: number;
+  sizeScale: number;
+}
+
+// Angle-based helper (degrees, converted once at module load) — easier
+// to reason about compass placement than raw forwardX/forwardZ pairs,
+// while still producing the same shape of def the placement code below
+// already expects for lakes.
+function rockDef(angleDeg: number, distanceScale: number, sizeScale: number): RockClusterDef {
+  const rad = THREE.MathUtils.degToRad(angleDeg);
+  return { forwardX: Math.cos(rad), forwardZ: Math.sin(rad), distanceScale, sizeScale };
+}
+
+// Small boulder clusters scattered in two bands: just past each lake's
+// far shoreline (real shorelines often expose rock right where the bank
+// rises) and along the outer hillside approaching the mountain ring
+// (real slopes shed scree/boulders as they steepen). Angles are chosen
+// to stay well clear of the ocean's bay opening (~10-105°, see
+// OCEAN_GAP_ANGLE/OCEAN_GAP_HALF_WIDTH) so nothing appears to float on
+// open water, and distanceScale keeps every cluster outside the play
+// area (>= ~2) so they never clutter the flock's own airspace.
+const ROCK_CLUSTER_DEFS: RockClusterDef[] = [
+  // Just past each lake's far shoreline, offset from the lake's own
+  // compass angle so the rocks read as "past the water's edge" rather
+  // than sitting on top of it.
+  rockDef(216, 2.15, 0.3),
+  rockDef(256, 2.15, 0.225),
+  rockDef(130, 2.65, 0.25),
+  rockDef(170, 2.65, 0.2),
+  rockDef(300, 3.05, 0.225),
+  rockDef(340, 3.05, 0.325),
+  // Scattered along the outer hillside approaching the mountain ring.
+  rockDef(130, 3.9, 0.35),
+  rockDef(160, 4.1, 0.25),
+  rockDef(195, 3.8, 0.375),
+  rockDef(225, 4.15, 0.275),
+  rockDef(255, 3.7, 0.3),
+  rockDef(290, 4.0, 0.25),
+  rockDef(320, 3.6, 0.325),
+  rockDef(350, 3.9, 0.225),
+];
+
+// Two muted grey/brown tones blended per-boulder (see createRockCluster)
+// for subtle natural variation — close to the ground shader's own
+// ROCK_TINT (steep-slope color) so scattered boulders read as the same
+// material as the bare-rock patches already visible on steep terrain.
+const ROCK_COLOR_A = new THREE.Color(0x9a9184);
+const ROCK_COLOR_B = new THREE.Color(0x6b6558);
+
+/**
+ * One low-poly boulder: a jittered icosahedron so it reads as a craggy,
+ * irregular rock rather than a perfect gemstone facet (an undisturbed
+ * icosahedron's regular symmetry is very recognizable at this low detail
+ * level). flatShading on the shared material (see createRockCluster)
+ * takes care of the faceted look; this only needs to break the
+ * geometry's perfect symmetry.
+ */
+function buildBoulderGeometry(radius: number): THREE.BufferGeometry {
+  const geometry = new THREE.IcosahedronGeometry(radius, 0);
+  const position = geometry.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < position.count; i++) {
+    const jitter = 1 + (Math.random() - 0.5) * 0.5;
+    position.setXYZ(i, position.getX(i) * jitter, position.getY(i) * jitter, position.getZ(i) * jitter);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * A minimal geometry+color merge (position and color attributes only —
+ * adequate for a flat-colored, textureless MeshStandardMaterial), mirroring
+ * mergePositionOnlyGeometries in birdGeometry.ts but also carrying a
+ * per-source-geometry solid color into a vertex color attribute. Avoids
+ * THREE's stricter BufferGeometryUtils.mergeGeometries(), which requires
+ * every input to share identical attribute sets already.
+ */
+function mergePositionAndColorGeometries(parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[]): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const colors: number[] = [];
+  for (const { geometry, color } of parts) {
+    const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
+    const attr = nonIndexed.getAttribute('position');
+    for (let i = 0; i < attr.count; i++) {
+      positions.push(attr.getX(i), attr.getY(i), attr.getZ(i));
+      colors.push(color.r, color.g, color.b);
+    }
+    if (nonIndexed !== geometry) nonIndexed.dispose();
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  merged.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+  merged.computeVertexNormals();
+  return merged;
+}
+
+/**
+ * A small cluster of 2-3 boulders grouped around a shared origin (rather
+ * than a single boulder per cluster def) so each rock formation reads as
+ * an irregular outcrop instead of one obviously-lone rock. Built once in
+ * "cluster-local" units and later uniformly positioned/scaled per
+ * ROCK_CLUSTER_DEFS entry in placeNatureEnvironment, exactly like
+ * createWaterPatch's lakes.
+ */
+function createRockCluster(): THREE.Mesh {
+  const boulderCount = 2 + Math.floor(Math.random() * 2); // 2-3
+  const parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
+  for (let i = 0; i < boulderCount; i++) {
+    const radius = 0.2 + Math.random() * 0.35;
+    const geometry = buildBoulderGeometry(radius);
+    const offsetAngle = Math.random() * Math.PI * 2;
+    const offsetDist = i === 0 ? 0 : radius * (0.6 + Math.random() * 0.6);
+    // Lift each boulder's center only partway above its own radius so
+    // the lower portion sits embedded in the terrain rather than
+    // perched exactly on top of it — reads as a real half-buried rock
+    // instead of a pebble resting on the grass.
+    const lift = radius * (0.25 + Math.random() * 0.25);
+    geometry.translate(Math.cos(offsetAngle) * offsetDist, lift, Math.sin(offsetAngle) * offsetDist);
+    geometry.rotateY(Math.random() * Math.PI * 2);
+    const color = ROCK_COLOR_A.clone().lerp(ROCK_COLOR_B, Math.random());
+    parts.push({ geometry, color });
+  }
+  const merged = mergePositionAndColorGeometries(parts);
+  parts.forEach((p) => p.geometry.dispose());
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    roughness: 1,
+    metalness: 0,
+  });
+  return new THREE.Mesh(merged, material);
+}
 
 export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer): NatureEnvironment {
   const sky = new Sky();
@@ -116,6 +255,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const skyEnvMap = createSkyEnvMap(renderer, skyUniforms);
   const lakes = LAKE_DEFS.map(() => createWaterPatch(skyEnvMap));
   const ocean = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
+  const rocks = ROCK_CLUSTER_DEFS.map(() => createRockCluster());
 
   // Pale horizon haze color (roughly matches this sky configuration's
   // horizon tone) — blended in via fog so the ground plane fades smoothly
@@ -123,12 +263,13 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
   let fogEnabled = true;
 
-  scene.add(sky, ground, mountains, ...lakes, ocean, sunLight, sunHalo, sunSprite);
+  scene.add(sky, ground, mountains, ...lakes, ocean, ...rocks, sunLight, sunHalo, sunSprite);
   sky.visible = false;
   ground.visible = false;
   mountains.visible = false;
   lakes.forEach((lake) => { lake.visible = false; });
   ocean.visible = false;
+  rocks.forEach((rock) => { rock.visible = false; });
   sunLight.visible = false;
   sunHalo.visible = false;
   sunSprite.visible = false;
@@ -139,6 +280,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
     mountains,
     lakes,
     ocean,
+    rocks,
     sunLight,
     sunSprite,
     sunHalo,
@@ -153,6 +295,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       mountains.visible = visible;
       lakes.forEach((lake) => { lake.visible = visible; });
       ocean.visible = visible;
+      rocks.forEach((rock) => { rock.visible = visible; });
       sunHalo.visible = visible;
       sunLight.visible = visible;
       sunSprite.visible = visible;
@@ -167,7 +310,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       scene.fog = enabled && sky.visible ? fog : null;
     },
     dispose() {
-      scene.remove(sky, ground, mountains, ...lakes, ocean, sunLight, sunHalo, sunSprite);
+      scene.remove(sky, ground, mountains, ...lakes, ocean, ...rocks, sunLight, sunHalo, sunSprite);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -186,6 +329,10 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       skyEnvMap.dispose();
       ocean.geometry.dispose();
       (ocean.material as THREE.Material).dispose();
+      for (const rock of rocks) {
+        rock.geometry.dispose();
+        (rock.material as THREE.Material).dispose();
+      }
       (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
       (sunHalo.material as THREE.Material).dispose();
       (sunSprite.material as THREE.SpriteMaterial).map?.dispose();
@@ -978,6 +1125,24 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   const oceanLift = Math.max(1, flockScale * 0.015);
   env.ocean.position.set(center.x, oceanLift, center.z);
   env.ocean.scale.setScalar(flockScale);
+
+  // Rock clusters follow the exact same terrain-following placement as
+  // the lakes (sample terrainHeightAt at the cluster's own position
+  // rather than a fixed lift) so they sit right on the actual hillside
+  // surface everywhere instead of floating above a hollow or sinking
+  // into a hill.
+  env.rocks.forEach((rock, i) => {
+    const def = ROCK_CLUSTER_DEFS[i];
+    const fx = def.forwardX * def.distanceScale;
+    const fy = def.forwardZ * def.distanceScale;
+    const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale;
+    rock.position.set(
+      center.x + fx * flockScale,
+      terrainWorldHeight,
+      center.z + fy * flockScale,
+    );
+    rock.scale.setScalar(flockScale * def.sizeScale);
+  });
 }
 
 /**
@@ -1188,10 +1353,11 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
   // A different, smaller cell frequency than GROUND_TEXTURE_REPEAT for
   // the procedural blotch field, so its pattern doesn't line up with
   // (and reinforce the visibility of) the fine canvas texture's own
-  // repeat grid. Halved from 23 to 11.5 per user preference for larger
-  // blotches — halving the cell frequency doubles every blob's size
-  // since radius is expressed as a fraction of cell size.
-  const blotchCellsPerRepeat = 11.5 / GROUND_TEXTURE_REPEAT;
+  // repeat grid. Halved again from 11.5 to 5.75 per user preference for
+  // the original blotches to be twice as big again — halving the cell
+  // frequency doubles every blob's size since radius is expressed as a
+  // fraction of cell size.
+  const blotchCellsPerRepeat = 5.75 / GROUND_TEXTURE_REPEAT;
   // A second, much coarser field for a handful of very large regional
   // patches (see groundBigBlotchField) — ~3.2 cells across the entire
   // ground plane (not the fine texture's repeat grid), so roughly
@@ -1242,13 +1408,14 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
       for (int dx = -1; dx <= 1; dx++) {
         for (int dy = -1; dy <= 1; dy++) {
           vec2 neighborCell = baseCell + vec2(float(dx), float(dy));
-          // Roughly a third of cells contribute no blob at all (and
-          // radius varies over a wide range) so blobs cluster and thin
-          // out irregularly instead of reading as an even polka-dot
-          // grid — real terrain patches vary in both size and density,
-          // not just position.
+          // Only about 12% of cells are skipped now (was ~a third) per
+          // user preference for even more splotches; radius still
+          // varies over a wide range so blobs cluster and thin out
+          // irregularly instead of reading as an even polka-dot grid —
+          // real terrain patches vary in both size and density, not
+          // just position.
           float presence = groundBombHash(neighborCell + vec2(58.3, 2.6)).x;
-          if (presence < 0.32) continue;
+          if (presence < 0.12) continue;
           vec2 jitter = groundBombHash(neighborCell + vec2(3.7, 9.1));
           vec2 center = neighborCell + jitter;
           float radiusPick = groundBombHash(neighborCell + vec2(21.4, 6.8)).x;
