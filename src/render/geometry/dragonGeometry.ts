@@ -179,6 +179,73 @@ function applyNeckBend(
  * head rises above the body line and tilts down, instead of following
  * the lathe's naturally dead-straight axis.
  */
+// Neck/head bend parameters shared between the body geometry (see
+// applyNeckBend) and computeDragonMouthTransform below — kept as named
+// constants (rather than inlined twice) so the fire-breath origin/
+// direction in Renderer3D can never silently drift out of sync with
+// where the geometry actually puts the snout tip.
+const NECK_PIVOT_FRACTION = 0.24; // neck starts bending at this fraction of halfLen
+const NECK_ANGLE_RAD = 0.4; // ~+23°: arch the neck/head up (positive = toward local +Z/up)
+const HEAD_PIVOT_FRACTION = 0.56; // head/jaw-hinge pivot, as a fraction of halfLen
+const HEAD_ANGLE_RAD = -0.6; // ~-34° relative tilt: angles the snout back down from the raised neck
+const SNOUT_TIP_FRACTION = 1.1; // elongated snout tip, past the body's nominal length (fraction of halfLen)
+
+/**
+ * Computes where the dragon's mouth actually ends up in local model
+ * space (X=right, Y=forward, Z=up — see MODEL_UP_AXIS/FORWARD_AXIS in
+ * Renderer3D) after both neck-bend rotations, plus the direction the
+ * snout points in that same local frame — by replaying the exact same
+ * rotateAroundPivot math applied to the snout-tip vertex in
+ * applyNeckBend/buildDragonBodyGeometry, rather than a hand-tuned
+ * approximation that could drift out of sync with the geometry.
+ *
+ * Used by Renderer3D's fire-breath effect so flame spawns from the
+ * dragon's actual visual mouth position and travels along the direction
+ * the snout is really pointing (forward and slightly down, per the bend
+ * angles above) instead of the raw body-forward heading, which ignored
+ * the raised/tilted neck entirely.
+ */
+export function computeDragonMouthTransform(length: number): {
+  offsetForward: number;
+  offsetUp: number;
+  dirForward: number;
+  dirUp: number;
+} {
+  const halfLen = length * 0.5;
+  const neckPivotY = halfLen * NECK_PIVOT_FRACTION;
+  const headPivotY = halfLen * HEAD_PIVOT_FRACTION;
+  const tipY = halfLen * SNOUT_TIP_FRACTION;
+
+  const [bentHeadPivotY, bentHeadPivotZ] = rotateAroundPivot(headPivotY, 0, neckPivotY, NECK_ANGLE_RAD);
+
+  let y = tipY;
+  let z = 0;
+  if (tipY > neckPivotY) {
+    [y, z] = rotateAroundPivot(y, z, neckPivotY, NECK_ANGLE_RAD);
+  }
+  if (tipY > headPivotY) {
+    const dy = y - bentHeadPivotY;
+    const dz = z - bentHeadPivotZ;
+    const cos = Math.cos(HEAD_ANGLE_RAD);
+    const sin = Math.sin(HEAD_ANGLE_RAD);
+    y = bentHeadPivotY + dy * cos - dz * sin;
+    z = bentHeadPivotZ + dy * sin + dz * cos;
+  }
+
+  // The snout tip lies beyond both pivots, so a *direction* vector there
+  // (as opposed to a position) is rotated by the simple sum of the two
+  // angles — both bends are rotations in the same local Y-Z plane, and
+  // sequential same-plane rotations compose additively for a direction
+  // (no pivot offset to subtract).
+  const totalAngle = NECK_ANGLE_RAD + HEAD_ANGLE_RAD;
+  return {
+    offsetForward: y,
+    offsetUp: z,
+    dirForward: Math.cos(totalAngle),
+    dirUp: Math.sin(totalAngle),
+  };
+}
+
 function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = [
@@ -193,7 +260,7 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
     new THREE.Vector2(width * 0.22, halfLen * 0.68), // undercut behind the nostril bump — breaks up the smooth beak curve
     new THREE.Vector2(width * 0.14, halfLen * 0.8), // snout base — narrows sharply, no round head bulge
     new THREE.Vector2(width * 0.08, halfLen * 0.94), // snout mid
-    new THREE.Vector2(width * 0.015, halfLen * 1.1), // elongated snout tip, past the body's nominal length
+    new THREE.Vector2(width * 0.015, halfLen * SNOUT_TIP_FRACTION), // elongated snout tip, past the body's nominal length
   ];
   const latheGeometry = new THREE.LatheGeometry(profile, 12);
   const frillGeometry = buildDragonFrillGeometry(length, width, halfLen);
@@ -220,13 +287,7 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   // Raise the neck/head and tilt the head down — see applyNeckBend's doc
   // comment for why this can't just be baked into the (straight-axis)
   // lathe profile itself.
-  applyNeckBend(
-    merged,
-    halfLen * 0.24, // neck starts bending at the same point the profile begins tapering
-    0.4, // ~+23°: arch the neck/head up (positive = toward local +Z/up)
-    halfLen * 0.56, // head/jaw-hinge pivot
-    -0.6, // ~-34° relative tilt: angles the snout back down from the raised neck
-  );
+  applyNeckBend(merged, halfLen * NECK_PIVOT_FRACTION, NECK_ANGLE_RAD, halfLen * HEAD_PIVOT_FRACTION, HEAD_ANGLE_RAD);
 
   return merged;
 }

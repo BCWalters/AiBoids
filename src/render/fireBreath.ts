@@ -8,8 +8,18 @@ import * as THREE from 'three';
  * per-particle velocity, fade/shrink over a fixed duration, clean up).
  */
 export interface FireBreathEffects {
-  /** Spawn one breath burst at `origin`, traveling forward along `direction` (the dragon's heading). */
-  spawn(origin: THREE.Vector3, direction: THREE.Vector3, scale: number): void;
+  /**
+   * Spawn one breath burst at `origin`, traveling forward along
+   * `direction` (the dragon's actual mouth-pointing direction).
+   * `emitterVelocity` is the breathing dragon's current world-space
+   * velocity — added to every particle's velocity so the flame stream
+   * reliably outpaces a fast-moving dragon instead of it flying through
+   * its own fire. `speedFraction` (0 = stationary, 1 = at max speed)
+   * additionally stretches the burst's initial spawn spread and outward
+   * speed, so the flame reaches farther ahead the faster the dragon is
+   * moving, and stays a short, close puff when it's nearly still.
+   */
+  spawn(origin: THREE.Vector3, direction: THREE.Vector3, scale: number, emitterVelocity: THREE.Vector3, speedFraction: number): void;
   update(dt: number): void;
   setVisible(visible: boolean): void;
   dispose(): void;
@@ -18,6 +28,10 @@ export interface FireBreathEffects {
 const BREATH_DURATION = 0.75;
 const PARTICLES_PER_BREATH = 14;
 const FLAME_COLORS = [0xfff2a8, 0xffb347, 0xff6a1a, 0xd6401a];
+// At full speed, particles get this much extra outward reach (both
+// initial stagger distance and outward speed) on top of the stationary
+// baseline — see the spawn() doc comment above.
+const REACH_SPEED_BOOST = 1.6;
 
 interface Particle {
   sprite: THREE.Sprite;
@@ -65,7 +79,7 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
   const up = new THREE.Vector3(0, 1, 0);
 
   return {
-    spawn(origin: THREE.Vector3, direction: THREE.Vector3, scale: number) {
+    spawn(origin: THREE.Vector3, direction: THREE.Vector3, scale: number, emitterVelocity: THREE.Vector3, speedFraction: number) {
       const dir = direction.clone().normalize();
       // Build a small local basis perpendicular to the breath direction so
       // particles spread outward in a cone rather than a single line.
@@ -73,6 +87,14 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
       if (side.lengthSq() < 1e-6) side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(1, 0, 0));
       side.normalize();
       const perp = new THREE.Vector3().crossVectors(dir, side).normalize();
+
+      // Reach grows with how fast the dragon is currently flying — a
+      // stationary/slow dragon gets a short, close puff, while one at
+      // full speed gets a stream that stretches out well ahead of it
+      // (both a longer initial stagger and a higher outward speed),
+      // reading more like a continuous jet than a single blob it could
+      // otherwise catch up to and fly straight through.
+      const reach = 1 + THREE.MathUtils.clamp(speedFraction, 0, 1) * REACH_SPEED_BOOST;
 
       const particles: Particle[] = [];
       for (let i = 0; i < PARTICLES_PER_BREATH; i++) {
@@ -83,7 +105,7 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
 
         // Stagger particles slightly behind the snout so the stream reads
         // as a continuous jet rather than one blob appearing all at once.
-        const startOffset = dir.clone().multiplyScalar(-Math.random() * scale * 0.4);
+        const startOffset = dir.clone().multiplyScalar(-Math.random() * scale * 0.4 * reach);
         sprite.position.copy(origin).add(startOffset);
         const startScale = scale * (0.35 + Math.random() * 0.35);
         sprite.scale.setScalar(startScale);
@@ -93,8 +115,13 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
           .clone()
           .multiplyScalar((Math.random() - 0.5) * coneSpread)
           .add(perp.clone().multiplyScalar((Math.random() - 0.5) * coneSpread));
-        const speed = scale * (3.5 + Math.random() * 3.5);
-        const velocity = dir.clone().add(spreadVec).normalize().multiplyScalar(speed);
+        const speed = scale * (3.5 + Math.random() * 3.5) * reach;
+        // Inherit the dragon's own velocity on top of the outward flame
+        // speed — without this, a dragon flying at max speed can easily
+        // catch up to (and appear to fly through) its own slower-moving
+        // fire, since the particles' outward speed alone has no idea how
+        // fast the emitter itself is already moving forward.
+        const velocity = dir.clone().add(spreadVec).normalize().multiplyScalar(speed).add(emitterVelocity);
 
         root.add(sprite);
         particles.push({ sprite, velocity, startScale });

@@ -11,7 +11,7 @@ import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
-import { createDragonGeometries } from './geometry/dragonGeometry';
+import { createDragonGeometries, computeDragonMouthTransform } from './geometry/dragonGeometry';
 import { createUnicornGeometries } from './geometry/unicornGeometry';
 import type { CreatureGeometries } from './geometry/creatureGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
@@ -1314,14 +1314,48 @@ export class Renderer3D {
         this.nextFireBreathTime.set(predator, elapsed + 0.5);
         continue;
       }
-      const dir = predator.renderHeading;
-      const direction = this.tmpVec3.set(dir.x, dir.y, dir.z).clone();
-      const origin = new THREE.Vector3(
-        predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
-        predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
-        predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
-      );
-      this.fireBreathEffects.spawn(origin, direction, DRAGON_LENGTH * 0.5);
+
+      // Anchor the flame to the dragon's actual *displayed* orientation
+      // (dragonDisplayQuats — the same turn-rate-limited quaternion used
+      // to draw the body mesh this frame) rather than the raw, unsmoothed
+      // predator.renderHeading. During a hard turn mid-hunt (exactly when
+      // fire is most likely to trigger), the raw target heading can point
+      // well away from where the model is actually currently drawn facing
+      // — using it made the flame appear to erupt from the dragon's back
+      // and shoot off in an unrelated direction (reported as "shooting
+      // upward like a whale spouting water") instead of out of the mouth
+      // in the direction the visible snout is pointing. Falling back to
+      // the raw heading only matters for a single early frame before any
+      // display quaternion has been computed yet.
+      const displayQuat = this.dragonDisplayQuats.get(predator.id);
+      const mouth = computeDragonMouthTransform(DRAGON_LENGTH);
+      let direction: THREE.Vector3;
+      let origin: THREE.Vector3;
+      if (displayQuat) {
+        direction = this.tmpVec3.set(0, mouth.dirForward, mouth.dirUp).applyQuaternion(displayQuat).normalize().clone();
+        const localOffset = new THREE.Vector3(0, mouth.offsetForward, mouth.offsetUp).applyQuaternion(displayQuat);
+        origin = new THREE.Vector3(predator.position.x, predator.position.y, predator.position.z).add(localOffset);
+      } else {
+        const dir = predator.renderHeading;
+        direction = this.tmpVec3.set(dir.x, dir.y, dir.z).clone();
+        origin = new THREE.Vector3(
+          predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
+          predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
+          predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
+        );
+      }
+
+      // Scale the flame's reach by how fast the dragon is actually
+      // flying right now — a hovering/slow dragon gets a short puff close
+      // to its mouth, while one at full speed gets a stream that stretches
+      // well out ahead of it (see fireBreath.spawn's reach/emitterVelocity
+      // doc comment) so it doesn't visually fly through its own fire.
+      const vel = predator.velocity;
+      const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+      const speedFraction = THREE.MathUtils.clamp(speed / Math.max(params.predatorMaxSpeed, 1e-6), 0, 1);
+      const emitterVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+
+      this.fireBreathEffects.spawn(origin, direction, DRAGON_LENGTH * 0.5, emitterVelocity, speedFraction);
       this.nextFireBreathTime.set(predator, elapsed + 2 + Math.random() * 2.5);
     }
   }
