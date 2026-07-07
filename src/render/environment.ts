@@ -27,11 +27,13 @@ export interface NatureEnvironment {
    * each height-matched to the terrain beneath it like the lakes. */
   rocks: THREE.Mesh[];
   /** Sparse forest patches (see FOREST_PATCH_DEFS) tucked between the
-   * play area and the rock/hillside bands — each a flat, slightly raised
-   * disc with a painted canopy texture (see createForestPatch) rather
-   * than modeled 3D trees, height-matched to the terrain like the
-   * lakes/rocks. */
-  forestPatches: THREE.Mesh[];
+   * play area and the rock/hillside bands. Each is a Group pairing a
+   * flat, painted-canopy "undergrowth" disc (see createForestLitter)
+   * with a merged cluster of many small rounded canopy volumes (see
+   * createForestCrowns) so the patch reads as an actual bumpy mass of
+   * treetops — rather than a flat cutout — from any viewing angle,
+   * height-matched to the terrain like the lakes/rocks. */
+  forestPatches: THREE.Group[];
   sunLight: THREE.DirectionalLight;
   sunSprite: THREE.Sprite;
   /** Larger, softer glow sprite rendered behind the sun disc for a warm corona effect. */
@@ -252,28 +254,24 @@ const FOREST_PATCH_DEFS: ForestPatchDef[] = [
 ];
 
 /**
- * A flat, only slightly raised irregular "forest patch" disc with a
- * painted canopy texture, rather than fully modeled 3D trees — much
- * cheaper, and sidesteps the problem of getting individual trees' height
- * right relative to the mountains/rocks (an earlier geometric-tree pass
- * read as wildly oversized once placed in the scene). Reuses the same
- * irregular-outline + soft alpha-feathered edge technique as
- * createWaterPatch so it blends into the surrounding grass instead of
- * showing a hard border, plus a little per-vertex height jitter so it
- * isn't a perfectly flat cutout either.
+ * Random irregular-blob shape descriptor shared by both halves of a
+ * forest patch (the flat ground-hugging litter disc and the scattered
+ * canopy crowns above it) so the two line up over the same footprint
+ * instead of drifting apart. Layered sine "lobes" (a handful of random
+ * harmonics/phases) give the outline a few bulges and inlets instead of
+ * reading as a slightly bumpy circle — this matters much more once
+ * patches get large, where a merely-bumpy circle still reads as "a
+ * circle" rather than an organic forest-cover shape. A random elongation
+ * + rotation on top further breaks any circular symmetry.
  */
-function createForestPatch(): THREE.Mesh {
-  const segments = 40;
-  const positions: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
+interface PatchShape {
+  lobes: { k: number; amp: number; phase: number }[];
+  stretchX: number;
+  stretchZ: number;
+  stretchRot: number;
+}
 
-  // Layered sine "lobes" (a handful of random harmonics/phases) give the
-  // outline a few bulges and inlets instead of reading as a slightly
-  // bumpy circle — this matters much more once patches get large, where
-  // a merely-bumpy circle still reads as "a circle" rather than an
-  // organic forest-cover shape. A random elongation + rotation on top
-  // further breaks any circular symmetry.
+function createPatchShape(): PatchShape {
   const lobeCount = 2 + Math.floor(Math.random() * 3); // 2-4 harmonics
   const lobes: { k: number; amp: number; phase: number }[] = [];
   for (let i = 0; i < lobeCount; i++) {
@@ -283,35 +281,54 @@ function createForestPatch(): THREE.Mesh {
       phase: Math.random() * Math.PI * 2,
     });
   }
-  const stretchX = 0.8 + Math.random() * 0.45;
-  const stretchZ = 0.8 + Math.random() * 0.45;
-  const stretchRot = Math.random() * Math.PI * 2;
+  return {
+    lobes,
+    stretchX: 0.8 + Math.random() * 0.45,
+    stretchZ: 0.8 + Math.random() * 0.45,
+    stretchRot: Math.random() * Math.PI * 2,
+  };
+}
 
-  const raw: number[] = [];
-  for (let i = 0; i < segments; i++) {
-    const angle = (i / segments) * Math.PI * 2;
-    let lobeSum = 0;
-    for (const lobe of lobes) lobeSum += lobe.amp * Math.sin(lobe.k * angle + lobe.phase);
-    raw.push(Math.max(0.35, 0.85 + lobeSum + (Math.random() - 0.5) * 0.25));
-  }
-  // Light neighbor-smoothing so the fine per-vertex jitter doesn't look
-  // like sharp saw-teeth, while still keeping the coarser lobe shape.
-  const radii = raw.map((r, i) => (raw[(i - 1 + segments) % segments] + r * 2 + raw[(i + 1) % segments]) / 4);
+/** Pre-stretch radius of the lobed disc at a given polar angle. */
+function patchBaseRadiusAt(shape: PatchShape, angle: number): number {
+  let lobeSum = 0;
+  for (const lobe of shape.lobes) lobeSum += lobe.amp * Math.sin(lobe.k * angle + lobe.phase);
+  return Math.max(0.35, 0.85 + lobeSum);
+}
+
+/** Maps a pre-stretch local (x, y) into the shape's final elongated/rotated footprint coordinates. */
+function applyPatchStretch(shape: PatchShape, x: number, y: number): [number, number] {
+  const rotX = x * Math.cos(shape.stretchRot) - y * Math.sin(shape.stretchRot);
+  const rotY = x * Math.sin(shape.stretchRot) + y * Math.cos(shape.stretchRot);
+  return [rotX * shape.stretchX, rotY * shape.stretchZ];
+}
+
+/**
+ * A flat, only slightly raised irregular disc with a painted canopy
+ * texture, sitting right at ground level beneath the 3D canopy crowns
+ * (see createForestCrowns) — reads as shadowed undergrowth/leaf-litter
+ * filling the gaps between crowns rather than bare grass, without the
+ * cost of actually modeling it. Reuses the same irregular-outline + soft
+ * alpha-feathered edge technique as createWaterPatch so it blends into
+ * the surrounding grass instead of showing a hard border. Kept slightly
+ * smaller than the crown scatter's own footprint (see createForestCrowns)
+ * so its edge never peeks out past the crowns above it.
+ */
+function createForestLitter(shape: PatchShape): THREE.Mesh {
+  const segments = 40;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
 
   positions.push(0, 0, (Math.random() - 0.5) * 0.08);
   uvs.push(0.5, 0.5);
   for (let i = 0; i < segments; i++) {
     const angle = (i / segments) * Math.PI * 2;
-    const r = radii[i];
-    let x = Math.cos(angle) * r;
-    let y = Math.sin(angle) * r;
-    // Elongate along a random axis, then rotate that axis to a random
-    // heading, so patches read as irregular blobs/streaks rather than
-    // uniformly round discs of varying size.
-    const rotX = x * Math.cos(stretchRot) - y * Math.sin(stretchRot);
-    const rotY = x * Math.sin(stretchRot) + y * Math.cos(stretchRot);
-    x = rotX * stretchX;
-    y = rotY * stretchZ;
+    // Shrunk slightly (0.85x) plus its own light per-vertex jitter so
+    // this undergrowth layer stays safely tucked inside the crown
+    // scatter's footprint rather than matching it exactly.
+    const r = patchBaseRadiusAt(shape, angle) * 0.85 * (0.92 + Math.random() * 0.16);
+    const [x, y] = applyPatchStretch(shape, Math.cos(angle) * r, Math.sin(angle) * r);
     // Small random height jitter — "very slightly raised", just enough
     // to catch a bit of directional light unevenly rather than reading
     // as a perfectly flat painted disc.
@@ -341,10 +358,147 @@ function createForestPatch(): THREE.Mesh {
     polygonOffset: true,
     polygonOffsetFactor: -3,
     polygonOffsetUnits: -3,
+    // A gentle darken relative to the painted texture's own tones so this
+    // reads as slightly shaded ground beneath the canopy crowns above it
+    // — kept close to white rather than a strong tint, since the texture
+    // is already quite dark and an aggressive multiply crushed it down
+    // to a near-black smudge that looked more like a shadow hole than
+    // shaded undergrowth.
+    color: new THREE.Color(0xd7ddc9),
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
   return mesh;
+}
+
+// Muted green/olive tones for individual canopy crowns — close to (but a
+// separate palette from) the flat litter texture's own tones, so the 3D
+// crowns above and the painted ground layer beneath them read as the
+// same kind of foliage rather than two different materials.
+const CROWN_TONES: THREE.Color[] = [
+  new THREE.Color(0x3f5e33),
+  new THREE.Color(0x4d7239),
+  new THREE.Color(0x5d8a42),
+  new THREE.Color(0x2c4324),
+  new THREE.Color(0x6b9c4c),
+];
+
+/**
+ * One rounded, low-poly "canopy crown" volume — a jittered, vertically
+ * squashed icosahedron (same jitter technique as buildBoulderGeometry)
+ * standing in for a single tree or small clump of treetops. Having many
+ * of these scattered and merged together (see createForestCrowns) gives
+ * the forest patch real silhouette volume, so it reads as a bumpy mass
+ * of foliage from any angle instead of a razor-flat painted disc whose
+ * straight polygon-outline edges become visible as unnatural sharp
+ * cutouts when viewed near edge-on.
+ */
+function buildCrownGeometry(radius: number): THREE.BufferGeometry {
+  const geometry = new THREE.IcosahedronGeometry(radius, 0);
+  const position = geometry.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < position.count; i++) {
+    const jitter = 1 + (Math.random() - 0.5) * 0.55;
+    position.setXYZ(
+      i,
+      position.getX(i) * jitter,
+      // Squash vertically so crowns read as rounded foliage masses
+      // rather than perfect spheres/gemstones.
+      position.getY(i) * jitter * 0.72,
+      position.getZ(i) * jitter,
+    );
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * Scatters many small rounded canopy-crown volumes across the patch's
+ * own irregular footprint (see PatchShape) and merges them into a single
+ * mesh, exactly like createRockCluster does for boulders. Crown count
+ * scales with the patch's real-world area (def.sizeScale squared) so
+ * small copses get a sparse handful of crowns while sprawling groves get
+ * a dense, tree-line-like mass of them.
+ *
+ * Each crown's height follows the *actual* local terrain beneath its own
+ * position (sampled via terrainHeightAt at that crown's real-world
+ * offset from the patch's anchor point) rather than inheriting one flat
+ * height for the whole patch — the old flat single-height disc could let
+ * the real terrain poke up through it wherever the ground rose within a
+ * large patch's footprint, since the ground mesh's own fine 200-segment
+ * grid would then clip through the flat plane along a straight edge.
+ * Sampling per-crown avoids that entirely, in addition to fixing the
+ * flat-silhouette problem above.
+ */
+function createForestCrowns(shape: PatchShape, def: ForestPatchDef): THREE.Mesh {
+  const area = def.sizeScale * def.sizeScale;
+  const crownCount = Math.round(THREE.MathUtils.clamp(34 * area, 14, 190));
+
+  const fxBase = def.forwardX * def.distanceScale;
+  const fyBase = def.forwardZ * def.distanceScale;
+  const baseTerrain = terrainHeightAt(fxBase, fyBase);
+
+  const parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
+  for (let i = 0; i < crownCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const maxR = patchBaseRadiusAt(shape, angle);
+    // sqrt(random) keeps points roughly area-uniform across the disc
+    // instead of clustering near the center.
+    const r = Math.sqrt(Math.random()) * maxR;
+    const [x, y] = applyPatchStretch(shape, Math.cos(angle) * r, Math.sin(angle) * r);
+
+    // A minority of larger "canopy giant" crowns give the patch some
+    // structure/height variation; the rest are smaller fill crowns that
+    // pack in the gaps between them — real forest cover has a similar
+    // mix of taller emergent trees and a lower, denser understory.
+    const isGiant = Math.random() < 0.28;
+    const radius = isGiant ? 0.12 + Math.random() * 0.09 : 0.05 + Math.random() * 0.07;
+
+    // See createForestCrowns's own doc comment: local mesh (x, y) here
+    // maps to a world-space offset of (x * sizeScale, -y * sizeScale)
+    // flock-scale units from the patch's anchor point once the whole
+    // mesh is later rotated -90° about X and scaled (matching the same
+    // local-axis mapping createGroundGeometry relies on) — used to
+    // sample this crown's own real terrain height rather than the
+    // patch's single anchor height.
+    const fx = fxBase + x * def.sizeScale;
+    const fy = fyBase - y * def.sizeScale;
+    const localHeight = (terrainHeightAt(fx, fy) - baseTerrain) / def.sizeScale;
+    // Mostly above ground with only a small embedded base, like a bush
+    // or low tree crown rather than a ball resting on top of the grass.
+    const lift = radius * (0.55 + Math.random() * 0.35);
+
+    const geometry = buildCrownGeometry(radius);
+    geometry.translate(x, y, localHeight + lift);
+    geometry.rotateZ(Math.random() * Math.PI * 2);
+    const color = CROWN_TONES[Math.floor(Math.random() * CROWN_TONES.length)].clone();
+    parts.push({ geometry, color });
+  }
+
+  const merged = mergePositionAndColorGeometries(parts);
+  parts.forEach((p) => p.geometry.dispose());
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    roughness: 1,
+    metalness: 0,
+  });
+  const mesh = new THREE.Mesh(merged, material);
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+/**
+ * Builds one full forest patch: the flat ground-hugging litter disc plus
+ * the merged canopy-crown volumes above it (see createForestLitter /
+ * createForestCrowns), grouped together so callers can position/scale/
+ * toggle-visibility on the pair as a single unit exactly like the other
+ * environment features (lakes, rocks) do with a single Mesh.
+ */
+function createForestPatch(def: ForestPatchDef): THREE.Group {
+  const shape = createPatchShape();
+  const group = new THREE.Group();
+  group.add(createForestLitter(shape), createForestCrowns(shape, def));
+  return group;
 }
 
 /**
@@ -484,7 +638,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const lakes = LAKE_DEFS.map(() => createWaterPatch(skyEnvMap));
   const { ocean, beach } = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
   const rocks = ROCK_CLUSTER_DEFS.map(() => createRockCluster());
-  const forestPatches = FOREST_PATCH_DEFS.map(() => createForestPatch());
+  const forestPatches = FOREST_PATCH_DEFS.map((def) => createForestPatch(def));
 
   // Pale horizon haze color (roughly matches this sky configuration's
   // horizon tone) — blended in via fog so the ground plane fades smoothly
@@ -571,10 +725,14 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
         (rock.material as THREE.Material).dispose();
       }
       for (const patch of forestPatches) {
-        patch.geometry.dispose();
-        (patch.material as THREE.MeshStandardMaterial).map?.dispose();
-        (patch.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
-        (patch.material as THREE.Material).dispose();
+        for (const child of patch.children) {
+          const mesh = child as THREE.Mesh;
+          mesh.geometry.dispose();
+          const material = mesh.material as THREE.MeshStandardMaterial;
+          material.map?.dispose();
+          material.alphaMap?.dispose();
+          material.dispose();
+        }
       }
       (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
       (sunHalo.material as THREE.Material).dispose();
@@ -1491,11 +1649,13 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
     rock.scale.setScalar(flockScale * def.sizeScale);
   });
 
-  // Forest patches use the same terrain-following placement as the
-  // rocks — a single terrainHeightAt sample per patch is plenty since
-  // each patch's own real-world footprint (disc radius * flockScale *
-  // sizeScale) is tiny next to the terrain noise's wavelength, so the
-  // ground is effectively flat across any one patch.
+  // Forest patches: the group (litter + crown cluster) is anchored at
+  // the same single terrainHeightAt sample the rocks use, but unlike the
+  // rocks, individual canopy crowns within a large patch additionally
+  // sample their *own* local terrain height relative to this anchor (see
+  // createForestCrowns) so a big patch's canopy still follows real
+  // undulation across its footprint instead of assuming the ground is
+  // perfectly flat underneath it.
   env.forestPatches.forEach((patch, i) => {
     const def = FOREST_PATCH_DEFS[i];
     const fx = def.forwardX * def.distanceScale;
