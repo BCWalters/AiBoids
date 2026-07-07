@@ -84,8 +84,14 @@ const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 
 // --- Optional "dragon" predator variant (nature style only): much larger,
 // purple, leathery-winged silhouette instead of the hawk geometry.
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x4a2270); // deep violet-purple scale (darkened slightly from 0x5b2a86)
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0x9c43be); // brighter magenta-purple when locked on (darkened slightly from 0xb84fe0)
+// Brightened from an earlier, much darker pair (0x4a2270/0x9c43be) — those,
+// combined with the wing material's own darkening multiply below, crushed
+// the wings/tail to near-solid black under normal lighting, hiding all the
+// scallop/bone-tube surface detail added to the wing geometry. These stay
+// deep and saturated (a "black dragon" should still read dark) but leave
+// enough headroom for facet-by-facet lighting variation to show through.
+const DRAGON_PREDATOR_BASE = new THREE.Color(0x6a3399); // deep violet-purple scale
+const DRAGON_PREDATOR_HUNT = new THREE.Color(0xb355d6); // brighter magenta-purple when locked on
 
 // --- "Unicorn" predator kind (all styles): light lavender body, always
 // upright (see keepUpright), gentle-chase-only — see Predator.kind. Wings
@@ -558,7 +564,13 @@ export class Renderer3D {
       color: 0xffffff,
       emissive: isNature ? 0x000000 : emissive,
       emissiveIntensity: isNature ? 0 : 1.4,
-      roughness: isNature ? 0.9 : 0.5,
+      // Dragons get a slightly glossier (lower-roughness) finish than the
+      // fully matte default nature look — with the dark scale color, a
+      // fully matte 0.9 roughness barely differentiates facets under the
+      // key light, so faceted geometry (frill spikes, neck bend, leg
+      // joints) reads as flat black regardless of angle. A touch of sheen
+      // gives visible specular highlights that vary with facet normal.
+      roughness: isNature ? (isDragon ? 0.65 : 0.9) : 0.5,
       metalness: 0,
       // Unicorns only: the body geometry bakes a gold vertex color onto
       // just the horn (see creatureGeometry's mergeGeometriesWithColor) so it
@@ -572,11 +584,16 @@ export class Renderer3D {
       // against the per-instance purple state color set in updateInstances)
       // so the leathery wings/tail read visibly darker than the scaly body
       // — a classic bat-wing-on-dragon cue — for free, with no extra
-      // per-instance color bookkeeping.
-      color: isDragon ? 0x554466 : 0xffffff,
+      // per-instance color bookkeeping. Kept much lighter than the earlier
+      // 0x554466: that value, multiplied against the (also dark) dragon
+      // body color, crushed the wings to near-solid black regardless of
+      // facet angle or lighting, hiding the scallop/bone-tube geometry
+      // detail — this stays visibly darker than the body without losing
+      // all lit-surface contrast.
+      color: isDragon ? 0x9c86ab : 0xffffff,
       emissive: isNature ? 0x000000 : emissive,
       emissiveIntensity: isNature ? 0 : 1.1,
-      roughness: isNature ? 0.9 : 0.5,
+      roughness: isNature ? (isDragon ? 0.65 : 0.9) : 0.5,
       metalness: 0,
       side: THREE.DoubleSide,
       // Unicorns only: the wing geometry itself carries a baked rainbow
