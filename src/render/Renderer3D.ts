@@ -12,7 +12,7 @@ import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
 import { createParrotGeometries } from './geometry/parrotGeometry';
-import { createDragonGeometries } from './geometry/dragonGeometry';
+import { createDragonGeometries, computeDragonMouthTransform } from './geometry/dragonGeometry';
 import { createUnicornGeometries } from './geometry/unicornGeometry';
 import type { CreatureGeometries } from './geometry/creatureGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
@@ -95,8 +95,14 @@ const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 
 // --- Optional "dragon" predator variant (nature style only): much larger,
 // purple, leathery-winged silhouette instead of the hawk geometry.
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x4a2270); // deep violet-purple scale (darkened slightly from 0x5b2a86)
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0x9c43be); // brighter magenta-purple when locked on (darkened slightly from 0xb84fe0)
+// Brightened from an earlier, much darker pair (0x4a2270/0x9c43be) — those,
+// combined with the wing material's own darkening multiply below, crushed
+// the wings/tail to near-solid black under normal lighting, hiding all the
+// scallop/bone-tube surface detail added to the wing geometry. These stay
+// deep and saturated (a "black dragon" should still read dark) but leave
+// enough headroom for facet-by-facet lighting variation to show through.
+const DRAGON_PREDATOR_BASE = new THREE.Color(0x6a3399); // deep violet-purple scale
+const DRAGON_PREDATOR_HUNT = new THREE.Color(0xb355d6); // brighter magenta-purple when locked on
 
 // --- "Unicorn" predator kind (all styles): light lavender body, always
 // upright (see keepUpright), gentle-chase-only — see Predator.kind. Wings
@@ -157,6 +163,17 @@ const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 const UNICORN_FLAP_FREQUENCY = 3.2;
 const UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
 const UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
+
+// Dragon tail sway: on-screen references (movies/TV) almost always show a
+// dragon's tail undulating up and down as it flies, driven by the same
+// wingbeat that powers the body through the air, rather than trailing
+// perfectly rigid behind it like a glider's tailplane. Reuses the wing's
+// flap phase (so the whole silhouette reads as one coordinated wingbeat)
+// but at a smaller amplitude and a phase offset, so the tail lags/leads
+// the wings rather than moving in a way that looks mechanically identical
+// to them.
+const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
+const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
 
 // Unicorns get their own dedicated "stay upright" orientation model in
 // updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
@@ -237,6 +254,10 @@ const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 // level, used below to build an orientation that stays right-side-up
 // rather than picking an arbitrary roll.
 const MODEL_UP_AXIS = new THREE.Vector3(0, 0, 1);
+// Local "right" — used to pitch the tail up/down for the dragon tail-sway
+// animation (a rotation around the model's own left-right axis tilts its
+// forward/up plane, i.e. swings the tail, which trails behind along -Y).
+const MODEL_RIGHT_AXIS = new THREE.Vector3(1, 0, 0);
 const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
 // When an entity's heading points anywhere near straight up/down,
 // world-up stops being a good reference for "which way is level": the
@@ -483,6 +504,7 @@ export class Renderer3D {
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
+  private tailSwayQuat = new THREE.Quaternion();
   private rollQuat = new THREE.Quaternion();
   private tmpVec3 = new THREE.Vector3();
   private tmpForward = new THREE.Vector3();
@@ -580,7 +602,13 @@ export class Renderer3D {
       color: 0xffffff,
       emissive: isNature ? 0x000000 : emissive,
       emissiveIntensity: isNature ? 0 : 1.4,
-      roughness: isNature ? 0.9 : 0.5,
+      // Dragons get a slightly glossier (lower-roughness) finish than the
+      // fully matte default nature look — with the dark scale color, a
+      // fully matte 0.9 roughness barely differentiates facets under the
+      // key light, so faceted geometry (frill spikes, neck bend, leg
+      // joints) reads as flat black regardless of angle. A touch of sheen
+      // gives visible specular highlights that vary with facet normal.
+      roughness: isNature ? (isDragon ? 0.65 : 0.9) : 0.5,
       metalness: 0,
       // Unicorns only: the body geometry bakes a gold vertex color onto
       // just the horn (see creatureGeometry's mergeGeometriesWithColor) so it
@@ -594,11 +622,16 @@ export class Renderer3D {
       // against the per-instance purple state color set in updateInstances)
       // so the leathery wings/tail read visibly darker than the scaly body
       // — a classic bat-wing-on-dragon cue — for free, with no extra
-      // per-instance color bookkeeping.
-      color: isDragon ? 0x554466 : 0xffffff,
+      // per-instance color bookkeeping. Kept much lighter than the earlier
+      // 0x554466: that value, multiplied against the (also dark) dragon
+      // body color, crushed the wings to near-solid black regardless of
+      // facet angle or lighting, hiding the scallop/bone-tube geometry
+      // detail — this stays visibly darker than the body without losing
+      // all lit-surface contrast.
+      color: isDragon ? 0x9c86ab : 0xffffff,
       emissive: isNature ? 0x000000 : emissive,
       emissiveIntensity: isNature ? 0 : 1.1,
-      roughness: isNature ? 0.9 : 0.5,
+      roughness: isNature ? (isDragon ? 0.65 : 0.9) : 0.5,
       metalness: 0,
       side: THREE.DoubleSide,
       // Unicorns only: the wing geometry itself carries a baked rainbow
@@ -761,7 +794,10 @@ export class Renderer3D {
         : style === 'nature'
           ? this.naturePredatorGeometries
           : this.arcadePredatorGeometries;
-      this.predatorInstances.set('hawk', this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon));
+      this.predatorInstances.set(
+        'hawk',
+        this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon),
+      );
       this.predatorInstanceKeys.set('hawk', hawkKey);
       this.dragonDisplayQuats.clear();
     }
@@ -1140,8 +1176,11 @@ export class Renderer3D {
       this.dummy.scale.setScalar(entityScale);
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
-      if (set.tail) set.tail.setMatrixAt(i, this.dummy.matrix);
       if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
+      // Dragon tails get an extra sway (see DRAGON_TAIL_SWAY_AMPLITUDE)
+      // computed below once the wingbeat phase is known; every other
+      // creature's tail just follows the body rigidly, as before.
+      if (set.tail && uprightStyle !== 'dragon') set.tail.setMatrixAt(i, this.dummy.matrix);
 
       // Wings: apply an extra local flap rotation around the forward axis
       // before combining with the shared body orientation, so both wings
@@ -1177,6 +1216,21 @@ export class Renderer3D {
       this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
       this.dummy.updateMatrix();
       set.wingRight.setMatrixAt(i, this.dummy.matrix);
+
+      // Tail sway (dragons only): pitch the tail up/down around the
+      // model's local right axis, reusing the wingbeat phase so the tail
+      // reads as part of the same continuous flight motion rather than
+      // an unrelated animation, but offset and scaled down so it lags
+      // the wings instead of moving identically to them.
+      if (set.tail) {
+        if (uprightStyle === 'dragon') {
+          const tailSwayAngle = DRAGON_TAIL_SWAY_AMPLITUDE * Math.sin(phase + DRAGON_TAIL_SWAY_PHASE_OFFSET);
+          this.tailSwayQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, tailSwayAngle);
+          this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
+          this.dummy.updateMatrix();
+          set.tail.setMatrixAt(i, this.dummy.matrix);
+        }
+      }
 
       // Color-by-state: lerp toward the highlight color as intensity rises.
       // Three coloring modes, checked in priority order:
@@ -1307,14 +1361,48 @@ export class Renderer3D {
         this.nextFireBreathTime.set(predator, elapsed + 0.5);
         continue;
       }
-      const dir = predator.renderHeading;
-      const direction = this.tmpVec3.set(dir.x, dir.y, dir.z).clone();
-      const origin = new THREE.Vector3(
-        predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
-        predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
-        predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
-      );
-      this.fireBreathEffects.spawn(origin, direction, DRAGON_LENGTH * 0.5);
+
+      // Anchor the flame to the dragon's actual *displayed* orientation
+      // (dragonDisplayQuats — the same turn-rate-limited quaternion used
+      // to draw the body mesh this frame) rather than the raw, unsmoothed
+      // predator.renderHeading. During a hard turn mid-hunt (exactly when
+      // fire is most likely to trigger), the raw target heading can point
+      // well away from where the model is actually currently drawn facing
+      // — using it made the flame appear to erupt from the dragon's back
+      // and shoot off in an unrelated direction (reported as "shooting
+      // upward like a whale spouting water") instead of out of the mouth
+      // in the direction the visible snout is pointing. Falling back to
+      // the raw heading only matters for a single early frame before any
+      // display quaternion has been computed yet.
+      const displayQuat = this.dragonDisplayQuats.get(predator.id);
+      const mouth = computeDragonMouthTransform(DRAGON_LENGTH);
+      let direction: THREE.Vector3;
+      let origin: THREE.Vector3;
+      if (displayQuat) {
+        direction = this.tmpVec3.set(0, mouth.dirForward, mouth.dirUp).applyQuaternion(displayQuat).normalize().clone();
+        const localOffset = new THREE.Vector3(0, mouth.offsetForward, mouth.offsetUp).applyQuaternion(displayQuat);
+        origin = new THREE.Vector3(predator.position.x, predator.position.y, predator.position.z).add(localOffset);
+      } else {
+        const dir = predator.renderHeading;
+        direction = this.tmpVec3.set(dir.x, dir.y, dir.z).clone();
+        origin = new THREE.Vector3(
+          predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
+          predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
+          predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
+        );
+      }
+
+      // Scale the flame's reach by how fast the dragon is actually
+      // flying right now — a hovering/slow dragon gets a short puff close
+      // to its mouth, while one at full speed gets a stream that stretches
+      // well out ahead of it (see fireBreath.spawn's reach/emitterVelocity
+      // doc comment) so it doesn't visually fly through its own fire.
+      const vel = predator.velocity;
+      const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+      const speedFraction = THREE.MathUtils.clamp(speed / Math.max(params.predatorMaxSpeed, 1e-6), 0, 1);
+      const emitterVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+
+      this.fireBreathEffects.spawn(origin, direction, DRAGON_LENGTH * 0.5, emitterVelocity, speedFraction);
       this.nextFireBreathTime.set(predator, elapsed + 2 + Math.random() * 2.5);
     }
   }
