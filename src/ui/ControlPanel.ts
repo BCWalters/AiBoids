@@ -289,6 +289,16 @@ export class ControlPanel {
     button.textContent = t('alienInvasionButton');
     button.addEventListener('click', () => {
       this.sim.spawnUFO();
+      // Immediate, unmistakable feedback that the click registered —
+      // the saucer itself takes a moment to descend into view, and the
+      // button doesn't visibly grey out until 3 are active, so without
+      // this a click can otherwise feel like it did nothing.
+      button.classList.remove('button-pulse');
+      // Force a reflow so re-adding the class restarts the animation
+      // even on rapid repeated clicks.
+      void button.offsetWidth;
+      button.classList.add('button-pulse');
+      this.syncAlienInvasionButton();
     });
     this.alienButton = button;
     wrapper.appendChild(button);
@@ -320,10 +330,17 @@ export class ControlPanel {
   syncAlienInvasionButton(): void {
     const button = this.alienButton;
     if (!button) return;
+    const activeCount = this.sim.ufos.length;
     const wrongMode = params.mode !== '3d';
-    const atCapacity = this.sim.ufos.length >= MAX_CONCURRENT_UFOS;
+    const atCapacity = activeCount >= MAX_CONCURRENT_UFOS;
     const disabled = wrongMode || atCapacity;
     button.disabled = disabled;
+    // Once at least one saucer is active, show the live count right on
+    // the button — ongoing confirmation that the click(s) worked, not
+    // just a one-off flash, since the saucer itself can take a moment
+    // to descend into view.
+    button.textContent =
+      activeCount > 0 ? t('alienInvasionButtonActive', { count: activeCount, max: MAX_CONCURRENT_UFOS }) : t('alienInvasionButton');
     button.title = wrongMode
       ? t('alienInvasionTitleWrongMode')
       : atCapacity

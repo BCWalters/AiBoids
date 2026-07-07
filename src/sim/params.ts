@@ -96,11 +96,11 @@ export const defaultParams: SimParams = {
   mode: '3d',
 
   boidCount: 150,
-  parrotCount: 30,
-  goldfinchCount: 25,
-  cardinalCount: 25,
-  bluejayCount: 25,
-  predatorCount: 2,
+  parrotCount: 75,
+  goldfinchCount: 75,
+  cardinalCount: 75,
+  bluejayCount: 75,
+  predatorCount: 5,
 
   boidMaxSpeed: 120,
   predatorMaxSpeed: 150,

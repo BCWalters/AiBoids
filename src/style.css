@@ -262,3 +262,22 @@ body {
 .control-buttons button:disabled:hover {
   background: #21262d;
 }
+
+/* Brief flash on click so an action reads as "registered" immediately,
+   even when its visible effect (e.g. a saucer descending into view)
+   takes a moment to actually appear. Removed via a timeout shortly
+   after the class is added (see ControlPanel.ts). */
+@keyframes button-pulse-flash {
+  0% {
+    background: var(--accent);
+    color: #06202b;
+  }
+  100% {
+    background: #21262d;
+    color: var(--text);
+  }
+}
+
+.control-buttons button.button-pulse {
+  animation: button-pulse-flash 0.5s ease-out;
+}
