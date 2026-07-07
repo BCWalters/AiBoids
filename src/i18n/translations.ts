@@ -59,6 +59,7 @@ const en = {
   fogEnabledLabel: 'Distance fog',
 
   alienInvasionButton: 'Send alien invasion 🛸',
+  alienInvasionButtonActive: 'Alien invasion 🛸 ({count}/{max} active)',
   alienInvasionTitleWrongMode: 'Switch to 3D mode to send a flying saucer',
   alienInvasionTitleAtCapacity: 'Up to {max} saucers can be out at once — wait for one to fly off',
   alienInvasionTitleReady: 'A flying saucer descends, tractor-beams nearby boids aboard, then departs',
@@ -129,6 +130,7 @@ const es: TranslationDict = {
   fogEnabledLabel: 'Niebla de distancia',
 
   alienInvasionButton: 'Enviar invasión alienígena 🛸',
+  alienInvasionButtonActive: 'Invasión alienígena 🛸 ({count}/{max} activos)',
   alienInvasionTitleWrongMode: 'Cambia al modo 3D para enviar un platillo volador',
   alienInvasionTitleAtCapacity: 'Puede haber hasta {max} platillos a la vez — espera a que uno se aleje',
   alienInvasionTitleReady: 'Un platillo volador desciende, atrae a los boids cercanos con un rayo tractor y luego se marcha',
@@ -196,6 +198,7 @@ const fr: TranslationDict = {
   fogEnabledLabel: 'Brouillard de distance',
 
   alienInvasionButton: 'Envoyer une invasion extraterrestre 🛸',
+  alienInvasionButtonActive: 'Invasion extraterrestre 🛸 ({count}/{max} actives)',
   alienInvasionTitleWrongMode: 'Passez en mode 3D pour envoyer une soucoupe volante',
   alienInvasionTitleAtCapacity: "Jusqu'à {max} soucoupes peuvent être présentes en même temps — attendez qu'une reparte",
   alienInvasionTitleReady: 'Une soucoupe volante descend, aspire les boids proches avec un rayon tracteur, puis repart',
