@@ -30,6 +30,7 @@ const en = {
   cardinalCount: 'Cardinal count',
   bluejayCount: 'Blue jay count',
   predatorCount: 'Predator count',
+  unicornCount: 'Unicorn count',
   boidMaxSpeed: 'Boid max speed',
   predatorMaxSpeed: 'Predator max speed',
 
@@ -101,6 +102,7 @@ const es: TranslationDict = {
   cardinalCount: 'Cantidad de cardenales',
   bluejayCount: 'Cantidad de arrendajos azules',
   predatorCount: 'Cantidad de depredadores',
+  unicornCount: 'Cantidad de unicornios',
   boidMaxSpeed: 'Velocidad máxima de los boids',
   predatorMaxSpeed: 'Velocidad máxima de los depredadores',
 
@@ -169,6 +171,7 @@ const fr: TranslationDict = {
   cardinalCount: 'Nombre de cardinaux',
   bluejayCount: 'Nombre de geais bleus',
   predatorCount: 'Nombre de prédateurs',
+  unicornCount: 'Nombre de licornes',
   boidMaxSpeed: 'Vitesse maximale des boids',
   predatorMaxSpeed: 'Vitesse maximale des prédateurs',
 

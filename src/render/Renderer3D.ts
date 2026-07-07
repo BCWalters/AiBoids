@@ -9,8 +9,11 @@ import { params, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
-import type { Predator } from '../sim/Predator';
-import { createBirdGeometries, createRealisticBirdGeometries, createDragonGeometries, type BirdGeometries } from './birdGeometry';
+import type { Predator, PredatorKind } from '../sim/Predator';
+import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
+import { createDragonGeometries } from './geometry/dragonGeometry';
+import { createUnicornGeometries } from './geometry/unicornGeometry';
+import type { CreatureGeometries } from './geometry/creatureGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
 import { createDriftingClouds, type DriftingClouds } from './clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
@@ -84,6 +87,21 @@ const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 const DRAGON_PREDATOR_BASE = new THREE.Color(0x4a2270); // deep violet-purple scale (darkened slightly from 0x5b2a86)
 const DRAGON_PREDATOR_HUNT = new THREE.Color(0x9c43be); // brighter magenta-purple when locked on (darkened slightly from 0xb84fe0)
 
+// --- "Unicorn" predator kind (all styles): light lavender body, always
+// upright (see keepUpright), gentle-chase-only — see Predator.kind. Wings
+// get a baked rainbow vertex-color gradient (nature style only, see
+// creatureGeometry's addRainbowVertexColors) rather than a flat tint, so the
+// body/tail colors here are deliberately close to white — a strongly
+// tinted body color would multiply against the rainbow vertex colors and
+// wash them out (InstancedMesh's per-instance color multiplies with the
+// material's vertexColors output).
+const NATURE_UNICORN_BODY = new THREE.Color(0xc9a8f0); // light lavender
+const NATURE_UNICORN_HUNT = new THREE.Color(0xe8c9ff); // brighter pale lavender-pink when locked on
+const NATURE_UNICORN_WING = new THREE.Color(0xf3ecff); // near-white so the rainbow vertex gradient reads clearly
+const ARCADE_UNICORN_EMISSIVE = new THREE.Color(0xd6a8ff);
+const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
+const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
+
 const BOID_LENGTH = 7;
 const BOID_WIDTH = 2.6;
 // Sparrows render a bit smaller than parrots — parrots keep the
@@ -96,6 +114,11 @@ const PREDATOR_WIDTH = 4.4;
 // slightly bigger hawk — roughly 2x the nature-style hawk's footprint.
 const DRAGON_LENGTH = PREDATOR_LENGTH * 3.0;
 const DRAGON_WIDTH = PREDATOR_WIDTH * 3.6;
+// Unicorns: a large, substantial creature — a little smaller than the
+// dragon, not just a slightly bigger hawk (the earlier hawk-relative
+// sizing read as bird-sized, not horse-sized).
+const UNICORN_LENGTH = DRAGON_LENGTH * 0.8;
+const UNICORN_WIDTH = DRAGON_WIDTH * 0.75;
 
 // Wing-flap tuning: base idle flutter plus extra amplitude proportional to
 // how fast the entity is currently moving (relative to its own max speed).
@@ -110,6 +133,23 @@ const FLAP_SPEED_AMPLITUDE = 0.9;
 const DRAGON_FLAP_FREQUENCY = 2.6;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
+
+// Unicorns flap more gracefully/slowly than the hawk — now sized close to
+// the dragon, so a fast hummingbird-like flap would look just as wrong as
+// it would on a dragon.
+const UNICORN_FLAP_FREQUENCY = 3.2;
+const UNICORN_FLAP_IDLE_AMPLITUDE = 0.35;
+const UNICORN_FLAP_SPEED_AMPLITUDE = 0.8;
+
+// Unicorns should stay much closer to upright/level than a dragon, which
+// is free to swoop, dive, and roll dramatically — per direct feedback
+// that a pegasus/unicorn in TV/movies reads as staying far more level
+// and upright in flight than that. levelBias flattens the pitch of the
+// orientation basis (see updateInstances); bankScale shrinks how far it
+// leans into turns. Dragons use the function defaults (0 and 1, i.e.
+// unaffected) by omitting these args at their call site.
+const UNICORN_LEVEL_BIAS = 0.75;
+const UNICORN_BANK_SCALE = 0.35;
 
 // Dragons additionally low-pass filter their heading direction (not just
 // their bank angle) before it's used for orientation — see the
@@ -136,7 +176,7 @@ const DRAGON_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(720);
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
 // "forward" direction we rotate onto each entity's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
-// The bodies' wings lie flat in the local Z=0 plane (see birdGeometry.ts)
+// The bodies' wings lie flat in the local Z=0 plane (see geometry/birdGeometry.ts, geometry/dragonGeometry.ts, geometry/unicornGeometry.ts)
 // — local +Z is therefore the model's own "dorsal/up" direction when
 // level, used below to build an orientation that stays right-side-up
 // rather than picking an arbitrary roll.
@@ -206,6 +246,12 @@ interface SpeciesColorSet {
   wing: THREE.Color;
   tail: THREE.Color;
 }
+
+// Unicorns reuse the same body/wing/tail split (lavender body+tail, near-
+// white wings so the baked rainbow vertex gradient shows through) in both
+// nature and arcade style — see NATURE_UNICORN_WING's doc comment above.
+const NATURE_UNICORN_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_WING, tail: NATURE_UNICORN_BODY };
+const ARCADE_UNICORN_COLORS: SpeciesColorSet = { body: ARCADE_UNICORN_BASE, wing: ARCADE_UNICORN_BASE, tail: ARCADE_UNICORN_BASE };
 
 interface BirdInstanceSet {
   body: THREE.InstancedMesh;
@@ -294,18 +340,24 @@ export class Renderer3D {
   private fireBreathEffects: FireBreathEffects;
   private ufoVisuals: UFOVisual[];
 
-  private arcadeBoidGeometries: BirdGeometries;
-  private arcadeSparrowGeometries: BirdGeometries;
-  private arcadePredatorGeometries: BirdGeometries;
-  private natureBoidGeometries: BirdGeometries;
-  private natureSparrowGeometries: BirdGeometries;
-  private naturePredatorGeometries: BirdGeometries;
-  private dragonPredatorGeometries: BirdGeometries;
+  private arcadeBoidGeometries: CreatureGeometries;
+  private arcadeSparrowGeometries: CreatureGeometries;
+  private arcadePredatorGeometries: CreatureGeometries;
+  private natureBoidGeometries: CreatureGeometries;
+  private natureSparrowGeometries: CreatureGeometries;
+  private naturePredatorGeometries: CreatureGeometries;
+  private dragonPredatorGeometries: CreatureGeometries;
+  private unicornPredatorGeometries: CreatureGeometries;
 
   private speciesInstances = new Map<BoidSpecies, BirdInstanceSet | null>();
   private speciesInstanceKeys = new Map<BoidSpecies, string | null>();
-  private predatorInstances: BirdInstanceSet | null = null;
-  private predatorInstancesKey: string | null = null;
+  /**
+   * Predator instances are split by kind (mirrors speciesInstances above)
+   * so hawks/dragons and unicorns can coexist as independent populations
+   * with entirely different geometries/materials — see Predator.kind.
+   */
+  private predatorInstances = new Map<PredatorKind, BirdInstanceSet | null>();
+  private predatorInstanceKeys = new Map<PredatorKind, string | null>();
   /**
    * Persisted, per-dragon *displayed* orientation — see the keepUpright
    * branch in updateInstances for why this exists as a final safety net
@@ -388,6 +440,7 @@ export class Renderer3D {
     );
     this.naturePredatorGeometries = createRealisticBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
+    this.unicornPredatorGeometries = createUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -399,11 +452,13 @@ export class Renderer3D {
   }
 
   private buildInstanceSet(
-    geometries: BirdGeometries,
+    geometries: CreatureGeometries,
     style: VisualStyle,
     emissive: THREE.Color,
     count: number,
     isDragon: boolean = false,
+    rainbowWings: boolean = false,
+    bodyVertexColors: boolean = false,
   ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
@@ -414,6 +469,12 @@ export class Renderer3D {
       emissiveIntensity: isNature ? 0 : 1.4,
       roughness: isNature ? 0.9 : 0.5,
       metalness: 0,
+      // Unicorns only: the body geometry bakes a gold vertex color onto
+      // just the horn (see creatureGeometry's mergeGeometriesWithColor) so it
+      // stands out from the rest of the (white-vertex-colored, so
+      // unaffected) body — this just tells the material to actually read
+      // and multiply by that per-vertex 'color' attribute.
+      vertexColors: bodyVertexColors,
     });
     const wingMaterial = new THREE.MeshStandardMaterial({
       // Dragons: tint the membrane/tail material itself darker (multiplies
@@ -427,6 +488,11 @@ export class Renderer3D {
       roughness: isNature ? 0.9 : 0.5,
       metalness: 0,
       side: THREE.DoubleSide,
+      // Unicorns only: the wing geometry itself carries a baked rainbow
+      // hue gradient (see creatureGeometry's addRainbowVertexColors) — this
+      // just tells the material to actually read and multiply by that
+      // per-vertex 'color' attribute rather than ignoring it.
+      vertexColors: rainbowWings,
     });
 
     const body = new THREE.InstancedMesh(geometries.body, bodyMaterial, Math.max(count, 1));
@@ -440,6 +506,13 @@ export class Renderer3D {
     let tail: THREE.InstancedMesh | undefined;
     if (geometries.tail) {
       const tailMaterial = wingMaterial.clone();
+      // Only the unicorn tail bakes its own rainbow 'color' attribute
+      // (see buildUnicornTailGeometry); other tails (e.g. none currently
+      // used elsewhere) have no color data, and a vertexColors-enabled
+      // material with no 'color' attribute on its geometry would render
+      // solid black, so only enable it when the geometry actually has one.
+      tailMaterial.vertexColors = !!geometries.tail.getAttribute('color');
+      tailMaterial.needsUpdate = true;
       tail = new THREE.InstancedMesh(geometries.tail, tailMaterial, Math.max(count, 1));
       tail.count = count;
       this.scene.add(tail);
@@ -505,7 +578,6 @@ export class Renderer3D {
     for (const boid of sim.boids) {
       countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
     }
-    const predatorCount = sim.predators.length;
 
     // Each species gets its own InstancedMesh set — separate materials so
     // arcade style can give each a distinct emissive bloom color (emissive
@@ -530,17 +602,59 @@ export class Renderer3D {
       }
     }
 
+    // Predators are split by kind (see Predator.kind / predatorInstances'
+    // doc comment) — hawks/dragons and unicorns are independent
+    // populations, each with their own InstancedMesh set, so both can be
+    // present in the scene at once.
+    let hawkCount = 0;
+    let unicornCount = 0;
+    for (const predator of sim.predators) {
+      if (predator.kind === 'unicorn') unicornCount++;
+      else hawkCount++;
+    }
+
     const isDragon = style === 'nature' && params.dragonPredators;
-    const predatorKey = `${predatorCount}:${style}:${isDragon}`;
-    if (this.predatorInstancesKey !== predatorKey) {
-      this.disposeInstanceSet(this.predatorInstances);
+    const hawkKey = `${hawkCount}:${style}:${isDragon}`;
+    if (this.predatorInstanceKeys.get('hawk') !== hawkKey) {
+      this.disposeInstanceSet(this.predatorInstances.get('hawk') ?? null);
       const geometries = isDragon
         ? this.dragonPredatorGeometries
         : style === 'nature'
           ? this.naturePredatorGeometries
           : this.arcadePredatorGeometries;
-      this.predatorInstances = this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, predatorCount, isDragon);
-      this.predatorInstancesKey = predatorKey;
+      this.predatorInstances.set('hawk', this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon));
+      this.predatorInstanceKeys.set('hawk', hawkKey);
+      this.dragonDisplayQuats.clear();
+    }
+
+    // Unicorns get the full pegasus-with-rainbow-wings geometry in nature
+    // style; arcade style reuses the plain hawk silhouette (just tinted
+    // lavender via updateInstances' color params) rather than a second
+    // bespoke geometry, since arcade's glowing-instanced look doesn't call
+    // for the same level of cosmetic detail.
+    const unicornKey = `${unicornCount}:${style}`;
+    if (this.predatorInstanceKeys.get('unicorn') !== unicornKey) {
+      this.disposeInstanceSet(this.predatorInstances.get('unicorn') ?? null);
+      const geometries = style === 'nature' ? this.unicornPredatorGeometries : this.arcadePredatorGeometries;
+      const rainbowWings = style === 'nature';
+      // The gold-horn vertex colors are only baked into the nature-style
+      // horse geometry (unicornPredatorGeometries) — arcade style reuses
+      // the plain hawk geometry, which has no 'color' attribute at all,
+      // so enabling vertexColors there would have nothing to read.
+      const bodyVertexColors = style === 'nature';
+      this.predatorInstances.set(
+        'unicorn',
+        this.buildInstanceSet(
+          geometries,
+          style,
+          ARCADE_UNICORN_EMISSIVE,
+          unicornCount,
+          false,
+          rainbowWings,
+          bodyVertexColors,
+        ),
+      );
+      this.predatorInstanceKeys.set('unicorn', unicornKey);
       this.dragonDisplayQuats.clear();
     }
 
@@ -633,6 +747,8 @@ export class Renderer3D {
     individualVariation: boolean = false,
     getSpeciesColors?: (entity: Boid | Predator) => SpeciesColorSet | null,
     keepUpright: boolean = false,
+    levelBias: number = 0,
+    bankScale: number = 1,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -670,6 +786,28 @@ export class Renderer3D {
       }
       const dir = entity.renderHeading;
       this.tmpForward.set(dir.x, dir.y, dir.z);
+
+      if (keepUpright && levelBias > 0) {
+        // Flatten the vertical (world-up-axis) component of the forward
+        // vector used to build the orientation basis below, so the
+        // model's pitch (and, by extension, how far the belly/legs axis
+        // tilts away from world-vertical) stays closer to level even
+        // while climbing/diving. Applied only to the orientation basis,
+        // not to entity.renderHeading/velocity, so the actual flight
+        // path is unaffected — just how upright the model looks while
+        // following it. Dragons pass levelBias=0 (unchanged, full
+        // swoop/dive/roll acrobatics); unicorns pass a high value so
+        // they read as staying much closer to horizontal, the way a
+        // pegasus/unicorn conventionally does in media, rather than
+        // pitching nose-down like a diving bird of prey.
+        this.tmpForward.y *= 1 - levelBias;
+        const flattenedLen = this.tmpForward.length();
+        if (flattenedLen > 1e-6) {
+          this.tmpForward.divideScalar(flattenedLen);
+        } else {
+          this.tmpForward.set(dir.x, dir.y, dir.z);
+        }
+      }
 
       if (keepUpright) {
         // Dragons only: build an orientation that keeps the model
@@ -767,7 +905,11 @@ export class Renderer3D {
       // flip — "it's fine if they bank hard, but they should prefer to
       // be right-side up" the rest of the time.
       const turnSignal = this.tmpPrevDir.cross(this.tmpForward).y;
-      const targetBank = THREE.MathUtils.clamp(-turnSignal * BANK_GAIN, -MAX_BANK_RADIANS, MAX_BANK_RADIANS);
+      const targetBank = THREE.MathUtils.clamp(
+        -turnSignal * BANK_GAIN * bankScale,
+        -MAX_BANK_RADIANS * bankScale,
+        MAX_BANK_RADIANS * bankScale,
+      );
       const bankSmoothing = 1 - Math.exp(-dt * BANK_SMOOTHING_RATE);
       entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
       this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
@@ -931,6 +1073,9 @@ export class Renderer3D {
   private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
     if (!(params.visualStyle === 'nature' && params.dragonPredators)) return;
     for (const predator of sim.predators) {
+      // Unicorns are never rendered as dragons (they have their own
+      // geometry) and shouldn't breathe fire regardless.
+      if (predator.kind === 'unicorn') continue;
       if (predator.digesting) continue;
       let nextTime = this.nextFireBreathTime.get(predator);
       if (nextTime === undefined) {
@@ -1024,11 +1169,13 @@ export class Renderer3D {
         );
       }
     }
-    if (this.predatorInstances) {
+    const hawkInstances = this.predatorInstances.get('hawk');
+    if (hawkInstances) {
       const isDragon = isNature && params.dragonPredators;
+      const hawks = sim.predators.filter((predator) => predator.kind !== 'unicorn');
       this.updateInstances(
-        this.predatorInstances,
-        sim.predators,
+        hawkInstances,
+        hawks,
         params.predatorMaxSpeed,
         elapsed,
         dt,
@@ -1045,6 +1192,38 @@ export class Renderer3D {
       );
     }
 
+    const unicornInstances = this.predatorInstances.get('unicorn');
+    if (unicornInstances) {
+      const unicorns = sim.predators.filter((predator) => predator.kind === 'unicorn');
+      this.updateInstances(
+        unicornInstances,
+        unicorns,
+        params.predatorMaxSpeed,
+        elapsed,
+        dt,
+        isNature ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
+        isNature ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
+        (entity) => (entity as Predator).huntIntensity,
+        UNICORN_FLAP_FREQUENCY,
+        UNICORN_FLAP_IDLE_AMPLITUDE,
+        UNICORN_FLAP_SPEED_AMPLITUDE,
+        undefined,
+        undefined,
+        () => (isNature ? NATURE_UNICORN_COLORS : ARCADE_UNICORN_COLORS),
+        // Unicorns always fly right-side-up, like dragons — see keepUpright's
+        // doc comment. Unlike the dragon toggle, this applies in every 3D
+        // style, not just nature, since it's a behavioral trait of the
+        // character rather than a nature-style-only cosmetic flourish.
+        true,
+        // Strong level bias + reduced bank: a pegasus/unicorn should read
+        // as staying much closer to horizontal and upright than a dragon,
+        // which is free to swoop/dive/roll dramatically (dragons pass the
+        // defaults, 0 and 1, i.e. unchanged acrobatics).
+        UNICORN_LEVEL_BIAS,
+        UNICORN_BANK_SCALE,
+      );
+    }
+
     this.controls.update();
     this.composer.render();
   }
@@ -1053,7 +1232,9 @@ export class Renderer3D {
     for (const config of BOID_SPECIES_CONFIGS) {
       this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
     }
-    this.disposeInstanceSet(this.predatorInstances);
+    for (const kind of this.predatorInstances.keys()) {
+      this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
+    }
     for (const geometries of [
       this.arcadeBoidGeometries,
       this.arcadeSparrowGeometries,
@@ -1062,6 +1243,7 @@ export class Renderer3D {
       this.natureSparrowGeometries,
       this.naturePredatorGeometries,
       this.dragonPredatorGeometries,
+      this.unicornPredatorGeometries,
     ]) {
       geometries.body.dispose();
       geometries.wingLeft.dispose();

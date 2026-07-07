@@ -9,6 +9,12 @@ let nextId = 1;
 /** How long (seconds) the "caught" shrink-and-slide-into-mouth animation lasts. */
 export const DYING_DURATION = 0.35;
 
+// Unicorns (see Predator.kind) gently chase boids without ever catching
+// them — this scales down how strongly boids react to one being nearby,
+// so it reads as a much weaker, playful "drift away" rather than the
+// full-blown panic flight a real predator (hawk/dragon) triggers.
+const UNICORN_THREAT_FACTOR = 0.25;
+
 /**
  * Which flock a boid belongs to. Boids only align/cohere with same-species
  * neighbors (see the flocking loop in update()) — a mixed sparrow+parrot
@@ -228,8 +234,14 @@ export class Boid {
     for (const predator of predators) {
       const d = V.distance(this.position, predator.position);
       if (d < p.panicRadius && d > 1e-6) {
+        // Unicorns are gentle chasers, not real threats: boids drift away
+        // playfully rather than panicking. UNICORN_THREAT_FACTOR scales
+        // down both the steering push and the reported proximity (which
+        // drives panicLevel, read by renderers for the alarm-color tint)
+        // so a unicorn nearby reads as mild wariness, not full flight.
+        const threatFactor = predator.kind === 'unicorn' ? UNICORN_THREAT_FACTOR : 1;
         // Closer predators produce a proportionally stronger push.
-        const proximity = 1 - d / p.panicRadius; // 0..1, 1 = right on top of us
+        const proximity = (1 - d / p.panicRadius) * threatFactor; // 0..1, 1 = right on top of us
         const away = V.scale(V.sub(this.position, predator.position), proximity / d);
         fleeSum = V.add(fleeSum, away);
         fleeCount++;

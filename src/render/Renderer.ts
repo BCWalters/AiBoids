@@ -34,6 +34,11 @@ const SPECIES_SIZE_SCALE: Record<string, number> = {
 };
 const PREDATOR_BASE: [number, number, number] = [255, 90, 90]; // #ff5a5a
 const PREDATOR_HUNT: [number, number, number] = [255, 255, 255]; // hot white lock-on flash
+// Unicorns (see Predator.kind): light lavender, brightening slightly when
+// actively chasing — distinct from the hawk's red "danger" palette since
+// unicorns are a gentle, non-lethal chaser, not a real threat.
+const UNICORN_BASE: [number, number, number] = [201, 160, 240]; // #c9a0f0
+const UNICORN_HUNT: [number, number, number] = [232, 201, 255]; // #e8c9ff
 
 // Cartoony blood-splatter particle burst spawned wherever a predator
 // catches a boid (see Simulation.catchEvents). Purely a client-side
@@ -158,13 +163,16 @@ export class Renderer {
     }
 
     for (const predator of sim.predators) {
+      const isUnicorn = predator.kind === 'unicorn';
       this.drawTriangle(
         predator.position.x,
         predator.position.y,
         predator.headingAngle,
         PREDATOR_LENGTH,
         PREDATOR_WIDTH,
-        lerpColor(PREDATOR_BASE, PREDATOR_HUNT, predator.huntIntensity),
+        isUnicorn
+          ? lerpColor(UNICORN_BASE, UNICORN_HUNT, predator.huntIntensity)
+          : lerpColor(PREDATOR_BASE, PREDATOR_HUNT, predator.huntIntensity),
       );
     }
 
