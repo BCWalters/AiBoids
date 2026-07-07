@@ -40,27 +40,36 @@ export function createParrotGeometries(length: number, width: number): CreatureG
 }
 
 /**
- * Compact, rounded lathed torso (parrots read as chunkier/rounder than a
- * lean hawk) topped with a large head, plus a separately-built curved
- * hooked beak merged on — a lathe alone can't produce the beak's
- * asymmetric downward hook, so it's authored as a small bent box-section
- * shape (same technique as the unicorn's legs/tail — see
- * buildParrotBeakGeometry) and merged with the torso.
+ * Compact, rounded lathed torso (parrots read as chunkier/shorter-necked
+ * than a lean hawk) topped with a large rounded head, plus a separately-
+ * built curved hooked beak merged on. Deliberately mirrors the proven
+ * hawk body profile's point count/shape progression (tail -> belly bulge
+ * -> chest -> neck taper -> head bulge -> face) rather than inventing a
+ * new curve from scratch — only the radii/spacing are tuned chunkier —
+ * since a from-scratch profile previously produced a head that read as
+ * "smooshed back" rather than a rounded head facing forward into the
+ * beak. A lathe alone can't produce the beak's asymmetric downward hook,
+ * so it's authored as its own small bent box-section shape (same
+ * technique as the unicorn's legs/tail — see buildParrotBeakGeometry)
+ * and merged with the torso, based flush against the face radius so the
+ * two pieces read as one continuous head instead of a disjointed seam.
  */
 function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
+  const faceRadius = width * 0.14;
+  const faceY = halfLen * 0.74;
   const profile = [
     new THREE.Vector2(width * 0.05, -halfLen * 0.95), // tail-root taper
-    new THREE.Vector2(width * 0.28, -halfLen * 0.6),
-    new THREE.Vector2(width * 0.46, -halfLen * 0.15), // belly bulge, rounder than a hawk's
-    new THREE.Vector2(width * 0.44, halfLen * 0.2), // chest
-    new THREE.Vector2(width * 0.34, halfLen * 0.45), // short thick neck
-    new THREE.Vector2(width * 0.4, halfLen * 0.62), // rounded head
-    new THREE.Vector2(width * 0.16, halfLen * 0.72), // face, just behind the beak
+    new THREE.Vector2(width * 0.24, -halfLen * 0.65),
+    new THREE.Vector2(width * 0.46, -halfLen * 0.2), // belly bulge, rounder than a hawk's
+    new THREE.Vector2(width * 0.44, halfLen * 0.15), // chest
+    new THREE.Vector2(width * 0.3, halfLen * 0.5), // short, thick neck (less taper than a hawk's)
+    new THREE.Vector2(width * 0.34, halfLen * 0.64), // rounded head bulge, forward of the neck
+    new THREE.Vector2(faceRadius, faceY), // face, where the beak attaches
   ];
   const torso = new THREE.LatheGeometry(profile, 12);
 
-  const beak = buildParrotBeakGeometry(length, width, halfLen * 0.72);
+  const beak = buildParrotBeakGeometry(length, faceY, faceRadius);
 
   return mergeGeometriesWithColor([
     { geometry: torso, color: WHITE_VERTEX_COLOR },
@@ -79,7 +88,7 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
  * distinguishes a macaw/parrot silhouette from a hawk's straight,
  * shallow beak.
  */
-function buildParrotBeakGeometry(length: number, width: number, faceY: number): THREE.BufferGeometry {
+function buildParrotBeakGeometry(length: number, faceY: number, faceRadius: number): THREE.BufferGeometry {
   const positions: number[] = [];
   const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) =>
     positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
@@ -134,14 +143,20 @@ function buildParrotBeakGeometry(length: number, width: number, faceY: number): 
   const seg2Len = beakLen * 0.35;
   const seg3Len = beakLen * 0.25;
 
-  const p1 = face.clone().add(segOffset(20, seg1Len));
-  const p2 = p1.clone().add(segOffset(60, seg2Len));
+  // First segment continues almost straight forward off the face (a
+  // gentle 10deg down-angle) so it reads as a continuation of the head's
+  // own taper rather than an abruptly different, disconnected shape.
+  const p1 = face.clone().add(segOffset(10, seg1Len));
+  const p2 = p1.clone().add(segOffset(55, seg2Len));
   const p3 = p2.clone().add(segOffset(115, seg3Len));
 
-  const baseHalf = width * 0.085;
-  pushBoxSegment(face, p1, baseHalf, baseHalf * 0.8, true, false);
-  pushBoxSegment(p1, p2, baseHalf * 0.7, baseHalf * 0.6, false, false);
-  pushBoxSegment(p2, p3, baseHalf * 0.4, baseHalf * 0.35, false, true);
+  // Base half-extent matches the face radius it's flush-merged against
+  // (rather than being noticeably thinner), so the beak reads as growing
+  // directly out of the face instead of floating in front of it.
+  const baseHalf = faceRadius;
+  pushBoxSegment(face, p1, baseHalf, baseHalf * 0.85, true, false);
+  pushBoxSegment(p1, p2, baseHalf * 0.75, baseHalf * 0.65, false, false);
+  pushBoxSegment(p2, p3, baseHalf * 0.42, baseHalf * 0.36, false, true);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
@@ -150,33 +165,44 @@ function buildParrotBeakGeometry(length: number, width: number, faceY: number): 
 }
 
 /**
- * Long trailing tail: a handful of narrow elongated streamer feathers of
- * slightly varying length (macaws famously have very long tail feathers,
- * unlike the short fanned tail on the shared hawk/songbird builder).
- * Each streamer is a double-sided flat ribbon (two mirrored-winding
- * triangles) so it doesn't vanish from the back-facing side.
+ * A solid fanned tail base (same shape/attachment as the shared hawk/
+ * songbird tail — two mirrored triangles meeting at a rear center point,
+ * rooted flush against the body's own tail-root) with a couple of long
+ * center streamer feathers layered on top, growing out from that same
+ * fan-back point rather than floating as separate disconnected sticks —
+ * macaws have a fanned tail base with a few dramatically elongated
+ * central feathers, not just bare quills.
  */
 function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  const streamerCount = 3;
   const positions: number[] = [];
-  const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
+  const pushTri = (a: number[], b: number[], c: number[]) => {
+    positions.push(...a, ...b, ...c);
+    positions.push(...c, ...b, ...a); // reversed winding so it's visible from both sides
+  };
 
+  const root = [0, -length * 0.42, 0];
+  const fanLeftTip = [-width * 0.85, -length * 0.68, 0];
+  const fanRightTip = [width * 0.85, -length * 0.68, 0];
+  const fanBack = [0, -length * 0.78, 0];
+  pushTri(root, fanLeftTip, fanBack);
+  pushTri(root, fanBack, fanRightTip);
+
+  // Long streamers grow directly out of the fan's own back point, close
+  // together near the centerline (rather than spread wide like the fan's
+  // own tips), so they visually continue the fan rather than sprouting
+  // from empty space beside it.
+  const streamerCount = 2;
   for (let i = 0; i < streamerCount; i++) {
     const t = i / (streamerCount - 1);
-    const xOffset = (t - 0.5) * width * 0.55;
-    // Central streamer trails longest, outer ones progressively shorter —
-    // long, but not as long as the whole body (a full-body-length streamer
-    // read as an oversized blob rather than a slender trailing feather).
-    const centerBias = 1 - Math.abs(t - 0.5) * 2;
-    const streamerLen = length * (0.42 + 0.22 * centerBias);
-    const halfWidth = width * 0.035;
+    const xOffset = (t - 0.5) * width * 0.3;
+    const streamerLen = length * 0.5;
+    const halfWidth = width * 0.06;
 
-    const root = [xOffset - halfWidth, -length * 0.42, 0];
-    const root2 = [xOffset + halfWidth, -length * 0.42, 0];
-    const tip = [xOffset, -length * 0.42 - streamerLen, -length * 0.1];
+    const streamerRoot = [xOffset - halfWidth, fanBack[1] * 0.85, 0];
+    const streamerRoot2 = [xOffset + halfWidth, fanBack[1] * 0.85, 0];
+    const tip = [xOffset, fanBack[1] - streamerLen, -length * 0.06];
 
-    pushTri(root, root2, tip);
-    pushTri(root2, root, tip);
+    pushTri(streamerRoot, streamerRoot2, tip);
   }
 
   const geometry = new THREE.BufferGeometry();
