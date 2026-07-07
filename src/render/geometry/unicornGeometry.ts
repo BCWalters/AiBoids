@@ -42,27 +42,39 @@ export function createUnicornGeometries(length: number, width: number): Creature
 
 
 /**
- * Horse-proportioned torso plus a small horn merged onto the top of the
- * head — see buildHorseBodyProfileGeometry / buildUnicornHornGeometry.
- * (No ears for now — an earlier pass added small paired ears here, but
- * they read wildly out of proportion, so they've been dropped pending a
- * better approach.) The horn is baked gold via mergeGeometriesWithColor
- * so it stands out against the lavender body — see that helper's doc
- * comment for why vertex colors (rather than a second material) are
- * needed here.
+ * Horse-proportioned torso plus a small horn, small paired ears, a
+ * flowing neck mane, and a rounded nose bulb merged onto the top/front
+ * of the head/neck — see buildHorseBodyProfileGeometry /
+ * buildUnicornHornGeometry / buildUnicornEarsGeometry /
+ * buildUnicornManeGeometry / buildUnicornNoseGeometry. (An earlier pass
+ * added ears that read wildly out of proportion and they were dropped;
+ * this pass re-adds them at a much smaller scale — see
+ * buildUnicornEarsGeometry's doc comment.) The horn is baked gold via
+ * mergeGeometriesWithColor so it stands out against the lavender body —
+ * see that helper's doc comment for why vertex colors (rather than a
+ * second material) are needed here.
  */
 function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGeometry {
-  const { geometry: bodyGeometry, pollY, pollZ, pollRadius, headTop } = buildHorseBodyProfileGeometry(length, width);
+  const { geometry: bodyGeometry, pollY, pollZ, pollRadius, headTop, muzzleTip } = buildHorseBodyProfileGeometry(length, width);
   const hornGeometry = buildUnicornHornGeometry(pollY, pollZ, pollRadius);
+  const earsGeometry = buildUnicornEarsGeometry(pollY, pollZ, pollRadius);
   const eyesGeometry = buildUnicornEyesGeometry(headTop.y, headTop.z, headTop.radius);
+  const maneGeometry = buildUnicornManeGeometry(length, width, pollY, pollZ, pollRadius);
+  const noseGeometry = buildUnicornNoseGeometry(muzzleTip.y, muzzleTip.z, muzzleTip.radius);
   const merged = mergeGeometriesWithColor([
     { geometry: bodyGeometry, color: new THREE.Color(0xffffff) },
     { geometry: hornGeometry, color: UNICORN_HORN_COLOR },
+    { geometry: earsGeometry, color: new THREE.Color(0xffffff) },
     { geometry: eyesGeometry, color: UNICORN_EYE_COLOR },
+    { geometry: maneGeometry, color: new THREE.Color(0xffffff) },
+    { geometry: noseGeometry, color: UNICORN_MUZZLE_TINT },
   ]);
   bodyGeometry.dispose();
   hornGeometry.dispose();
+  earsGeometry.dispose();
   eyesGeometry.dispose();
+  maneGeometry.dispose();
+  noseGeometry.dispose();
   return merged;
 }
 
@@ -163,6 +175,7 @@ function buildHorseBodyProfileGeometry(
   pollZ: number;
   pollRadius: number;
   headTop: { y: number; z: number; radius: number };
+  muzzleTip: { y: number; z: number; radius: number };
 } {
   const halfLen = length * 0.5;
   const spine: SpinePoint[] = [
@@ -186,17 +199,22 @@ function buildHorseBodyProfileGeometry(
     // Head shortened (poll -> muzzle distance scaled toward the poll)
     // and widened (radii increased) per direct feedback: "slightly
     // wider and slightly shorter".
-    { y: halfLen * 0.303, z: length * 0.337, radius: width * 0.16 }, // top of head, starting to bend down+forward
+    { y: halfLen * 0.29, z: length * 0.345, radius: width * 0.185 }, // top of head/forehead, starting to bend down+forward
+    // Cheek/jaw bulge — a distinct wider point partway down the face
+    // (real horses have a noticeably thicker jaw/cheek area right below
+    // the forehead, before the face narrows into the muzzle) so the
+    // taper isn't one continuous pinch from poll to nose-tip, which read
+    // as a thin anteater snout. zScale eased slightly (0.9, not fully
+    // round) since the jaw is a touch flatter than the throat/neck.
+    { y: halfLen * 0.325, z: length * 0.32, radius: width * 0.175, zScale: 0.9 }, // cheek/jaw
     // Mouth/muzzle area: flattened (reduced zScale) and tinted a darker
     // purple (multiplies against the lavender instance color) so it
     // reads as a distinct muzzle rather than a continuation of the neck.
-    // Widened considerably and the taper eased (radii step down more
-    // gradually from the head/poll instead of pinching sharply) — per
-    // direct feedback the previous abrupt taper read as an anteater
-    // snout rather than a horse muzzle, and the muzzle itself needed to
-    // end larger.
-    { y: halfLen * 0.373, z: length * 0.277, radius: width * 0.145, zScale: 0.75, color: UNICORN_MUZZLE_TINT }, // nose bridge — head angling down
-    { y: halfLen * 0.447, z: length * 0.161, radius: width * 0.09, zScale: 0.68, color: UNICORN_MUZZLE_TINT }, // muzzle tip — down and forward of the poll
+    // Shortened considerably (was reaching halfLen*0.447 — a long thin
+    // taper that read as an anteater snout) and the taper eased so the
+    // muzzle stays noticeably thick right up until the blunt nose tip.
+    { y: halfLen * 0.365, z: length * 0.29, radius: width * 0.15, zScale: 0.8, color: UNICORN_MUZZLE_TINT }, // nose bridge — head angling down
+    { y: halfLen * 0.4, z: length * 0.24, radius: width * 0.115, zScale: 0.72, color: UNICORN_MUZZLE_TINT }, // muzzle tip — blunt, not pinched to a point
   ];
 
   const segments = 10;
@@ -259,6 +277,26 @@ function buildHorseBodyProfileGeometry(
     }
   }
 
+  // Cap the muzzle-tip ring with a flat fan of triangles. Without this,
+  // the sweep's final ring was simply an open hole — combined with the
+  // small terminal radius there, the head read as tapering to a bare
+  // point/hollow "anteater snout" rather than ending in a blunt nose
+  // surface (per direct feedback: "it looks like it's missing its nose
+  // ... ends at a point"). A flat cap alone gives a blunt end; the
+  // rounded nose bulb merged in separately (see buildUnicornNoseGeometry)
+  // sits just in front of this cap for the fleshy "muzzle" read.
+  const tipIndex = spine.length - 1;
+  const tipRing = rings[tipIndex];
+  const tipColor = ringColors[tipIndex];
+  // A point behind the tip (toward the previous ring) so pushOutwardTri
+  // can correctly tell the cap's outward direction is forward (+Y).
+  const tipCapBehind = new THREE.Vector3(0, spine[tipIndex - 1].y, spine[tipIndex - 1].z);
+  const tipCenter = new THREE.Vector3(0, spine[tipIndex].y, spine[tipIndex].z);
+  for (let j = 0; j < segments; j++) {
+    const k = (j + 1) % segments;
+    pushOutwardTri(tipCenter, tipColor, tipRing[j], tipColor, tipRing[k], tipColor, tipCapBehind);
+  }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
@@ -266,12 +304,14 @@ function buildHorseBodyProfileGeometry(
 
   const poll = spine[7];
   const headTopPoint = spine[8];
+  const muzzleTipPoint = spine[spine.length - 1];
   return {
     geometry,
     pollY: poll.y,
     pollZ: poll.z,
     pollRadius: poll.radius,
     headTop: { y: headTopPoint.y, z: headTopPoint.z, radius: headTopPoint.radius },
+    muzzleTip: { y: muzzleTipPoint.y, z: muzzleTipPoint.z, radius: muzzleTipPoint.radius },
   };
 }
 
@@ -294,6 +334,58 @@ function buildUnicornEyesGeometry(headTopY: number, headTopZ: number, headTopRad
   const rightEye = new THREE.SphereGeometry(eyeRadius, 8, 6);
   rightEye.translate(sideOffset, headTopY, headTopZ + upOffset);
   return mergePositionOnlyGeometries([leftEye, rightEye]);
+}
+
+
+/**
+ * A subtle rounded nose-cap (tinted the same muzzle purple as the nose
+ * bridge — see buildHorseBodyProfileGeometry) sitting flush against the
+ * muzzle-tip ring, plus two small dark nostril dots. Per direct
+ * feedback ("looking at the unicorn... it looks like it's missing its
+ * nose, from the side it looks like it ends at a point") — the
+ * swept-tube head profile's final ring, even now capped flat (see
+ * buildHorseBodyProfileGeometry), still read as an abrupt/pointed
+ * cutoff rather than an actual nose. A first pass at fixing this used a
+ * full sphere offset forward of the tip, which then read as a distinct
+ * ball sticking out ("like a Rudolph nose") rather than part of the
+ * face. This is a half-sphere (thetaLength = PI/2, so only the dome
+ * half is built, with a flat cut face at the equator) sized close to
+ * the tip ring's own radius and sitting almost flush against it (only
+ * a small forward offset) — a gentle rounded pad blending into the
+ * muzzle rather than a separate protruding bulb.
+ */
+function buildUnicornNoseGeometry(muzzleTipY: number, muzzleTipZ: number, muzzleTipRadius: number): THREE.BufferGeometry {
+  const bulbRadius = muzzleTipRadius * 0.7;
+  const bulbRadiusZ = muzzleTipRadius * 0.55;
+  // Only a small fraction of the bulb's own radius pokes past the
+  // tip ring — mostly flush with it, not projecting forward as its own
+  // separate shape.
+  const noseY = muzzleTipY + bulbRadius * 0.2;
+  // thetaStart=0, thetaLength=PI/2 keeps just the pole cap (a dome/half-
+  // sphere bulging forward in local +Y, the sphere's default pole axis,
+  // which already matches the model's forward axis here) with a flat
+  // circular cut face at the equator — no full-sphere "ball" silhouette.
+  const bulb = new THREE.SphereGeometry(bulbRadius, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+  bulb.scale(1, 1, bulbRadiusZ / bulbRadius);
+  bulb.translate(0, noseY, muzzleTipZ);
+
+  const nostrilRadius = muzzleTipRadius * 0.15;
+  const nostrilSideOffset = muzzleTipRadius * 0.35;
+  const nostrilY = noseY + bulbRadius * 0.4;
+  const leftNostril = new THREE.SphereGeometry(nostrilRadius, 6, 5);
+  leftNostril.translate(-nostrilSideOffset, nostrilY, muzzleTipZ);
+  const rightNostril = new THREE.SphereGeometry(nostrilRadius, 6, 5);
+  rightNostril.translate(nostrilSideOffset, nostrilY, muzzleTipZ);
+
+  const merged = mergeGeometriesWithColor([
+    { geometry: bulb, color: UNICORN_MUZZLE_TINT },
+    { geometry: leftNostril, color: UNICORN_EYE_COLOR },
+    { geometry: rightNostril, color: UNICORN_EYE_COLOR },
+  ]);
+  bulb.dispose();
+  leftNostril.dispose();
+  rightNostril.dispose();
+  return merged;
 }
 
 
@@ -404,7 +496,15 @@ function buildUnicornLegsGeometry(length: number, width: number): THREE.BufferGe
   }
 
   const frontY = length * 0.02; // near the chest
-  const backY = -length * 0.42; // near the haunch
+  // Rear hip Y was -length*0.42 — *behind* the body's own rear-most spine
+  // point (the tail root sits at -halfLen*0.8 = -length*0.4, see
+  // buildHorseBodyProfileGeometry), so the back legs floated in empty
+  // space past the rump instead of actually attaching to the haunch —
+  // read as "detached" legs. Moved forward into the hindquarter bulge
+  // (spine's hindquarter ring sits at -halfLen*0.62 = -length*0.31,
+  // radius width*0.32 — the widest part of the rear body) so the hip
+  // socket sits inside/at the body surface.
+  const backY = -length * 0.3; // inside the hindquarter bulge
   const stanceX = width * 0.26;
   // Legs now emerge a bit lower on the belly (more negative Z, "down")
   // rather than right at the body's central spine axis (z=0) — per
@@ -510,10 +610,17 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
 
   // Longer than the previous stubby tail — a real flowing horse tail
   // rather than a short bunch.
-  const tailLength = length * 0.55;
+  const tailLength = length * 0.68;
   const numSegments = 7; // 6 internal joints between root and tip
-  const startAngleDeg = 45; // up-and-back flick right at the rump
-  const endAngleDeg = -95; // curling to point down, just past straight down at the tip
+  // Trails mostly backward with a gentle downward sag, rather than
+  // curling almost straight down (-95deg tip, from an earlier pass tuned
+  // for a different flight-pose model) — now that unicorns fly upright
+  // and nearly flat (see updateInstances' uprightStyle === 'unicorn'),
+  // a tail hanging down like a rope under gravity reads wrong; a mostly-
+  // horizontal streaming tail (like a horse's tail flowing behind it in
+  // motion, e.g. the reference pegasus image) reads much better.
+  const startAngleDeg = 20; // slight up-and-back flick right at the rump
+  const endAngleDeg = -30; // trailing back with a gentle downward droop at the tip
   const smoothstep = (t: number) => t * t * (3 - 2 * t);
 
   // Root anchor matches the body's now-slightly-shorter rump (tail root
@@ -538,8 +645,8 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
     prev = next;
   }
 
-  const rootHalfWidth = width * 0.11;
-  const tipHalfWidth = width * 0.02;
+  const rootHalfWidth = width * 0.15;
+  const tipHalfWidth = width * 0.03;
   for (let i = 0; i < points.length - 1; i++) {
     const t = i / (points.length - 2);
     const halfX = THREE.MathUtils.lerp(rootHalfWidth, tipHalfWidth, t);
@@ -586,5 +693,166 @@ function buildUnicornHornGeometry(
   // axis at the poll) and extends further upward from there.
   cone.translate(0, pollY, pollZ + pollRadius + hornLength / 2);
   return cone;
+}
+
+
+/**
+ * Two small paired ears flanking the horn at the poll, tilted slightly
+ * outward and back. An earlier attempt at ears read "wildly out of
+ * proportion" and was removed; the fix here is scale — these are sized
+ * as a small fraction of the horn (which is itself already tuned small
+ * relative to the head), not the head/body directly, so they can't
+ * balloon out of proportion the way a width-relative size did before.
+ * Built as flattened cones (short, wide-based, tapering to a point) so
+ * they read as small horse ears rather than horn-like spikes.
+ */
+function buildUnicornEarsGeometry(pollY: number, pollZ: number, pollRadius: number): THREE.BufferGeometry {
+  const earLength = pollRadius * 0.85;
+  const earRadius = pollRadius * 0.4;
+  const sideOffset = pollRadius * 0.55;
+  // Ears sit just behind/beside the horn base, not stacked directly on
+  // top of it, and lean outward+backward (away from the face) the way a
+  // real horse's ears angle.
+  const baseZ = pollZ + pollRadius * 0.55;
+  const baseY = pollY - pollRadius * 0.25;
+
+  function buildEar(side: 1 | -1): THREE.BufferGeometry {
+    const ear = new THREE.ConeGeometry(earRadius, earLength, 6);
+    ear.rotateX(Math.PI / 2); // point along +Z like the horn, before leaning
+    // Lean outward (away from the midline) and slightly backward.
+    ear.rotateY((side * Math.PI) / 8);
+    ear.rotateX(-Math.PI / 10);
+    ear.translate(side * sideOffset, baseY, baseZ + earLength * 0.4);
+    return ear;
+  }
+
+  return mergePositionOnlyGeometries([buildEar(1), buildEar(-1)]);
+}
+
+
+/**
+ * A flowing mane draping down one side of the neck from the poll back
+ * toward the withers, matching the reference pegasus image's most
+ * distinctive missing feature. Built the same way as the tail (true 3D
+ * box segments — see pushBoxSegment in buildUnicornLegsGeometry/
+ * buildUnicornTailGeometry — not a flat ribbon), tapering from a
+ * thicker base near the poll to a thin wisp near the withers, and
+ * offset to hang along +X (one side of the neck) with a slight
+ * trailing lag (-Y) as if blown back in flight, rather than standing
+ * straight up off the topline.
+ */
+function buildUnicornManeGeometry(
+  length: number,
+  width: number,
+  pollY: number,
+  pollZ: number,
+  pollRadius: number,
+): THREE.BufferGeometry {
+  const halfLen = length * 0.5;
+  const positions: number[] = [];
+  const colors: number[] = [];
+  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, color: THREE.Color) => {
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
+  };
+
+  // Same outward-normal-safe box-segment helper duplicated in
+  // buildUnicornLegsGeometry/buildUnicornTailGeometry — each of these
+  // "hair"/"limb" builders stays self-contained rather than sharing a
+  // module-level helper, matching this file's existing pattern.
+  function pushBoxSegment(
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    halfX: number,
+    halfY: number,
+    capStart: boolean,
+    capEnd: boolean,
+    color: THREE.Color,
+  ) {
+    const corner = (p: THREE.Vector3, sx: number, sy: number) => new THREE.Vector3(p.x + sx * halfX, p.y + sy * halfY, p.z);
+    const signs: [number, number][] = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+    const ca = signs.map(([sx, sy]) => corner(a, sx, sy));
+    const cb = signs.map(([sx, sy]) => corner(b, sx, sy));
+    const axisCenter = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
+    const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, center: THREE.Vector3) => {
+      const e1 = new THREE.Vector3().subVectors(p1, p0);
+      const e2 = new THREE.Vector3().subVectors(p2, p0);
+      const normal = new THREE.Vector3().crossVectors(e1, e2);
+      const centroid = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3);
+      const outward = new THREE.Vector3().subVectors(centroid, center);
+      if (normal.dot(outward) < 0) {
+        pushTri(p0, p2, p1, color);
+      } else {
+        pushTri(p0, p1, p2, color);
+      }
+    };
+    for (let i = 0; i < 4; i++) {
+      const j = (i + 1) % 4;
+      pushOutward(ca[i], cb[i], cb[j], axisCenter);
+      pushOutward(ca[i], cb[j], ca[j], axisCenter);
+    }
+    if (capStart) {
+      pushOutward(ca[0], ca[1], ca[2], axisCenter);
+      pushOutward(ca[0], ca[2], ca[3], axisCenter);
+    }
+    if (capEnd) {
+      pushOutward(cb[0], cb[1], cb[2], axisCenter);
+      pushOutward(cb[0], cb[2], cb[3], axisCenter);
+    }
+  }
+
+  // Anchor points follow the same neck curve used in
+  // buildHorseBodyProfileGeometry's spine (withers -> poll), recomputed
+  // here from length/width rather than threading the whole spine array
+  // through — the mane only needs these four points, and they're cheap
+  // to re-derive from the same length-relative fractions. `radius`
+  // mirrors each point's actual neck cross-section radius there (also
+  // from that same spine array) so the mane can be pushed clear of the
+  // neck's own surface at each point, not just at the (much narrower)
+  // poll — using a single poll-sized offset for the whole mane buried
+  // most of it inside the thicker withers end of the neck.
+  const necklinePoints: { y: number; z: number; radius: number }[] = [
+    { y: halfLen * 0.08, z: length * 0.1, radius: width * 0.22 }, // withers
+    { y: halfLen * 0.147, z: length * 0.193, radius: width * 0.17 },
+    { y: halfLen * 0.207, z: length * 0.287, radius: width * 0.13 },
+    { y: pollY, z: pollZ, radius: pollRadius }, // poll (base of the mane, just behind the ears/horn)
+  ];
+
+  // Root sits a bit above the topline (so the mane reads as hair sitting
+  // on top of the neck, not buried inside it) and drapes slightly to one
+  // side (+X) with a small backward lag, growing more pronounced toward
+  // the withers end as if trailing in the airflow.
+  const points: THREE.Vector3[] = [];
+  const radii: number[] = [];
+  for (let i = necklinePoints.length - 1; i >= 0; i--) {
+    const t = (necklinePoints.length - 1 - i) / (necklinePoints.length - 1); // 0 at poll, 1 at withers
+    const p = necklinePoints[i];
+    const topOffset = p.radius * 0.7;
+    const sideDrape = width * 0.06 * (0.3 + t);
+    const backLag = length * 0.02 * t;
+    points.push(new THREE.Vector3(sideDrape, p.y - backLag, p.z + topOffset));
+    radii.push(p.radius);
+  }
+
+  // Thickness follows each segment's own neck radius (thicker where the
+  // neck itself is thicker, near the withers) rather than a single
+  // poll-sized value throughout, which read as too uniformly thin.
+  for (let i = 0; i < points.length - 1; i++) {
+    const avgRadius = (radii[i] + radii[i + 1]) / 2;
+    const halfX = avgRadius * 0.4;
+    const halfY = halfX * 0.9;
+    pushBoxSegment(points[i], points[i + 1], halfX, halfY, i === 0, i === points.length - 2, WHITE_VERTEX_COLOR);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 

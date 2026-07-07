@@ -107,14 +107,26 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
   const shoulder = [mainSpan * 0.42 * s, chord * 0.42, 0];
   pushTri(root, shoulder, tip);
 
-  const fingerCount = 5;
+  // fingerCount raised from 5->6 and each feather now has an explicit,
+  // deliberate gap to its neighbors (rather than nearly-touching bases)
+  // so individual feathers read as separate shapes rather than one solid
+  // scalloped edge — closer to a real fanned primary-feather look.
+  const fingerCount = 6;
   const innerAnchor = [mainSpan * 0.5 * s, -chord * 0.1, 0];
   const outerAnchor = tip;
+  const halfWidth = 0.075;
   for (let i = 0; i < fingerCount; i++) {
     const t = i / (fingerCount - 1);
-    const rootPt = lerp3(innerAnchor, outerAnchor, t);
-    const rootPt2 = lerp3(innerAnchor, outerAnchor, Math.min(1, t + 0.22));
-    const fingerLen = span * (0.3 + 0.12 * t);
+    const rootPt = lerp3(innerAnchor, outerAnchor, Math.max(0, t - halfWidth));
+    const rootPt2 = lerp3(innerAnchor, outerAnchor, Math.min(1, t + halfWidth));
+    // Lengthened back up from the prior pass (which overcorrected to
+    // 0.08-0.25*span and read as "fingering effect gone" — barely
+    // visible against the solid main panel). Longest (outermost) feather
+    // now reaches almost exactly to the wing's own nominal total span
+    // (mainSpan 0.72 + 0.28 = 1.0*span) rather than needle-spiking well
+    // past it (the old 0.3-0.42*span bug) or staying tucked well inside
+    // it (barely past the main panel's own edge).
+    const fingerLen = span * (0.12 + 0.16 * t);
     const spreadRad = ((-16 + 42 * t) * Math.PI) / 180;
 
     const baseDirX = s;

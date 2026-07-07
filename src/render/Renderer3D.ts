@@ -136,10 +136,16 @@ const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 
 // Unicorns flap more gracefully/slowly than the hawk — now sized close to
 // the dragon, so a fast hummingbird-like flap would look just as wrong as
-// it would on a dragon.
+// it would on a dragon. Amplitude eased down from an earlier pass (0.35
+// idle / 0.8 speed) — a large horse-scale wing swinging a full ~45-65deg
+// past horizontal on the downstroke read as an aggressive flap and, at
+// certain viewing angles, foreshortened into a thin edge-on "blade"
+// silhouette. A gentler swing suits a serene, floaty pegasus better and
+// keeps the wing panel closer to broadside-on to the camera throughout
+// the cycle.
 const UNICORN_FLAP_FREQUENCY = 3.2;
-const UNICORN_FLAP_IDLE_AMPLITUDE = 0.35;
-const UNICORN_FLAP_SPEED_AMPLITUDE = 0.8;
+const UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
+const UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
 
 // Dragon tail sway: on-screen references (movies/TV) almost always show a
 // dragon's tail undulating up and down as it flies, driven by the same
