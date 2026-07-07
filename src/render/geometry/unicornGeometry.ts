@@ -510,10 +510,17 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
 
   // Longer than the previous stubby tail — a real flowing horse tail
   // rather than a short bunch.
-  const tailLength = length * 0.55;
+  const tailLength = length * 0.68;
   const numSegments = 7; // 6 internal joints between root and tip
-  const startAngleDeg = 45; // up-and-back flick right at the rump
-  const endAngleDeg = -95; // curling to point down, just past straight down at the tip
+  // Trails mostly backward with a gentle downward sag, rather than
+  // curling almost straight down (-95deg tip, from an earlier pass tuned
+  // for a different flight-pose model) — now that unicorns fly upright
+  // and nearly flat (see updateInstances' uprightStyle === 'unicorn'),
+  // a tail hanging down like a rope under gravity reads wrong; a mostly-
+  // horizontal streaming tail (like a horse's tail flowing behind it in
+  // motion, e.g. the reference pegasus image) reads much better.
+  const startAngleDeg = 20; // slight up-and-back flick right at the rump
+  const endAngleDeg = -30; // trailing back with a gentle downward droop at the tip
   const smoothstep = (t: number) => t * t * (3 - 2 * t);
 
   // Root anchor matches the body's now-slightly-shorter rump (tail root
@@ -538,8 +545,8 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
     prev = next;
   }
 
-  const rootHalfWidth = width * 0.11;
-  const tipHalfWidth = width * 0.02;
+  const rootHalfWidth = width * 0.15;
+  const tipHalfWidth = width * 0.03;
   for (let i = 0; i < points.length - 1; i++) {
     const t = i / (points.length - 2);
     const halfX = THREE.MathUtils.lerp(rootHalfWidth, tipHalfWidth, t);
