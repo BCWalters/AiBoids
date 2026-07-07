@@ -141,6 +141,17 @@ const UNICORN_FLAP_FREQUENCY = 3.2;
 const UNICORN_FLAP_IDLE_AMPLITUDE = 0.35;
 const UNICORN_FLAP_SPEED_AMPLITUDE = 0.8;
 
+// Dragon tail sway: on-screen references (movies/TV) almost always show a
+// dragon's tail undulating up and down as it flies, driven by the same
+// wingbeat that powers the body through the air, rather than trailing
+// perfectly rigid behind it like a glider's tailplane. Reuses the wing's
+// flap phase (so the whole silhouette reads as one coordinated wingbeat)
+// but at a smaller amplitude and a phase offset, so the tail lags/leads
+// the wings rather than moving in a way that looks mechanically identical
+// to them.
+const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
+const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
+
 // Unicorns get their own dedicated "stay upright" orientation model in
 // updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
 // smaller-numbers reuse of the dragon's keepUpright path (see
@@ -220,6 +231,10 @@ const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 // level, used below to build an orientation that stays right-side-up
 // rather than picking an arbitrary roll.
 const MODEL_UP_AXIS = new THREE.Vector3(0, 0, 1);
+// Local "right" — used to pitch the tail up/down for the dragon tail-sway
+// animation (a rotation around the model's own left-right axis tilts its
+// forward/up plane, i.e. swings the tail, which trails behind along -Y).
+const MODEL_RIGHT_AXIS = new THREE.Vector3(1, 0, 0);
 const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
 // When an entity's heading points anywhere near straight up/down,
 // world-up stops being a good reference for "which way is level": the
@@ -445,6 +460,7 @@ export class Renderer3D {
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
+  private tailSwayQuat = new THREE.Quaternion();
   private rollQuat = new THREE.Quaternion();
   private tmpVec3 = new THREE.Vector3();
   private tmpForward = new THREE.Vector3();
@@ -708,7 +724,10 @@ export class Renderer3D {
         : style === 'nature'
           ? this.naturePredatorGeometries
           : this.arcadePredatorGeometries;
-      this.predatorInstances.set('hawk', this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon));
+      this.predatorInstances.set(
+        'hawk',
+        this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon),
+      );
       this.predatorInstanceKeys.set('hawk', hawkKey);
       this.dragonDisplayQuats.clear();
     }
@@ -1087,8 +1106,11 @@ export class Renderer3D {
       this.dummy.scale.setScalar(entityScale);
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
-      if (set.tail) set.tail.setMatrixAt(i, this.dummy.matrix);
       if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
+      // Dragon tails get an extra sway (see DRAGON_TAIL_SWAY_AMPLITUDE)
+      // computed below once the wingbeat phase is known; every other
+      // creature's tail just follows the body rigidly, as before.
+      if (set.tail && uprightStyle !== 'dragon') set.tail.setMatrixAt(i, this.dummy.matrix);
 
       // Wings: apply an extra local flap rotation around the forward axis
       // before combining with the shared body orientation, so both wings
@@ -1124,6 +1146,21 @@ export class Renderer3D {
       this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
       this.dummy.updateMatrix();
       set.wingRight.setMatrixAt(i, this.dummy.matrix);
+
+      // Tail sway (dragons only): pitch the tail up/down around the
+      // model's local right axis, reusing the wingbeat phase so the tail
+      // reads as part of the same continuous flight motion rather than
+      // an unrelated animation, but offset and scaled down so it lags
+      // the wings instead of moving identically to them.
+      if (set.tail) {
+        if (uprightStyle === 'dragon') {
+          const tailSwayAngle = DRAGON_TAIL_SWAY_AMPLITUDE * Math.sin(phase + DRAGON_TAIL_SWAY_PHASE_OFFSET);
+          this.tailSwayQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, tailSwayAngle);
+          this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
+          this.dummy.updateMatrix();
+          set.tail.setMatrixAt(i, this.dummy.matrix);
+        }
+      }
 
       // Color-by-state: lerp toward the highlight color as intensity rises.
       // Three coloring modes, checked in priority order:
