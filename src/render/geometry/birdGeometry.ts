@@ -114,7 +114,15 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
     const t = i / (fingerCount - 1);
     const rootPt = lerp3(innerAnchor, outerAnchor, t);
     const rootPt2 = lerp3(innerAnchor, outerAnchor, Math.min(1, t + 0.22));
-    const fingerLen = span * (0.3 + 0.12 * t);
+    // Kept well within the overall wing envelope (mainSpan is already
+    // 0.72*span) — these used to run up to 0.3-0.42*span, which put
+    // finger *tips* past the wing's own total span from the root
+    // (mainSpan + fingerLen > span), reading as thin spikes shooting out
+    // beyond the wing rather than layered tip feathers. Longest feather
+    // (outermost, t=1) now reaches only a modest amount past the wing's
+    // trailing edge; innermost (t=0) is noticeably shorter, for a
+    // natural tapered-fan look.
+    const fingerLen = span * (0.08 + 0.17 * t);
     const spreadRad = ((-16 + 42 * t) * Math.PI) / 180;
 
     const baseDirX = s;
