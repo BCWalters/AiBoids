@@ -1,7 +1,7 @@
 import * as V from './vector';
 import { params } from './params';
 import { Boid, DYING_DURATION, type BoidSpecies } from './Boid';
-import { Predator } from './Predator';
+import { Predator, type PredatorKind } from './Predator';
 import { clampToBounds, type WorldBounds } from './boundary';
 import { UFO, createUFO } from './UFO';
 
@@ -190,7 +190,33 @@ export class Simulation {
     this.pendingRespawns = [];
   }
 
-  /** Adds/removes boids and predators to match params.<species>Count / predatorCount. */
+  /**
+   * Adds/removes predators of one kind to match a target count, leaving
+   * the other kind's predators untouched — mirrors syncSpecies' approach
+   * for boids, since hawks/dragons and unicorns are independent
+   * populations that can coexist (see Predator.kind).
+   */
+  private syncPredatorKind(kind: PredatorKind, targetCount: number): void {
+    let count = 0;
+    for (const predator of this.predators) if (predator.kind === kind) count++;
+
+    while (count < targetCount) {
+      this.predators.push(
+        new Predator(this.randomPosition(), this.randomVelocity(params.predatorMaxSpeed), kind),
+      );
+      count++;
+    }
+
+    let toRemove = count - targetCount;
+    for (let i = this.predators.length - 1; i >= 0 && toRemove > 0; i--) {
+      if (this.predators[i].kind === kind) {
+        this.predators.splice(i, 1);
+        toRemove--;
+      }
+    }
+  }
+
+  /** Adds/removes boids and predators to match params.<species>Count / predatorCount / unicornCount. */
   syncPopulation(): void {
     this.syncSpecies('sparrow', params.boidCount);
     this.syncSpecies('parrot', params.parrotCount);
@@ -198,14 +224,8 @@ export class Simulation {
     this.syncSpecies('cardinal', params.cardinalCount);
     this.syncSpecies('bluejay', params.bluejayCount);
 
-    while (this.predators.length < params.predatorCount) {
-      this.predators.push(
-        new Predator(this.randomPosition(), this.randomVelocity(params.predatorMaxSpeed)),
-      );
-    }
-    while (this.predators.length > params.predatorCount) {
-      this.predators.pop();
-    }
+    this.syncPredatorKind('hawk', params.predatorCount);
+    this.syncPredatorKind('unicorn', params.unicornCount);
   }
 
   /** Resets all entities to fresh random positions (used by the Reset button). */
@@ -254,6 +274,9 @@ export class Simulation {
     if (!params.predatorCatchEnabled) return;
 
     for (const predator of this.predators) {
+      // Unicorns gently chase boids but never catch them — see
+      // Predator.kind's doc comment.
+      if (predator.kind === 'unicorn') continue;
       if (predator.digesting) continue;
       for (const boid of this.boids) {
         if (boid.dying) continue;
@@ -296,7 +319,7 @@ export class Simulation {
       else this.wrap(boid.position);
     }
     for (const predator of this.predators) {
-      predator.update(dt, this.boids, bounds);
+      predator.update(dt, this.boids, this.predators, bounds);
       if (is3D) clampToBounds(predator.position, bounds);
       else this.wrap(predator.position);
     }

@@ -22,6 +22,7 @@ export interface SimParams {
   cardinalCount: number;
   bluejayCount: number;
   predatorCount: number;
+  unicornCount: number;
 
   // Movement
   boidMaxSpeed: number;
@@ -101,6 +102,10 @@ export const defaultParams: SimParams = {
   cardinalCount: 75,
   bluejayCount: 75,
   predatorCount: 5,
+  // Independent from predatorCount — unicorns are a separate predator
+  // "kind" (see Predator.kind) that coexists with hawks/dragons, so
+  // default to a small handful rather than 0 (visible out of the box).
+  unicornCount: 2,
 
   boidMaxSpeed: 120,
   predatorMaxSpeed: 150,

@@ -22,6 +22,7 @@ const populationSpeedSpecs: SliderSpec[] = [
   { key: 'cardinalCount', labelKey: 'cardinalCount', min: 0, max: 300, step: 1 },
   { key: 'bluejayCount', labelKey: 'bluejayCount', min: 0, max: 300, step: 1 },
   { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 10, step: 1 },
+  { key: 'unicornCount', labelKey: 'unicornCount', min: 0, max: 10, step: 1 },
   { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
   { key: 'predatorMaxSpeed', labelKey: 'predatorMaxSpeed', min: 20, max: 350, step: 5 },
 ];
