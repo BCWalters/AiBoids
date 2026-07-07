@@ -141,15 +141,54 @@ const UNICORN_FLAP_FREQUENCY = 3.2;
 const UNICORN_FLAP_IDLE_AMPLITUDE = 0.35;
 const UNICORN_FLAP_SPEED_AMPLITUDE = 0.8;
 
-// Unicorns should stay much closer to upright/level than a dragon, which
-// is free to swoop, dive, and roll dramatically — per direct feedback
-// that a pegasus/unicorn in TV/movies reads as staying far more level
-// and upright in flight than that. levelBias flattens the pitch of the
-// orientation basis (see updateInstances); bankScale shrinks how far it
-// leans into turns. Dragons use the function defaults (0 and 1, i.e.
-// unaffected) by omitting these args at their call site.
-const UNICORN_LEVEL_BIAS = 0.75;
+// Unicorns get their own dedicated "stay upright" orientation model in
+// updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
+// smaller-numbers reuse of the dragon's keepUpright path (see
+// DRAGON_HEADING_SMOOTHING_RATE / near-pole handling below) — a
+// pegasus/unicorn should never pitch its nose up/down or roll far
+// enough to need that machinery at all; it's a fundamentally flatter,
+// gentler flight style, not the same math dialed down.
+//
+// Pitch (nose up/down) is hard-clamped, asymmetrically, based on
+// whether the entity is climbing or sinking:
+// - Ascending: pitch is clamped to exactly 0 — "they stay flat rather
+//   than turning upward", no nose-up tilt at all while climbing.
+// - Descending: pitch is allowed a small nose-down droop, capped well
+//   below the overall tilt ceiling below, so sinking reads as a gentle
+//   "floating down" rather than either a flat glide or a diving swoop.
+const UNICORN_ASCEND_PITCH_RADIANS = 0;
+const UNICORN_DESCEND_PITCH_RADIANS = THREE.MathUtils.degToRad(10);
+// Hard ceiling on how far the model's up/legs axis is ever allowed to
+// tilt away from true vertical — "legs toward the ground, no more than
+// 30 degrees from vertical" — enforced as a final safety clamp after
+// pitch *and* bank are both baked into the orientation (see
+// clampUpTilt), so it holds regardless of how those two combine. The
+// pitch/bank constants here are tuned to stay comfortably under it on
+// their own; this is the hard guarantee behind that tuning.
+const UNICORN_MAX_UP_TILT_RADIANS = THREE.MathUtils.degToRad(30);
+// Unicorns lean into turns much less than a dragon (see the shared
+// MAX_BANK_RADIANS / BANK_GAIN bank-into-turns code, used by every
+// entity) — a small, horse-like lean rather than a dramatic dragon roll.
 const UNICORN_BANK_SCALE = 0.35;
+// Unicorns smooth their heading direction before use, same idea as
+// DRAGON_HEADING_SMOOTHING_RATE (removes per-frame jitter at the
+// source) but with its own rate constant — kept separate rather than
+// shared so each creature's feel can be tuned independently, and
+// because unicorns don't need the dragon's near-pole instability fix at
+// all (their pitch is hard-clamped small, so it never gets anywhere
+// near vertical to begin with).
+const UNICORN_HEADING_SMOOTHING_RATE = 5;
+// Final safety-net turn-rate cap, same purpose as
+// DRAGON_MAX_TURN_RADIANS_PER_SEC (see its doc comment) but tracked in
+// its own per-unicorn map (unicornDisplayQuats) with its own constant,
+// rather than sharing the dragon's.
+const UNICORN_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(540);
+// Flap speed scales with vertical velocity instead of horizontal speed
+// — "flap faster as they go up, slower as they descend". climbFrac is
+// vel.y / maxSpeed clamped to [-1, 1]; frequency scales up while
+// climbing and down while sinking, independent of horizontal speed.
+const UNICORN_CLIMB_FLAP_BOOST = 0.9; // up to +90% frequency at full climb
+const UNICORN_DESCEND_FLAP_CUT = 0.55; // down to -55% frequency at full descent
 
 // Dragons additionally low-pass filter their heading direction (not just
 // their bank angle) before it's used for orientation — see the
@@ -180,6 +219,7 @@ const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 // — local +Z is therefore the model's own "dorsal/up" direction when
 // level, used below to build an orientation that stays right-side-up
 // rather than picking an arbitrary roll.
+const MODEL_UP_AXIS = new THREE.Vector3(0, 0, 1);
 const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
 // When an entity's heading points anywhere near straight up/down,
 // world-up stops being a good reference for "which way is level": the
@@ -375,6 +415,28 @@ export class Renderer3D {
    * predator instance set is rebuilt (species/count/dragon-mode change).
    */
   private dragonDisplayQuats = new Map<number, THREE.Quaternion>();
+  /**
+   * Same turn-rate-limiting safety net as dragonDisplayQuats, but kept
+   * as its own map/constant (UNICORN_MAX_TURN_RADIANS_PER_SEC) rather
+   * than shared with dragons — unicorns have an entirely different
+   * upright/pitch model (see updateInstances' uprightStyle === 'unicorn'
+   * branch) and shouldn't inherit dragon-tuned behavior just because the
+   * final turn-rate clamp happens to be structurally similar.
+   */
+  private unicornDisplayQuats = new Map<number, THREE.Quaternion>();
+  /**
+   * Per-unicorn accumulated flap phase (radians) — unicorns modulate
+   * their flap *frequency* by vertical velocity (see UNICORN_CLIMB_FLAP_
+   * BOOST / UNICORN_DESCEND_FLAP_CUT), so unlike every other creature's
+   * flap phase (which is just `elapsed * flapFrequency`, safe because
+   * their frequency is a constant), the phase has to be integrated
+   * frame-by-frame here — using a frequency that changes moment to
+   * moment directly in an `elapsed * frequency` formula would make the
+   * phase (and thus the wing angle) jump discontinuously every time the
+   * frequency itself changed, rather than smoothly speeding up/slowing
+   * down.
+   */
+  private unicornFlapPhase = new Map<number, number>();
   private boundsHelper: THREE.LineSegments | null = null;
   private currentStyle: VisualStyle | null = null;
 
@@ -391,6 +453,13 @@ export class Renderer3D {
   private tmpPersistedRight = new THREE.Vector3();
   private tmpPrevDir = new THREE.Vector3();
   private tmpBasisMatrix = new THREE.Matrix4();
+  // Unicorn-only scratch objects for the pitch clamp / up-tilt safety
+  // clamp in updateInstances — kept separate from the dragon-path tmp
+  // vectors above since the unicorn orientation math is its own thing.
+  private tmpUnicornHorizontal = new THREE.Vector3();
+  private tmpUnicornUpWorld = new THREE.Vector3();
+  private tmpUnicornTiltAxis = new THREE.Vector3();
+  private unicornTiltCorrection = new THREE.Quaternion();
   private stateColor = new THREE.Color();
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
@@ -655,7 +724,8 @@ export class Renderer3D {
         ),
       );
       this.predatorInstanceKeys.set('unicorn', unicornKey);
-      this.dragonDisplayQuats.clear();
+      this.unicornDisplayQuats.clear();
+      this.unicornFlapPhase.clear();
     }
 
     if (this.currentStyle !== style) {
@@ -747,7 +817,14 @@ export class Renderer3D {
     individualVariation: boolean = false,
     getSpeciesColors?: (entity: Boid | Predator) => SpeciesColorSet | null,
     keepUpright: boolean = false,
-    levelBias: number = 0,
+    // Which "stay upright" orientation model to use when keepUpright is
+    // true — 'dragon' (near-pole-safe basis + free pitch, for full
+    // swoop/dive/roll acrobatics) or 'unicorn' (hard-clamped pitch +
+    // final up-tilt safety clamp, for a flat, floaty pegasus-style
+    // flight). These are deliberately separate code paths below, not a
+    // shared one parameterized by a bias knob — see the UNICORN_* tuning
+    // constants' doc comments.
+    uprightStyle: 'dragon' | 'unicorn' = 'dragon',
     bankScale: number = 1,
   ): void {
     for (let i = 0; i < entities.length; i++) {
@@ -771,10 +848,12 @@ export class Renderer3D {
         const targetY = vel.y * invSpeed;
         const targetZ = vel.z * invSpeed;
         if (keepUpright) {
-          // Low-pass filter the heading itself for dragons — see
-          // DRAGON_HEADING_SMOOTHING_RATE above for why this is needed
-          // in addition to the near-pole "right" vector stabilization.
-          const rate = 1 - Math.exp(-dt * DRAGON_HEADING_SMOOTHING_RATE);
+          // Low-pass filter the heading itself — see
+          // DRAGON_HEADING_SMOOTHING_RATE / UNICORN_HEADING_SMOOTHING_RATE
+          // above for why this is needed in addition to whatever
+          // per-style basis-building stabilization follows below. Each
+          // style uses its own rate constant rather than sharing one.
+          const rate = 1 - Math.exp(-dt * (uprightStyle === 'unicorn' ? UNICORN_HEADING_SMOOTHING_RATE : DRAGON_HEADING_SMOOTHING_RATE));
           let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
           let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
           let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
@@ -787,29 +866,35 @@ export class Renderer3D {
       const dir = entity.renderHeading;
       this.tmpForward.set(dir.x, dir.y, dir.z);
 
-      if (keepUpright && levelBias > 0) {
-        // Flatten the vertical (world-up-axis) component of the forward
-        // vector used to build the orientation basis below, so the
-        // model's pitch (and, by extension, how far the belly/legs axis
-        // tilts away from world-vertical) stays closer to level even
-        // while climbing/diving. Applied only to the orientation basis,
-        // not to entity.renderHeading/velocity, so the actual flight
-        // path is unaffected — just how upright the model looks while
-        // following it. Dragons pass levelBias=0 (unchanged, full
-        // swoop/dive/roll acrobatics); unicorns pass a high value so
-        // they read as staying much closer to horizontal, the way a
-        // pegasus/unicorn conventionally does in media, rather than
-        // pitching nose-down like a diving bird of prey.
-        this.tmpForward.y *= 1 - levelBias;
-        const flattenedLen = this.tmpForward.length();
-        if (flattenedLen > 1e-6) {
-          this.tmpForward.divideScalar(flattenedLen);
-        } else {
-          this.tmpForward.set(dir.x, dir.y, dir.z);
+      if (keepUpright && uprightStyle === 'unicorn') {
+        // Hard pitch clamp (not a proportional flatten) — see
+        // UNICORN_ASCEND_PITCH_RADIANS / UNICORN_DESCEND_PITCH_RADIANS'
+        // doc comment: ascending is clamped to exactly flat, descending
+        // gets a small allowed nose-down droop for a "floating down"
+        // feel. Only the orientation basis is touched here, not
+        // entity.renderHeading/velocity, so the actual flight path
+        // (where the flock logic takes the unicorn) is unaffected —
+        // just how level the model looks while following it.
+        this.tmpUnicornHorizontal.set(this.tmpForward.x, 0, this.tmpForward.z);
+        const horizontalLen = this.tmpUnicornHorizontal.length();
+        if (horizontalLen > 1e-6) {
+          this.tmpUnicornHorizontal.divideScalar(horizontalLen);
+          const rawPitch = Math.atan2(this.tmpForward.y, horizontalLen);
+          // Ceiling is UNICORN_ASCEND_PITCH_RADIANS (0 — never nose-up),
+          // floor is -UNICORN_DESCEND_PITCH_RADIANS (a small allowed
+          // nose-down droop while sinking).
+          const clampedPitch = THREE.MathUtils.clamp(rawPitch, -UNICORN_DESCEND_PITCH_RADIANS, UNICORN_ASCEND_PITCH_RADIANS);
+          this.tmpForward.copy(this.tmpUnicornHorizontal).multiplyScalar(Math.cos(clampedPitch));
+          this.tmpForward.y = Math.sin(clampedPitch);
         }
+        // else: heading is already (near-)vertical with essentially no
+        // horizontal component to anchor a clamped pitch to — vanishingly
+        // rare given flock steering, and the final up-tilt safety clamp
+        // below still bounds the result either way.
       }
 
-      if (keepUpright) {
+      if (keepUpright && uprightStyle === 'dragon') {
+
         // Dragons only: build an orientation that keeps the model
         // right-side-up by construction, instead of the shortest-arc
         // rotation used below for everything else
@@ -886,14 +971,28 @@ export class Renderer3D {
         // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
         this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
         this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+      } else if (keepUpright && uprightStyle === 'unicorn') {
+        // Unicorns: a much simpler basis than the dragon path above, and
+        // deliberately so — since pitch was already hard-clamped to a
+        // small angle further up, tmpForward here is never anywhere near
+        // parallel to WORLD_UP_AXIS, so the near-pole "right" vector
+        // instability the dragon path works around simply doesn't arise
+        // for unicorns. No persisted-right fallback, no re-
+        // orthogonalization, just a direct cross product every frame.
+        this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpForward).normalize();
+        entity.renderRight = { x: this.tmpRight.x, y: this.tmpRight.y, z: this.tmpRight.z };
+        this.tmpUp.crossVectors(this.tmpForward, this.tmpRight).normalize();
+        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
       } else {
         // Everyone else: simple shortest-arc rotation from the model's
         // rest forward axis to the current heading. This has a free
         // degree of roll around `dir` (so these entities can end up
         // flying upside-down sometimes), but it has no near-pole
         // singularity to speak of, so it never flickers/flattens —
-        // acceptable here since non-dragon geometry doesn't read as
-        // obviously "wrong side up" the way a large dragon does.
+        // acceptable here since non-dragon/unicorn geometry doesn't read
+        // as obviously "wrong side up" the way a large dragon or a
+        // horse-legged unicorn does.
         this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpForward);
       }
 
@@ -915,7 +1014,7 @@ export class Renderer3D {
       this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
       this.bodyQuat.multiply(this.rollQuat);
 
-      if (keepUpright) {
+      if (keepUpright && uprightStyle === 'dragon') {
         // Final safety net (see dragonDisplayQuats doc comment): never
         // let the *displayed* orientation jump straight to this frame's
         // target — only rotate toward it at a bounded rate. This can't
@@ -928,6 +1027,38 @@ export class Renderer3D {
           this.dragonDisplayQuats.set(entity.id, displayQuat);
         } else {
           displayQuat.rotateTowards(this.bodyQuat, DRAGON_MAX_TURN_RADIANS_PER_SEC * dt);
+        }
+        this.bodyQuat.copy(displayQuat);
+      } else if (keepUpright && uprightStyle === 'unicorn') {
+        // Same turn-rate-limiting idea as the dragon branch above, but
+        // its own map/constant (see unicornDisplayQuats' doc comment).
+        let displayQuat = this.unicornDisplayQuats.get(entity.id);
+        if (!displayQuat) {
+          displayQuat = this.bodyQuat.clone();
+          this.unicornDisplayQuats.set(entity.id, displayQuat);
+        } else {
+          displayQuat.rotateTowards(this.bodyQuat, UNICORN_MAX_TURN_RADIANS_PER_SEC * dt);
+        }
+
+        // Hard ceiling on how far the model's up/legs axis can end up
+        // tilted from true vertical, applied last (after pitch clamp,
+        // basis construction, bank, and the turn-rate smoothing above
+        // have all already been baked in) — see
+        // UNICORN_MAX_UP_TILT_RADIANS' doc comment for why this is a
+        // belt-and-suspenders guarantee rather than just relying on the
+        // upstream constants being tuned correctly. Applied directly to
+        // the persisted displayQuat (not a local copy) so next frame's
+        // rotateTowards target already reflects the clamp, rather than
+        // fighting it back open every frame.
+        this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
+        const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
+        if (upTilt > UNICORN_MAX_UP_TILT_RADIANS) {
+          this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
+          if (this.tmpUnicornTiltAxis.lengthSq() > 1e-10) {
+            this.tmpUnicornTiltAxis.normalize();
+            this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - UNICORN_MAX_UP_TILT_RADIANS);
+            displayQuat.premultiply(this.unicornTiltCorrection);
+          }
         }
         this.bodyQuat.copy(displayQuat);
       }
@@ -947,7 +1078,24 @@ export class Renderer3D {
       // swing up/down in sync regardless of which way the bird is heading.
       const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
       const amplitude = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
-      const phase = elapsed * flapFrequency + entity.id * 1.7;
+      let phase: number;
+      if (uprightStyle === 'unicorn') {
+        // Flap frequency scales with vertical velocity instead of the
+        // constant-frequency formula everyone else uses — "flap faster
+        // as they go up, slower as they descend" — so the phase has to
+        // be integrated (see unicornFlapPhase's doc comment) rather than
+        // computed directly from elapsed time.
+        const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
+        const freqMultiplier = climbFrac >= 0
+          ? 1 + UNICORN_CLIMB_FLAP_BOOST * climbFrac
+          : 1 - UNICORN_DESCEND_FLAP_CUT * -climbFrac;
+        const effectiveFrequency = flapFrequency * freqMultiplier;
+        const prevPhase = this.unicornFlapPhase.get(entity.id) ?? entity.id * 1.7;
+        phase = prevPhase + effectiveFrequency * dt;
+        this.unicornFlapPhase.set(entity.id, phase);
+      } else {
+        phase = elapsed * flapFrequency + entity.id * 1.7;
+      }
       const flapAngle = amplitude * Math.sin(phase);
 
       this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
@@ -1215,11 +1363,11 @@ export class Renderer3D {
         // style, not just nature, since it's a behavioral trait of the
         // character rather than a nature-style-only cosmetic flourish.
         true,
-        // Strong level bias + reduced bank: a pegasus/unicorn should read
-        // as staying much closer to horizontal and upright than a dragon,
-        // which is free to swoop/dive/roll dramatically (dragons pass the
-        // defaults, 0 and 1, i.e. unchanged acrobatics).
-        UNICORN_LEVEL_BIAS,
+        // Unicorns get their own dedicated orientation model — see
+        // updateInstances' uprightStyle === 'unicorn' branch and the
+        // UNICORN_* constants near the top of this file — rather than
+        // reusing the dragon path with different bias numbers.
+        'unicorn',
         UNICORN_BANK_SCALE,
       );
     }
