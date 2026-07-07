@@ -55,6 +55,14 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   const merged = mergePositionOnlyGeometries([latheGeometry, hornsGeometry]);
   latheGeometry.dispose();
   hornsGeometry.dispose();
+  // The lathe revolves the profile around the Y (head-to-tail) axis, so
+  // its cross-section is a perfect circle — reads fine in side profile
+  // but looks like a round balloon/pumpkin when viewed head-on or from
+  // directly behind. Squashing the whole merged body (lathe + horns)
+  // slightly along Z flattens that cross-section into a shallow oval
+  // (taller than deep, like a real torso keel) without visibly changing
+  // the side silhouette the profile above was tuned against.
+  merged.scale(1, 1, 0.62);
   return merged;
 }
 
@@ -202,20 +210,23 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   // Small dorsal spines standing proud of the ribbon plane (local +Z),
   // shrinking toward the tip — the tail's answer to the body's
   // horn/frill spike, reinforcing a reptilian rather than avian read.
-  const spineCount = 4;
+  // Kept short and broad-based (triangular "fin" silhouette) rather than
+  // tall and thread-thin, which previously read as long antenna-like
+  // whiskers sticking out sideways instead of a dorsal ridge.
+  const spineCount = 5;
   for (let i = 0; i < spineCount; i++) {
     const t = i / spineCount;
-    const y = -length * (0.25 + t * 1.15);
-    const spineHeight = length * (0.22 - t * 0.14);
-    const spineWidth = width * (0.1 - t * 0.05);
+    const y = -length * (0.2 + t * 1.2);
+    const spineHeight = length * (0.055 - t * 0.03);
+    const spineWidth = width * (0.24 - t * 0.1);
     const base = [0, y, 0];
-    const baseBack = [0, y - length * 0.08, 0];
-    const tip = [0, y - length * 0.03, spineHeight];
+    const baseBack = [0, y - length * 0.035, 0];
+    const tip = [0, y - length * 0.015, spineHeight];
     pushTri(base, baseBack, tip);
     // Give the spine a sliver of thickness (two side faces) so it isn't
     // a perfectly edge-on invisible triangle from some viewing angles.
-    const tipLeft = [-spineWidth * 0.3, y - length * 0.03, spineHeight * 0.85];
-    const tipRight = [spineWidth * 0.3, y - length * 0.03, spineHeight * 0.85];
+    const tipLeft = [-spineWidth * 0.3, y - length * 0.015, spineHeight * 0.7];
+    const tipRight = [spineWidth * 0.3, y - length * 0.015, spineHeight * 0.7];
     pushTri(base, tipLeft, tip);
     pushTri(base, tip, tipRight);
   }
@@ -241,17 +252,21 @@ function buildDragonLegsGeometry(length: number, width: number): THREE.BufferGeo
   const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
 
   function buildLeg(hipX: number, hipY: number) {
-    const thighLen = length * 0.22;
-    const shinLen = length * 0.2;
+    // Shortened and thickened vs. the original proportions, which read as
+    // long spindly spider-legs dangling far past the body silhouette from
+    // most angles — real tucked-in-flight dragon legs should stay compact
+    // and close to the belly, with only the clawed feet reading clearly.
+    const thighLen = length * 0.13;
+    const shinLen = length * 0.11;
     const hip = [hipX, hipY, 0];
     // Bend the knee backward (thigh sweeps toward the tail) then swing the
     // shin forward again toward/past the hip — a proper knee-bend "Z"
     // silhouette in the Y/Z (front-back / up-down) plane, instead of the
     // old hip->knee->foot chain which barely diverged and read as one
     // straight rigid rod hanging under the belly, even mid-flight.
-    const knee = [hipX * 1.15, hipY - length * 0.09, -thighLen];
-    const foot = [hipX * 1.05, knee[1] + length * 0.12, -(thighLen + shinLen)];
-    const legWidth = width * 0.1;
+    const knee = [hipX * 1.15, hipY - length * 0.05, -thighLen];
+    const foot = [hipX * 1.05, knee[1] + length * 0.07, -(thighLen + shinLen)];
+    const legWidth = width * 0.16;
 
     // Thigh + shin as two thin tapering quads (a simple bent leg silhouette).
     const hipL = [hip[0] - legWidth, hip[1], hip[2]];
@@ -265,8 +280,10 @@ function buildDragonLegsGeometry(length: number, width: number): THREE.BufferGeo
     pushTri(kneeL, footL, footR);
     pushTri(kneeL, footR, kneeR);
 
-    // A small fan of three claw talons splayed from the foot.
-    const clawLen = length * 0.14;
+    // A small fan of three claw talons splayed from the foot — shorter and
+    // tighter than before so the foot reads as a compact clawed paw rather
+    // than a wide spider-leg fan.
+    const clawLen = length * 0.07;
     const clawSpread = [
       [-1, 0.3],
       [0, 1],
@@ -274,7 +291,7 @@ function buildDragonLegsGeometry(length: number, width: number): THREE.BufferGeo
     ];
     for (const [spreadX, spreadForward] of clawSpread) {
       const clawTip = [
-        foot[0] + spreadX * width * 0.16,
+        foot[0] + spreadX * width * 0.1,
         foot[1] + spreadForward * clawLen * 0.4,
         foot[2] - clawLen,
       ];
@@ -286,7 +303,7 @@ function buildDragonLegsGeometry(length: number, width: number): THREE.BufferGeo
 
   const frontY = length * 0.05; // near the chest
   const backY = -length * 0.32; // near the haunch
-  const stanceX = width * 0.3;
+  const stanceX = width * 0.22;
 
   buildLeg(-stanceX, frontY);
   buildLeg(stanceX, frontY);
