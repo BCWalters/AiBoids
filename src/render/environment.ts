@@ -22,6 +22,12 @@ export interface NatureEnvironment {
    * shorelines and along the outer hillside (see ROCK_CLUSTER_DEFS),
    * each height-matched to the terrain beneath it like the lakes. */
   rocks: THREE.Mesh[];
+  /** Sparse forest patches (see FOREST_PATCH_DEFS) tucked between the
+   * play area and the rock/hillside bands — each a flat, slightly raised
+   * disc with a painted canopy texture (see createForestPatch) rather
+   * than modeled 3D trees, height-matched to the terrain like the
+   * lakes/rocks. */
+  forestPatches: THREE.Mesh[];
   sunLight: THREE.DirectionalLight;
   sunSprite: THREE.Sprite;
   /** Larger, softer glow sprite rendered behind the sun disc for a warm corona effect. */
@@ -193,6 +199,224 @@ function createRockCluster(): THREE.Mesh {
   return new THREE.Mesh(merged, material);
 }
 
+interface ForestPatchDef {
+  forwardX: number;
+  forwardZ: number;
+  distanceScale: number;
+  sizeScale: number;
+}
+
+function forestPatchDef(angleDeg: number, distanceScale: number, sizeScale: number): ForestPatchDef {
+  const rad = THREE.MathUtils.degToRad(angleDeg);
+  return { forwardX: Math.cos(rad), forwardZ: Math.sin(rad), distanceScale, sizeScale };
+}
+
+// Sparse forest patches tucked between the play area and the outer
+// rock/hillside bands — real tree cover tends to grow in patches rather
+// than spread evenly. Positions were chosen (and checked against
+// LAKE_DEFS' own center + radius, in these same distanceScale-equivalent
+// units) to clear every lake's shoreline by a healthy margin — an
+// earlier pass placed a couple of patches close enough to a lake's own
+// angle that they visibly overlapped the water. Angles avoid the
+// ocean's bay opening (~10-105°, see OCEAN_GAP_ANGLE/OCEAN_GAP_HALF_WIDTH).
+// Deliberately varied in size across four rough tiers (small copses up
+// to sprawling 10x+ groves) and pushed further out as they get bigger so
+// a big patch's footprint still clears every lake/the play area —
+// larger patches sit further from center in roughly the same band the
+// outer rock clusters use.
+const FOREST_PATCH_DEFS: ForestPatchDef[] = [
+  // Small copses, close to the play area.
+  forestPatchDef(184.3, 2.16, 0.199),
+  forestPatchDef(109.2, 1.81, 0.201),
+  forestPatchDef(347.3, 2.18, 0.182),
+  forestPatchDef(5.4, 2.09, 0.126),
+  forestPatchDef(186.9, 2.17, 0.17),
+  // Medium patches.
+  forestPatchDef(359.2, 3.4, 0.552),
+  forestPatchDef(104.1, 2.56, 0.53),
+  forestPatchDef(344.9, 3.26, 0.3),
+  forestPatchDef(280.3, 2.74, 0.326),
+  forestPatchDef(119.7, 3.37, 0.527),
+  // Large groves.
+  forestPatchDef(349.5, 4.4, 1.113),
+  forestPatchDef(278.2, 3.93, 1.107),
+  forestPatchDef(266.2, 4.54, 1.038),
+  forestPatchDef(201.4, 4.45, 1.33),
+  // Sprawling forests (10x+ the smallest copses).
+  forestPatchDef(197.1, 5.47, 2.056),
+  forestPatchDef(6.9, 5.48, 2.082),
+];
+
+/**
+ * A flat, only slightly raised irregular "forest patch" disc with a
+ * painted canopy texture, rather than fully modeled 3D trees — much
+ * cheaper, and sidesteps the problem of getting individual trees' height
+ * right relative to the mountains/rocks (an earlier geometric-tree pass
+ * read as wildly oversized once placed in the scene). Reuses the same
+ * irregular-outline + soft alpha-feathered edge technique as
+ * createWaterPatch so it blends into the surrounding grass instead of
+ * showing a hard border, plus a little per-vertex height jitter so it
+ * isn't a perfectly flat cutout either.
+ */
+function createForestPatch(): THREE.Mesh {
+  const segments = 40;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  // Layered sine "lobes" (a handful of random harmonics/phases) give the
+  // outline a few bulges and inlets instead of reading as a slightly
+  // bumpy circle — this matters much more once patches get large, where
+  // a merely-bumpy circle still reads as "a circle" rather than an
+  // organic forest-cover shape. A random elongation + rotation on top
+  // further breaks any circular symmetry.
+  const lobeCount = 2 + Math.floor(Math.random() * 3); // 2-4 harmonics
+  const lobes: { k: number; amp: number; phase: number }[] = [];
+  for (let i = 0; i < lobeCount; i++) {
+    lobes.push({
+      k: 2 + Math.floor(Math.random() * 4), // harmonic order 2-5
+      amp: 0.06 + Math.random() * 0.14,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+  const stretchX = 0.8 + Math.random() * 0.45;
+  const stretchZ = 0.8 + Math.random() * 0.45;
+  const stretchRot = Math.random() * Math.PI * 2;
+
+  const raw: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    let lobeSum = 0;
+    for (const lobe of lobes) lobeSum += lobe.amp * Math.sin(lobe.k * angle + lobe.phase);
+    raw.push(Math.max(0.35, 0.85 + lobeSum + (Math.random() - 0.5) * 0.25));
+  }
+  // Light neighbor-smoothing so the fine per-vertex jitter doesn't look
+  // like sharp saw-teeth, while still keeping the coarser lobe shape.
+  const radii = raw.map((r, i) => (raw[(i - 1 + segments) % segments] + r * 2 + raw[(i + 1) % segments]) / 4);
+
+  positions.push(0, 0, (Math.random() - 0.5) * 0.08);
+  uvs.push(0.5, 0.5);
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const r = radii[i];
+    let x = Math.cos(angle) * r;
+    let y = Math.sin(angle) * r;
+    // Elongate along a random axis, then rotate that axis to a random
+    // heading, so patches read as irregular blobs/streaks rather than
+    // uniformly round discs of varying size.
+    const rotX = x * Math.cos(stretchRot) - y * Math.sin(stretchRot);
+    const rotY = x * Math.sin(stretchRot) + y * Math.cos(stretchRot);
+    x = rotX * stretchX;
+    y = rotY * stretchZ;
+    // Small random height jitter — "very slightly raised", just enough
+    // to catch a bit of directional light unevenly rather than reading
+    // as a perfectly flat painted disc.
+    const z = (Math.random() - 0.5) * 0.08;
+    positions.push(x, y, z);
+    uvs.push(x * 0.5 + 0.5, y * 0.5 + 0.5);
+  }
+  for (let i = 0; i < segments; i++) {
+    indices.push(0, 1 + i, 1 + ((i + 1) % segments));
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    map: createForestCanopyTexture(),
+    alphaMap: createForestAlphaTexture(),
+    transparent: true,
+    roughness: 1,
+    metalness: 0,
+    depthWrite: false,
+    // Same z-fighting safety margin as the lake water patches, nudging
+    // this just toward the camera relative to the ground beneath it.
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+    polygonOffsetUnits: -3,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+/**
+ * Paints a mottled treetop-canopy look (viewed roughly from above) as a
+ * canvas texture: a dark base fill plus many overlapping soft blobs in
+ * a handful of muted green tones (standing in for individual tree
+ * crowns) and a few small darker "gap" blobs for a bit of depth between
+ * them — no actual 3D tree geometry needed.
+ */
+function createForestCanopyTexture(): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = 'rgb(42,63,34)';
+  ctx.fillRect(0, 0, size, size);
+
+  const tones: Array<[number, number, number]> = [
+    [63, 94, 51],
+    [77, 114, 57],
+    [93, 138, 66],
+    [44, 67, 36],
+  ];
+  for (let i = 0; i < 42; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = size * (0.07 + Math.random() * 0.16);
+    const [rr, gg, bb] = tones[Math.floor(Math.random() * tones.length)];
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
+    gradient.addColorStop(0, `rgba(${rr},${gg},${bb},0.9)`);
+    gradient.addColorStop(1, `rgba(${rr},${gg},${bb},0)`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+  }
+  // A few small dark gaps between crowns for a bit of depth.
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = size * (0.02 + Math.random() * 0.035);
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, r);
+    gradient.addColorStop(0, 'rgba(12,22,9,0.55)');
+    gradient.addColorStop(1, 'rgba(12,22,9,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  // Without this, three.js treats the canvas's raw sRGB pixel values as
+  // linear color data and the canopy reads as a washed-out, nearly flat
+  // pale tint instead of the painted mottled greens (same fix already
+  // applied to the ground diffuse texture elsewhere in this file).
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/** Soft radial falloff so the forest patch's edge feathers into the
+ * surrounding grass instead of cutting off sharply — same technique as
+ * createWaterAlphaTexture. */
+function createForestAlphaTexture(): THREE.Texture {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.6, 'rgba(255,255,255,0.95)');
+  gradient.addColorStop(0.85, 'rgba(255,255,255,0.5)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+
 export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer): NatureEnvironment {
   const sky = new Sky();
   sky.scale.setScalar(20000);
@@ -256,6 +480,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const lakes = LAKE_DEFS.map(() => createWaterPatch(skyEnvMap));
   const ocean = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
   const rocks = ROCK_CLUSTER_DEFS.map(() => createRockCluster());
+  const forestPatches = FOREST_PATCH_DEFS.map(() => createForestPatch());
 
   // Pale horizon haze color (roughly matches this sky configuration's
   // horizon tone) — blended in via fog so the ground plane fades smoothly
@@ -263,13 +488,14 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
   let fogEnabled = true;
 
-  scene.add(sky, ground, mountains, ...lakes, ocean, ...rocks, sunLight, sunHalo, sunSprite);
+  scene.add(sky, ground, mountains, ...lakes, ocean, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
   sky.visible = false;
   ground.visible = false;
   mountains.visible = false;
   lakes.forEach((lake) => { lake.visible = false; });
   ocean.visible = false;
   rocks.forEach((rock) => { rock.visible = false; });
+  forestPatches.forEach((patch) => { patch.visible = false; });
   sunLight.visible = false;
   sunHalo.visible = false;
   sunSprite.visible = false;
@@ -281,6 +507,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
     lakes,
     ocean,
     rocks,
+    forestPatches,
     sunLight,
     sunSprite,
     sunHalo,
@@ -296,6 +523,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       lakes.forEach((lake) => { lake.visible = visible; });
       ocean.visible = visible;
       rocks.forEach((rock) => { rock.visible = visible; });
+      forestPatches.forEach((patch) => { patch.visible = visible; });
       sunHalo.visible = visible;
       sunLight.visible = visible;
       sunSprite.visible = visible;
@@ -310,7 +538,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       scene.fog = enabled && sky.visible ? fog : null;
     },
     dispose() {
-      scene.remove(sky, ground, mountains, ...lakes, ocean, ...rocks, sunLight, sunHalo, sunSprite);
+      scene.remove(sky, ground, mountains, ...lakes, ocean, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -332,6 +560,12 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       for (const rock of rocks) {
         rock.geometry.dispose();
         (rock.material as THREE.Material).dispose();
+      }
+      for (const patch of forestPatches) {
+        patch.geometry.dispose();
+        (patch.material as THREE.MeshStandardMaterial).map?.dispose();
+        (patch.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
+        (patch.material as THREE.Material).dispose();
       }
       (sunHalo.material as THREE.SpriteMaterial).map?.dispose();
       (sunHalo.material as THREE.Material).dispose();
@@ -1142,6 +1376,24 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
       center.z + fy * flockScale,
     );
     rock.scale.setScalar(flockScale * def.sizeScale);
+  });
+
+  // Forest patches use the same terrain-following placement as the
+  // rocks — a single terrainHeightAt sample per patch is plenty since
+  // each patch's own real-world footprint (disc radius * flockScale *
+  // sizeScale) is tiny next to the terrain noise's wavelength, so the
+  // ground is effectively flat across any one patch.
+  env.forestPatches.forEach((patch, i) => {
+    const def = FOREST_PATCH_DEFS[i];
+    const fx = def.forwardX * def.distanceScale;
+    const fy = def.forwardZ * def.distanceScale;
+    const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale;
+    patch.position.set(
+      center.x + fx * flockScale,
+      terrainWorldHeight,
+      center.z + fy * flockScale,
+    );
+    patch.scale.setScalar(flockScale * def.sizeScale);
   });
 }
 
