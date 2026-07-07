@@ -219,13 +219,32 @@ function forestPatchDef(angleDeg: number, distanceScale: number, sizeScale: numb
 // earlier pass placed a couple of patches close enough to a lake's own
 // angle that they visibly overlapped the water. Angles avoid the
 // ocean's bay opening (~10-105°, see OCEAN_GAP_ANGLE/OCEAN_GAP_HALF_WIDTH).
+// Deliberately varied in size across four rough tiers (small copses up
+// to sprawling 10x+ groves) and pushed further out as they get bigger so
+// a big patch's footprint still clears every lake/the play area —
+// larger patches sit further from center in roughly the same band the
+// outer rock clusters use.
 const FOREST_PATCH_DEFS: ForestPatchDef[] = [
-  forestPatchDef(193, 2.2, 0.24),
-  forestPatchDef(278, 2.3, 0.26),
-  forestPatchDef(340, 2.0, 0.22),
-  forestPatchDef(127, 2.1, 0.25),
-  forestPatchDef(215, 2.6, 0.28),
-  forestPatchDef(305, 2.1, 0.23),
+  // Small copses, close to the play area.
+  forestPatchDef(184.3, 2.16, 0.199),
+  forestPatchDef(109.2, 1.81, 0.201),
+  forestPatchDef(347.3, 2.18, 0.182),
+  forestPatchDef(5.4, 2.09, 0.126),
+  forestPatchDef(186.9, 2.17, 0.17),
+  // Medium patches.
+  forestPatchDef(359.2, 3.4, 0.552),
+  forestPatchDef(104.1, 2.56, 0.53),
+  forestPatchDef(344.9, 3.26, 0.3),
+  forestPatchDef(280.3, 2.74, 0.326),
+  forestPatchDef(119.7, 3.37, 0.527),
+  // Large groves.
+  forestPatchDef(349.5, 4.4, 1.113),
+  forestPatchDef(278.2, 3.93, 1.107),
+  forestPatchDef(266.2, 4.54, 1.038),
+  forestPatchDef(201.4, 4.45, 1.33),
+  // Sprawling forests (10x+ the smallest copses).
+  forestPatchDef(197.1, 5.47, 2.056),
+  forestPatchDef(6.9, 5.48, 2.082),
 ];
 
 /**
@@ -240,13 +259,39 @@ const FOREST_PATCH_DEFS: ForestPatchDef[] = [
  * isn't a perfectly flat cutout either.
  */
 function createForestPatch(): THREE.Mesh {
-  const segments = 32;
+  const segments = 40;
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
 
+  // Layered sine "lobes" (a handful of random harmonics/phases) give the
+  // outline a few bulges and inlets instead of reading as a slightly
+  // bumpy circle — this matters much more once patches get large, where
+  // a merely-bumpy circle still reads as "a circle" rather than an
+  // organic forest-cover shape. A random elongation + rotation on top
+  // further breaks any circular symmetry.
+  const lobeCount = 2 + Math.floor(Math.random() * 3); // 2-4 harmonics
+  const lobes: { k: number; amp: number; phase: number }[] = [];
+  for (let i = 0; i < lobeCount; i++) {
+    lobes.push({
+      k: 2 + Math.floor(Math.random() * 4), // harmonic order 2-5
+      amp: 0.06 + Math.random() * 0.14,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+  const stretchX = 0.8 + Math.random() * 0.45;
+  const stretchZ = 0.8 + Math.random() * 0.45;
+  const stretchRot = Math.random() * Math.PI * 2;
+
   const raw: number[] = [];
-  for (let i = 0; i < segments; i++) raw.push(0.75 + Math.random() * 0.35);
+  for (let i = 0; i < segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    let lobeSum = 0;
+    for (const lobe of lobes) lobeSum += lobe.amp * Math.sin(lobe.k * angle + lobe.phase);
+    raw.push(Math.max(0.35, 0.85 + lobeSum + (Math.random() - 0.5) * 0.25));
+  }
+  // Light neighbor-smoothing so the fine per-vertex jitter doesn't look
+  // like sharp saw-teeth, while still keeping the coarser lobe shape.
   const radii = raw.map((r, i) => (raw[(i - 1 + segments) % segments] + r * 2 + raw[(i + 1) % segments]) / 4);
 
   positions.push(0, 0, (Math.random() - 0.5) * 0.08);
@@ -254,8 +299,15 @@ function createForestPatch(): THREE.Mesh {
   for (let i = 0; i < segments; i++) {
     const angle = (i / segments) * Math.PI * 2;
     const r = radii[i];
-    const x = Math.cos(angle) * r;
-    const y = Math.sin(angle) * r;
+    let x = Math.cos(angle) * r;
+    let y = Math.sin(angle) * r;
+    // Elongate along a random axis, then rotate that axis to a random
+    // heading, so patches read as irregular blobs/streaks rather than
+    // uniformly round discs of varying size.
+    const rotX = x * Math.cos(stretchRot) - y * Math.sin(stretchRot);
+    const rotY = x * Math.sin(stretchRot) + y * Math.cos(stretchRot);
+    x = rotX * stretchX;
+    y = rotY * stretchZ;
     // Small random height jitter — "very slightly raised", just enough
     // to catch a bit of directional light unevenly rather than reading
     // as a perfectly flat painted disc.
