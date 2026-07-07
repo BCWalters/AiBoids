@@ -225,33 +225,50 @@ function forestPatchDef(angleDeg: number, distanceScale: number, sizeScale: numb
 // earlier pass placed a couple of patches close enough to a lake's own
 // angle that they visibly overlapped the water. Angles avoid the
 // ocean's bay opening (~10-105°, see OCEAN_GAP_ANGLE/OCEAN_GAP_HALF_WIDTH).
-// Deliberately varied in size across four rough tiers (small copses up
-// to sprawling 10x+ groves) and pushed further out as they get bigger so
-// a big patch's footprint still clears every lake/the play area —
-// larger patches sit further from center in roughly the same band the
-// outer rock clusters use.
+//
+// sizeScale was originally tiered up to ~2.08 (bigger than the mountain
+// ring's own inner radius of 5.4!) — direct visual QA showed the
+// biggest "groves" reading as an absurdly oversized wall of foliage that
+// dwarfed the mountains instead of sitting believably small in front of
+// them, like real tree cover does against a real mountain range. A first
+// fix uniformly scaled every tier down by the same ~7-8x factor, but
+// that shrank the already-reasonably-sized small-copse tier down into
+// nearly invisible specks too — the actual ask was to compress the
+// *larger* tiers down toward the small tier's existing (already good)
+// size, not shrink everything uniformly. The small-copse tier below is
+// therefore unchanged from the original values; medium/large/sprawling
+// are compressed to sit just above it instead of dwarfing it.
 const FOREST_PATCH_DEFS: ForestPatchDef[] = [
-  // Small copses, close to the play area.
+  // Small copses, close to the play area — unchanged from the original
+  // sizing, since this tier already read as an appropriately small
+  // patch of trees relative to the mountains.
   forestPatchDef(184.3, 2.16, 0.199),
   forestPatchDef(109.2, 1.81, 0.201),
   forestPatchDef(347.3, 2.18, 0.182),
   forestPatchDef(5.4, 2.09, 0.126),
   forestPatchDef(186.9, 2.17, 0.17),
-  // Medium patches.
-  forestPatchDef(359.2, 3.4, 0.552),
-  forestPatchDef(104.1, 2.56, 0.53),
-  forestPatchDef(344.9, 3.26, 0.3),
-  forestPatchDef(280.3, 2.74, 0.326),
-  forestPatchDef(119.7, 3.37, 0.527),
+  // Medium patches — only a little larger than the small-copse tier now.
+  forestPatchDef(359.2, 3.4, 0.26),
+  forestPatchDef(104.1, 2.56, 0.25),
+  forestPatchDef(344.9, 3.26, 0.21),
+  forestPatchDef(280.3, 2.74, 0.22),
+  forestPatchDef(119.7, 3.37, 0.245),
   // Large groves.
-  forestPatchDef(349.5, 4.4, 1.113),
-  forestPatchDef(278.2, 3.93, 1.107),
-  forestPatchDef(266.2, 4.54, 1.038),
-  forestPatchDef(201.4, 4.45, 1.33),
-  // Sprawling forests (10x+ the smallest copses).
-  forestPatchDef(197.1, 5.47, 2.056),
-  forestPatchDef(6.9, 5.48, 2.082),
+  forestPatchDef(349.5, 4.4, 0.31),
+  forestPatchDef(278.2, 3.93, 0.305),
+  forestPatchDef(266.2, 4.54, 0.29),
+  forestPatchDef(201.4, 4.45, 0.335),
+  // Sprawling forests (biggest tier — still deliberately kept close to
+  // the small-copse tier's own size, unlike the old ~2x tier, so even
+  // the largest patch of trees reads as small against the mountains).
+  forestPatchDef(197.1, 5.47, 0.39),
+  forestPatchDef(6.9, 5.48, 0.4),
 ];
+
+// Smallest/largest sizeScale actually authored above — used to
+// normalize crown density in createForestCrowns without hardcoding
+// these numbers twice. Update this if FOREST_PATCH_DEFS's range changes.
+const FOREST_SIZE_SCALE_RANGE: [number, number] = [0.126, 0.4];
 
 /**
  * Random irregular-blob shape descriptor shared by both halves of a
@@ -415,9 +432,10 @@ function buildCrownGeometry(radius: number): THREE.BufferGeometry {
  * Scatters many small rounded canopy-crown volumes across the patch's
  * own irregular footprint (see PatchShape) and merges them into a single
  * mesh, exactly like createRockCluster does for boulders. Crown count
- * scales with the patch's real-world area (def.sizeScale squared) so
- * small copses get a sparse handful of crowns while sprawling groves get
- * a dense, tree-line-like mass of them.
+ * scales with the patch's own sizeScale (linearly interpolated across
+ * FOREST_PATCH_DEFS's authored sizeScale range — see
+ * FOREST_SIZE_SCALE_RANGE) so small copses get a sparse handful of
+ * crowns while sprawling groves get a dense, tree-line-like mass of them.
  *
  * Each crown's height follows the *actual* local terrain beneath its own
  * position (sampled via terrainHeightAt at that crown's real-world
@@ -430,8 +448,19 @@ function buildCrownGeometry(radius: number): THREE.BufferGeometry {
  * flat-silhouette problem above.
  */
 function createForestCrowns(shape: PatchShape, def: ForestPatchDef): THREE.Mesh {
-  const area = def.sizeScale * def.sizeScale;
-  const crownCount = Math.round(THREE.MathUtils.clamp(34 * area, 14, 190));
+  // A straight sizeScale^2 (area) scaling made sense back when sizeScale
+  // spanned a huge ~0.13-2.08 range, but after rescaling FOREST_PATCH_DEFS
+  // down ~7-8x (see its own comment) that same formula would clamp almost
+  // every patch to the minimum crown count, losing the small/medium/
+  // large/sprawling density variety entirely. Interpolating linearly
+  // across the actual authored sizeScale range instead keeps that same
+  // relative variety regardless of the absolute scale chosen.
+  const t = THREE.MathUtils.clamp(
+    (def.sizeScale - FOREST_SIZE_SCALE_RANGE[0]) / (FOREST_SIZE_SCALE_RANGE[1] - FOREST_SIZE_SCALE_RANGE[0]),
+    0,
+    1,
+  );
+  const crownCount = Math.round(THREE.MathUtils.lerp(9, 130, t));
 
   const fxBase = def.forwardX * def.distanceScale;
   const fyBase = def.forwardZ * def.distanceScale;
