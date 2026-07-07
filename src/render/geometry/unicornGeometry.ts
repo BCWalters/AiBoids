@@ -338,27 +338,40 @@ function buildUnicornEyesGeometry(headTopY: number, headTopZ: number, headTopRad
 
 
 /**
- * A rounded nose bulb (tinted the same muzzle purple as the nose bridge
- * — see buildHorseBodyProfileGeometry) sitting just past the muzzle-tip
- * ring, plus two small dark nostril dots. Per direct feedback ("looking
- * at the unicorn... it looks like it's missing its nose, from the side
- * it looks like it ends at a point") — the swept-tube head profile's
- * final ring, even now capped flat (see buildHorseBodyProfileGeometry),
- * still read as an abrupt/pointed cutoff rather than an actual nose;
- * this rounded bulb gives it real volume and the nostril dots give it
- * the final "this is a nose" read.
+ * A subtle rounded nose-cap (tinted the same muzzle purple as the nose
+ * bridge — see buildHorseBodyProfileGeometry) sitting flush against the
+ * muzzle-tip ring, plus two small dark nostril dots. Per direct
+ * feedback ("looking at the unicorn... it looks like it's missing its
+ * nose, from the side it looks like it ends at a point") — the
+ * swept-tube head profile's final ring, even now capped flat (see
+ * buildHorseBodyProfileGeometry), still read as an abrupt/pointed
+ * cutoff rather than an actual nose. A first pass at fixing this used a
+ * full sphere offset forward of the tip, which then read as a distinct
+ * ball sticking out ("like a Rudolph nose") rather than part of the
+ * face. This is a half-sphere (thetaLength = PI/2, so only the dome
+ * half is built, with a flat cut face at the equator) sized close to
+ * the tip ring's own radius and sitting almost flush against it (only
+ * a small forward offset) — a gentle rounded pad blending into the
+ * muzzle rather than a separate protruding bulb.
  */
 function buildUnicornNoseGeometry(muzzleTipY: number, muzzleTipZ: number, muzzleTipRadius: number): THREE.BufferGeometry {
-  const bulbRadiusY = muzzleTipRadius * 0.9;
-  const bulbRadiusZ = muzzleTipRadius * 0.75;
-  const noseY = muzzleTipY + bulbRadiusY * 0.55;
-  const bulb = new THREE.SphereGeometry(muzzleTipRadius * 0.95, 10, 8);
-  bulb.scale(1, bulbRadiusY / (muzzleTipRadius * 0.95), bulbRadiusZ / (muzzleTipRadius * 0.95));
+  const bulbRadius = muzzleTipRadius * 0.7;
+  const bulbRadiusZ = muzzleTipRadius * 0.55;
+  // Only a small fraction of the bulb's own radius pokes past the
+  // tip ring — mostly flush with it, not projecting forward as its own
+  // separate shape.
+  const noseY = muzzleTipY + bulbRadius * 0.2;
+  // thetaStart=0, thetaLength=PI/2 keeps just the pole cap (a dome/half-
+  // sphere bulging forward in local +Y, the sphere's default pole axis,
+  // which already matches the model's forward axis here) with a flat
+  // circular cut face at the equator — no full-sphere "ball" silhouette.
+  const bulb = new THREE.SphereGeometry(bulbRadius, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+  bulb.scale(1, 1, bulbRadiusZ / bulbRadius);
   bulb.translate(0, noseY, muzzleTipZ);
 
-  const nostrilRadius = muzzleTipRadius * 0.22;
-  const nostrilSideOffset = muzzleTipRadius * 0.4;
-  const nostrilY = noseY + bulbRadiusY * 0.35;
+  const nostrilRadius = muzzleTipRadius * 0.15;
+  const nostrilSideOffset = muzzleTipRadius * 0.35;
+  const nostrilY = noseY + bulbRadius * 0.4;
   const leftNostril = new THREE.SphereGeometry(nostrilRadius, 6, 5);
   leftNostril.translate(-nostrilSideOffset, nostrilY, muzzleTipZ);
   const rightNostril = new THREE.SphereGeometry(nostrilRadius, 6, 5);
