@@ -380,8 +380,9 @@ function createForestLitter(shape: PatchShape): THREE.Mesh {
     // — kept close to white rather than a strong tint, since the texture
     // is already quite dark and an aggressive multiply crushed it down
     // to a near-black smudge that looked more like a shadow hole than
-    // shaded undergrowth.
-    color: new THREE.Color(0xd7ddc9),
+    // shaded undergrowth. Pulled down a little further from its first
+    // pass to stay in step with the crowns above also being darkened.
+    color: new THREE.Color(0xc3c9b7),
   });
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
@@ -391,13 +392,19 @@ function createForestLitter(shape: PatchShape): THREE.Mesh {
 // Muted green/olive tones for individual canopy crowns — close to (but a
 // separate palette from) the flat litter texture's own tones, so the 3D
 // crowns above and the painted ground layer beneath them read as the
-// same kind of foliage rather than two different materials.
+// same kind of foliage rather than two different materials. Darkened
+// from an earlier, noticeably brighter palette (direct feedback: the
+// forest patches read too light on average) and biased toward the
+// darker end by including an extra deep-shadow tone, rather than an
+// even brighter/darker split, so most crowns land on the muted side
+// with only occasional lighter highlights.
 const CROWN_TONES: THREE.Color[] = [
-  new THREE.Color(0x3f5e33),
-  new THREE.Color(0x4d7239),
-  new THREE.Color(0x5d8a42),
-  new THREE.Color(0x2c4324),
-  new THREE.Color(0x6b9c4c),
+  new THREE.Color(0x2f4726),
+  new THREE.Color(0x3a562b),
+  new THREE.Color(0x466832),
+  new THREE.Color(0x21321b),
+  new THREE.Color(0x4b6d35),
+  new THREE.Color(0x24341c),
 ];
 
 /**
