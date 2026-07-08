@@ -1754,6 +1754,28 @@ export class Renderer3D {
   }
 
   /**
+   * Model Gallery: converts a *sim-space* position (e.g. an entity's raw
+   * `entity.position`, in the same coordinate space as `sim.width` /
+   * `sim.height` / `params.worldDepth`) into the actual rendered
+   * world-space position it appears at. For nature/arcade styles this is
+   * a no-op (identity), but fishtank style inflates both the tank and
+   * every fish/predator's rendered position by TANK_VISUAL_SCALE, grown
+   * outward from `fishtankCenter` (see updateInstances' `worldScale`
+   * param and TANK_VISUAL_SCALE's doc comment) — so a creature posed at
+   * the sim's raw center can render well away from that same point in
+   * fishtank style. debugFrameCamera must target *this* position, not
+   * the raw sim-space one, or the close-up gallery framing aims at empty
+   * space next to the creature instead of the creature itself.
+   */
+  toRenderedPosition(x: number, y: number, z: number): THREE.Vector3 {
+    const isFishtank = params.visualStyle === 'fishtank';
+    if (!isFishtank) return new THREE.Vector3(x, y, z);
+    const scale = TANK_VISUAL_SCALE;
+    const c = this.fishtankCenter;
+    return new THREE.Vector3(c.x + (x - c.x) * scale, c.y + (y - c.y) * scale, c.z + (z - c.z) * scale);
+  }
+
+  /**
    * Model Gallery / debug-QA helper: point the camera at a fixed
    * world-space position from a pleasant, fixed elevated 3/4 angle
    * (roughly matching a typical reference-photo framing of a flying
@@ -1825,7 +1847,13 @@ export class Renderer3D {
     }
     if (box.isEmpty()) return fallbackDistance;
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const radius = sphere.radius;
+    // Fishtank style additionally scales every instance's mesh (not just
+    // its position) by TANK_VISUAL_SCALE (see updateInstances' worldScale
+    // param) — the geometry's own local bounding box doesn't reflect that,
+    // so without this the fishtank creature would actually render larger
+    // than this distance was solved for and clip out of frame.
+    const worldScale = params.visualStyle === 'fishtank' ? TANK_VISUAL_SCALE : 1;
+    const radius = sphere.radius * worldScale;
     if (!radius) return fallbackDistance;
 
     // Matches debugFrameCamera's (0.7, 0.35, 0.9) offset vector — the
