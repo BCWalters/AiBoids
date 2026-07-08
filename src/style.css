@@ -281,3 +281,64 @@ body {
 .control-buttons button.button-pulse {
   animation: button-pulse-flash 0.5s ease-out;
 }
+
+/* Touch-target sizing: only widen tap areas for touch-primary devices
+ * (coarse pointer, no hover) so mouse/trackpad users keep the compact
+ * desktop layout. Targets below are bumped toward the ~44px minimum
+ * recommended by Apple/Android accessibility guidelines. */
+@media (hover: none) and (pointer: coarse) {
+  #control-panel-toggle {
+    width: 44px;
+    height: 44px;
+    font-size: 16px;
+  }
+
+  #control-panel.collapsed {
+    width: 60px;
+  }
+
+  .control-checkbox-row {
+    min-height: 44px;
+    gap: 12px;
+  }
+
+  .control-checkbox-row input[type='checkbox'] {
+    width: 22px;
+    height: 22px;
+  }
+
+  .control-buttons button {
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .control-section summary {
+    padding: 12px 10px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .control-row select {
+    padding: 10px 8px;
+    min-height: 44px;
+  }
+
+  /* Range slider thumbs are tiny by default on WebKit/Blink touch
+   * browsers; enlarge them so dragging is easier without needing
+   * pixel-perfect precision. */
+  .control-row input[type='range'] {
+    height: 28px;
+  }
+
+  .control-row input[type='range']::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+
+  .control-row input[type='range']::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
+}
