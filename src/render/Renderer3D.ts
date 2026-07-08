@@ -198,6 +198,27 @@ const FLAP_FREQUENCY = 9; // radians/sec-ish; controls flap speed
 const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
 
+// Fishtank-only mesh-size boost applied on top of TANK_VISUAL_SCALE (see
+// updateInstances' meshScaleBoost param). TANK_VISUAL_SCALE alone grows
+// fish position spread and mesh size by the *same* factor as the tank/
+// room around them, which is a pure uniform zoom — it doesn't change how
+// large a fish reads *relative to the tank*, since the camera framing
+// scales right along with it. That's why fish still looked bug-sized
+// once the tank/room got big enough to need a real room around it: the
+// ratio of "fish size" to "tank size" was never actually changed, only
+// the absolute number of world units both were measured in. This boost
+// is mesh-only (position spread still uses worldScale alone, see
+// updateInstances' worldScale doc comment) so fish read as chunkier,
+// more real-aquarium-fish-sized individuals without also making them
+// range farther apart / more sparse-looking inside the tank.
+const FISHTANK_FISH_MESH_BOOST = 2.2;
+
+// Sharks (predators using dragon geometry while fishtank is active — see
+// isShark below) get an extra size boost on top of FISHTANK_FISH_MESH_BOOST
+// — real sharks read as noticeably larger apex predators next to the
+// schooling fish, not just a same-scaled reskin of the dragon.
+const FISHTANK_SHARK_MESH_BOOST = 1.5;
+
 // Dragons are ~2.5-3x the size of the hawk predator, so flapping at the
 // same fast hummingbird-like frequency read as a tiny insect (dragonfly/
 // hummingbird) rather than a huge beast — big wings should beat slower
@@ -1067,14 +1088,15 @@ export class Renderer3D {
       const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
       this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
       // Fishtank's generous zoom-out range is only mathematically
-      // guaranteed to clear the floor/ceiling up to cameraTiltLimitRad
-      // of tilt away from horizontal (see maxCameraDistance's and
-      // cameraTiltLimitRad's doc comments in computeFishtankRoomBounds —
-      // both are derived together so they always stay in sync here).
-      // Other styles have no such enclosing geometry to worry about, so
-      // they get OrbitControls' unrestricted default range back.
-      this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltLimitRad : 0;
-      this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltLimitRad : Math.PI;
+      // guaranteed to clear the floor/ceiling up to cameraTiltUpRad/
+      // cameraTiltDownRad of tilt away from horizontal (see
+      // maxCameraDistance's and cameraTiltUpRad/cameraTiltDownRad's doc
+      // comments in computeFishtankRoomBounds — all derived together so
+      // they always stay in sync here). Other styles have no such
+      // enclosing geometry to worry about, so they get OrbitControls'
+      // unrestricted default range back.
+      this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltUpRad : 0;
+      this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltDownRad : Math.PI;
 
       // Re-frame the camera when crossing into/out of fishtank
       // specifically (not just on world-dimension changes, handled
@@ -1245,6 +1267,14 @@ export class Renderer3D {
     // inflated independently of the sim's actual coordinate space.
     // Always 1 (no-op) for arcade/nature.
     worldScale: number = 1,
+    // Fishtank-only: an *extra* mesh-only scale multiplier (does NOT
+    // affect position spreading, unlike worldScale above) — see
+    // FISHTANK_FISH_MESH_BOOST's doc comment for why fish need their own
+    // size bump on top of worldScale to read as real aquarium fish
+    // rather than tiny specks lost in a room-sized tank. Always 1
+    // (no-op) for arcade/nature and for fishtank predators/species that
+    // don't opt into the boost.
+    meshScaleBoost: number = 1,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -1498,7 +1528,7 @@ export class Renderer3D {
         this.dummy.position.set(pos.x, pos.y, pos.z);
       }
       this.dummy.quaternion.copy(this.bodyQuat);
-      this.dummy.scale.setScalar(entityScale * worldScale);
+      this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
       if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
@@ -2040,6 +2070,7 @@ export class Renderer3D {
           isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
           0,
           isFishtank ? TANK_VISUAL_SCALE : 1,
+          isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
         );
       }
     }
@@ -2082,6 +2113,7 @@ export class Renderer3D {
         isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
         isShark ? getSharkTailPivotY(DRAGON_LENGTH) : 0,
         isFishtank ? TANK_VISUAL_SCALE : 1,
+        isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
       );
     }
 
@@ -2121,6 +2153,7 @@ export class Renderer3D {
         undefined,
         0,
         isFishtank ? TANK_VISUAL_SCALE : 1,
+        isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
       );
     }
 
