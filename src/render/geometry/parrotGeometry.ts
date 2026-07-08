@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from './creatureGeometry';
-import { mergeGeometriesWithColor, extrudeRingGeometry, mergePositionOnlyGeometries } from './creatureGeometry';
+import {
+  mergeGeometriesWithColor,
+  extrudeRingGeometry,
+  mergePositionOnlyGeometries,
+  buildHookedBeakGeometry,
+  buildEyeDotsGeometry,
+} from './creatureGeometry';
 
 /**
  * Parrot-specific geometry — split out from the shared "realistic bird"
@@ -23,6 +29,11 @@ import { mergeGeometriesWithColor, extrudeRingGeometry, mergePositionOnlyGeometr
 // rest of the body.
 const BEAK_COLOR = new THREE.Color(0x2b2620);
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
+// Near-black eye dots — stay near-black under any per-instance body tint
+// multiply (see the multiply-color reasoning in unicornGeometry.ts), so
+// this single baked color works correctly across every macaw color
+// pattern in PARROT_COLOR_PATTERNS.
+const EYE_COLOR = new THREE.Color(0x0d0b08);
 
 export function createParrotGeometries(length: number, width: number): CreatureGeometries {
   const body = buildParrotBodyGeometry(length, width);
@@ -52,173 +63,144 @@ export function createParrotGeometries(length: number, width: number): CreatureG
  * pushed noticeably further here so the head+beak silhouette reads
  * unambiguously as a parrot face from any side-on viewing angle.
  */
+// Same head-narrowing/lengthening treatment requested for the small-bird
+// species (see birdGeometry.ts's HEAD_NARROW_SCALE/HEAD_LENGTHEN_SCALE
+// doc comment) applied here too, for visual consistency across all three
+// bird shapes — 25% narrower, 10% longer, pivoting at the neck pinch so
+// only the head region (not the neck/torso below it) stretches.
+const HEAD_NARROW_SCALE = 0.75;
+const HEAD_LENGTHEN_SCALE = 1.2;
+const HEAD_START_FRAC = 0.38; // neck pinch
+const HEAD_END_FRAC = HEAD_START_FRAC + (0.9 - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE; // face point (was faceY = halfLen*0.9)
+
 function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
+  const headFrac = (frac: number) => HEAD_START_FRAC + (frac - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE;
   // Face radius kept smaller than the head-crown bulge (a real, if
   // gentle, step down) so the head reads as a rounded mass with a
   // distinctly narrower face the beak grows out of, rather than the
   // beak's base being the same girth as the whole skull.
-  const faceRadius = width * 0.18;
-  const faceY = halfLen * 0.8;
+  const faceRadius = width * 0.16 * HEAD_NARROW_SCALE;
+  const faceY = halfLen * HEAD_END_FRAC;
   const profile = [
-    new THREE.Vector2(width * 0.05, -halfLen * 0.95), // tail-root taper
-    new THREE.Vector2(width * 0.24, -halfLen * 0.65),
-    new THREE.Vector2(width * 0.46, -halfLen * 0.2), // belly bulge, rounder than a hawk's
-    new THREE.Vector2(width * 0.42, halfLen * 0.12), // chest
-    new THREE.Vector2(width * 0.2, halfLen * 0.42), // real pinched neck — noticeably narrower than both chest and head
-    new THREE.Vector2(width * 0.4, halfLen * 0.56), // head base, bulging back out past the neck pinch
-    new THREE.Vector2(width * 0.46, halfLen * 0.66), // crown — the widest point of the head
-    new THREE.Vector2(width * 0.34, halfLen * 0.74), // forehead, narrowing toward the face
+    new THREE.Vector2(width * 0.045, -halfLen * 0.95), // tail-root taper
+    new THREE.Vector2(width * 0.21, -halfLen * 0.65),
+    new THREE.Vector2(width * 0.4, -halfLen * 0.2), // belly bulge, rounder than a hawk's — trimmed slightly narrower
+    new THREE.Vector2(width * 0.37, halfLen * 0.12), // chest — trimmed slightly narrower
+    // Head reworked to be noticeably taller (a longer Y-span from neck
+    // pinch to face) relative to its radius than the previous profile —
+    // that version spanned only ~0.38*halfLen in Y against a ~0.46*width
+    // peak radius, an oblate-spheroid ratio that read as a flat, wide
+    // "smooshed"/Lego-brick head rather than a rounded skull. Pushing the
+    // neck pinch earlier and the face further out (plus trimming the
+    // peak radius down a touch) roughly doubles that span:radius ratio.
+    // Every radius/position past this point is additionally scaled by
+    // HEAD_NARROW_SCALE/HEAD_LENGTHEN_SCALE above.
+    new THREE.Vector2(width * 0.24, halfLen * HEAD_START_FRAC), // real pinched neck — widened a bit on its own (not the head/body) so it doesn't read as pinched to a thread
+    new THREE.Vector2(width * 0.32 * HEAD_NARROW_SCALE, halfLen * headFrac(0.5)), // head base, bulging back out past the neck pinch
+    new THREE.Vector2(width * 0.37 * HEAD_NARROW_SCALE, halfLen * headFrac(0.62)), // crown — the widest point of the head
+    new THREE.Vector2(width * 0.3 * HEAD_NARROW_SCALE, halfLen * headFrac(0.74)), // forehead, narrowing toward the face
+    new THREE.Vector2(width * 0.22 * HEAD_NARROW_SCALE, halfLen * headFrac(0.84)), // brow, just above the eyes
     new THREE.Vector2(faceRadius, faceY), // face, where the beak attaches
   ];
   const torso = new THREE.LatheGeometry(profile, 16);
 
-  const beak = buildParrotBeakGeometry(length, faceY, faceRadius);
+  // Macaws have a deeply hooked beak curling well past straight-down
+  // (132deg from forward) — much more than the hawk's shallower raptor
+  // hook (see hawkGeometry.ts) — shared sweep builder, different tuning.
+  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.34, 132, 0.85);
+
+  // A pair of small dark eye dots on either side of the head, just above
+  // and slightly behind the face point — the single biggest missing
+  // "facial feature" cue reported (a parrot with no visible eyes reads
+  // as a smooth featureless head no matter how good the beak/head shape
+  // is otherwise).
+  const eyeY = halfLen * headFrac(0.78);
+  const eyeX = width * 0.26 * HEAD_NARROW_SCALE;
+  const eyeZ = width * 0.06 * HEAD_NARROW_SCALE;
+  const eyeRadius = width * 0.05 * HEAD_NARROW_SCALE;
+  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
   return mergeGeometriesWithColor([
     { geometry: torso, color: WHITE_VERTEX_COLOR },
     { geometry: beak, color: BEAK_COLOR },
+    { geometry: eyes, color: EYE_COLOR },
   ]);
 }
 
 /**
- * A short, deep, sharply hooked beak swept along a bent spine — same
- * "rings + outward-triangle-winding" technique as the body/torso profile
- * above (and the unicorn's horse body), rather than a small number of
- * large flat box segments. The previous box-segment version (even after
- * increasing from 3 to 5 segments) still had only 4 flat side faces per
- * segment and large angle jumps between segments; against the near-
- * black beak tint, those big flat facets read as a distinctly banded/
- * ribbed pattern rather than a smoothly curved beak. Using many more,
- * smaller rings (circular cross-section, not a 4-cornered box) along a
- * continuously-bending spine — matching the resolution/approach that
- * already reads smoothly for the torso — fixes that.
- */
-function buildParrotBeakGeometry(length: number, faceY: number, faceRadius: number): THREE.BufferGeometry {
-  // Pushed considerably longer than the first couple of passes (which
-  // read as a barely-visible stub tucked behind the head's own
-  // silhouette) — a macaw's hooked beak is one of its most prominent,
-  // recognizable features and needs to clearly protrude past the head
-  // from every side angle.
-  const beakLen = length * 0.34;
-  const spineSamples = 9; // rings along the beak's length
-  const angleSegments = 8; // circular cross-section resolution
-
-  // Bend angle (measured from straight-forward +Y, rotating toward -Z)
-  // grows with t^1.6 — gentle near the face, sharply hooking under
-  // itself only in the last stretch near the tip.
-  const maxAngleDeg = 132;
-  const spine: { y: number; z: number; radius: number }[] = [];
-  let cursorY = faceY;
-  let cursorZ = 0;
-  const stepLen = beakLen / spineSamples;
-  for (let i = 0; i <= spineSamples; i++) {
-    const t = i / spineSamples;
-    spine.push({ y: cursorY, z: cursorZ, radius: faceRadius * (1 - 0.85 * Math.pow(t, 1.8)) });
-    if (i === spineSamples) break;
-    const angleDeg = maxAngleDeg * Math.pow((i + 0.5) / spineSamples, 1.6);
-    const rad = (angleDeg * Math.PI) / 180;
-    cursorY += Math.cos(rad) * stepLen;
-    cursorZ -= Math.sin(rad) * stepLen;
-  }
-
-  const rings: THREE.Vector3[][] = spine.map((point) => {
-    const ring: THREE.Vector3[] = [];
-    for (let j = 0; j < angleSegments; j++) {
-      const angle = (j / angleSegments) * Math.PI * 2;
-      // Slightly flattened top-to-bottom (a real beak's cross-section is
-      // taller than wide), matching the faceRadius*0.85 ratio the old
-      // box version used.
-      const x = Math.cos(angle) * point.radius;
-      const z = Math.sin(angle) * point.radius * 0.85;
-      ring.push(new THREE.Vector3(x, point.y, point.z + z));
-    }
-    return ring;
-  });
-
-  const positions: number[] = [];
-  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) =>
-    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-  const pushOutwardTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, center: THREE.Vector3) => {
-    const ab = new THREE.Vector3().subVectors(b, a);
-    const ac = new THREE.Vector3().subVectors(c, a);
-    const faceNormal = new THREE.Vector3().crossVectors(ab, ac);
-    const centroid = new THREE.Vector3().add(a).add(b).add(c).divideScalar(3);
-    const outward = new THREE.Vector3().subVectors(centroid, center);
-    if (faceNormal.dot(outward) < 0) pushTri(a, c, b);
-    else pushTri(a, b, c);
-  };
-
-  for (let i = 0; i < rings.length - 1; i++) {
-    const ringA = rings[i];
-    const ringB = rings[i + 1];
-    const center = new THREE.Vector3(0, (spine[i].y + spine[i + 1].y) / 2, (spine[i].z + spine[i + 1].z) / 2);
-    for (let j = 0; j < angleSegments; j++) {
-      const k = (j + 1) % angleSegments;
-      pushOutwardTri(ringA[j], ringA[k], ringB[j], center);
-      pushOutwardTri(ringA[k], ringB[k], ringB[j], center);
-    }
-  }
-
-  // Blunt cap at the hooked tip so it doesn't end in a bare hole.
-  const tipIndex = spine.length - 1;
-  const tipRing = rings[tipIndex];
-  const tipCenter = new THREE.Vector3(0, spine[tipIndex].y, spine[tipIndex].z);
-  const tipCapBehind = new THREE.Vector3(0, spine[tipIndex - 1].y, spine[tipIndex - 1].z);
-  for (let j = 0; j < angleSegments; j++) {
-    const k = (j + 1) % angleSegments;
-    pushOutwardTri(tipCenter, tipRing[j], tipRing[k], tipCapBehind);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-/**
- * A solid fanned tail base (same shape/attachment as the shared hawk/
- * songbird tail — a quadrilateral boundary meeting at a rear center
- * point, rooted flush against the body's own tail-root) with a couple
- * of long center streamer feathers layered on top, growing out from
- * that same fan-back point rather than floating as separate disconnected
- * sticks — macaws have a fanned tail base with a few dramatically
- * elongated central feathers, not just bare quills. Both the fan and the
- * streamers are run through extrudeRingGeometry to give them real
- * Z-thickness: the previous version was a zero-thickness flat plane
- * lying in the model's X/Y plane, which vanished completely when viewed
- * edge-on from the side (a side camera looks straight down the X axis,
- * seeing ~0 apparent height for anything with no Z-extent).
+ * A graduated fan of individually shaped tail feathers — a real macaw
+ * tail is a continuous fan of several feathers of different lengths
+ * (the central pair much longer, tapering shorter toward the outer
+ * edges), each feather a slender vane (narrow quill at the root,
+ * bulging out to its widest a bit past the middle, then tapering to a
+ * point at the tip), all rooted at the same point flush against the
+ * body so the fan reads as one continuous structure rather than a flat
+ * paddle base with a couple of bare sticks poking out of it (the
+ * earlier "fan + 2 quill streamers" version, which read as artificial).
+ * Feathers overlap slightly at the root (each is a solid quad fanned
+ * out at its own angle from dead-center) and every feather droops
+ * slightly in -Z (gravity droop, matching the rest of the body's
+ * plumage) with the droop growing toward the tip. Each vane is run
+ * through extrudeRingGeometry for real Z-thickness so it doesn't
+ * vanish edge-on.
  */
 function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  const thickness = width * 0.05;
+  const thickness = width * 0.035;
 
-  const root = new THREE.Vector3(0, -length * 0.42, 0);
-  const fanLeftTip = new THREE.Vector3(-width * 0.85, -length * 0.68, 0);
-  const fanRightTip = new THREE.Vector3(width * 0.85, -length * 0.68, 0);
-  const fanBack = new THREE.Vector3(0, -length * 0.78, 0);
-  const fan = extrudeRingGeometry([root, fanLeftTip, fanBack, fanRightTip], thickness);
+  // Root sits at (or slightly ahead of, for guaranteed overlap) the
+  // body lathe's own tail-root profile point (-halfLen*0.95 = -length*0.475
+  // — see buildParrotBodyGeometry's profile): a shallower root left a
+  // visible gap between where the body's own taper ended and where the
+  // tail began, reading as "the tail is separated from the body".
+  const rootY = -length * 0.46;
 
-  // Long streamers grow directly out of the fan's own back point, close
-  // together near the centerline (rather than spread wide like the fan's
-  // own tips), so they visually continue the fan rather than sprouting
-  // from empty space beside it.
-  const streamerCount = 2;
-  const streamerGeometries: THREE.BufferGeometry[] = [fan];
-  for (let i = 0; i < streamerCount; i++) {
-    const t = i / (streamerCount - 1);
-    const xOffset = (t - 0.5) * width * 0.3;
-    const streamerLen = length * 0.5;
-    const halfWidth = width * 0.06;
+  const featherCount = 7;
+  const maxSpreadDeg = 34; // total angular spread of the fan, center feather at 0deg
+  const maxLen = length * 0.62; // center (longest) feather length
+  const minLenFrac = 0.45; // outermost feathers' length relative to maxLen
 
-    const streamerRoot = new THREE.Vector3(xOffset - halfWidth, fanBack.y * 0.85, 0);
-    const streamerRoot2 = new THREE.Vector3(xOffset + halfWidth, fanBack.y * 0.85, 0);
-    const tip = new THREE.Vector3(xOffset, fanBack.y - streamerLen, -length * 0.06);
+  const featherGeometries: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < featherCount; i++) {
+    // -1 (leftmost) .. 0 (center) .. +1 (rightmost)
+    const t = (i / (featherCount - 1)) * 2 - 1;
+    const angle = THREE.MathUtils.degToRad(t * maxSpreadDeg);
+    const lenFrac = minLenFrac + (1 - minLenFrac) * Math.pow(Math.cos((t * Math.PI) / 2), 1.4);
+    const featherLen = maxLen * lenFrac;
 
-    streamerGeometries.push(extrudeRingGeometry([streamerRoot, streamerRoot2, tip], thickness));
+    const dirX = Math.sin(angle);
+    const dirY = -Math.cos(angle); // fan opens backward (-Y)
+    const droop = -length * 0.08 * lenFrac; // longer feathers droop a bit more
+
+    // Vane outline: a slender quill at the root widening to its
+    // fullest a bit past the middle, then tapering to a fine point —
+    // built as a 4-point diamond (root, left-bulge, tip, right-bulge)
+    // rather than a plain thin sliver, so each feather reads as a real
+    // vane rather than a wire.
+    const perpX = Math.cos(angle);
+    const perpY = Math.sin(angle);
+    const vaneHalfWidth = width * 0.055 * lenFrac;
+    const bulgeAt = 0.55; // fraction along the feather where it's widest
+
+    const root = new THREE.Vector3(0, rootY, 0);
+    const bulgeCenterX = dirX * featherLen * bulgeAt;
+    const bulgeCenterY = rootY + dirY * featherLen * bulgeAt;
+    const leftBulge = new THREE.Vector3(
+      bulgeCenterX - perpX * vaneHalfWidth,
+      bulgeCenterY - perpY * vaneHalfWidth,
+      droop * bulgeAt,
+    );
+    const rightBulge = new THREE.Vector3(
+      bulgeCenterX + perpX * vaneHalfWidth,
+      bulgeCenterY + perpY * vaneHalfWidth,
+      droop * bulgeAt,
+    );
+    const tip = new THREE.Vector3(dirX * featherLen, rootY + dirY * featherLen, droop);
+
+    featherGeometries.push(extrudeRingGeometry([root, leftBulge, tip, rightBulge], thickness));
   }
 
-  return mergePositionOnlyGeometries(streamerGeometries);
+  return mergePositionOnlyGeometries(featherGeometries);
 }
 
 /**

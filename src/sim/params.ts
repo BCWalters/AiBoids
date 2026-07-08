@@ -117,7 +117,7 @@ export interface SimParams {
   galleryCreature: GalleryCreature | null;
 }
 
-export type GalleryCreature = 'unicorn' | 'dragon' | 'hawk' | 'parrot' | 'goldfinch' | 'cardinal' | 'bluejay';
+export type GalleryCreature = 'unicorn' | 'dragon' | 'hawk' | 'sparrow' | 'parrot' | 'goldfinch' | 'cardinal' | 'bluejay';
 
 export const defaultParams: SimParams = {
   mode: '3d',

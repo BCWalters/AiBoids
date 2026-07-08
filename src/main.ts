@@ -65,7 +65,7 @@ let renderer3D: Renderer3D | null = null;
  * exactly what the user had running before.
  */
 const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['unicorn', 'dragon', 'hawk']);
-const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['parrot', 'goldfinch', 'cardinal', 'bluejay']);
+const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['sparrow', 'parrot', 'goldfinch', 'cardinal', 'bluejay']);
 
 function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number } | null {
   const searchParams = new URLSearchParams(window.location.search);
@@ -179,6 +179,7 @@ function enterGallery(kind: GalleryCreature): void {
     params.predatorCount = 1;
     params.dragonPredators = true;
   } else if (kind === 'hawk') params.predatorCount = 1;
+  else if (kind === 'sparrow') params.boidCount = 1;
   else if (kind === 'parrot') params.parrotCount = 1;
   else if (kind === 'goldfinch') params.goldfinchCount = 1;
   else if (kind === 'cardinal') params.cardinalCount = 1;

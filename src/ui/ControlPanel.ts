@@ -305,6 +305,7 @@ export class ControlPanel {
       { value: 'unicorn', textKey: 'galleryUnicorn' },
       { value: 'dragon', textKey: 'galleryDragon' },
       { value: 'hawk', textKey: 'galleryHawk' },
+      { value: 'sparrow', textKey: 'gallerySparrow' },
       { value: 'parrot', textKey: 'galleryParrot' },
       { value: 'goldfinch', textKey: 'galleryGoldfinch' },
       { value: 'cardinal', textKey: 'galleryCardinal' },
