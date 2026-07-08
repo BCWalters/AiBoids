@@ -16,6 +16,13 @@ export interface CreatureGeometries {
   /** Dragon-only: a pair of clawed legs tucked under the belly, rendered
    * with the same static per-instance transform as the body (no flap). */
   legs?: THREE.BufferGeometry;
+  /** Small-bird-only: the beak as its own InstancedMesh part (rather than
+   * merged/vertex-baked into the body) — see birdGeometry.ts's doc
+   * comment on why a shared multi-species geometry needs this instead of
+   * the parrot/hawk approach of baking a fixed beak color into the body's
+   * vertex colors. Rendered with the same static per-instance transform
+   * as the body (no flap). */
+  beak?: THREE.BufferGeometry;
 }
 
 /**
@@ -136,6 +143,107 @@ export function extrudeRingGeometry(ring: THREE.Vector3[], thickness: number): T
   return geometry;
 }
 
+
+/**
+ * A deeply hooked beak swept along a bent spine of shrinking circular
+ * rings (rather than a small number of flat box segments, which read as
+ * banded/faceted against a dark solid tint) — shared by parrot (macaw
+ * beak) and hawk (raptor beak) geometry, since both are variations on
+ * the same "hooked bird-of-prey/parrot beak" shape, just tuned with
+ * different length/curvature/flattening parameters. `maxAngleDeg` is how
+ * far the tip curls downward from straight-forward (+Y); a parrot's beak
+ * curls much further under itself than a hawk's.
+ */
+export function buildHookedBeakGeometry(
+  faceY: number,
+  faceRadius: number,
+  beakLen: number,
+  maxAngleDeg: number,
+  flattenRatio: number = 0.85,
+): THREE.BufferGeometry {
+  const spineSamples = 9;
+  const angleSegments = 8;
+
+  const spine: { y: number; z: number; radius: number }[] = [];
+  let cursorY = faceY;
+  let cursorZ = 0;
+  const stepLen = beakLen / spineSamples;
+  for (let i = 0; i <= spineSamples; i++) {
+    const t = i / spineSamples;
+    spine.push({ y: cursorY, z: cursorZ, radius: faceRadius * (1 - 0.85 * Math.pow(t, 1.8)) });
+    if (i === spineSamples) break;
+    const angleDeg = maxAngleDeg * Math.pow((i + 0.5) / spineSamples, 1.6);
+    const rad = (angleDeg * Math.PI) / 180;
+    cursorY += Math.cos(rad) * stepLen;
+    cursorZ -= Math.sin(rad) * stepLen;
+  }
+
+  const rings: THREE.Vector3[][] = spine.map((point) => {
+    const ring: THREE.Vector3[] = [];
+    for (let j = 0; j < angleSegments; j++) {
+      const angle = (j / angleSegments) * Math.PI * 2;
+      const x = Math.cos(angle) * point.radius;
+      const z = Math.sin(angle) * point.radius * flattenRatio;
+      ring.push(new THREE.Vector3(x, point.y, point.z + z));
+    }
+    return ring;
+  });
+
+  const positions: number[] = [];
+  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) =>
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  const pushOutwardTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, center: THREE.Vector3) => {
+    const ab = new THREE.Vector3().subVectors(b, a);
+    const ac = new THREE.Vector3().subVectors(c, a);
+    const faceNormal = new THREE.Vector3().crossVectors(ab, ac);
+    const centroid = new THREE.Vector3().add(a).add(b).add(c).divideScalar(3);
+    const outward = new THREE.Vector3().subVectors(centroid, center);
+    if (faceNormal.dot(outward) < 0) pushTri(a, c, b);
+    else pushTri(a, b, c);
+  };
+
+  for (let i = 0; i < rings.length - 1; i++) {
+    const ringA = rings[i];
+    const ringB = rings[i + 1];
+    const center = new THREE.Vector3(0, (spine[i].y + spine[i + 1].y) / 2, (spine[i].z + spine[i + 1].z) / 2);
+    for (let j = 0; j < angleSegments; j++) {
+      const k = (j + 1) % angleSegments;
+      pushOutwardTri(ringA[j], ringA[k], ringB[j], center);
+      pushOutwardTri(ringA[k], ringB[k], ringB[j], center);
+    }
+  }
+
+  // Blunt cap at the hooked tip so it doesn't end in a bare hole.
+  const tipIndex = spine.length - 1;
+  const tipRing = rings[tipIndex];
+  const tipCenter = new THREE.Vector3(0, spine[tipIndex].y, spine[tipIndex].z);
+  const tipCapBehind = new THREE.Vector3(0, spine[tipIndex - 1].y, spine[tipIndex - 1].z);
+  for (let j = 0; j < angleSegments; j++) {
+    const k = (j + 1) % angleSegments;
+    pushOutwardTri(tipCenter, tipRing[j], tipRing[k], tipCapBehind);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * A small paired-dot eye (two tiny spheres mirrored across the X axis) —
+ * same technique as unicornGeometry.ts's buildUnicornEyesGeometry, shared
+ * here so small-bird/hawk geometry can use it too. Baked as a near-black
+ * vertex color so it reads correctly regardless of whatever per-instance
+ * body tint a given species/individual gets (near-black stays near-black
+ * under any multiply).
+ */
+export function buildEyeDotsGeometry(x: number, y: number, z: number, radius: number): THREE.BufferGeometry {
+  const left = new THREE.SphereGeometry(radius, 8, 6);
+  left.translate(x, y, z);
+  const right = new THREE.SphereGeometry(radius, 8, 6);
+  right.translate(-x, y, z);
+  return mergePositionOnlyGeometries([left, right]);
+}
 
 /**
  * Bakes a rainbow hue gradient (violet at the wing root, red at the tip)

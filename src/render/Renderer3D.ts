@@ -11,6 +11,7 @@ import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
+import { createHawkGeometries } from './geometry/hawkGeometry';
 import { createParrotGeometries } from './geometry/parrotGeometry';
 import { createDragonGeometries, computeDragonMouthTransform } from './geometry/dragonGeometry';
 import { createUnicornGeometries } from './geometry/unicornGeometry';
@@ -48,6 +49,21 @@ const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrast
 const NATURE_BOID_PANIC = new THREE.Color(0xf2e6c8); // paler alarm plumage
 const NATURE_PREDATOR_BASE = new THREE.Color(0x7a3b22); // hawk rust-brown
 const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked on
+
+// --- Nature-style hawk (bald-eagle-inspired, see geometry/hawkGeometry.ts):
+// body/wing/tail split, mirroring the parrot/goldfinch/cardinal/bluejay
+// pattern, rather than one flat NATURE_PREDATOR_BASE tint (the hawk now
+// has its own dedicated geometry with baked white-head/dark-torso/yellow-
+// beak vertex colors, which only show through correctly if the per-
+// instance "body" tint stays close to white — see hawkGeometry.ts's doc
+// comment on the tint-multiplies-vertex-color math). Wing and tail are
+// separate InstancedMesh parts (no vertex-bake needed there), so they can
+// just get plain, genuinely dark-brown/white instance tints directly —
+// a real bald eagle's tail is white too, a free extra accuracy win.
+const NATURE_HAWK_HEAD_TINT = new THREE.Color(0xefece2); // near-white so baked head/torso/beak colors read as-authored
+const NATURE_HAWK_WING = new THREE.Color(0x2a2018); // dark blackish-brown, matches the baked torso color
+const NATURE_HAWK_TAIL = new THREE.Color(0xf2efe6); // genuinely white, matches the baked head color
+const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing: NATURE_HAWK_WING, tail: NATURE_HAWK_TAIL };
 
 // --- Parrot boid species: vivid multi-hued macaw-style plumage instead of
 // the sparrow-type boid's earth tones. Body/wing/tail get distinct colors
@@ -360,6 +376,8 @@ interface BirdInstanceSet {
   wingRight: THREE.InstancedMesh;
   tail?: THREE.InstancedMesh;
   legs?: THREE.InstancedMesh;
+  /** Small-bird-only: see CreatureGeometries.beak's doc comment. */
+  beak?: THREE.InstancedMesh;
 }
 
 /** Per-species rendering config: which population param drives its count,
@@ -379,6 +397,11 @@ interface BoidSpeciesConfig {
   getColors?: (entity: Boid | Predator) => SpeciesColorSet;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
+  /** Small-bird species only (nature style): the beak's own instance
+   * color, distinct from the body — see CreatureGeometries.beak's doc
+   * comment on why this can't just be baked into the shared body
+   * geometry's vertex colors the way parrot/hawk beaks are. */
+  beakColor?: THREE.Color;
 }
 
 const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
@@ -389,6 +412,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     arcadeBase: ARCADE_BOID_BASE,
     natureBase: NATURE_BOID_BASE,
     useSmallGeometry: true,
+    beakColor: new THREE.Color(0x3a332b), // dark grayish-brown, typical sparrow beak
   },
   {
     species: 'parrot',
@@ -408,6 +432,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureBase: GOLDFINCH_BODY_BASE,
     colors: { body: GOLDFINCH_BODY_BASE, wing: GOLDFINCH_WING_BASE, tail: GOLDFINCH_TAIL_BASE },
     useSmallGeometry: false,
+    beakColor: new THREE.Color(0xf0b96a), // pale orange-pink, a real goldfinch's distinctive beak color
   },
   {
     species: 'cardinal',
@@ -417,6 +442,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureBase: CARDINAL_BODY_BASE,
     colors: { body: CARDINAL_BODY_BASE, wing: CARDINAL_WING_BASE, tail: CARDINAL_TAIL_BASE },
     useSmallGeometry: false,
+    beakColor: new THREE.Color(0xe8672a), // bright orange-red, a real cardinal's signature thick beak color
   },
   {
     species: 'bluejay',
@@ -426,6 +452,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureBase: BLUEJAY_BODY_BASE,
     colors: { body: BLUEJAY_BODY_BASE, wing: BLUEJAY_WING_BASE, tail: BLUEJAY_TAIL_BASE },
     useSmallGeometry: false,
+    beakColor: new THREE.Color(0x1c1c1c), // near-black, matches a real blue jay's beak
   },
 ];
 
@@ -540,6 +567,7 @@ export class Renderer3D {
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
   private tailColor = new THREE.Color();
+  private beakInstanceColor = new THREE.Color();
   private hsl = { h: 0, s: 0, l: 0 };
   private startTime = performance.now();
   private lastElapsed = 0;
@@ -590,7 +618,7 @@ export class Renderer3D {
     // shares the simple flat-diamond silhouette with every other species
     // (arcade's whole aesthetic is bloom-glow blobs, not anatomical detail).
     this.natureParrotGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
-    this.naturePredatorGeometries = createRealisticBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
+    this.naturePredatorGeometries = createHawkGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.1);
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
     this.unicornPredatorGeometries = createUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
 
@@ -724,7 +752,21 @@ export class Renderer3D {
       this.scene.add(legs);
     }
 
-    return { body, wingLeft, wingRight, tail, legs };
+    let beak: THREE.InstancedMesh | undefined;
+    if (geometries.beak) {
+      // Small-bird-only part (see CreatureGeometries.beak) — a plain,
+      // non-vertex-colored material (this.beakMaterial has no vertex data
+      // to read; its whole point is getting its own flat per-instance
+      // color, set in updateInstances).
+      const beakMaterial = bodyMaterial.clone();
+      beakMaterial.vertexColors = false;
+      beak = new THREE.InstancedMesh(geometries.beak, beakMaterial, Math.max(count, 1));
+      beak.count = count;
+      beak.frustumCulled = false;
+      this.scene.add(beak);
+    }
+
+    return { body, wingLeft, wingRight, tail, legs, beak };
   }
 
   /**
@@ -759,6 +801,7 @@ export class Renderer3D {
       set.wingRight,
       ...(set.tail ? [set.tail] : []),
       ...(set.legs ? [set.legs] : []),
+      ...(set.beak ? [set.beak] : []),
     ];
     for (const mesh of meshes) {
       this.scene.remove(mesh);
@@ -809,7 +852,13 @@ export class Renderer3D {
               : isFishtank
                 ? this.fishtankBoidGeometries
                 : this.arcadeBoidGeometries;
-        const bodyVertexColors = !!config.useParrotGeometry && isOrganic;
+        // Parrot geometry (nature + fishtank) bakes vertex colors for its
+        // beak/eyes; small-bird geometry (sparrow/goldfinch/cardinal/
+        // bluejay) now does too, but only in the nature-style file — the
+        // fishtank small-bird geometry hasn't been given the same
+        // eye-detail treatment yet, so enabling vertexColors there would
+        // read as solid black (no 'color' attribute to multiply against).
+        const bodyVertexColors = config.useParrotGeometry ? isOrganic : isNature;
         this.speciesInstances.set(
           config.species,
           this.buildInstanceSet(geometries, style, config.arcadeEmissive, count, false, false, bodyVertexColors),
@@ -849,7 +898,7 @@ export class Renderer3D {
             : this.arcadePredatorGeometries;
       this.predatorInstances.set(
         'hawk',
-        this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon),
+        this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon || isNature),
       );
       this.predatorInstanceKeys.set('hawk', hawkKey);
       this.dragonDisplayQuats.clear();
@@ -994,6 +1043,11 @@ export class Renderer3D {
     // constants' doc comments.
     uprightStyle: 'dragon' | 'unicorn' = 'dragon',
     bankScale: number = 1,
+    // Small-bird-only: a flat, distinct instance color for the separate
+    // `beak` InstancedMesh part (see BoidSpeciesConfig.beakColor's doc
+    // comment on why this is a separate part rather than a body vertex
+    // bake for these particular species).
+    beakColor?: THREE.Color,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -1239,6 +1293,7 @@ export class Renderer3D {
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
       if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
+      if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
       // Dragon tails get an extra sway (see DRAGON_TAIL_SWAY_AMPLITUDE)
       // computed below once the wingbeat phase is known; every other
       // creature's tail just follows the body rigidly, as before.
@@ -1368,6 +1423,13 @@ export class Renderer3D {
         if (set.tail) set.tail.setColorAt(i, this.stateColor);
       }
       if (set.legs) set.legs.setColorAt(i, this.stateColor);
+      if (set.beak && beakColor) {
+        // Small per-individual jitter, same treatment as the other parts
+        // — keeps a flock of e.g. cardinals from looking like every
+        // single beak is the identical exact pixel color.
+        this.jitterHSL(this.beakInstanceColor, beakColor, entity.id, 5, 0.04, 0.1, 0.08);
+        set.beak.setColorAt(i, this.beakInstanceColor);
+      }
     }
 
     set.body.instanceMatrix.needsUpdate = true;
@@ -1383,6 +1445,10 @@ export class Renderer3D {
     if (set.legs) {
       set.legs.instanceMatrix.needsUpdate = true;
       if (set.legs.instanceColor) set.legs.instanceColor.needsUpdate = true;
+    }
+    if (set.beak) {
+      set.beak.instanceMatrix.needsUpdate = true;
+      if (set.beak.instanceColor) set.beak.instanceColor.needsUpdate = true;
     }
   }
 
@@ -1612,6 +1678,10 @@ export class Renderer3D {
           (entity) => (entity as Boid).scale,
           config.colors || config.getColors ? true : isOrganic,
           config.getColors ?? (config.colors ? () => config.colors! : undefined),
+          false,
+          'dragon',
+          1,
+          config.beakColor,
         );
       }
     }
@@ -1633,7 +1703,12 @@ export class Renderer3D {
         isDragon ? DRAGON_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
         undefined,
         undefined,
-        undefined,
+        // Plain nature-style hawks (not dragon, not arcade/fishtank) get
+        // the dedicated bald-eagle body/wing/tail color split — see
+        // NATURE_HAWK_COLORS' doc comment. Must match the same isNature-
+        // only gating used for bodyVertexColors above (fishtank's hawk
+        // geometry has no baked vertex colors to read yet).
+        !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
         isDragon,
       );
     }

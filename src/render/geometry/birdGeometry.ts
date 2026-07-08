@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from './creatureGeometry';
-import { extrudeRingGeometry, mergePositionOnlyGeometries } from './creatureGeometry';
+import {
+  extrudeRingGeometry,
+  mergeGeometriesWithColor,
+  buildEyeDotsGeometry,
+} from './creatureGeometry';
 
 /**
  * Builds a simple low-poly bird silhouette: an elongated diamond body
@@ -51,9 +55,21 @@ function buildWingGeometry(span: number, chord: number, side: 1 | -1): THREE.Buf
  * wings with fanned, separated wingtip "finger" feathers — evoking a
  * soaring hawk silhouette rather than the simple flat-diamond arcade bird.
  * Not photo-realistic, but reads much better as "a bird" from a distance.
+ *
+ * This shape is shared across four differently-colored small-songbird
+ * species (sparrow/goldfinch/cardinal/bluejay — see BOID_SPECIES_CONFIGS
+ * in Renderer3D.ts), so the beak is returned as its own separate `beak`
+ * geometry/instance part rather than baked into the body's vertex colors
+ * (contrast with parrotGeometry.ts/hawkGeometry.ts, whose beaks CAN be
+ * vertex-baked since each of those geometries belongs to only one
+ * species/color scheme). Keeping the beak a separate InstancedMesh part
+ * lets each species get its own distinct, appropriate beak instance color
+ * (see Renderer3D's BOID_SPECIES_CONFIGS `beakColor` field) without the
+ * shared body geometry having to pick just one baked-in hue.
  */
 export function createRealisticBirdGeometries(length: number, width: number): CreatureGeometries {
   const body = buildTaperedBodyGeometry(length, width);
+  const beak = buildSmallBirdBeakGeometry(length, width);
 
   const wingSpan = length * 1.3;
   const wingChord = length * 0.6;
@@ -62,7 +78,7 @@ export function createRealisticBirdGeometries(length: number, width: number): Cr
 
   const tail = buildTailGeometry(length, width);
 
-  return { body, wingLeft, wingRight, tail };
+  return { body, wingLeft, wingRight, tail, beak };
 }
 
 
@@ -71,43 +87,65 @@ export function createRealisticBirdGeometries(length: number, width: number): Cr
  * match FORWARD_AXIS. Tail end stays slim (a lathe can't produce a flat
  * fanned tail — that's added separately via buildTailGeometry).
  *
- * The neck now genuinely pinches in (much narrower than the chest) before
- * the head bulge, and the head bulge itself is wider than the neck by a
- * clear margin — without that pinch, the lathe reads as one continuous
- * tapering blob (an "egg with a pointed tip") rather than a body + a
- * separate head, which was the small-bird complaint ("looks like a yellow
- * blob, no head"). A small beak cone is appended past the face point (see
- * buildBeakGeometry) so there's an actual protruding beak shape instead of
- * the lathe profile just pinching to a bare point.
+ * Slimmed down from an earlier pass whose chest/belly/head radii (up to
+ * 0.42*width at the belly, 0.3-0.32*width through the head) read as "both
+ * the body and the head are way too fat" — real small perching birds have
+ * a proportionally slimmer, more streamlined torso than that. Radii below
+ * are trimmed roughly 25-30% through the torso and head while keeping the
+ * neck pinch (still clearly narrower than both chest and head) that fixed
+ * the earlier "no head at all, just a blob" bug. A pair of near-black eye
+ * dots (see buildEyeDotsGeometry) are baked onto the head via
+ * mergeGeometriesWithColor — safe under any per-species body tint
+ * multiply (near-black stays near-black regardless of what it's
+ * multiplied against), giving every small-bird species actual facial
+ * detail instead of a featureless head.
  */
 function buildTaperedBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = [
-    new THREE.Vector2(width * 0.04, -halfLen * 1.0), // tail tip
-    new THREE.Vector2(width * 0.22, -halfLen * 0.7),
-    new THREE.Vector2(width * 0.42, -halfLen * 0.25), // belly bulge
-    new THREE.Vector2(width * 0.4, halfLen * 0.15), // chest
-    new THREE.Vector2(width * 0.15, halfLen * 0.42), // neck pinch — clearly narrower than chest/head
-    new THREE.Vector2(width * 0.3, halfLen * 0.58), // head base bulge — clearly wider than the neck pinch
-    new THREE.Vector2(width * 0.32, halfLen * 0.66), // crown, the widest point of the head
-    new THREE.Vector2(width * 0.2, halfLen * 0.74), // forehead, narrowing toward the face
-    new THREE.Vector2(width * 0.09, halfLen * 0.8), // face point, where the beak attaches
+    new THREE.Vector2(width * 0.03, -halfLen * 1.0), // tail tip
+    new THREE.Vector2(width * 0.16, -halfLen * 0.7),
+    new THREE.Vector2(width * 0.3, -halfLen * 0.25), // belly bulge — slimmer than before
+    new THREE.Vector2(width * 0.28, halfLen * 0.15), // chest
+    new THREE.Vector2(width * 0.12, halfLen * 0.42), // neck pinch — clearly narrower than chest/head
+    new THREE.Vector2(width * 0.21, halfLen * 0.58), // head base bulge — clearly wider than the neck pinch
+    new THREE.Vector2(width * 0.22, halfLen * 0.66), // crown, the widest point of the head
+    new THREE.Vector2(width * 0.15, halfLen * 0.74), // forehead, narrowing toward the face
+    new THREE.Vector2(width * 0.075, halfLen * 0.8), // face point, where the beak attaches
   ];
   const body = new THREE.LatheGeometry(profile, 14);
-  const beak = buildBeakGeometry(length, halfLen * 0.8, width * 0.09);
-  return mergePositionOnlyGeometries([body, beak]);
+
+  const eyeY = halfLen * 0.68;
+  const eyeX = width * 0.16;
+  const eyeZ = width * 0.05;
+  const eyeRadius = width * 0.04;
+  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+
+  return mergeGeometriesWithColor([
+    { geometry: body, color: WHITE_VERTEX_COLOR },
+    { geometry: eyes, color: EYE_COLOR },
+  ]);
 }
 
+// Near-black eye baked onto every small-bird species' head — see
+// buildTaperedBodyGeometry's doc comment for why this stays visually
+// correct under any per-species per-instance body tint.
+const EYE_COLOR = new THREE.Color(0x0d0b08);
+const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
+
 /**
- * A small solid cone forming the beak, attached at the body lathe's face
- * point and pointing further forward along +Y. Gives small birds (and the
- * hawk) an actual protruding beak shape instead of the lathe profile
- * simply pinching down to a bare point (which reads as "no head/beak at
- * all" from a distance, especially on uniformly-colored small birds).
+ * A small solid cone forming the beak — its own separate CreatureGeometries
+ * `beak` part (not merged into the body) so each small-bird species can be
+ * given its own distinct beak instance color (see Renderer3D's
+ * BOID_SPECIES_CONFIGS). Attached at the same face point the body lathe
+ * profile ends at (see buildTaperedBodyGeometry).
  */
-function buildBeakGeometry(length: number, faceY: number, faceRadius: number): THREE.BufferGeometry {
-  const beakLen = length * 0.22;
-  const geometry = new THREE.ConeGeometry(faceRadius * 0.85, beakLen, 8);
+function buildSmallBirdBeakGeometry(length: number, width: number): THREE.BufferGeometry {
+  const halfLen = length * 0.5;
+  const faceY = halfLen * 0.8;
+  const faceRadius = width * 0.075;
+  const beakLen = length * 0.2;
+  const geometry = new THREE.ConeGeometry(faceRadius * 0.9, beakLen, 8);
   geometry.scale(1, 1, 0.75); // slightly flattened, taller than wide
   // ConeGeometry's axis already runs along +Y (apex at +height/2, base at
   // -height/2), matching the body's own forward axis — no rotation
@@ -190,7 +228,7 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
  * plane) doesn't disappear when viewed edge-on from directly the side.
  * Static (does not flap).
  */
-function buildTailGeometry(length: number, width: number): THREE.BufferGeometry {
+export function buildTailGeometry(length: number, width: number): THREE.BufferGeometry {
   const root = new THREE.Vector3(0, 0, 0);
   const leftTip = new THREE.Vector3(-width * 0.9, -length * 0.55, 0);
   const rightTip = new THREE.Vector3(width * 0.9, -length * 0.55, 0);
