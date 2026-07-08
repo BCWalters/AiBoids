@@ -955,17 +955,19 @@ export class Renderer3D {
       this.natureEnv.setVisible(isNature);
       this.fishtankEnv.setVisible(isFishtank);
       this.driftingClouds.setVisible(isNature);
+      // Fishtank has its own dedicated glass-box wireframe (frameEdges,
+      // see styles/fishtank/environment.ts) so the generic debug
+      // boundsHelper stays hidden for both organic styles, same as before.
       if (this.boundsHelper) this.boundsHelper.visible = !isOrganic;
       this.ambientLight.intensity = isOrganic ? 0.55 : 0.35;
       this.keyLight.visible = !isOrganic;
 
-      // Re-apply the zoom clamp for the new style: organic styles' distance
-      // fog needs a much tighter max zoom-out than arcade's fog-free scene.
-      // flockScale here matches the internal scale placeNatureEnvironment/
-      // placeFishtankEnvironment derive (groundSize / 30 === maxDim) — NOT
-      // groundSize itself.
+      // Re-apply the zoom clamp for the new style: nature's distance fog
+      // needs a tight max zoom-out, while fishtank now has real geometry
+      // (a table + room) around the tank that's worth seeing when zoomed
+      // out further, so it gets a much looser clamp than nature.
       const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      this.controls.maxDistance = isOrganic ? maxDim * 5.5 : maxDim * 25;
+      this.controls.maxDistance = isFishtank ? maxDim * 12 : isNature ? maxDim * 5.5 : maxDim * 25;
     }
 
     // Applied every frame (cheap) rather than gated on style-change, so
@@ -1000,21 +1002,24 @@ export class Renderer3D {
       this.controls.update();
 
       placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
-      placeFishtankEnvironment(this.fishtankEnv, center, maxDim * 30);
+      // Unlike nature's ground plane (an arbitrary-scale backdrop),
+      // fishtank's glass box must match the sim's actual world bounds
+      // exactly — it's a real container the fish swim inside, not just
+      // scenery — so this takes the raw dimensions rather than a single
+      // "groundSize" scalar.
+      placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
       this.driftingClouds.configure(center, maxDim);
 
       // Clamp orbit zoom to a sane range for this world's scale: never so
       // close the camera can slide through the ground/boundary box, and
-      // never so far out that an organic style's distance fog reduces the
-      // whole view to a flat, blown-out wall of fog color (which reads as
-      // a rendering glitch rather than "zoomed out"). flockScale matches
-      // the internal scale placeNatureEnvironment/placeFishtankEnvironment
-      // derive from groundSize (groundSize / 30 === maxDim here), which is
-      // what fog.near/far are themselves scaled from — NOT groundSize
-      // directly.
+      // never so far out that nature's distance fog reduces the whole
+      // view to a flat, blown-out wall of fog color (which reads as a
+      // rendering glitch rather than "zoomed out"). Fishtank gets a much
+      // further max distance since zooming out is supposed to reveal the
+      // tank sitting on its table in the room, not just hit a fog wall.
       const flockScale = maxDim;
       this.controls.minDistance = maxDim * 0.05;
-      this.controls.maxDistance = isOrganic ? flockScale * 5.5 : maxDim * 25;
+      this.controls.maxDistance = isFishtank ? flockScale * 12 : isNature ? flockScale * 5.5 : maxDim * 25;
     }
   }
 
