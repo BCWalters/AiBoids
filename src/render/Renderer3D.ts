@@ -22,10 +22,10 @@ import {
   placeFishtankEnvironment,
   type FishtankEnvironment,
 } from './styles/fishtank/environment';
-import { createRealisticBirdGeometries as createFishtankBirdGeometries } from './styles/fishtank/geometry/birdGeometry';
-import { createParrotGeometries as createFishtankParrotGeometries } from './styles/fishtank/geometry/parrotGeometry';
-import { createDragonGeometries as createFishtankPredatorGeometries } from './styles/fishtank/geometry/dragonGeometry';
-import { createUnicornGeometries as createFishtankUnicornGeometries } from './styles/fishtank/geometry/unicornGeometry';
+import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/fishGeometry';
+import { createTetraGeometries as createFishtankTetraGeometries } from './styles/fishtank/geometry/tetraGeometry';
+import { createSharkGeometries as createFishtankSharkGeometries } from './styles/fishtank/geometry/sharkGeometry';
+import { createSeaHorseGeometries as createFishtankSeaHorseGeometries } from './styles/fishtank/geometry/seaHorseGeometry';
 import { createDriftingClouds, type DriftingClouds } from './styles/nature/clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
 import { createFireBreathEffects, type FireBreathEffects } from './styles/nature/fireBreath';
@@ -627,15 +627,15 @@ export class Renderer3D {
     // same sizing so they slot into the same instancing code paths — a
     // future reskinning pass can freely change proportions/shapes here
     // without touching nature's geometry at all.
-    this.fishtankBoidGeometries = createFishtankBirdGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
-    this.fishtankSparrowGeometries = createFishtankBirdGeometries(
+    this.fishtankBoidGeometries = createFishtankFishGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.fishtankSparrowGeometries = createFishtankFishGeometries(
       BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
       BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
     );
-    this.fishtankParrotGeometries = createFishtankParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
-    this.fishtankPredatorGeometries = createFishtankBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
-    this.fishtankSharkPredatorGeometries = createFishtankPredatorGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
-    this.fishtankUnicornPredatorGeometries = createFishtankUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
+    this.fishtankParrotGeometries = createFishtankTetraGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.fishtankPredatorGeometries = createFishtankFishGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
+    this.fishtankSharkPredatorGeometries = createFishtankSharkGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
+    this.fishtankUnicornPredatorGeometries = createFishtankSeaHorseGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
