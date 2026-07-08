@@ -1030,8 +1030,11 @@ function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh 
   const segments = 64;
   const outerRadius = 6.1; // base, flock-scale units
   const innerRadius = 5.4; // ridge line, pulled slightly inward/forward
-  const baseColor = new THREE.Color(0x8497a8);
-  const peakColor = new THREE.Color(0xd7e1e6);
+  // Foothill tone at the mountain's base — feeds into mountainColorAt's
+  // height gradient below. A muted sage-green-gray so it reads as a
+  // scrubby lower slope distinct from both the grass plain in front of
+  // it and the bare rock above it.
+  const baseColor = new THREE.Color(0x6f7a5c);
 
   // Smooth neighboring random heights so the ridge undulates gently
   // instead of spiking sharply between adjacent segments. Heights are
@@ -1050,6 +1053,70 @@ function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh 
     const next = rawHeights[(i + 1) % segments];
     return (prev + h * 2 + next) / 4;
   });
+  const maxHeight = Math.max(...heights);
+
+  // Per-vertex rock texture + snow caps, replacing the old flat
+  // baseColor -> peakColor two-stop gradient — direct visual QA showed
+  // the ridge reading as a single uniform gray wall with no rock detail
+  // at all, easily the weakest-looking element next to the ground/
+  // forest/rocks once those got their own noise-driven variation. Uses
+  // the same fbm2 noise already used for ground/biome texturing so the
+  // mountains read as part of the same terrain system rather than a
+  // separately-styled backdrop.
+  //
+  // Two rounds of tuning were needed beyond just picking colors:
+  // 1) A first pass used a subtle desaturated blue-gray rock palette
+  //    (close in hue/lightness to both the foothill tone and the
+  //    ambient sky/fog color) — direct visual QA showed the mountain's
+  //    own strong directional-light shading gradient completely
+  //    swamped that subtle albedo variation. Needed a wide luminance +
+  //    hue swing (dark umber to warm sunlit tan) to survive it.
+  // 2) Even with that contrast, pure angle/height-keyed noise bands
+  //    (a smoothly-varying blotch pattern) still frequently rendered as
+  //    a single flat wall from most camera angles: the scene's
+  //    UnrealBloomPass (see Renderer3D.ts) uses a low brightness
+  //    threshold, so it blurs/glows almost the entire sunlit slope,
+  //    smearing out slow, low-frequency blotches almost completely.
+  //    Adding a second, much higher-frequency deterministic banding
+  //    term keyed purely on height (real rock strata run in roughly
+  //    horizontal bands) survives that blur far better than noise
+  //    blotches alone, and — being angle-independent — is guaranteed to
+  //    read as visible striping from any camera direction rather than
+  //    depending on luck about which noise cell happens to be in view.
+  const ROCK_LIGHT = new THREE.Color(0xd6c49a);
+  const ROCK_DARK = new THREE.Color(0x2f2a1f);
+  const SNOW_COLOR = new THREE.Color(0xffffff);
+  function mountainColorAt(angle: number, h: number): THREE.Color {
+    const t = THREE.MathUtils.clamp(h / maxHeight, 0, 1);
+    // Noise-driven light/dark rock blotching across the slope's face —
+    // keyed on angle (stable per ridge position) and height (a little
+    // vertical striation) so it reads as weathered rock rather than a
+    // smooth gradient. Frequency roughly doubled from the first pass so
+    // several bands are visible across a typical camera's field of
+    // view instead of just one slow gradient.
+    const rockNoise = fbm2(Math.cos(angle) * 14 + 91.3, Math.sin(angle) * 14 + h * 5 + 40.2, 3);
+    // Higher-frequency horizontal strata bands, purely a function of
+    // height so they read as real rock layers regardless of which
+    // angle happens to be in view (see comment above on bloom washing
+    // out slower noise blotches).
+    const stripe = Math.sin(h * 26 + rockNoise * 4) * 0.5 + 0.5;
+    const rockBlend = THREE.MathUtils.smoothstep(rockNoise * 0.6 + stripe * 0.4, 0.15, 0.75);
+    const rockColor = ROCK_DARK.clone().lerp(ROCK_LIGHT, rockBlend);
+    // Blend from the foothill tone up toward the textured rock tones as
+    // elevation increases.
+    const color = baseColor.clone().lerp(rockColor, THREE.MathUtils.smoothstep(t, 0, 0.45));
+    // Snow caps only on the tallest peaks, with a noise-perturbed
+    // snowline (rather than a razor-flat height threshold) so it reads
+    // as an irregular natural treeline/snowline instead of a painted
+    // stripe running the length of the ridge. Pure white so it still
+    // registers as snow even when darkened by shadow-side lighting or
+    // softened by bloom.
+    const snowNoise = fbm2(Math.cos(angle) * 4 + 500, Math.sin(angle) * 4 + 250, 2);
+    const snowThreshold = 0.62 + snowNoise * 0.14;
+    const snowFactor = THREE.MathUtils.smoothstep(t, snowThreshold, snowThreshold + 0.14);
+    if (snowFactor > 0) color.lerp(SNOW_COLOR, snowFactor);
+    return color;
+  }
 
   // Carve a smooth-edged gap/bay around gapAngle: mountain height drops
   // to sea-level so the range appears to "part" and reveal the ocean
@@ -1107,16 +1174,44 @@ function createMountainRing(gapAngle: number, gapHalfWidth: number): THREE.Mesh 
     const h0 = heights[i] * (1 - g0);
     const h1 = heights[(i + 1) % segments] * (1 - g1);
 
-    const base0 = [Math.cos(a0) * outerRadius, 0, Math.sin(a0) * outerRadius];
-    const base1 = [Math.cos(a1) * outerRadius, 0, Math.sin(a1) * outerRadius];
-    const ridge0 = [Math.cos(a0) * innerRadius, h0, Math.sin(a0) * innerRadius];
-    const ridge1 = [Math.cos(a1) * innerRadius, h1, Math.sin(a1) * innerRadius];
+    // Subdivide base->ridge into several radial steps rather than a
+    // single quad — with only one step, mountainColorAt was only ever
+    // sampled at the base (h=0) and ridge (full height) per segment,
+    // and the GPU just linearly interpolated colors across that single
+    // huge quad. That meant no rock texture or snow banding could ever
+    // actually appear *within* a segment (only 64 samples existed
+    // around the whole ring), so from any one camera angle showing only
+    // a handful of segments, the visible slope read as a single smooth
+    // gradient no matter how much noise/contrast was added to
+    // mountainColorAt. Real per-step samples let color vary up the
+    // slope itself, not just around the ring.
+    const radialSteps = 5;
+    for (let s = 0; s < radialSteps; s++) {
+      const tA = s / radialSteps;
+      const tB = (s + 1) / radialSteps;
+      const rA = THREE.MathUtils.lerp(outerRadius, innerRadius, tA);
+      const rB = THREE.MathUtils.lerp(outerRadius, innerRadius, tB);
+      const hA0 = h0 * tA;
+      const hB0 = h0 * tB;
+      const hA1 = h1 * tA;
+      const hB1 = h1 * tB;
 
-    // Two triangles per segment forming a continuous sloped strip from
-    // base to ridge — side is set to DoubleSide on the material so
-    // winding order (we're viewed from inside the ring) doesn't matter.
-    pushTri(base0, ridge0, base1, baseColor, peakColor, baseColor);
-    pushTri(ridge0, ridge1, base1, peakColor, peakColor, baseColor);
+      const p00 = [Math.cos(a0) * rA, hA0, Math.sin(a0) * rA];
+      const p01 = [Math.cos(a1) * rA, hA1, Math.sin(a1) * rA];
+      const p10 = [Math.cos(a0) * rB, hB0, Math.sin(a0) * rB];
+      const p11 = [Math.cos(a1) * rB, hB1, Math.sin(a1) * rB];
+
+      const c00 = mountainColorAt(a0, hA0);
+      const c01 = mountainColorAt(a1, hA1);
+      const c10 = mountainColorAt(a0, hB0);
+      const c11 = mountainColorAt(a1, hB1);
+
+      // Two triangles per step forming a continuous sloped strip from
+      // base to ridge — side is set to DoubleSide on the material so
+      // winding order (we're viewed from inside the ring) doesn't matter.
+      pushTri(p00, p10, p01, c00, c10, c01);
+      pushTri(p10, p11, p01, c10, c11, c01);
+    }
   }
 
   const geometry = new THREE.BufferGeometry();
