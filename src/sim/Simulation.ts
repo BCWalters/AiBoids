@@ -4,6 +4,7 @@ import { Boid, DYING_DURATION, type BoidSpecies } from './Boid';
 import { Predator, type PredatorKind } from './Predator';
 import { clampToBounds, type WorldBounds } from './boundary';
 import { UFO, createUFO } from './UFO';
+import { SpatialGrid } from './spatialGrid';
 
 /** A single "predator caught a boid" moment — read by renderers to spawn a one-shot cartoony blood-splatter effect. Capped/pruned so the array never grows unbounded. */
 export interface CatchEvent {
@@ -313,8 +314,25 @@ export class Simulation {
     const bounds = this.bounds;
     const is3D = params.mode === '3d';
 
+    // Broad-phase spatial index so each boid's neighbor search only
+    // checks nearby candidates instead of scanning every boid in the
+    // flock (O(n) per boid instead of O(n) full-array, i.e. overall
+    // O(n) rather than O(n^2) — this matters a lot once population
+    // sliders are pushed toward their max, where a full-array scan per
+    // boid becomes the dominant per-frame cost). Cell size matches
+    // perceptionRadius (the largest radius a boid ever queries with),
+    // which is the standard choice for a uniform grid: checking a
+    // point's cell plus its immediate neighborhood is then guaranteed
+    // to capture every boid within perceptionRadius, same as before —
+    // Boid.canSee still applies the exact distance/FOV filter on the
+    // smaller candidate set, so results are unchanged, just faster.
+    // Rebuilt fresh every frame since boids move continuously.
+    const neighborGrid = new SpatialGrid<Boid>(params.perceptionRadius);
+    for (const boid of this.boids) neighborGrid.insert(boid);
+
     for (const boid of this.boids) {
-      boid.update(dt, this.boids, this.predators, bounds);
+      const candidates = neighborGrid.queryNearby(boid.position);
+      boid.update(dt, candidates, this.predators, bounds);
       if (is3D) clampToBounds(boid.position, bounds);
       else this.wrap(boid.position);
     }
