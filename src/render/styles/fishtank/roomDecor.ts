@@ -614,8 +614,8 @@ function buildTankWindowContents(group: THREE.Group, aspect: number): void {
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
   const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, '#123a42');
-  grad.addColorStop(1, '#041418');
+  grad.addColorStop(0, '#0f3a58');
+  grad.addColorStop(1, '#041426');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
 
