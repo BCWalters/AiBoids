@@ -60,6 +60,44 @@ const boundarySliderSpecs: SliderSpec[] = [
 // kept ungrouped near the top alongside the mode/style toggles.
 const trailSliderSpec: SliderSpec = { key: 'trailAmount', labelKey: 'trailAmount', min: 0, max: 0.95, step: 0.01 };
 
+// Fishtank swims with a much smaller population than the wide-open
+// outdoor styles by default — a giant public-aquarium tank reads oddly
+// crowded at the same counts that look right scattered across an open
+// sky/field. Snapshotted alongside savedOutdoorPopulation below so each
+// style's own counts (including any manual tweaks) are preserved across
+// repeated switches, without ever touching defaultParams itself (the
+// "outdoor" default counts must stay exactly as they were).
+type PopulationSnapshot = Pick<
+  SimParams,
+  'boidCount' | 'parrotCount' | 'goldfinchCount' | 'cardinalCount' | 'bluejayCount' | 'predatorCount' | 'unicornCount'
+>;
+const POPULATION_KEYS: (keyof PopulationSnapshot)[] = [
+  'boidCount',
+  'parrotCount',
+  'goldfinchCount',
+  'cardinalCount',
+  'bluejayCount',
+  'predatorCount',
+  'unicornCount',
+];
+const FISHTANK_DEFAULT_POPULATION: PopulationSnapshot = {
+  boidCount: 40,
+  parrotCount: 20,
+  goldfinchCount: 20,
+  cardinalCount: 20,
+  bluejayCount: 20,
+  predatorCount: 2,
+  unicornCount: 0,
+};
+let savedOutdoorPopulation: PopulationSnapshot | null = null;
+let savedFishtankPopulation: PopulationSnapshot | null = null;
+
+function snapshotPopulation(): PopulationSnapshot {
+  const snapshot = {} as PopulationSnapshot;
+  for (const key of POPULATION_KEYS) snapshot[key] = params[key];
+  return snapshot;
+}
+
 export class ControlPanel {
   private container: HTMLElement;
   private sim: Simulation;
@@ -268,9 +306,21 @@ export class ControlPanel {
       select.appendChild(option);
     }
     select.addEventListener('change', () => {
-      params.visualStyle = select.value as VisualStyle;
+      const newStyle = select.value as VisualStyle;
+      const oldStyle = params.visualStyle;
+      if (newStyle !== oldStyle) {
+        if (oldStyle === 'fishtank' && newStyle !== 'fishtank') {
+          savedFishtankPopulation = snapshotPopulation();
+          if (savedOutdoorPopulation) Object.assign(params, savedOutdoorPopulation);
+        } else if (oldStyle !== 'fishtank' && newStyle === 'fishtank') {
+          savedOutdoorPopulation = snapshotPopulation();
+          Object.assign(params, savedFishtankPopulation ?? FISHTANK_DEFAULT_POPULATION);
+        }
+      }
+      params.visualStyle = newStyle;
       // Re-render so the dragon-predators toggle (nature-only) appears/
-      // disappears immediately rather than only after some other change.
+      // disappears immediately, and so the population sliders reflect
+      // the just-swapped-in per-style counts above.
       this.render();
     });
 
