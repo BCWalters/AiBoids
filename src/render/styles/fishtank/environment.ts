@@ -267,7 +267,12 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     },
     setFogEnabled(enabled: boolean) {
       fogEnabled = enabled;
-      scene.fog = enabled && waterFill.visible ? fog : null;
+      // Guarded by waterFill.visible so this only touches scene.fog while
+      // fishtank is the active style — Renderer3D calls setFogEnabled on
+      // both environments every frame regardless of which is active, and
+      // unconditionally assigning here would clobber whichever fog the
+      // other (currently-visible) environment just set.
+      if (waterFill.visible) scene.fog = enabled ? fog : null;
     },
     dispose() {
       scene.remove(
