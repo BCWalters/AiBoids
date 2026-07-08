@@ -139,8 +139,13 @@ function buildRidgePlate(anchor: THREE.Vector3, height: number, thickness: numbe
 
 function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): THREE.BufferGeometry {
   const span = length * 0.16;
-  const rootY = length * 0.1;
-  const rootZ = length * 0.11;
+  // Root anchored to match spine[6] in buildSeaHorseShellGeometry (y=halfLen*0.1,
+  // z=length*0.16) -- the shoulder/gill area where a seahorse's pectoral fins
+  // actually sit. The previous z (length*0.11) sat well below the body's actual
+  // curve at that y, so the fin floated in open space ahead of/below the body
+  // instead of looking attached to it.
+  const rootY = length * 0.05;
+  const rootZ = length * 0.16;
   const ring = [
     new THREE.Vector3(0, rootY, rootZ),
     new THREE.Vector3(side * span * 0.45, rootY + length * 0.038, rootZ + width * 0.022),

@@ -351,9 +351,15 @@ interface SpeciesColorSet {
 }
 
 // Unicorns reuse the same body/wing/tail split (lavender body+tail, near-
-// white wings so the baked rainbow vertex gradient shows through) in both
-// nature and arcade style — see NATURE_UNICORN_WING's doc comment above.
+// white wings so the baked rainbow vertex gradient shows through) in nature
+// style — see NATURE_UNICORN_WING's doc comment above. The fishtank seahorse
+// reuses this same predator-kind/color pipeline but its "wing" slot is
+// repurposed as solid-colored pectoral fins (no rainbow gradient baked in),
+// so its wing/tail tint should match the body instead of the near-white
+// rainbow-reading tint, or the fins render as washed-out white flags that
+// look detached from the body.
 const NATURE_UNICORN_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_WING, tail: NATURE_UNICORN_BODY };
+const FISHTANK_SEAHORSE_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_BODY, tail: NATURE_UNICORN_BODY };
 const ARCADE_UNICORN_COLORS: SpeciesColorSet = { body: ARCADE_UNICORN_BASE, wing: ARCADE_UNICORN_BASE, tail: ARCADE_UNICORN_BASE };
 
 /**
@@ -918,7 +924,10 @@ export class Renderer3D {
         : isFishtank
           ? this.fishtankUnicornPredatorGeometries
           : this.arcadePredatorGeometries;
-      const rainbowWings = isOrganic;
+      // The fishtank seahorse's "wing" slot is solid-colored pectoral fins
+      // (no baked rainbow gradient), unlike the nature unicorn's wings —
+      // only enable the rainbow-wing vertex-color path for nature style.
+      const rainbowWings = isNature;
       // The gold-horn vertex colors are only baked into the organic-style
       // horse geometry (unicornPredatorGeometries/fishtankUnicornPredator
       // Geometries) — arcade style reuses the plain hawk geometry, which
@@ -1735,7 +1744,7 @@ export class Renderer3D {
         UNICORN_FLAP_SPEED_AMPLITUDE,
         undefined,
         undefined,
-        () => (isOrganic ? NATURE_UNICORN_COLORS : ARCADE_UNICORN_COLORS),
+        () => (isFishtank ? FISHTANK_SEAHORSE_COLORS : isOrganic ? NATURE_UNICORN_COLORS : ARCADE_UNICORN_COLORS),
         // Unicorns always fly right-side-up, like dragons — see keepUpright's
         // doc comment. Unlike the dragon toggle, this applies in every 3D
         // style, not just nature, since it's a behavioral trait of the
