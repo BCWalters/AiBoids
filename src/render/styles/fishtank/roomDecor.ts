@@ -254,18 +254,19 @@ function paintArt(ctx: CanvasRenderingContext2D, width: number, height: number, 
     ctx.font = `bold ${height * 0.19}px Georgia, serif`;
     ctx.fillText('AQUARIUM', width * 0.5, height * 0.66);
   } else if (variant === 'giantSquid') {
-    // 'giantSquid' — a deep-ocean landscape mural to match blueWhale's
-    // room scale: near-black abyssal gradient, a couple of faint
-    // sunbeam shafts fading into the dark, and a large giant-squid
-    // silhouette (bulbous mantle, two long feeding tentacles, and a
-    // ring of shorter arms) trailing across most of the width.
+    // 'giantSquid' — a sunlit open-water landscape mural to match
+    // blueWhale's room scale: a light blue gradient backdrop (for
+    // contrast against the dark squid silhouette), a couple of faint
+    // sunbeam shafts, and a large giant-squid silhouette (bulbous
+    // mantle, two long feeding tentacles, and a ring of shorter arms)
+    // trailing across most of the width.
     const grad = ctx.createLinearGradient(0, 0, 0, height);
-    grad.addColorStop(0, '#0b2a3d');
-    grad.addColorStop(0.55, '#041826');
-    grad.addColorStop(1, '#010a12');
+    grad.addColorStop(0, '#bfe6f5');
+    grad.addColorStop(0.55, '#8fcbe6');
+    grad.addColorStop(1, '#5aa8cf');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
     for (let i = 0; i < 3; i++) {
       ctx.save();
       ctx.translate(width * (0.2 + i * 0.3), 0);
@@ -277,7 +278,7 @@ function paintArt(ctx: CanvasRenderingContext2D, width: number, height: number, 
     ctx.save();
     ctx.translate(width * 0.55, height * 0.42);
     ctx.rotate(0.08);
-    const squidColor = '#7a3d63';
+    const squidColor = '#20122b';
     // Mantle (the bulbous "head" body).
     ctx.fillStyle = squidColor;
     ctx.beginPath();
