@@ -6,6 +6,7 @@ import {
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
+  latheBodyRadiusAt,
 } from '../../../geometry/creatureGeometry';
 
 // Fish tank style: this file originally started as a duplicate of
@@ -93,23 +94,6 @@ function buildSharkBodyProfile(halfLen: number, width: number): THREE.Vector2[] 
   ];
 }
 
-// Linearly interpolates the lathed body's own radius at a given local Y,
-// walking the profile's (y descending) control points. Clamps to the
-// nearest end point outside the profile's own Y range.
-function sharkBodyRadiusAt(y: number, profile: THREE.Vector2[]): number {
-  if (y >= profile[profile.length - 1].y) return profile[profile.length - 1].x;
-  if (y <= profile[0].y) return profile[0].x;
-  for (let i = 0; i < profile.length - 1; i++) {
-    const a = profile[i];
-    const b = profile[i + 1];
-    if (y >= a.y && y <= b.y) {
-      const t = (y - a.y) / (b.y - a.y);
-      return a.x + t * (b.x - a.x);
-    }
-  }
-  return profile[0].x;
-}
-
 function buildSharkBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = buildSharkBodyProfile(halfLen, width);
@@ -146,7 +130,7 @@ const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
  * "shark" from nearly any viewing angle — plus a much smaller second
  * dorsal fin further back near the peduncle, matching real sharks' twin-
  * dorsal-fin layout. Each fin's root Z is derived from the body's own
- * lathed profile (sharkBodyRadiusAt), buried very slightly below the
+ * lathed profile (latheBodyRadiusAt), buried very slightly below the
  * body's actual surface (the BURY_FRACTION multiplier) rather than an
  * independent estimate, so the fin base is guaranteed to sit flush
  * against/inside the body with no visible floating gap at the seam —
@@ -165,8 +149,8 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const mainRootY = halfLen * 0.02;
   const mainBackY = -halfLen * 0.32;
   const mainTipY = -halfLen * 0.08;
-  const mainRootZ = sharkBodyRadiusAt(mainRootY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
-  const mainBackZ = sharkBodyRadiusAt(mainBackY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
+  const mainRootZ = latheBodyRadiusAt(mainRootY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
+  const mainBackZ = latheBodyRadiusAt(mainBackY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
   const mainFinHeight = width * 0.85;
   const mainRoot = new THREE.Vector3(0, mainRootY, mainRootZ);
   const mainBack = new THREE.Vector3(0, mainBackY, mainBackZ);
@@ -177,8 +161,8 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const secondRootY = -halfLen * 0.58;
   const secondBackY = -halfLen * 0.72;
   const secondTipY = -halfLen * 0.63;
-  const secondRootZ = sharkBodyRadiusAt(secondRootY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
-  const secondBackZ = sharkBodyRadiusAt(secondBackY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
+  const secondRootZ = latheBodyRadiusAt(secondRootY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
+  const secondBackZ = latheBodyRadiusAt(secondBackY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
   const secondFinHeight = width * 0.3;
   const secondRoot = new THREE.Vector3(0, secondRootY, secondRootZ);
   const secondBack = new THREE.Vector3(0, secondBackY, secondBackZ);
