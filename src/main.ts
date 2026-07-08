@@ -276,7 +276,15 @@ function poseGalleryEntityIfReady(): void {
   // so they key off 'hawk' here too.
   const instanceKind = kind === 'dragon' ? 'hawk' : kind;
   const distance = galleryDistanceOverride ?? renderer3D.getGalleryFramingDistance(instanceKind);
-  renderer3D.debugFrameCamera(center.x, center.y, center.z, distance);
+  // The camera must target where the creature actually *renders*, not
+  // its raw sim-space position — fishtank style inflates every fish/
+  // predator's rendered position around fishtankCenter by
+  // TANK_VISUAL_SCALE (see toRenderedPosition's doc comment), so without
+  // this conversion the close-up gallery framing aims at empty space
+  // next to the creature in fishtank style instead of the creature
+  // itself.
+  const renderTarget = renderer3D.toRenderedPosition(center.x, center.y, center.z);
+  renderer3D.debugFrameCamera(renderTarget.x, renderTarget.y, renderTarget.z, distance);
 
   // Exposed for an external screenshot/automation script to poll for
   // readiness and to inspect/tweak the posed entity directly.
