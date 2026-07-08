@@ -136,11 +136,13 @@ export class ControlPanel {
     // Renderer3D's currentStyle switch), so grey it out there rather than
     // let it silently do nothing. Perception/panic radii are drawn only by
     // the 2D canvas renderer, so grey that out whenever 3D mode is active.
-    const trailDisabled = params.mode === '3d' && params.visualStyle === 'nature';
+    const trailDisabled = params.mode === '3d' && params.visualStyle !== 'arcade';
     const debugDisabled = params.mode === '3d';
     const visualSettingsChildren = [this.buildSlider(trailSliderSpec, trailDisabled), this.buildDebugToggle(debugDisabled)];
-    if (params.mode === '3d' && params.visualStyle === 'nature') {
+    if (params.mode === '3d' && params.visualStyle !== 'arcade') {
       visualSettingsChildren.push(this.buildDragonPredatorsToggle());
+    }
+    if (params.mode === '3d' && params.visualStyle !== 'arcade') {
       visualSettingsChildren.push(this.buildFogToggle());
     }
     this.container.appendChild(this.buildSection('visualSettings', t('sectionVisualSettings'), visualSettingsChildren, false));
@@ -256,6 +258,7 @@ export class ControlPanel {
     const options: { value: VisualStyle; textKey: TranslationKey }[] = [
       { value: 'arcade', textKey: 'visualStyleArcade' },
       { value: 'nature', textKey: 'visualStyleNature' },
+      { value: 'fishtank', textKey: 'visualStyleFishtank' },
     ];
     for (const opt of options) {
       const option = document.createElement('option');

@@ -9,7 +9,11 @@ export type SimMode = '2d' | '3d';
 // look; 'nature' swaps in a blue sky, drifting clouds, a ground plane,
 // and more bird-like (earth-toned, fingered-wingtip) geometry aiming for
 // "looks plausible from a distance" rather than true photo-realism.
-export type VisualStyle = 'arcade' | 'nature';
+// 'fishtank' is an independent underwater-themed style (see
+// src/render/styles/fishtank/) — currently just an empty blue void with
+// nature's creature geometry duplicated as a starting point, meant to be
+// reskinned into fish/tank scenery independently of nature's assets.
+export type VisualStyle = 'arcade' | 'nature' | 'fishtank';
 
 export interface SimParams {
   // Rendering / dimensionality mode
