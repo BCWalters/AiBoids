@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from './creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
 import {
   mergeGeometriesWithColor,
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
   buildHookedBeakGeometry,
   buildEyeDotsGeometry,
-} from './creatureGeometry';
+} from '../../../geometry/creatureGeometry';
 
 /**
  * Parrot-specific geometry — split out from the shared "realistic bird"

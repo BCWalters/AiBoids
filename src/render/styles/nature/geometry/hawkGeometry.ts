@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from './creatureGeometry';
-import { mergeGeometriesWithColor, buildHookedBeakGeometry, buildEyeDotsGeometry } from './creatureGeometry';
-import { buildFingeredWingGeometry, buildTailGeometry } from './birdGeometry';
+import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
+import { mergeGeometriesWithColor, buildHookedBeakGeometry, buildEyeDotsGeometry } from '../../../geometry/creatureGeometry';
+import { buildFingeredWingGeometry, buildTailGeometry } from '../../../geometry/birdGeometry';
 
 /**
  * Hawk predator geometry — split out from the shared "realistic bird"
