@@ -87,7 +87,7 @@ const FISHTANK_DEFAULT_POPULATION: PopulationSnapshot = {
   cardinalCount: 20,
   bluejayCount: 20,
   predatorCount: 1,
-  unicornCount: 0,
+  unicornCount: 2,
 };
 let savedOutdoorPopulation: PopulationSnapshot | null = null;
 let savedFishtankPopulation: PopulationSnapshot | null = null;
