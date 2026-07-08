@@ -27,7 +27,8 @@ import {
 export interface FishtankEnvironment {
   waterFill: THREE.Mesh;
   glassPanels: THREE.Mesh;
-  frameEdges: THREE.LineSegments;
+  frame: THREE.Group;
+  baseTrim: THREE.Mesh;
   table: THREE.Group;
   roomFloor: THREE.Mesh;
   roomCeiling: THREE.Mesh;
@@ -69,6 +70,19 @@ const WALL_COLOR = 0xe4ded0;
 const ACCENT_WALL_COLOR = 0x7c8f74;
 const CEILING_COLOR = 0xf2efe6;
 
+// How much bigger the tank renders than the sim's literal swim bounds
+// (sim.width/height/params.worldDepth). Those bounds are shared with
+// every other 3D style (arcade/nature), so they can't just be bumped up
+// for fishtank alone without also enlarging arcade/nature's flight
+// space — instead, fishtank inflates its own visuals (glass box, water,
+// room, and — via Renderer3D applying this same constant to fishtank's
+// boid instance positions/scale — the fish themselves) by this factor,
+// entirely independently of the sim's actual coordinate space. Without
+// this, a big enough room to read as "a real room" makes a tank sized
+// to the raw sim bounds (and the fish inside it) look tiny/bug-sized
+// once the camera pulls back far enough to frame that room.
+export const TANK_VISUAL_SCALE = 1.8;
+
 function disposeObject3D(root: THREE.Object3D): void {
   root.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -96,10 +110,28 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   const glassPanels = new THREE.Mesh(glassGeometry, glassMaterial);
   glassPanels.visible = false;
 
-  const edgesGeometry = new THREE.EdgesGeometry(glassGeometry);
-  const frameMaterial = new THREE.LineBasicMaterial({ color: FRAME_COLOR });
-  const frameEdges = new THREE.LineSegments(edgesGeometry, frameMaterial);
-  frameEdges.visible = false;
+  // A dark plastic/rubber base plinth just under the glass, hiding the
+  // seam where the tank meets the table — a detail seen on virtually
+  // every real aquarium.
+  const baseTrimMaterial = new THREE.MeshStandardMaterial({ color: FRAME_COLOR, roughness: 0.7, metalness: 0.1 });
+  const baseTrim = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), baseTrimMaterial);
+  baseTrim.visible = false;
+
+  // Metal frame: thin brushed-aluminum bars along all 12 edges of the
+  // glass box (4 vertical corner posts + 4 top edges + 4 bottom edges),
+  // replacing the old flat LineSegments wireframe with an actual 3D
+  // frame — narrower than the previous line-drawn "border" reads, and
+  // one that actually catches light/specular highlights like real
+  // aquarium framing.
+  const frameBarMaterial = new THREE.MeshStandardMaterial({ color: 0xb7bdc4, roughness: 0.35, metalness: 0.9 });
+  const frame = new THREE.Group();
+  const barGeometry = new THREE.BoxGeometry(1, 1, 1);
+  for (let i = 0; i < 12; i++) {
+    const bar = new THREE.Mesh(barGeometry, frameBarMaterial);
+    bar.name = `frameBar${i}`;
+    frame.add(bar);
+  }
+  frame.visible = false;
 
   const waterGeometry = new THREE.BoxGeometry(1, 1, 1);
   const waterMaterial = new THREE.MeshStandardMaterial({
@@ -132,20 +164,40 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   // Floor: black/white checker tile texture rather than a flat color.
   const floorTexture = createCheckerTexture('#1c1c1c', '#f2f2f2', 8);
   const floorGeometry = new THREE.PlaneGeometry(1, 1);
-  const floorMaterial = new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.55, metalness: 0.05 });
+  const floorMaterial = new THREE.MeshStandardMaterial({
+    map: floorTexture,
+    roughness: 0.55,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
+  });
   const roomFloor = new THREE.Mesh(floorGeometry, floorMaterial);
   roomFloor.rotation.x = -Math.PI / 2;
   roomFloor.visible = false;
 
   const ceilingGeometry = new THREE.PlaneGeometry(1, 1);
-  const ceilingMaterial = new THREE.MeshStandardMaterial({ color: CEILING_COLOR, roughness: 0.95, metalness: 0 });
+  const ceilingMaterial = new THREE.MeshStandardMaterial({
+    color: CEILING_COLOR,
+    roughness: 0.95,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
   const roomCeiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
   roomCeiling.rotation.x = Math.PI / 2;
   roomCeiling.visible = false;
 
   const wallGeometry = new THREE.PlaneGeometry(1, 1);
-  const wallMaterial = new THREE.MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.95, metalness: 0 });
-  const accentWallMaterial = new THREE.MeshStandardMaterial({ color: ACCENT_WALL_COLOR, roughness: 0.9, metalness: 0 });
+  // DoubleSide as a safety net: even with the room now sized to
+  // comfortably exceed the camera's max zoom-out distance (see
+  // placeFishtankEnvironment), a single-sided wall the camera ever ends
+  // up behind would otherwise vanish outright (backface culling) rather
+  // than simply looking wrong from an unexpected angle.
+  const wallMaterial = new THREE.MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+  const accentWallMaterial = new THREE.MeshStandardMaterial({
+    color: ACCENT_WALL_COLOR,
+    roughness: 0.9,
+    metalness: 0,
+    side: THREE.DoubleSide,
+  });
 
   // Back wall is the single accent wall (muted green) — the natural
   // "feature wall" backdrop directly behind the tank.
@@ -198,7 +250,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
 
   scene.add(
     glassPanels,
-    frameEdges,
+    frame,
+    baseTrim,
     waterFill,
     table,
     roomFloor,
@@ -221,7 +274,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   return {
     waterFill,
     glassPanels,
-    frameEdges,
+    frame,
+    baseTrim,
     table,
     roomFloor,
     roomCeiling,
@@ -242,7 +296,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     },
     setVisible(visible: boolean) {
       glassPanels.visible = visible;
-      frameEdges.visible = visible;
+      frame.visible = visible;
+      baseTrim.visible = visible;
       waterFill.visible = visible;
       table.visible = visible;
       roomFloor.visible = visible;
@@ -272,7 +327,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     dispose() {
       scene.remove(
         glassPanels,
-        frameEdges,
+        frame,
+        baseTrim,
         waterFill,
         table,
         roomFloor,
@@ -292,8 +348,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       if (scene.fog === fog) scene.fog = null;
       glassPanels.geometry.dispose();
       (glassPanels.material as THREE.Material).dispose();
-      frameEdges.geometry.dispose();
-      (frameEdges.material as THREE.Material).dispose();
+      disposeObject3D(frame);
+      baseTrim.geometry.dispose();
+      (baseTrim.material as THREE.Material).dispose();
       waterFill.geometry.dispose();
       (waterFill.material as THREE.Material).dispose();
       disposeObject3D(table);
@@ -327,16 +384,77 @@ export function placeFishtankEnvironment(
   worldHeight: number,
   worldDepth: number,
 ): void {
+  // Table height must stay anchored to the sim's actual (unscaled) size,
+  // not the inflated visual tank size below — otherwise a bigger tank
+  // would also stand on a taller table, when the ask is a bigger tank on
+  // the *same* table.
+  const simMaxDim = Math.max(worldWidth, worldHeight, worldDepth);
+  // The tank's center point is fixed at the sim's actual (unscaled)
+  // center — computed here, before worldWidth/Height/Depth are inflated
+  // below — so the visually-bigger tank grows symmetrically around the
+  // same point in space rather than shifting away from it. This matters
+  // because Renderer3D's camera target/framing is computed from this
+  // same raw sim center; if the tank's *position* moved when its size
+  // was inflated, the camera would end up looking at empty space instead
+  // of the tank. (Renderer3D applies the equivalent "grow around center"
+  // transform to fishtank's own boid positions — see TANK_VISUAL_SCALE's
+  // doc comment.)
+  const center = new THREE.Vector3(worldWidth / 2, worldHeight / 2, worldDepth / 2);
+
+  // Inflate the tank's rendered dimensions (see TANK_VISUAL_SCALE's doc
+  // comment) — every tank/water/room *size* measurement below is derived
+  // from these scaled values, not the raw sim bounds passed in. Only
+  // sizes are scaled here, never the center computed above.
+  worldWidth *= TANK_VISUAL_SCALE;
+  worldHeight *= TANK_VISUAL_SCALE;
+  worldDepth *= TANK_VISUAL_SCALE;
+
   const maxDim = Math.max(worldWidth, worldHeight, worldDepth);
   // Thin glass shell just outside the tank's actual swim bounds.
   const glassThickness = maxDim * 0.012;
-  const center = new THREE.Vector3(worldWidth / 2, worldHeight / 2, worldDepth / 2);
 
   env.glassPanels.scale.set(worldWidth + glassThickness * 2, worldHeight + glassThickness * 2, worldDepth + glassThickness * 2);
   env.glassPanels.position.copy(center);
 
-  env.frameEdges.scale.copy(env.glassPanels.scale);
-  env.frameEdges.position.copy(center);
+  // Metal frame: 12 thin bars tracing the outer glass box's edges,
+  // narrower than the old line-drawn border and built with an actual
+  // brushed-metal material so it catches specular highlights like real
+  // aquarium framing.
+  const frameBarThickness = maxDim * 0.016;
+  const halfW = (worldWidth + glassThickness * 2) / 2;
+  const halfH = (worldHeight + glassThickness * 2) / 2;
+  const halfD = (worldDepth + glassThickness * 2) / 2;
+  const edgeSpecs: { axis: 'x' | 'y' | 'z'; oy: number; oz: number; ox: number }[] = [
+    // 4 edges running along X, at each Y/Z corner.
+    { axis: 'x', oy: -halfH, oz: -halfD, ox: 0 },
+    { axis: 'x', oy: -halfH, oz: halfD, ox: 0 },
+    { axis: 'x', oy: halfH, oz: -halfD, ox: 0 },
+    { axis: 'x', oy: halfH, oz: halfD, ox: 0 },
+    // 4 edges running along Y, at each X/Z corner.
+    { axis: 'y', ox: -halfW, oz: -halfD, oy: 0 },
+    { axis: 'y', ox: -halfW, oz: halfD, oy: 0 },
+    { axis: 'y', ox: halfW, oz: -halfD, oy: 0 },
+    { axis: 'y', ox: halfW, oz: halfD, oy: 0 },
+    // 4 edges running along Z, at each X/Y corner.
+    { axis: 'z', ox: -halfW, oy: -halfH, oz: 0 },
+    { axis: 'z', ox: -halfW, oy: halfH, oz: 0 },
+    { axis: 'z', ox: halfW, oy: -halfH, oz: 0 },
+    { axis: 'z', ox: halfW, oy: halfH, oz: 0 },
+  ];
+  edgeSpecs.forEach((spec, i) => {
+    const bar = env.frame.getObjectByName(`frameBar${i}`) as THREE.Mesh;
+    const length = spec.axis === 'x' ? worldWidth + glassThickness * 2 : spec.axis === 'y' ? worldHeight + glassThickness * 2 : worldDepth + glassThickness * 2;
+    if (spec.axis === 'x') bar.scale.set(length, frameBarThickness, frameBarThickness);
+    else if (spec.axis === 'y') bar.scale.set(frameBarThickness, length, frameBarThickness);
+    else bar.scale.set(frameBarThickness, frameBarThickness, length);
+    bar.position.set(center.x + spec.ox, center.y + spec.oy, center.z + spec.oz);
+  });
+
+  // Base trim: a dark plastic plinth bridging the small gap between the
+  // glass box's bottom edge and the table surface beneath it, hiding
+  // that seam the way real aquarium bases do.
+  const trimFootprintX = worldWidth + glassThickness * 6;
+  const trimFootprintZ = worldDepth + glassThickness * 6;
 
   // Inset further than glassThickness so the water fill's faces are
   // never nearly-coplanar with the glass box's inner faces — too small a
@@ -350,7 +468,7 @@ export function placeFishtankEnvironment(
   // noticeably larger footprint than the tank so it visibly reads as
   // furniture the tank sits on rather than a coincidentally-sized block,
   // standing on four legs inset from the tabletop's edges.
-  const tableHeight = maxDim * 0.5;
+  const tableHeight = simMaxDim * 0.5;
   const tableFootprintX = worldWidth * 1.6;
   const tableFootprintZ = worldDepth * 1.6;
   const tableTopThickness = tableHeight * 0.16;
@@ -361,6 +479,13 @@ export function placeFishtankEnvironment(
   // otherwise perfectly overlap.
   const tableGap = glassThickness * 1.5;
   const tableTopY = -tableGap - tableTopThickness / 2;
+
+  // Now that tableGap is known, size/position the base trim to bridge
+  // exactly the gap between the glass box's bottom face (world y=0) and
+  // the table surface beneath it.
+  env.baseTrim.scale.set(trimFootprintX, tableGap * 1.8, trimFootprintZ);
+  env.baseTrim.position.set(center.x, -tableGap * 0.9, center.z);
+
   // The table Group itself stays at the scene origin — tabletop/leg
   // children below are positioned with absolute world coordinates
   // (including center.x/center.z) directly, so giving the group its own
@@ -390,12 +515,29 @@ export function placeFishtankEnvironment(
   });
 
   // Room: floor, ceiling, and four walls fully enclosing a box around
-  // the tank/table, sized generously relative to the tank so it reads as
-  // a real room rather than a tight diorama shell.
-  const roomFloorSize = maxDim * 8;
-  const roomHeight = maxDim * 5;
+  // the tank/table, sized generously relative to the (already-inflated,
+  // see TANK_VISUAL_SCALE) tank so it reads as a real room rather than a
+  // tight diorama shell.
+  // Room size must comfortably exceed the camera's max zoom-out distance
+  // (see Renderer3D's fishtank maxDistance clamp, ~visualMaxDim * 4.5,
+  // which is itself derived from this same scaled maxDim) or the camera
+  // can end up outside the wall/floor planes — which, since these are
+  // single-sided, makes them vanish entirely (backface culling) rather
+  // than fade, producing a "ghostly" look where wall-mounted objects
+  // (art/door/window) appear to float with nothing solid behind them.
+  // An earlier version of this pushed the margin far beyond that
+  // (maxDim * 16 / roomHeight maxDim * 20) to be extra safe, but that
+  // made the floor/walls so large relative to the tank that the room
+  // read as an unbounded, horizon-less plane with decor "floating" in
+  // the distance — a worse artifact than the one it was avoiding. This
+  // more modest margin still comfortably clears the camera clamp below
+  // without that side effect. Floor/ceiling are sized to exactly match
+  // the wall footprint (rather than independently) so the floor never
+  // visibly runs out past the walls either.
+  const wallMargin = maxDim * 6;
+  const roomFloorSize = wallMargin * 2;
+  const roomHeight = maxDim * 7;
   const roomFloorY = -tableGap - tableHeight;
-  const wallMargin = maxDim * 3;
 
   env.roomFloor.scale.set(roomFloorSize, roomFloorSize, 1);
   env.roomFloor.position.set(center.x, roomFloorY, center.z);
@@ -482,10 +624,10 @@ export function placeFishtankEnvironment(
   // THREE.Fog measures distance from the *camera*, not from the tank, so
   // its far distance must comfortably exceed the camera's own max
   // zoom-out distance (see Renderer3D's fishtank maxDistance clamp,
-  // ~flockScale * 12) or the entire room reads as a flat wall of fog
+  // ~visualMaxDim * 4.5) or the entire room reads as a flat wall of fog
   // color the moment the camera pulls back to see the table/room (the
   // same "blown-out fog wall" failure mode nature's environment avoids
   // by keeping its fog.far comfortably beyond its own zoom clamp).
-  env.fog.near = maxDim * 3;
-  env.fog.far = maxDim * 20;
+  env.fog.near = maxDim * 2;
+  env.fog.far = maxDim * 8;
 }
