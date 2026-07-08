@@ -172,11 +172,13 @@ export function createWindow(): THREE.Group {
   // With nothing lit outside, the pane should read as reflective rather
   // than transparent — low roughness + high metalness picks up bright
   // specular highlights from the room's lights (the overhead lamp, key
-  // light) the way a dark window looks like a mirror at night.
+  // light) the way a dark window looks like a mirror at night. A very
+  // dark base color keeps it reading as "dark outside" even under the
+  // fishtank style's fairly bright ambient light.
   const glassMaterial = new THREE.MeshStandardMaterial({
-    color: 0x11151d,
-    roughness: 0.08,
-    metalness: 0.9,
+    color: 0x040609,
+    roughness: 0.12,
+    metalness: 0.95,
   });
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.94, 0.94), glassMaterial);
   glass.position.z = 0.025;

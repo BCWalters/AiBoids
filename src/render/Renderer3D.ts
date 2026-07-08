@@ -20,6 +20,8 @@ import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment
 import {
   createFishtankEnvironment,
   placeFishtankEnvironment,
+  computeFishtankRoomBounds,
+  TANK_VISUAL_SCALE,
   type FishtankEnvironment,
 } from './styles/fishtank/environment';
 import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/fishGeometry';
@@ -585,6 +587,13 @@ export class Renderer3D {
   private tailOriginToPivot = new THREE.Matrix4();
   private rollQuat = new THREE.Quaternion();
   private tmpVec3 = new THREE.Vector3();
+  // Sim world center, recomputed once per frame in render() while
+  // fishtank style is active — used to "grow" fishtank's boid positions
+  // symmetrically around the tank's true center (see TANK_VISUAL_SCALE's
+  // doc comment / updateInstances' worldScale param) rather than around
+  // the coordinate origin, which would shift the whole flock away from
+  // where the tank/camera actually are.
+  private fishtankCenter = new THREE.Vector3();
   private tmpForward = new THREE.Vector3();
   private tmpRight = new THREE.Vector3();
   private tmpUp = new THREE.Vector3();
@@ -985,6 +994,7 @@ export class Renderer3D {
     }
 
     if (this.currentStyle !== style) {
+      const wasFishtank = this.currentStyle === 'fishtank';
       this.currentStyle = style;
       this.bloomPass.enabled = !isOrganic;
       // The screen-space afterimage/motion-trail effect persists whole
@@ -1007,9 +1017,46 @@ export class Renderer3D {
       // Re-apply the zoom clamp for the new style: nature's distance fog
       // needs a tight max zoom-out, while fishtank now has real geometry
       // (a table + room) around the tank that's worth seeing when zoomed
-      // out further, so it gets a much looser clamp than nature.
+      // out further, so it gets a much looser clamp than nature. Fishtank's
+      // clamp is derived from computeFishtankRoomBounds — the exact same
+      // wallMargin/roomHeight formulas placeFishtankEnvironment uses to
+      // build the room — so it stays in lockstep with the room's actual
+      // size (see that function's maxCameraDistance doc comment).
       const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      this.controls.maxDistance = isFishtank ? maxDim * 12 : isNature ? maxDim * 5.5 : maxDim * 25;
+      const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+      this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
+      // Fishtank's generous zoom-out range is only mathematically
+      // guaranteed to clear the floor/ceiling up to cameraTiltLimitRad
+      // of tilt away from horizontal (see maxCameraDistance's and
+      // cameraTiltLimitRad's doc comments in computeFishtankRoomBounds —
+      // both are derived together so they always stay in sync here).
+      // Other styles have no such enclosing geometry to worry about, so
+      // they get OrbitControls' unrestricted default range back.
+      this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltLimitRad : 0;
+      this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltLimitRad : Math.PI;
+
+      // Re-frame the camera when crossing into/out of fishtank
+      // specifically (not just on world-dimension changes, handled
+      // separately below) — fishtank renders at TANK_VISUAL_SCALE, so a
+      // camera position/distance that was correct for arcade/nature
+      // would otherwise end up far too close (effectively "inside" the
+      // now much-bigger tank) the moment fishtank is selected, or too
+      // far out the moment it's left again.
+      if (isFishtank !== wasFishtank) {
+        const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+        // Fishtank looks at the tank's true (bottom-anchored) vertical
+        // center rather than the sim's raw center — see
+        // computeFishtankRoomBounds' tankCenterY doc comment.
+        if (isFishtank) center.y = fishtankBounds.tankCenterY;
+        const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+        this.camera.position.set(
+          center.x + maxDim * 0.6 * cameraDistScale,
+          center.y + maxDim * 0.4 * cameraDistScale,
+          center.z + maxDim * 0.9 * cameraDistScale,
+        );
+        this.controls.target.copy(center);
+        this.controls.update();
+      }
     }
 
     // Applied every frame (cheap) rather than gated on style-change, so
@@ -1044,19 +1091,40 @@ export class Renderer3D {
       box.dispose();
 
       // Frame the camera around the world box the first time we see it (or
-      // whenever its size changes), centered on the box with orbit target there.
+      // whenever its size changes), centered on the box with orbit target
+      // there. Fishtank's own visual scale (see TANK_VISUAL_SCALE) grows
+      // the tank around this same center point horizontally without
+      // moving it (see placeFishtankEnvironment's `center` doc comment),
+      // so the target stays correct across styles — only the initial
+      // camera *distance* needs to widen for fishtank so it doesn't start
+      // inside the bigger tank, and (for fishtank specifically) the
+      // target's vertical component needs to look at the tank's true
+      // (bottom-anchored) center rather than the sim's raw center — see
+      // computeFishtankRoomBounds' tankCenterY doc comment.
       const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
       const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      this.camera.position.set(center.x + maxDim * 0.6, center.y + maxDim * 0.4, center.z + maxDim * 0.9);
-      this.controls.target.copy(center);
+      const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+      const cameraTarget = center.clone();
+      if (isFishtank) cameraTarget.y = fishtankBounds.tankCenterY;
+      const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+      this.camera.position.set(
+        cameraTarget.x + maxDim * 0.6 * cameraDistScale,
+        cameraTarget.y + maxDim * 0.4 * cameraDistScale,
+        cameraTarget.z + maxDim * 0.9 * cameraDistScale,
+      );
+      this.controls.target.copy(cameraTarget);
       this.controls.update();
 
+      // Nature/clouds always use the sim's raw (unscaled) center — only
+      // fishtank's own target/framing (above) and glass box (below) use
+      // the inflated TANK_VISUAL_SCALE geometry.
       placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
       // Unlike nature's ground plane (an arbitrary-scale backdrop),
       // fishtank's glass box must match the sim's actual world bounds
       // exactly — it's a real container the fish swim inside, not just
       // scenery — so this takes the raw dimensions rather than a single
-      // "groundSize" scalar.
+      // "groundSize" scalar. (placeFishtankEnvironment inflates its own
+      // rendered size internally — see TANK_VISUAL_SCALE's doc comment.)
       placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
       this.driftingClouds.configure(center, maxDim);
 
@@ -1066,10 +1134,12 @@ export class Renderer3D {
       // view to a flat, blown-out wall of fog color (which reads as a
       // rendering glitch rather than "zoomed out"). Fishtank gets a much
       // further max distance since zooming out is supposed to reveal the
-      // tank sitting on its table in the room, not just hit a fog wall.
+      // tank sitting on its table in the room, not just hit a fog wall —
+      // derived from computeFishtankRoomBounds (the real room size), like
+      // the matching comment on the other maxDistance assignment above.
       const flockScale = maxDim;
       this.controls.minDistance = maxDim * 0.05;
-      this.controls.maxDistance = isFishtank ? flockScale * 12 : isNature ? flockScale * 5.5 : maxDim * 25;
+      this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
     }
   }
 
@@ -1128,6 +1198,12 @@ export class Renderer3D {
     // rotating "around the origin" and "around a pivot at the origin"
     // are the same thing.
     tailSwayPivotY: number = 0,
+    // Fishtank-only: grows both position (around this.fishtankCenter,
+    // set once per frame in render()) and mesh scale by this factor —
+    // see TANK_VISUAL_SCALE's doc comment for why the tank/fish are
+    // inflated independently of the sim's actual coordinate space.
+    // Always 1 (no-op) for arcade/nature.
+    worldScale: number = 1,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -1367,9 +1443,21 @@ export class Renderer3D {
 
       // Body: just position + orientation, no flap. Caught boids shrink
       // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
-      this.dummy.position.set(pos.x, pos.y, pos.z);
+      // worldScale !== 1 (fishtank only) grows the position outward from
+      // fishtankCenter rather than the coordinate origin, so the whole
+      // flock spreads to fill the visually-bigger tank symmetrically
+      // instead of shifting toward one corner of it.
+      if (worldScale !== 1) {
+        this.dummy.position.set(
+          this.fishtankCenter.x + (pos.x - this.fishtankCenter.x) * worldScale,
+          this.fishtankCenter.y + (pos.y - this.fishtankCenter.y) * worldScale,
+          this.fishtankCenter.z + (pos.z - this.fishtankCenter.z) * worldScale,
+        );
+      } else {
+        this.dummy.position.set(pos.x, pos.y, pos.z);
+      }
       this.dummy.quaternion.copy(this.bodyQuat);
-      this.dummy.scale.setScalar(entityScale);
+      this.dummy.scale.setScalar(entityScale * worldScale);
       this.dummy.updateMatrix();
       set.body.setMatrixAt(i, this.dummy.matrix);
       if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
@@ -1733,6 +1821,20 @@ export class Renderer3D {
     const isNature = params.visualStyle === 'nature';
     const isFishtank = params.visualStyle === 'fishtank';
     const isOrganic = isNature || isFishtank;
+    // Recomputed every frame (cheap) rather than cached, so it always
+    // reflects the current sim/world params without needing extra
+    // invalidation logic — used below to grow fishtank's boid positions
+    // around the tank's true center (see updateInstances' worldScale
+    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
+    // is the sim's raw center, matching placeFishtankEnvironment's
+    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
+    // resting on the table — NOT the sim's raw vertical center, matching
+    // placeFishtankEnvironment's bottom-anchored vertical growth (see
+    // its `center.y` doc comment) so fish grow in lockstep with the
+    // glass box instead of drifting out of sync with it.
+    if (isFishtank) {
+      this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
+    }
 
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
@@ -1790,6 +1892,12 @@ export class Renderer3D {
           'dragon',
           1,
           config.beakColor,
+          0,
+          MODEL_RIGHT_AXIS,
+          DRAGON_TAIL_SWAY_AMPLITUDE,
+          undefined,
+          0,
+          isFishtank ? TANK_VISUAL_SCALE : 1,
         );
       }
     }
@@ -1831,6 +1939,7 @@ export class Renderer3D {
         isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
         isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
         isShark ? getSharkTailPivotY(DRAGON_LENGTH) : 0,
+        isFishtank ? TANK_VISUAL_SCALE : 1,
       );
     }
 
@@ -1863,6 +1972,13 @@ export class Renderer3D {
         // reusing the dragon path with different bias numbers.
         'unicorn',
         UNICORN_BANK_SCALE,
+        undefined,
+        0,
+        MODEL_RIGHT_AXIS,
+        DRAGON_TAIL_SWAY_AMPLITUDE,
+        undefined,
+        0,
+        isFishtank ? TANK_VISUAL_SCALE : 1,
       );
     }
 
