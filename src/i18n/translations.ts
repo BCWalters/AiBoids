@@ -22,6 +22,7 @@ const en = {
   visualStyleLabel: 'Visual style',
   visualStyleArcade: 'Arcade (neon glow)',
   visualStyleNature: 'Nature (sky & hawks)',
+  visualStyleFishtank: 'Fish tank (underwater)',
 
   sectionPopulationSpeed: 'Population & speed',
   boidCount: 'Boid count (sparrows)',
@@ -112,6 +113,7 @@ const es: TranslationDict = {
   visualStyleLabel: 'Estilo visual',
   visualStyleArcade: 'Arcade (brillo neón)',
   visualStyleNature: 'Naturaleza (cielo y halcones)',
+  visualStyleFishtank: 'Acuario (bajo el agua)',
 
   sectionPopulationSpeed: 'Población y velocidad',
   boidCount: 'Cantidad de boids (gorriones)',
@@ -199,6 +201,7 @@ const fr: TranslationDict = {
   visualStyleLabel: 'Style visuel',
   visualStyleArcade: 'Arcade (lueur néon)',
   visualStyleNature: 'Nature (ciel et faucons)',
+  visualStyleFishtank: 'Aquarium (sous-marin)',
 
   sectionPopulationSpeed: 'Population et vitesse',
   boidCount: 'Nombre de boids (moineaux)',

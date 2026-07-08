@@ -16,6 +16,15 @@ import { createDragonGeometries, computeDragonMouthTransform } from './geometry/
 import { createUnicornGeometries } from './geometry/unicornGeometry';
 import type { CreatureGeometries } from './geometry/creatureGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
+import {
+  createFishtankEnvironment,
+  placeFishtankEnvironment,
+  type FishtankEnvironment,
+} from './styles/fishtank/environment';
+import { createRealisticBirdGeometries as createFishtankBirdGeometries } from './styles/fishtank/geometry/birdGeometry';
+import { createParrotGeometries as createFishtankParrotGeometries } from './styles/fishtank/geometry/parrotGeometry';
+import { createDragonGeometries as createFishtankPredatorGeometries } from './styles/fishtank/geometry/dragonGeometry';
+import { createUnicornGeometries as createFishtankUnicornGeometries } from './styles/fishtank/geometry/unicornGeometry';
 import { createDriftingClouds, type DriftingClouds } from './clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
 import { createFireBreathEffects, type FireBreathEffects } from './fireBreath';
@@ -432,6 +441,7 @@ export class Renderer3D {
   private ambientLight: THREE.AmbientLight;
   private keyLight: THREE.DirectionalLight;
   private natureEnv: NatureEnvironment;
+  private fishtankEnv: FishtankEnvironment;
   private driftingClouds: DriftingClouds;
   private bloodEffects: BloodEffects;
   private fireBreathEffects: FireBreathEffects;
@@ -447,6 +457,12 @@ export class Renderer3D {
   private naturePredatorGeometries: CreatureGeometries;
   private dragonPredatorGeometries: CreatureGeometries;
   private unicornPredatorGeometries: CreatureGeometries;
+  private fishtankBoidGeometries: CreatureGeometries;
+  private fishtankSparrowGeometries: CreatureGeometries;
+  private fishtankParrotGeometries: CreatureGeometries;
+  private fishtankPredatorGeometries: CreatureGeometries;
+  private fishtankSharkPredatorGeometries: CreatureGeometries;
+  private fishtankUnicornPredatorGeometries: CreatureGeometries;
 
   private speciesInstances = new Map<BoidSpecies, BirdInstanceSet | null>();
   private speciesInstanceKeys = new Map<BoidSpecies, string | null>();
@@ -551,6 +567,7 @@ export class Renderer3D {
     this.scene.add(this.ambientLight, this.keyLight);
 
     this.natureEnv = createNatureEnvironment(this.scene, this.renderer);
+    this.fishtankEnv = createFishtankEnvironment(this.scene);
     this.driftingClouds = createDriftingClouds(this.scene);
     this.bloodEffects = createBloodEffects(this.scene);
     this.fireBreathEffects = createFireBreathEffects(this.scene);
@@ -577,6 +594,21 @@ export class Renderer3D {
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
     this.unicornPredatorGeometries = createUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
 
+    // Fish tank style geometries: independent duplicates of the nature
+    // ones above (see src/render/styles/fishtank/), built with the exact
+    // same sizing so they slot into the same instancing code paths — a
+    // future reskinning pass can freely change proportions/shapes here
+    // without touching nature's geometry at all.
+    this.fishtankBoidGeometries = createFishtankBirdGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.fishtankSparrowGeometries = createFishtankBirdGeometries(
+      BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
+      BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
+    );
+    this.fishtankParrotGeometries = createFishtankParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.fishtankPredatorGeometries = createFishtankBirdGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
+    this.fishtankSharkPredatorGeometries = createFishtankPredatorGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
+    this.fishtankUnicornPredatorGeometries = createFishtankUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
+
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     this.afterimagePass = new AfterimagePass();
@@ -597,18 +629,18 @@ export class Renderer3D {
   ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
-    const isNature = style === 'nature';
+    const isOrganic = style === 'nature' || style === 'fishtank';
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      emissive: isNature ? 0x000000 : emissive,
-      emissiveIntensity: isNature ? 0 : 1.4,
+      emissive: isOrganic ? 0x000000 : emissive,
+      emissiveIntensity: isOrganic ? 0 : 1.4,
       // Dragons get a slightly glossier (lower-roughness) finish than the
-      // fully matte default nature look — with the dark scale color, a
-      // fully matte 0.9 roughness barely differentiates facets under the
-      // key light, so faceted geometry (frill spikes, neck bend, leg
-      // joints) reads as flat black regardless of angle. A touch of sheen
-      // gives visible specular highlights that vary with facet normal.
-      roughness: isNature ? (isDragon ? 0.65 : 0.9) : 0.5,
+      // fully matte default nature/fishtank look — with the dark scale
+      // color, a fully matte 0.9 roughness barely differentiates facets
+      // under the key light, so faceted geometry (frill spikes, neck bend,
+      // leg joints) reads as flat black regardless of angle. A touch of
+      // sheen gives visible specular highlights that vary with facet normal.
+      roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
       metalness: 0,
       // Unicorns only: the body geometry bakes a gold vertex color onto
       // just the horn (see creatureGeometry's mergeGeometriesWithColor) so it
@@ -629,9 +661,9 @@ export class Renderer3D {
       // detail — this stays visibly darker than the body without losing
       // all lit-surface contrast.
       color: isDragon ? 0x9c86ab : 0xffffff,
-      emissive: isNature ? 0x000000 : emissive,
-      emissiveIntensity: isNature ? 0 : 1.1,
-      roughness: isNature ? (isDragon ? 0.65 : 0.9) : 0.5,
+      emissive: isOrganic ? 0x000000 : emissive,
+      emissiveIntensity: isOrganic ? 0 : 1.1,
+      roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
       metalness: 0,
       side: THREE.DoubleSide,
       // Unicorns only: the wing geometry itself carries a baked rainbow
@@ -737,6 +769,12 @@ export class Renderer3D {
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
   private ensureScene(sim: Simulation): void {
     const style = params.visualStyle;
+    const isNature = style === 'nature';
+    const isFishtank = style === 'fishtank';
+    // Both "organic" styles (nature/fishtank) use the same instancing
+    // pattern (realistic/lathed geometry, vertex-colored variants, etc.)
+    // — only which concrete geometry set/environment is picked differs.
+    const isOrganic = isNature || isFishtank;
     const countsBySpecies = new Map<BoidSpecies, number>();
     for (const boid of sim.boids) {
       countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
@@ -747,25 +785,31 @@ export class Renderer3D {
     // is a material-level property; shared instances would force identical
     // bloom-glow color regardless of per-instance diffuse tint). Sparrows
     // use the shrunken geometry, parrots use their own dedicated macaw-
-    // style geometry (nature style only), and everything else uses the
-    // shared "reference" small-bird size/shape.
+    // style geometry (nature/fishtank styles only), and everything else
+    // uses the shared "reference" small-bird size/shape.
     for (const config of BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
       const key = `${count}:${style}`;
       if (this.speciesInstanceKeys.get(config.species) !== key) {
         this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
         const geometries = config.useSmallGeometry
-          ? style === 'nature'
+          ? isNature
             ? this.natureSparrowGeometries
-            : this.arcadeSparrowGeometries
+            : isFishtank
+              ? this.fishtankSparrowGeometries
+              : this.arcadeSparrowGeometries
           : config.useParrotGeometry
-            ? style === 'nature'
+            ? isNature
               ? this.natureParrotGeometries
-              : this.arcadeParrotGeometries
-            : style === 'nature'
+              : isFishtank
+                ? this.fishtankParrotGeometries
+                : this.arcadeParrotGeometries
+            : isNature
               ? this.natureBoidGeometries
-              : this.arcadeBoidGeometries;
-        const bodyVertexColors = !!config.useParrotGeometry && style === 'nature';
+              : isFishtank
+                ? this.fishtankBoidGeometries
+                : this.arcadeBoidGeometries;
+        const bodyVertexColors = !!config.useParrotGeometry && isOrganic;
         this.speciesInstances.set(
           config.species,
           this.buildInstanceSet(geometries, style, config.arcadeEmissive, count, false, false, bodyVertexColors),
@@ -785,15 +829,24 @@ export class Renderer3D {
       else hawkCount++;
     }
 
-    const isDragon = style === 'nature' && params.dragonPredators;
+    // dragonPredators is a generic "give the flying/swimming predator a
+    // bigger bespoke silhouette" toggle: in nature it swaps hawks for
+    // dragons, and in fishtank (reusing the same checkbox until a
+    // dedicated tank-specific UI exists) it swaps the fish-shaped predator
+    // stand-in for the shark-shaped stand-in (dragonGeometry's duplicate).
+    const isDragon = isOrganic && params.dragonPredators;
     const hawkKey = `${hawkCount}:${style}:${isDragon}`;
     if (this.predatorInstanceKeys.get('hawk') !== hawkKey) {
       this.disposeInstanceSet(this.predatorInstances.get('hawk') ?? null);
       const geometries = isDragon
-        ? this.dragonPredatorGeometries
-        : style === 'nature'
+        ? isFishtank
+          ? this.fishtankSharkPredatorGeometries
+          : this.dragonPredatorGeometries
+        : isNature
           ? this.naturePredatorGeometries
-          : this.arcadePredatorGeometries;
+          : isFishtank
+            ? this.fishtankPredatorGeometries
+            : this.arcadePredatorGeometries;
       this.predatorInstances.set(
         'hawk',
         this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon),
@@ -803,20 +856,26 @@ export class Renderer3D {
     }
 
     // Unicorns get the full pegasus-with-rainbow-wings geometry in nature
-    // style; arcade style reuses the plain hawk silhouette (just tinted
-    // lavender via updateInstances' color params) rather than a second
-    // bespoke geometry, since arcade's glowing-instanced look doesn't call
-    // for the same level of cosmetic detail.
+    // style, and its fishtank-duplicate stand-in in fishtank style; arcade
+    // style reuses the plain hawk silhouette (just tinted lavender via
+    // updateInstances' color params) rather than a second bespoke
+    // geometry, since arcade's glowing-instanced look doesn't call for the
+    // same level of cosmetic detail.
     const unicornKey = `${unicornCount}:${style}`;
     if (this.predatorInstanceKeys.get('unicorn') !== unicornKey) {
       this.disposeInstanceSet(this.predatorInstances.get('unicorn') ?? null);
-      const geometries = style === 'nature' ? this.unicornPredatorGeometries : this.arcadePredatorGeometries;
-      const rainbowWings = style === 'nature';
-      // The gold-horn vertex colors are only baked into the nature-style
-      // horse geometry (unicornPredatorGeometries) — arcade style reuses
-      // the plain hawk geometry, which has no 'color' attribute at all,
-      // so enabling vertexColors there would have nothing to read.
-      const bodyVertexColors = style === 'nature';
+      const geometries = isNature
+        ? this.unicornPredatorGeometries
+        : isFishtank
+          ? this.fishtankUnicornPredatorGeometries
+          : this.arcadePredatorGeometries;
+      const rainbowWings = isOrganic;
+      // The gold-horn vertex colors are only baked into the organic-style
+      // horse geometry (unicornPredatorGeometries/fishtankUnicornPredator
+      // Geometries) — arcade style reuses the plain hawk geometry, which
+      // has no 'color' attribute at all, so enabling vertexColors there
+      // would have nothing to read.
+      const bodyVertexColors = isOrganic;
       this.predatorInstances.set(
         'unicorn',
         this.buildInstanceSet(
@@ -836,32 +895,35 @@ export class Renderer3D {
 
     if (this.currentStyle !== style) {
       this.currentStyle = style;
-      const isNature = style === 'nature';
-      this.bloomPass.enabled = !isNature;
+      this.bloomPass.enabled = !isOrganic;
       // The screen-space afterimage/motion-trail effect persists whole
       // previous frames — great for arcade neon trails, but when the
-      // camera pans in nature mode it drags a ghost trail of the bright
-      // sky (especially the sun disc) across the frame, looking like a
-      // smeary lens flare and leaving "hovering circle" afterimages.
-      this.afterimagePass.enabled = !isNature;
+      // camera pans in an organic (fog-using) style it drags a ghost
+      // trail of the bright sky/water (especially the sun disc in nature)
+      // across the frame, looking like a smeary lens flare and leaving
+      // "hovering circle" afterimages.
+      this.afterimagePass.enabled = !isOrganic;
       this.natureEnv.setVisible(isNature);
+      this.fishtankEnv.setVisible(isFishtank);
       this.driftingClouds.setVisible(isNature);
-      if (this.boundsHelper) this.boundsHelper.visible = !isNature;
-      this.ambientLight.intensity = isNature ? 0.55 : 0.35;
-      this.keyLight.visible = !isNature;
+      if (this.boundsHelper) this.boundsHelper.visible = !isOrganic;
+      this.ambientLight.intensity = isOrganic ? 0.55 : 0.35;
+      this.keyLight.visible = !isOrganic;
 
-      // Re-apply the zoom clamp for the new style: nature's distance fog
-      // needs a much tighter max zoom-out than arcade's fog-free scene.
-      // flockScale here matches the internal scale placeNatureEnvironment
-      // derives (groundSize / 30 === maxDim) — NOT groundSize itself.
+      // Re-apply the zoom clamp for the new style: organic styles' distance
+      // fog needs a much tighter max zoom-out than arcade's fog-free scene.
+      // flockScale here matches the internal scale placeNatureEnvironment/
+      // placeFishtankEnvironment derive (groundSize / 30 === maxDim) — NOT
+      // groundSize itself.
       const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      this.controls.maxDistance = isNature ? maxDim * 5.5 : maxDim * 25;
+      this.controls.maxDistance = isOrganic ? maxDim * 5.5 : maxDim * 25;
     }
 
     // Applied every frame (cheap) rather than gated on style-change, so
     // toggling the fog checkbox takes effect immediately without needing
     // a full style switch.
     this.natureEnv.setFogEnabled(params.fogEnabled);
+    this.fishtankEnv.setFogEnabled(params.fogEnabled);
 
     const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
     if (this.boundsHelper?.userData.key !== expectedKey) {
@@ -876,7 +938,7 @@ export class Renderer3D {
       this.boundsHelper = new THREE.LineSegments(edges, material);
       this.boundsHelper.position.set(sim.width / 2, sim.height / 2, params.worldDepth / 2);
       this.boundsHelper.userData.key = expectedKey;
-      this.boundsHelper.visible = params.visualStyle !== 'nature';
+      this.boundsHelper.visible = !isOrganic;
       this.scene.add(this.boundsHelper);
       box.dispose();
 
@@ -889,21 +951,21 @@ export class Renderer3D {
       this.controls.update();
 
       placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
+      placeFishtankEnvironment(this.fishtankEnv, center, maxDim * 30);
       this.driftingClouds.configure(center, maxDim);
 
       // Clamp orbit zoom to a sane range for this world's scale: never so
       // close the camera can slide through the ground/boundary box, and
-      // never so far out that nature style's distance fog reduces the
+      // never so far out that an organic style's distance fog reduces the
       // whole view to a flat, blown-out wall of fog color (which reads as
       // a rendering glitch rather than "zoomed out"). flockScale matches
-      // the internal scale placeNatureEnvironment derives from groundSize
-      // (groundSize / 30 === maxDim here), which is what fog.near/far are
-      // themselves scaled from — NOT groundSize directly.
+      // the internal scale placeNatureEnvironment/placeFishtankEnvironment
+      // derive from groundSize (groundSize / 30 === maxDim here), which is
+      // what fog.near/far are themselves scaled from — NOT groundSize
+      // directly.
       const flockScale = maxDim;
       this.controls.minDistance = maxDim * 0.05;
-      this.controls.maxDistance = params.visualStyle === 'nature'
-        ? flockScale * 5.5
-        : maxDim * 25;
+      this.controls.maxDistance = isOrganic ? flockScale * 5.5 : maxDim * 25;
     }
   }
 
@@ -1495,11 +1557,14 @@ export class Renderer3D {
     const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
     this.lastElapsed = elapsed;
     const isNature = params.visualStyle === 'nature';
+    const isFishtank = params.visualStyle === 'fishtank';
+    const isOrganic = isNature || isFishtank;
 
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
     this.natureEnv.update(elapsed);
+    this.fishtankEnv.update(elapsed);
     this.driftingClouds.update(dt);
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
@@ -1538,21 +1603,21 @@ export class Renderer3D {
           params.boidMaxSpeed,
           elapsed,
           dt,
-          isNature ? config.natureBase : config.arcadeBase,
-          isNature ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
+          isOrganic ? config.natureBase : config.arcadeBase,
+          isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
           (entity) => (entity as Boid).panicLevel,
           FLAP_FREQUENCY,
           FLAP_IDLE_AMPLITUDE,
           FLAP_SPEED_AMPLITUDE,
           (entity) => (entity as Boid).scale,
-          config.colors || config.getColors ? true : isNature,
+          config.colors || config.getColors ? true : isOrganic,
           config.getColors ?? (config.colors ? () => config.colors! : undefined),
         );
       }
     }
     const hawkInstances = this.predatorInstances.get('hawk');
     if (hawkInstances) {
-      const isDragon = isNature && params.dragonPredators;
+      const isDragon = isOrganic && params.dragonPredators;
       const hawks = sim.predators.filter((predator) => predator.kind !== 'unicorn');
       this.updateInstances(
         hawkInstances,
@@ -1560,8 +1625,8 @@ export class Renderer3D {
         params.predatorMaxSpeed,
         elapsed,
         dt,
-        isDragon ? DRAGON_PREDATOR_BASE : isNature ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
-        isDragon ? DRAGON_PREDATOR_HUNT : isNature ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
+        isDragon ? DRAGON_PREDATOR_BASE : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
+        isDragon ? DRAGON_PREDATOR_HUNT : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
         (entity) => (entity as Predator).huntIntensity,
         isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
         isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
@@ -1582,15 +1647,15 @@ export class Renderer3D {
         params.predatorMaxSpeed,
         elapsed,
         dt,
-        isNature ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
-        isNature ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
+        isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
+        isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
         (entity) => (entity as Predator).huntIntensity,
         UNICORN_FLAP_FREQUENCY,
         UNICORN_FLAP_IDLE_AMPLITUDE,
         UNICORN_FLAP_SPEED_AMPLITUDE,
         undefined,
         undefined,
-        () => (isNature ? NATURE_UNICORN_COLORS : ARCADE_UNICORN_COLORS),
+        () => (isOrganic ? NATURE_UNICORN_COLORS : ARCADE_UNICORN_COLORS),
         // Unicorns always fly right-side-up, like dragons — see keepUpright's
         // doc comment. Unlike the dragon toggle, this applies in every 3D
         // style, not just nature, since it's a behavioral trait of the
@@ -1635,6 +1700,7 @@ export class Renderer3D {
       geometries.legs?.dispose();
     }
     this.natureEnv.dispose();
+    this.fishtankEnv.dispose();
     this.driftingClouds.dispose();
     this.bloodEffects.dispose();
     this.fireBreathEffects.dispose();
