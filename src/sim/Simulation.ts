@@ -249,7 +249,7 @@ export class Simulation {
    */
   spawnUFO(): void {
     if (params.mode !== '3d' || this.ufos.length >= MAX_CONCURRENT_UFOS) return;
-    this.ufos.push(createUFO(this.boids, this.bounds));
+    this.ufos.push(createUFO(this.boids, this.bounds, this.ufos));
   }
 
   /** 2D mode only: torus wraparound at the world edges. */

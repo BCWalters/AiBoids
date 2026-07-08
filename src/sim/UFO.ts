@@ -45,6 +45,17 @@ const HOVER_MARGIN = 170;
 // plausibly reach from the saucer's hover altitude down to the flock,
 // without needing to duplicate this tuning constant.
 export const UFO_BEAM_REACH = HOVER_MARGIN * 1.4;
+// Minimum horizontal distance kept between simultaneously active
+// saucers' assigned "stations" over the flock (see stationOffset below)
+// — comfortably wider than 2x BEAM_RADIUS so two invasions' tractor
+// beams can never overlap, however many are in flight at once.
+const MIN_STATION_SEPARATION = BEAM_RADIUS * 3;
+// Golden angle (radians) — stepping each new station's angle by this
+// amount and its radius by sqrt(index) (a standard sunflower/Fibonacci
+// spiral layout) spreads any number of simultaneous stations roughly
+// evenly around the flock with no pairwise distance ever falling below
+// ~MIN_STATION_SEPARATION, without needing rejection sampling.
+const GOLDEN_ANGLE_RAD = 2.399963;
 
 /**
  * A flying-saucer "alien invasion" one-shot event: descends from high
@@ -68,11 +79,20 @@ export class UFO {
   done = false;
 
   private hoverY: number;
+  // Fixed horizontal (xz) offset from the flock's live centroid this
+  // saucer tracks while beaming — assigned once at creation (see
+  // createUFO) so that when several invasions are active at once, each
+  // one hovers over its own distinct patch of the flock instead of all
+  // of them drifting back to the exact same centroid point and
+  // overlapping (see the "gently drift to stay over the flock's
+  // current centroid" logic in update()'s 'beaming' phase).
+  private stationOffset: Vec3;
 
-  constructor(position: Vec3, velocity: Vec3, hoverY: number) {
+  constructor(position: Vec3, velocity: Vec3, hoverY: number, stationOffset: Vec3 = V.create()) {
     this.position = position;
     this.velocity = velocity;
     this.hoverY = hoverY;
+    this.stationOffset = stationOffset;
   }
 
   private flockCentroid(boids: Boid[]): Vec3 | null {
@@ -102,12 +122,15 @@ export class UFO {
       const smoothing = 1 - Math.exp(-dt * 4);
       this.beamStrength += (1 - this.beamStrength) * smoothing;
 
-      // Gently drift to stay over the flock's current centroid rather than
-      // hovering at a fixed point while boids flee out from underneath.
+      // Gently drift to stay over the flock's current centroid (offset by
+      // this saucer's assigned station — see stationOffset's doc comment)
+      // rather than hovering at a fixed point while boids flee out from
+      // underneath.
       const centroid = this.flockCentroid(boids);
       if (centroid) {
-        const toCentroid = V.sub(V.create(centroid.x, this.position.y, centroid.z), this.position);
-        this.position = V.add(this.position, V.scale(toCentroid, Math.min(1, dt * 0.6)));
+        const target = V.add(centroid, this.stationOffset);
+        const toTarget = V.sub(V.create(target.x, this.position.y, target.z), this.position);
+        this.position = V.add(this.position, V.scale(toTarget, Math.min(1, dt * 0.6)));
       }
 
       for (const boid of boids) {
@@ -156,8 +179,15 @@ export class UFO {
  * the current flock centroid, descending at a somewhat random angle
  * rather than dropping straight down. `bounds` gives the world's current
  * size so the spawn/hover altitudes scale sensibly with worldDepth/height.
+ *
+ * `activeUFOs` is every other invasion currently in flight (before this
+ * one is added) — used only to pick this saucer's index in the
+ * sunflower-spiral station layout (see MIN_STATION_SEPARATION/
+ * GOLDEN_ANGLE_RAD) so simultaneous invasions each get assigned their
+ * own distinct patch of the flock to hover over/beam up, instead of
+ * every saucer converging on the exact same centroid point.
  */
-export function createUFO(boids: Boid[], bounds: WorldBounds): UFO {
+export function createUFO(boids: Boid[], bounds: WorldBounds, activeUFOs: readonly UFO[] = []): UFO {
   let centroid = V.create(bounds.width / 2, bounds.height / 2, bounds.depth / 2);
   if (boids.length > 0) {
     let sum = V.create();
@@ -165,21 +195,34 @@ export function createUFO(boids: Boid[], bounds: WorldBounds): UFO {
     centroid = V.scale(sum, 1 / boids.length);
   }
 
+  // Sunflower/Fibonacci-spiral station layout: the first saucer (index 0)
+  // gets no offset at all (hovers right over the centroid, as before),
+  // and each subsequent one steps its angle by the golden angle and
+  // grows its radius by sqrt(index) * MIN_STATION_SEPARATION — a
+  // standard technique for spacing N points roughly evenly with no
+  // pair ever closer than ~MIN_STATION_SEPARATION, regardless of how
+  // many invasions happen to be active at once.
+  const stationIndex = activeUFOs.length;
+  const stationAngle = stationIndex * GOLDEN_ANGLE_RAD;
+  const stationRadius = stationIndex === 0 ? 0 : MIN_STATION_SEPARATION * Math.sqrt(stationIndex);
+  const stationOffset = V.create(Math.cos(stationAngle) * stationRadius, 0, Math.sin(stationAngle) * stationRadius);
+
   const spawnHeight = bounds.height + HOVER_MARGIN * 5;
   const hoverY = Math.min(spawnHeight - HOVER_MARGIN, centroid.y + HOVER_MARGIN);
+  const target = V.add(centroid, stationOffset);
 
   // Random horizontal offset so the saucer doesn't always appear directly
-  // over the flock's centroid — it has to travel to find it, giving the
+  // above its target station — it has to travel to find it, giving the
   // "somewhat random angle from above" look the user asked for.
   const offsetAngle = Math.random() * Math.PI * 2;
   const offsetRadius = Math.max(bounds.width, bounds.depth) * (0.3 + Math.random() * 0.3);
-  const startX = centroid.x + Math.cos(offsetAngle) * offsetRadius;
-  const startZ = centroid.z + Math.sin(offsetAngle) * offsetRadius;
+  const startX = target.x + Math.cos(offsetAngle) * offsetRadius;
+  const startZ = target.z + Math.sin(offsetAngle) * offsetRadius;
   const start = V.create(startX, spawnHeight, startZ);
 
-  const toTarget = V.sub(V.create(centroid.x, hoverY, centroid.z), start);
+  const toTarget = V.sub(V.create(target.x, hoverY, target.z), start);
   const dir = V.normalize(toTarget);
   const velocity = V.scale(dir, DESCEND_SPEED);
 
-  return new UFO(start, velocity, hoverY);
+  return new UFO(start, velocity, hoverY, stationOffset);
 }
