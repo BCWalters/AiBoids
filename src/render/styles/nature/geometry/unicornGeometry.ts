@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from './creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
 import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
   addRainbowVertexColors,
   addRainbowVertexColorsByDistance,
-} from './creatureGeometry';
-import { buildFingeredWingGeometry } from './birdGeometry';
+} from '../../../geometry/creatureGeometry';
+import { buildFingeredWingGeometry } from '../../../geometry/birdGeometry';
 
 /**
  * "Unicorn" predator geometry: a proper horse-like silhouette — a barrel-

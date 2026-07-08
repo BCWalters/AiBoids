@@ -11,12 +11,12 @@ import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
-import { createHawkGeometries } from './geometry/hawkGeometry';
-import { createParrotGeometries } from './geometry/parrotGeometry';
-import { createDragonGeometries, computeDragonMouthTransform } from './geometry/dragonGeometry';
-import { createUnicornGeometries } from './geometry/unicornGeometry';
+import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
+import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
+import { createDragonGeometries, computeDragonMouthTransform } from './styles/nature/geometry/dragonGeometry';
+import { createUnicornGeometries } from './styles/nature/geometry/unicornGeometry';
 import type { CreatureGeometries } from './geometry/creatureGeometry';
-import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './environment';
+import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './styles/nature/environment';
 import {
   createFishtankEnvironment,
   placeFishtankEnvironment,
@@ -26,9 +26,9 @@ import { createRealisticBirdGeometries as createFishtankBirdGeometries } from '.
 import { createParrotGeometries as createFishtankParrotGeometries } from './styles/fishtank/geometry/parrotGeometry';
 import { createDragonGeometries as createFishtankPredatorGeometries } from './styles/fishtank/geometry/dragonGeometry';
 import { createUnicornGeometries as createFishtankUnicornGeometries } from './styles/fishtank/geometry/unicornGeometry';
-import { createDriftingClouds, type DriftingClouds } from './clouds';
+import { createDriftingClouds, type DriftingClouds } from './styles/nature/clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
-import { createFireBreathEffects, type FireBreathEffects } from './fireBreath';
+import { createFireBreathEffects, type FireBreathEffects } from './styles/nature/fireBreath';
 import { createUFOVisual, type UFOVisual } from './ufoEffects';
 import { UFO_BEAM_REACH } from '../sim/UFO';
 
