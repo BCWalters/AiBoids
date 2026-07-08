@@ -39,6 +39,18 @@ export interface SimParams {
   cohesionWeight: number;
   separationRadius: number; // distance at which separation kicks in (<= perceptionRadius)
 
+  // A softer, longer-range push that only applies between different
+  // species (unlike separationRadius/separationWeight above, which are
+  // a tight "personal space" collision-avoidance radius applying to
+  // everyone). Without this, mixed-species flocks freely interpenetrate
+  // since alignment/cohesion never pull across species and the plain
+  // separation radius is too short-range to matter until birds are
+  // nearly colliding — this keeps each species' flock visually distinct
+  // as a whole, gently steering it away from other flocks it's drifted
+  // into, rather than just dodging individual birds at the last moment.
+  interspeciesAvoidWeight: number;
+  interspeciesAvoidRadius: number; // typically between separationRadius and perceptionRadius
+
   // Predator interaction
   panicRadius: number;
   fleeWeight: number;
@@ -128,6 +140,8 @@ export const defaultParams: SimParams = {
   alignmentWeight: 1.0,
   cohesionWeight: 1.0,
   separationRadius: 24,
+  interspeciesAvoidWeight: 1.2,
+  interspeciesAvoidRadius: 45,
 
   panicRadius: 90,
   fleeWeight: 3.5,

@@ -37,6 +37,8 @@ const behaviorSpecs: SliderSpec[] = [
   { key: 'alignmentWeight', labelKey: 'alignmentWeight', min: 0, max: 4, step: 0.1 },
   { key: 'cohesionWeight', labelKey: 'cohesionWeight', min: 0, max: 4, step: 0.1 },
   { key: 'separationRadius', labelKey: 'separationRadius', min: 5, max: 100, step: 1 },
+  { key: 'interspeciesAvoidWeight', labelKey: 'interspeciesAvoidWeight', min: 0, max: 4, step: 0.1 },
+  { key: 'interspeciesAvoidRadius', labelKey: 'interspeciesAvoidRadius', min: 5, max: 150, step: 1 },
   { key: 'panicRadius', labelKey: 'panicRadius', min: 10, max: 300, step: 5 },
   { key: 'fleeWeight', labelKey: 'fleeWeight', min: 0, max: 8, step: 0.1 },
 ];
