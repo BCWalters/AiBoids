@@ -2246,6 +2246,42 @@ export class Renderer3D {
       );
     }
 
+    if (isFishtank) {
+      // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
+      // maxCameraDistance (set once, in ensureScene) has to satisfy the
+      // *worst-case* permitted tilt at all times, which is overly
+      // conservative at/near a level (untitled) view — there's no
+      // floor/ceiling to clip through at all when looking straight
+      // across the room. Recomputed every frame (cheap pure math, no
+      // allocations worth caching) from the camera's *current* polar
+      // angle via OrbitControls' own getPolarAngle(), so at level view
+      // the camera can pull back much farther, right up near the far
+      // wall (per an explicit ask to "zoom out farther... virtually
+      // close to the wall behind"), while steeper tilts still clamp
+      // down toward the same safe distance computed by
+      // computeFishtankRoomBounds.
+      const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+      const polarAngle = this.controls.getPolarAngle();
+      // 0 at a level/horizontal view, growing toward cameraTiltUpRad
+      // (looking down) or cameraTiltDownRad (looking up) at the tilt
+      // extremes — see FishtankRoomBounds' cameraTiltUpRad/DownRad.
+      const elevation = Math.abs(polarAngle - Math.PI / 2);
+      const distToCeiling = bounds.roomFloorY + bounds.roomHeight - bounds.tankCenterY;
+      const distToFloor = bounds.tankCenterY - bounds.roomFloorY;
+      // Looking down (polarAngle < PI/2) rises toward the ceiling as
+      // distance grows; looking up (polarAngle > PI/2) drops toward the
+      // floor — each direction is clamped by its own clearance.
+      const vertClearance = polarAngle < Math.PI / 2 ? distToCeiling : distToFloor;
+      const sinE = Math.sin(elevation);
+      const cosE = Math.cos(elevation);
+      // Safety factor (0.92) matches computeFishtankRoomBounds' own 0.9,
+      // just shy of 1 so the camera never grazes the actual floor/
+      // ceiling/wall plane.
+      const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
+      const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
+      this.controls.maxDistance = Math.min(vertCap, horizCap);
+    }
+
     this.controls.update();
     this.composer.render();
   }
