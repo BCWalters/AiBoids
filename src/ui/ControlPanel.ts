@@ -64,6 +64,7 @@ export class ControlPanel {
   private container: HTMLElement;
   private sim: Simulation;
   private onModeChange: (mode: SimMode) => void;
+  private getDeepLinkURL: () => string;
   private alienButton: HTMLButtonElement | null = null;
   private respawnButton: HTMLButtonElement | null = null;
   private unsubscribeLanguage: () => void;
@@ -78,10 +79,11 @@ export class ControlPanel {
   // picking a creature from its own dropdown.
   private sectionOpenState = new Map<string, boolean>();
 
-  constructor(container: HTMLElement, sim: Simulation, onModeChange: (mode: SimMode) => void) {
+  constructor(container: HTMLElement, sim: Simulation, onModeChange: (mode: SimMode) => void, getDeepLinkURL: () => string) {
     this.container = container;
     this.sim = sim;
     this.onModeChange = onModeChange;
+    this.getDeepLinkURL = getDeepLinkURL;
     // Full re-render on language change — simplest way to refresh every
     // label/title in the panel, consistent with how other setting
     // changes (mode, visual style) already trigger a re-render.
@@ -554,7 +556,74 @@ export class ControlPanel {
     wrapper.appendChild(playPause);
     wrapper.appendChild(reset);
     wrapper.appendChild(restoreDefaults);
+    wrapper.appendChild(this.buildDeepLinkButton());
     return wrapper;
+  }
+
+  /**
+   * "Copy deep link" button: captures the exact current settings + (in
+   * 3D) camera position/orbit target into a URL (see main.ts's
+   * buildDeepLinkURL) and copies it to the clipboard. A one-shot,
+   * explicit action rather than a continuously-synced URL, per explicit
+   * request — the address bar shouldn't rewrite itself on every slider
+   * drag. Intended for sharing a precise repro/debugging setup (this is
+   * a generalization of the `?galleryCreature=` URL shortcut used
+   * earlier to zoom in on individual creature models).
+   */
+  private buildDeepLinkButton(): HTMLButtonElement {
+    const button = document.createElement('button');
+    const defaultLabel = t('deepLinkButton');
+    button.textContent = defaultLabel;
+    button.title = t('deepLinkButtonTitle');
+
+    let resetTimer: ReturnType<typeof setTimeout> | null = null;
+    const flash = (label: string) => {
+      button.textContent = label;
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        button.textContent = defaultLabel;
+      }, 2000);
+    };
+
+    button.addEventListener('click', () => {
+      const url = this.getDeepLinkURL();
+      this.copyToClipboard(url).then(
+        () => flash(t('deepLinkCopied')),
+        () => flash(t('deepLinkCopyFailed')),
+      );
+    });
+
+    return button;
+  }
+
+  /**
+   * Copies text via the async Clipboard API where available, falling
+   * back to a hidden, selected <textarea> + execCommand('copy') — some
+   * browsing contexts (older browsers, denied clipboard permission)
+   * don't support/allow navigator.clipboard.writeText.
+   */
+  private copyToClipboard(text: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (ok) resolve();
+        else reject(new Error('execCommand copy failed'));
+      } catch (err) {
+        document.body.removeChild(textarea);
+        reject(err);
+      }
+    });
   }
 
   private buildDebugToggle(disabled: boolean = false): HTMLElement {

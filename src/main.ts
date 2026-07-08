@@ -78,11 +78,56 @@ function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number
   return { kind: kind as GalleryCreature, distance };
 }
 
-const galleryFromURL = readGalleryCreatureFromURL();
+/**
+ * "Copy deep link" full-state restore: captures every tunable SimParams
+ * field plus the exact 3D camera position/orbit target into a single
+ * `?state=` URL query param (see buildDeepLinkURL below, wired to a
+ * button in ControlPanel). Unlike the `?galleryCreature=` shortcut above
+ * (which only isolates one creature for close inspection), this
+ * reproduces the exact simulation the user had running — full
+ * population mix, every slider, and the exact camera framing — making it
+ * trivial to share a precise repro/debugging setup via a single link.
+ * Deliberately a one-shot capture triggered by a button click, not a
+ * continuously-synced URL, per explicit request — the address bar
+ * doesn't rewrite itself on every param change.
+ */
+interface DeepLinkState {
+  params: SimParams;
+  camera: { position: [number, number, number]; target: [number, number, number] } | null;
+}
+
+function readStateFromURL(): DeepLinkState | null {
+  const searchParams = new URLSearchParams(window.location.search);
+  const raw = searchParams.get('state');
+  if (!raw) return null;
+  try {
+    const decoded = JSON.parse(decodeURIComponent(raw)) as Partial<DeepLinkState> | null;
+    if (decoded && typeof decoded === 'object' && decoded.params && typeof decoded.params === 'object') {
+      return { params: decoded.params as SimParams, camera: decoded.camera ?? null };
+    }
+  } catch {
+    // Malformed/truncated state param (e.g. hand-edited or a mangled
+    // copy/paste) — fall through to a normal, un-restored startup rather
+    // than throwing.
+  }
+  return null;
+}
+
+const stateFromURL = readStateFromURL();
+if (stateFromURL) Object.assign(params, stateFromURL.params);
+// Applied once, on the first frame after the initial render() call sets
+// up the scene (see the loop below) — applying any earlier would be
+// clobbered by ensureScene's own one-time auto-framing.
+let pendingCameraState = stateFromURL?.camera ?? null;
+
+// The simpler `?galleryCreature=` shortcut is only consulted when a full
+// `?state=` deep link isn't present, since the latter already carries
+// params.galleryCreature (if any) as part of its full snapshot.
+const galleryFromURL = stateFromURL ? null : readGalleryCreatureFromURL();
 // Only URL-driven entry auto-collapses the panel (clean shot for
 // automation) — the interactive dropdown leaves the panel exactly as
 // the user had it, since they need it open to use the dropdown itself.
-const galleryLaunchedFromURL = galleryFromURL !== null;
+const galleryLaunchedFromURL = galleryFromURL !== null || (stateFromURL?.params.galleryCreature ?? null) !== null;
 let galleryDistance = galleryFromURL?.distance ?? 220;
 if (galleryFromURL) params.galleryCreature = galleryFromURL.kind;
 
@@ -193,6 +238,36 @@ function poseGalleryEntityIfReady(): void {
   (window as unknown as { __debugRenderer?: unknown }).__debugRenderer = renderer3D;
 }
 
+/**
+ * Applies a `?state=` deep link's captured camera position/orbit target
+ * exactly once, on the first frame after renderer3D exists and has run
+ * its first render() call — any earlier and ensureScene's own one-time
+ * auto-framing (keyed on world size, ambient to render()) would
+ * immediately clobber it. Mirrors poseGalleryEntityIfReady's same
+ * "apply once, right after render()" pattern for the same reason.
+ */
+function applyPendingCameraStateIfReady(): void {
+  if (!pendingCameraState || !renderer3D || params.mode !== '3d') return;
+  renderer3D.setCameraState(pendingCameraState.position, pendingCameraState.target);
+  pendingCameraState = null;
+}
+
+/**
+ * Builds the shareable "Copy deep link" URL: every current SimParams
+ * field plus (if in 3D mode) the exact live camera position/orbit
+ * target, packed into a single `?state=` query param. Read back by
+ * readStateFromURL/applyPendingCameraStateIfReady above on page load.
+ * Intentionally a one-shot snapshot computed on demand (see the
+ * ControlPanel button that calls this) rather than a continuously
+ * updated URL — the address bar should stay quiet while the user works.
+ */
+function buildDeepLinkURL(): string {
+  const camera = params.mode === '3d' && renderer3D ? renderer3D.getCameraState() : null;
+  const payload: DeepLinkState = { params: { ...params }, camera };
+  const encoded = encodeURIComponent(JSON.stringify(payload));
+  return `${window.location.origin}${window.location.pathname}?state=${encoded}`;
+}
+
 // Once the user manually toggles the panel, their choice is respected on
 // future resizes — only before that do we keep auto-collapsing/expanding
 // based on the 40%-of-viewport-width rule below.
@@ -256,7 +331,7 @@ function resizeCanvases(): void {
   sim.resize(width, height);
 }
 
-const controlPanel = new ControlPanel(controlPanelBody, sim, applyMode);
+const controlPanel = new ControlPanel(controlPanelBody, sim, applyMode, buildDeepLinkURL);
 applyMode(params.mode);
 
 if (galleryLaunchedFromURL) {
@@ -310,6 +385,14 @@ function loop(now: number): void {
   // count), which would otherwise clobber debugFrameCamera's framing if
   // this ran first on the same frame render() first initializes things.
   poseGalleryEntityIfReady();
+
+  // Runs *after* poseGalleryEntityIfReady so a restored `?state=` deep
+  // link's exact camera wins over the Model Gallery's own auto-framing
+  // when both apply on the same load (e.g. a deep link captured while
+  // the gallery was isolating a creature) — both are one-shot (each
+  // clears its own "already applied" flag), so this ordering only
+  // matters on the very first frame.
+  applyPendingCameraStateIfReady();
 
   requestAnimationFrame(loop);
 }

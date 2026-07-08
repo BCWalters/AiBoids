@@ -87,6 +87,11 @@ const en = {
   pauseButton: 'Pause',
   resetButton: 'Reset',
   restoreDefaultsButton: 'Restore defaults',
+
+  deepLinkButton: 'Copy deep link 🔗',
+  deepLinkButtonTitle: 'Copies a URL that restores these exact settings and camera view — great for sharing a bug report or debugging setup',
+  deepLinkCopied: 'Link copied! ✅',
+  deepLinkCopyFailed: 'Copy failed ❌',
 };
 
 export type TranslationKey = keyof typeof en;
@@ -172,6 +177,11 @@ const es: TranslationDict = {
   pauseButton: 'Pausa',
   resetButton: 'Reiniciar',
   restoreDefaultsButton: 'Restaurar valores predeterminados',
+
+  deepLinkButton: 'Copiar enlace directo 🔗',
+  deepLinkButtonTitle: 'Copia una URL que restaura exactamente esta configuración y vista de cámara — ideal para compartir un informe de errores',
+  deepLinkCopied: '¡Enlace copiado! ✅',
+  deepLinkCopyFailed: 'Error al copiar ❌',
 };
 
 const fr: TranslationDict = {
@@ -254,6 +264,11 @@ const fr: TranslationDict = {
   pauseButton: 'Pause',
   resetButton: 'Réinitialiser',
   restoreDefaultsButton: 'Restaurer les valeurs par défaut',
+
+  deepLinkButton: 'Copier le lien direct 🔗',
+  deepLinkButtonTitle: 'Copie une URL qui restaure exactement ces réglages et cette vue de caméra — idéal pour partager un rapport de bug',
+  deepLinkCopied: 'Lien copié ! ✅',
+  deepLinkCopyFailed: 'Échec de la copie ❌',
 };
 
 const translations: Record<Language, TranslationDict> = { en, es, fr };
