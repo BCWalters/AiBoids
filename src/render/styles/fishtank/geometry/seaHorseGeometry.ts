@@ -175,14 +175,22 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
   const centerZ = anchorZ;
   const startTheta = -Math.PI;
   const turns = 5.2;
-  const samples = 14;
+  const samples = 28;
 
   const path: THREE.Vector3[] = [];
   const radii: number[] = [];
   for (let i = 0; i < samples; i++) {
     const t = i / (samples - 1);
     const theta = startTheta + turns * t;
-    const radius = THREE.MathUtils.lerp(maxRadius, minRadius, t);
+    // Ease the coil radius shrink with t^2 (zero derivative at t=0) so the very
+    // first segment is a pure rotation around the coil center -- otherwise the
+    // radius shrinking right from t=0 adds an extra "inward" (forward) velocity
+    // component on top of the rotational one, making the tail's first segment
+    // point down-and-forward instead of straight down, and creating a visible
+    // hump where it meets the body. Combined with more samples (28 vs. 14) so
+    // that first segment is short enough to closely track the true tangent.
+    const radiusT = t * t;
+    const radius = THREE.MathUtils.lerp(maxRadius, minRadius, radiusT);
     path.push(new THREE.Vector3(0, centerY + Math.cos(theta) * radius, centerZ + Math.sin(theta) * radius));
     // Ease the taper with a squared falloff so the thick root persists briefly
     // before narrowing, rather than shrinking linearly right away.
