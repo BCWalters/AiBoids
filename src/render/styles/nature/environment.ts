@@ -732,7 +732,12 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
     },
     setFogEnabled(enabled: boolean) {
       fogEnabled = enabled;
-      scene.fog = enabled && sky.visible ? fog : null;
+      // Guarded by sky.visible so this only touches scene.fog while nature
+      // is the active style — Renderer3D calls setFogEnabled on both
+      // environments every frame regardless of which is active, and
+      // unconditionally assigning here would clobber whichever fog the
+      // other (currently-visible) environment just set.
+      if (sky.visible) scene.fog = enabled ? fog : null;
     },
     dispose() {
       scene.remove(sky, ground, mountains, ...lakes, ocean, beach, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
