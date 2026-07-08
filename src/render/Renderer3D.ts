@@ -25,7 +25,7 @@ import {
   type FishtankEnvironment,
 } from './styles/fishtank/environment';
 import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/fishGeometry';
-import { createTetraGeometries as createFishtankTetraGeometries } from './styles/fishtank/geometry/tetraGeometry';
+import { createButterflyfishGeometries } from './styles/fishtank/geometry/butterflyfishGeometry';
 import { createSharkGeometries as createFishtankSharkGeometries, getSharkTailPivotY } from './styles/fishtank/geometry/sharkGeometry';
 import { createSeaHorseGeometries as createFishtankSeaHorseGeometries } from './styles/fishtank/geometry/seaHorseGeometry';
 import { createDriftingClouds, type DriftingClouds } from './styles/nature/clouds';
@@ -97,6 +97,27 @@ const PARROT_COLOR_PATTERNS: SpeciesColorSet[] = [
 ];
 const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
 const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
+
+// Fish tank style only: the parrot species' butterflyfish reskin gets its
+// own distinct set of color patterns (real-world butterflyfish are
+// commonly yellow/white/orange/blue, often striped combinations of
+// those) rather than reusing the nature style's macaw palette above —
+// see getParrotColors' visualStyle branch below. `body` is the tinted,
+// stripe-alternating hue (multiplied onto WHITE_VERTEX_COLOR in
+// butterflyfishGeometry.ts); `wing`/`tail` pick complementary accent
+// colors for the pectoral fins and caudal fin.
+const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
+  // Yellow longnose-style: golden body, blue accents
+  { body: new THREE.Color(0xf5c518), wing: new THREE.Color(0x1f6fd8), tail: new THREE.Color(0xf5c518) },
+  // Orange/white banded
+  { body: new THREE.Color(0xf07a1f), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xf07a1f) },
+  // Blue-and-yellow (raccoon-style)
+  { body: new THREE.Color(0x2f8fd0), wing: new THREE.Color(0xf5c518), tail: new THREE.Color(0x2f8fd0) },
+  // White with orange accents
+  { body: new THREE.Color(0xf2ede0), wing: new THREE.Color(0xf07a1f), tail: new THREE.Color(0xf2ede0) },
+  // Orange-and-blue (copperband-style)
+  { body: new THREE.Color(0xe8981a), wing: new THREE.Color(0x2f6fdc), tail: new THREE.Color(0xe8981a) },
+];
 
 // --- Three more songbird species, each with distinct multi-part plumage
 // (body/wing/tail) and their own arcade emissive/base color so every
@@ -424,17 +445,22 @@ const FISHTANK_SEAHORSE_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, w
 const ARCADE_UNICORN_COLORS: SpeciesColorSet = { body: ARCADE_UNICORN_BASE, wing: ARCADE_UNICORN_BASE, tail: ARCADE_UNICORN_BASE };
 
 /**
- * Deterministically picks one of PARROT_COLOR_PATTERNS per individual
- * (stable across frames since it's keyed only on the entity's own id, not
- * time) so the parrot flock reads as several distinct real-world macaw/
- * conure color patterns rather than one uniform hue jittered slightly —
- * updateInstances layers its own small per-individual jitter on top of
- * whichever pattern this returns, for the same "no two look identical"
- * variety the other species get.
+ * Deterministically picks one of PARROT_COLOR_PATTERNS (nature style) or
+ * BUTTERFLYFISH_COLOR_PATTERNS (fish tank style) per individual (stable
+ * across frames since it's keyed only on the entity's own id, not time)
+ * so the flock reads as several distinct real-world color patterns
+ * rather than one uniform hue jittered slightly — updateInstances layers
+ * its own small per-individual jitter on top of whichever pattern this
+ * returns, for the same "no two look identical" variety the other
+ * species get. Branches on the current visual style since this is the
+ * one species whose fish tank skin (a butterflyfish) is a completely
+ * different creature from its nature skin (a macaw/conure), unlike
+ * every other species sharing one palette across styles.
  */
 function getParrotColors(entity: Boid | Predator): SpeciesColorSet {
-  const index = Math.floor(idHash(entity.id, 42) * PARROT_COLOR_PATTERNS.length) % PARROT_COLOR_PATTERNS.length;
-  return PARROT_COLOR_PATTERNS[index];
+  const patterns = params.visualStyle === 'fishtank' ? BUTTERFLYFISH_COLOR_PATTERNS : PARROT_COLOR_PATTERNS;
+  const index = Math.floor(idHash(entity.id, 42) * patterns.length) % patterns.length;
+  return patterns[index];
 }
 
 interface BirdInstanceSet {
@@ -553,7 +579,7 @@ export class Renderer3D {
   private unicornPredatorGeometries: CreatureGeometries;
   private fishtankBoidGeometries: CreatureGeometries;
   private fishtankSparrowGeometries: CreatureGeometries;
-  private fishtankParrotGeometries: CreatureGeometries;
+  private fishtankButterflyfishGeometries: CreatureGeometries;
   private fishtankPredatorGeometries: CreatureGeometries;
   private fishtankSharkPredatorGeometries: CreatureGeometries;
   private fishtankUnicornPredatorGeometries: CreatureGeometries;
@@ -712,7 +738,7 @@ export class Renderer3D {
       BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
       BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
     );
-    this.fishtankParrotGeometries = createFishtankTetraGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.fishtankButterflyfishGeometries = createButterflyfishGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
     this.fishtankPredatorGeometries = createFishtankFishGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
     this.fishtankSharkPredatorGeometries = createFishtankSharkGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
     this.fishtankUnicornPredatorGeometries = createFishtankSeaHorseGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
@@ -929,7 +955,7 @@ export class Renderer3D {
             ? isNature
               ? this.natureParrotGeometries
               : isFishtank
-                ? this.fishtankParrotGeometries
+                ? this.fishtankButterflyfishGeometries
                 : this.arcadeParrotGeometries
             : isNature
               ? this.natureBoidGeometries
@@ -1784,6 +1810,28 @@ export class Renderer3D {
   }
 
   /**
+   * Model Gallery: converts a *sim-space* position (e.g. an entity's raw
+   * `entity.position`, in the same coordinate space as `sim.width` /
+   * `sim.height` / `params.worldDepth`) into the actual rendered
+   * world-space position it appears at. For nature/arcade styles this is
+   * a no-op (identity), but fishtank style inflates both the tank and
+   * every fish/predator's rendered position by TANK_VISUAL_SCALE, grown
+   * outward from `fishtankCenter` (see updateInstances' `worldScale`
+   * param and TANK_VISUAL_SCALE's doc comment) — so a creature posed at
+   * the sim's raw center can render well away from that same point in
+   * fishtank style. debugFrameCamera must target *this* position, not
+   * the raw sim-space one, or the close-up gallery framing aims at empty
+   * space next to the creature instead of the creature itself.
+   */
+  toRenderedPosition(x: number, y: number, z: number): THREE.Vector3 {
+    const isFishtank = params.visualStyle === 'fishtank';
+    if (!isFishtank) return new THREE.Vector3(x, y, z);
+    const scale = TANK_VISUAL_SCALE;
+    const c = this.fishtankCenter;
+    return new THREE.Vector3(c.x + (x - c.x) * scale, c.y + (y - c.y) * scale, c.z + (z - c.z) * scale);
+  }
+
+  /**
    * Model Gallery / debug-QA helper: point the camera at a fixed
    * world-space position from a pleasant, fixed elevated 3/4 angle
    * (roughly matching a typical reference-photo framing of a flying
@@ -1855,7 +1903,13 @@ export class Renderer3D {
     }
     if (box.isEmpty()) return fallbackDistance;
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const radius = sphere.radius;
+    // Fishtank style additionally scales every instance's mesh (not just
+    // its position) by TANK_VISUAL_SCALE (see updateInstances' worldScale
+    // param) — the geometry's own local bounding box doesn't reflect that,
+    // so without this the fishtank creature would actually render larger
+    // than this distance was solved for and clip out of frame.
+    const worldScale = params.visualStyle === 'fishtank' ? TANK_VISUAL_SCALE : 1;
+    const radius = sphere.radius * worldScale;
     if (!radius) return fallbackDistance;
 
     // Matches debugFrameCamera's (0.7, 0.35, 0.9) offset vector — the
@@ -1984,16 +2038,13 @@ export class Renderer3D {
         const instances = this.speciesInstances.get(config.species);
         if (!instances) continue;
         const entities = boidsBySpecies.get(config.species) ?? [];
-        // Fish-tail wave (fishtank only): the plain small-fish geometry's
-        // caudal fin (sparrow/goldfinch/cardinal/bluejay's fishtank
-        // silhouette) is rooted at the model's own local origin, so it's
+        // Fish-tail wave (fishtank only): every fishtank species' caudal
+        // fin is rooted at the model's own local origin (sparrow/
+        // goldfinch/cardinal/bluejay's plain small-fish geometry, and
+        // now the parrot species' butterflyfish geometry too), so it's
         // safe to sway around the shared pivot with no detachment risk
-        // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment). The parrot
-        // species uses a different geometry (a "tetra" fish, via
-        // useParrotGeometry) whose tail fan is rooted further back —
-        // deliberately excluded here so it keeps its existing, already-
-        // tuned sway rather than picking up a pivot mismatch.
-        const isFishTail = isFishtank && !config.useParrotGeometry;
+        // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
+        const isFishTail = isFishtank;
         this.updateInstances(
           instances,
           entities,

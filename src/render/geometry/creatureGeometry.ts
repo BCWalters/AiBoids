@@ -286,6 +286,69 @@ export function buildHookedBeakGeometry(
 }
 
 /**
+ * Linearly interpolates a lathed body's own radius at a given local Y,
+ * walking a profile's (y descending, matching how these profiles are
+ * conventionally authored tail-to-nose) control points. Clamps to the
+ * nearest end point outside the profile's own Y range. Shared by any
+ * lathed-body creature that needs to root an add-on part (a dorsal fin,
+ * a ridge, a horn) flush against its own actual surface rather than a
+ * rough hand-picked estimate — the latter leaves a visible gap/floating
+ * seam wherever the estimate doesn't quite match the real lathed radius
+ * (see sharkGeometry.ts's history for the bug this was extracted to
+ * avoid repeating).
+ */
+export function latheBodyRadiusAt(y: number, profile: THREE.Vector2[]): number {
+  if (y >= profile[profile.length - 1].y) return profile[profile.length - 1].x;
+  if (y <= profile[0].y) return profile[0].x;
+  for (let i = 0; i < profile.length - 1; i++) {
+    const a = profile[i];
+    const b = profile[i + 1];
+    if (y >= a.y && y <= b.y) {
+      const t = (y - a.y) / (b.y - a.y);
+      return a.x + t * (b.x - a.x);
+    }
+  }
+  return profile[0].x;
+}
+
+/**
+ * Bakes alternating vertical stripe colors into a per-vertex 'color'
+ * attribute, banding a lathed body purely by local Y position (tail at
+ * -halfLen to nose at +halfLen) into `stripeCount` equal bands that
+ * alternate between colorA/colorB — the butterflyfish's most
+ * recognizable feature. Works on any lathe-style body (radially
+ * symmetric around Y) since every vertex around a given Y ring gets the
+ * same band regardless of its angle, so the stripes read identically
+ * from any side. Converts to non-indexed first (like
+ * mergePositionOnlyGeometries) since a LatheGeometry's default indexing
+ * shares vertices between adjacent triangles that may straddle a stripe
+ * boundary — sharing one color between them would smear the boundary;
+ * non-indexed gives every triangle-corner its own color sample instead.
+ */
+export function bakeVerticalStripeColors(
+  geometry: THREE.BufferGeometry,
+  halfLen: number,
+  stripeCount: number,
+  colorA: THREE.Color,
+  colorB: THREE.Color,
+): THREE.BufferGeometry {
+  const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
+  const position = nonIndexed.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    const t = THREE.MathUtils.clamp((position.getY(i) + halfLen) / (2 * halfLen), 0, 1);
+    const band = Math.min(stripeCount - 1, Math.floor(t * stripeCount));
+    const color = band % 2 === 0 ? colorA : colorB;
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  nonIndexed.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  if (nonIndexed !== geometry) geometry.dispose();
+  return nonIndexed;
+}
+
+/**
  * A small paired-dot eye (two tiny spheres mirrored across the X axis) —
  * same technique as unicornGeometry.ts's buildUnicornEyesGeometry, shared
  * here so small-bird/hawk geometry can use it too. Baked as a near-black

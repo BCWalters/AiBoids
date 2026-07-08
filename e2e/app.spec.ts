@@ -8,6 +8,38 @@ import { test, expect, type Page } from '@playwright/test';
  * actually visible on screen (not just "no JS exceptions thrown").
  */
 
+/**
+ * Navigates to the app with a drastically smaller population than the
+ * real default (150 boids + 75 of each of 4 more species + 5 hawks + 2
+ * unicorns = 457 rendered creatures) via the existing `?state=` deep-link
+ * mechanism (see main.ts's readStateFromURL/DeepLinkState — it merges
+ * this partial object over the full defaults via Object.assign, so we
+ * only need to specify the counts we want to shrink). CI runners have no
+ * GPU, so every one of those ~457 instances gets rasterized in software
+ * (SwiftShader) on every frame; that's the dominant cost of these tests
+ * (observed: ~2 minutes for 5 tests on CI vs. ~25s locally with a real
+ * GPU), not Playwright/browser startup overhead. A handful of creatures
+ * is still plenty to exercise "is anything actually rendering" /
+ * "are boids visible" assertions while cutting per-frame instance count
+ * by ~40x. Keeps at least one of each rendered kind (boid + predator +
+ * unicorn) so tests still meaningfully cover every render path.
+ */
+async function gotoApp(page: Page, path = '/'): Promise<void> {
+  const state = {
+    params: {
+      boidCount: 8,
+      parrotCount: 0,
+      goldfinchCount: 0,
+      cardinalCount: 0,
+      bluejayCount: 0,
+      predatorCount: 1,
+      unicornCount: 1,
+    },
+  };
+  const separator = path.includes('?') ? '&' : '?';
+  await page.goto(`${path}${separator}state=${encodeURIComponent(JSON.stringify(state))}`);
+}
+
 /** Fails the test if the page logs a console error or an uncaught exception. */
 function failOnConsoleErrors(page: Page): void {
   page.on('console', (msg) => {
@@ -60,7 +92,7 @@ async function canvasHasVisibleContent(page: Page, canvasSelector: string): Prom
 test.describe('App smoke tests', () => {
   test('loads without console errors and shows the 3D nature canvas by default', async ({ page }) => {
     failOnConsoleErrors(page);
-    await page.goto('/');
+    await gotoApp(page);
     await expect(page).toHaveTitle(/AiBoids/);
     await expect(page.locator('#sim-canvas-3d')).toHaveClass(/active/);
     // Give the render loop a few frames to draw sky/ground/creatures.
@@ -69,7 +101,7 @@ test.describe('App smoke tests', () => {
   });
 
   test('control panel toggle button shows and hides the panel', async ({ page }) => {
-    await page.goto('/');
+    await gotoApp(page);
     const panel = page.locator('#control-panel');
     const toggle = page.locator('#control-panel-toggle');
     const initiallyCollapsed = await panel.evaluate((el) => el.classList.contains('collapsed'));
@@ -81,7 +113,7 @@ test.describe('App smoke tests', () => {
 
   test('cycling through every visual style keeps the 3D canvas rendering', async ({ page }) => {
     failOnConsoleErrors(page);
-    await page.goto('/');
+    await gotoApp(page);
     const styleSelect = page.locator('#param-visual-style');
     const styles = await styleSelect.locator('option').allTextContents();
     expect(styles.length).toBeGreaterThanOrEqual(2);
@@ -99,7 +131,7 @@ test.describe('App smoke tests', () => {
 
   test('switching to 2D mode shows the 2D canvas with visible boids, and back to 3D', async ({ page }) => {
     failOnConsoleErrors(page);
-    await page.goto('/');
+    await gotoApp(page);
     const modeSelect = page.locator('#param-mode');
 
     await modeSelect.selectOption('2d');
@@ -114,7 +146,7 @@ test.describe('App smoke tests', () => {
   });
 
   test('language switcher updates visible UI text', async ({ page }) => {
-    await page.goto('/');
+    await gotoApp(page);
     const heading = page.locator('#control-panel-heading');
     await expect(heading).toHaveText('Controls');
 
