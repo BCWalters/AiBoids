@@ -24,7 +24,7 @@ import {
 } from './styles/fishtank/environment';
 import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/fishGeometry';
 import { createTetraGeometries as createFishtankTetraGeometries } from './styles/fishtank/geometry/tetraGeometry';
-import { createSharkGeometries as createFishtankSharkGeometries } from './styles/fishtank/geometry/sharkGeometry';
+import { createSharkGeometries as createFishtankSharkGeometries, getSharkTailPivotY } from './styles/fishtank/geometry/sharkGeometry';
 import { createSeaHorseGeometries as createFishtankSeaHorseGeometries } from './styles/fishtank/geometry/seaHorseGeometry';
 import { createDriftingClouds, type DriftingClouds } from './styles/nature/clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
@@ -128,6 +128,13 @@ const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 // enough headroom for facet-by-facet lighting variation to show through.
 const DRAGON_PREDATOR_BASE = new THREE.Color(0x6a3399); // deep violet-purple scale
 const DRAGON_PREDATOR_HUNT = new THREE.Color(0xb355d6); // brighter magenta-purple when locked on
+// Fish tank sharks reuse the dragon's geometry-selection path (isDragon)
+// but must not inherit its purple scale coloring — real sharks read as
+// medium gray, not violet. Kept as separate constants (rather than
+// reusing DRAGON_PREDATOR_BASE/HUNT for both styles) so nature's dragon
+// and fishtank's shark can be tinted independently.
+const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
+const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
 
 // --- "Unicorn" predator kind (all styles): light lavender body, always
 // upright (see keepUpright), gentle-chase-only — see Predator.kind. Wings
@@ -199,6 +206,22 @@ const UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
 // to them.
 const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
 const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
+
+// Fish tank sharks: unlike a dragon's flapping bat wings, a shark's
+// pectoral fins (which reuse the wingLeft/wingRight slots) are rigid
+// steering/lift planes that barely move — just a gentle up/down wobble,
+// not a real flap — and they're held tilted down from horizontal at
+// rest rather than level, the way a swimming shark's pectoral fins
+// naturally droop. The tail, meanwhile, is the shark's actual means of
+// propulsion and should swing side to side (a yaw, around the model's
+// local up axis) rather than up and down like the dragon's whip tail —
+// see the tailSwayAxis parameter on updateInstances.
+const SHARK_FLAP_FREQUENCY = 2.2;
+const SHARK_FLAP_IDLE_AMPLITUDE = 0.05;
+const SHARK_FLAP_SPEED_AMPLITUDE = 0.09;
+const SHARK_FIN_REST_TILT_RAD = 0.35; // ~20 degrees, tips angled down from horizontal
+const SHARK_TAIL_SWAY_AMPLITUDE = 0.5; // radians; a visibly wide side-to-side beat
+const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — the main swimming motion
 
 // Unicorns get their own dedicated "stay upright" orientation model in
 // updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
@@ -554,6 +577,12 @@ export class Renderer3D {
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
   private tailSwayQuat = new THREE.Quaternion();
+  // Scratch objects for composing "rotate the tail around its own
+  // attachment point rather than the model's shared local origin" (see
+  // tailSwayPivotY's doc comment on updateInstances).
+  private tailPivotMatrix = new THREE.Matrix4();
+  private tailPivotToOrigin = new THREE.Matrix4();
+  private tailOriginToPivot = new THREE.Matrix4();
   private rollQuat = new THREE.Quaternion();
   private tmpVec3 = new THREE.Vector3();
   private tmpForward = new THREE.Vector3();
@@ -693,8 +722,12 @@ export class Renderer3D {
       // body color, crushed the wings to near-solid black regardless of
       // facet angle or lighting, hiding the scallop/bone-tube geometry
       // detail — this stays visibly darker than the body without losing
-      // all lit-surface contrast.
-      color: isDragon ? 0x9c86ab : 0xffffff,
+      // all lit-surface contrast. Fish tank sharks get their own neutral
+      // light-gray tint instead: 0x9c86ab is a lavender tuned to sit well
+      // against the dragon's purple body, and multiplying it against the
+      // shark's gray body would leak a visible purple/pink cast into the
+      // fins/tail instead of the intended plain gray.
+      color: isDragon ? (style === 'fishtank' ? 0xb8bcc0 : 0x9c86ab) : 0xffffff,
       emissive: isOrganic ? 0x000000 : emissive,
       emissiveIntensity: isOrganic ? 0 : 1.1,
       roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
@@ -887,8 +920,8 @@ export class Renderer3D {
     // dragonPredators is a generic "give the flying/swimming predator a
     // bigger bespoke silhouette" toggle: in nature it swaps hawks for
     // dragons, and in fishtank (reusing the same checkbox until a
-    // dedicated tank-specific UI exists) it swaps the fish-shaped predator
-    // stand-in for the shark-shaped stand-in (dragonGeometry's duplicate).
+    // dedicated tank-specific UI exists) it swaps the small fish-shaped
+    // predator for the shark.
     const isDragon = isOrganic && params.dragonPredators;
     const hawkKey = `${hawkCount}:${style}:${isDragon}`;
     if (this.predatorInstanceKeys.get('hawk') !== hawkKey) {
@@ -985,6 +1018,14 @@ export class Renderer3D {
     this.natureEnv.setFogEnabled(params.fogEnabled);
     this.fishtankEnv.setFogEnabled(params.fogEnabled);
 
+    // Model Gallery uses a close, creature-relative camera distance that
+    // sits *inside* the tank/water volume (see main.ts's
+    // poseGalleryEntityIfReady) rather than the far-outside "view the
+    // whole tank" distance normal fishtank browsing uses — hide the
+    // surrounding room while it's active so the transparent glass/water
+    // doesn't show the room incongruously right behind the creature.
+    this.fishtankEnv.setRoomVisible(params.galleryCreature === null);
+
     const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
     if (this.boundsHelper?.userData.key !== expectedKey) {
       if (this.boundsHelper) {
@@ -1062,6 +1103,31 @@ export class Renderer3D {
     // comment on why this is a separate part rather than a body vertex
     // bake for these particular species).
     beakColor?: THREE.Color,
+    // Fish tank shark-only: a constant downward tilt bias applied to both
+    // pectoral fins (see SHARK_FIN_REST_TILT_RAD's doc comment) so they
+    // rest angled below horizontal instead of dead level, on top of
+    // whatever small oscillation flapIdleAmplitude/flapSpeedAmplitude add.
+    finRestBiasRad: number = 0,
+    // Which local axis the tail sway (dragon/shark only, uprightStyle ===
+    // 'dragon') rotates around: MODEL_RIGHT_AXIS pitches it up/down (the
+    // dragon's whip-tail undulation), MODEL_UP_AXIS yaws it side to side
+    // (a shark's swimming tail beat).
+    tailSwayAxis: THREE.Vector3 = MODEL_RIGHT_AXIS,
+    tailSwayAmplitude: number = DRAGON_TAIL_SWAY_AMPLITUDE,
+    // Defaults to flapFrequency (matching the dragon's original "reuse the
+    // wingbeat phase" behavior) when left unset — pass an explicit value
+    // (e.g. SHARK_TAIL_SWAY_FREQUENCY) to decouple the tail beat from the
+    // fin wobble's own, much slower frequency.
+    tailSwayFrequency?: number,
+    // Fish tank shark-only: local-Y position of the tail's own
+    // attachment point (see getSharkTailPivotY), used so the tail-sway
+    // rotation below pivots around *that* point instead of the model's
+    // shared local origin — see the pivot-matrix comment near
+    // tailSwayQuat for why this matters. 0 (the origin itself) for every
+    // other species, which keeps their existing behavior unchanged since
+    // rotating "around the origin" and "around a pivot at the origin"
+    // are the same thing.
+    tailSwayPivotY: number = 0,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -1336,7 +1402,7 @@ export class Renderer3D {
       } else {
         phase = elapsed * flapFrequency + entity.id * 1.7;
       }
-      const flapAngle = amplitude * Math.sin(phase);
+      const flapAngle = amplitude * Math.sin(phase) + finRestBiasRad;
 
       this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
       this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
@@ -1348,17 +1414,45 @@ export class Renderer3D {
       this.dummy.updateMatrix();
       set.wingRight.setMatrixAt(i, this.dummy.matrix);
 
-      // Tail sway (dragons only): pitch the tail up/down around the
-      // model's local right axis, reusing the wingbeat phase so the tail
-      // reads as part of the same continuous flight motion rather than
-      // an unrelated animation, but offset and scaled down so it lags
-      // the wings instead of moving identically to them.
+      // Tail sway (dragons/sharks only): swing the tail around
+      // tailSwayAxis — pitch (up/down) for a dragon's whip tail, yaw
+      // (side to side) for a shark's swimming tail beat — using its own
+      // phase (independent frequency, but still offset from the fin/
+      // wing motion) so the tail reads as part of the same continuous
+      // motion rather than an unrelated animation, without necessarily
+      // moving in lockstep with it.
       if (set.tail) {
         if (uprightStyle === 'dragon') {
-          const tailSwayAngle = DRAGON_TAIL_SWAY_AMPLITUDE * Math.sin(phase + DRAGON_TAIL_SWAY_PHASE_OFFSET);
-          this.tailSwayQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, tailSwayAngle);
+          const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
+          const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
+          this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
           this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
           this.dummy.updateMatrix();
+          if (tailSwayPivotY !== 0) {
+            // The tail geometry's own root vertex sits at local
+            // (0, tailSwayPivotY, 0) — the body's actual (static) tail
+            // attachment point — not at the shared local origin. Simply
+            // rotating around the origin (as above) would swing that
+            // root vertex through an arc away from the body, since it's
+            // some distance from the pivot, making the tail look
+            // detached/loose rather than hinged at a fixed joint. So
+            // instead of baking tailSwayQuat directly into dummy's own
+            // quaternion, compose translate(+pivot) * rotate(tailSwayQuat)
+            // * translate(-pivot) as an *extra* matrix applied in the
+            // tail's own local space (before dummy's position/bodyQuat),
+            // so the root vertex — which lands exactly on the pivot
+            // point after that first translate — stays fixed under the
+            // rotation, and only the fin's own outward geometry visibly
+            // swings, matching how a real tail flexes at its base.
+            this.dummy.quaternion.copy(this.bodyQuat);
+            this.dummy.updateMatrix();
+            this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
+            this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
+            this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
+            this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
+            this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
+            this.dummy.matrix.multiply(this.tailPivotMatrix);
+          }
           set.tail.setMatrixAt(i, this.dummy.matrix);
         }
       }
@@ -1702,6 +1796,7 @@ export class Renderer3D {
     const hawkInstances = this.predatorInstances.get('hawk');
     if (hawkInstances) {
       const isDragon = isOrganic && params.dragonPredators;
+      const isShark = isDragon && isFishtank;
       const hawks = sim.predators.filter((predator) => predator.kind !== 'unicorn');
       this.updateInstances(
         hawkInstances,
@@ -1709,12 +1804,12 @@ export class Renderer3D {
         params.predatorMaxSpeed,
         elapsed,
         dt,
-        isDragon ? DRAGON_PREDATOR_BASE : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
-        isDragon ? DRAGON_PREDATOR_HUNT : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
+        isDragon ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE) : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
+        isDragon ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT) : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
         (entity) => (entity as Predator).huntIntensity,
-        isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
-        isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
-        isDragon ? DRAGON_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+        isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
+        isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
+        isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
         undefined,
         undefined,
         // Plain nature-style hawks (not dragon, not arcade/fishtank) get
@@ -1724,6 +1819,18 @@ export class Renderer3D {
         // geometry has no baked vertex colors to read yet).
         !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
         isDragon,
+        'dragon',
+        1,
+        undefined,
+        // Sharks: fins droop down at rest and barely flap; the tail
+        // yaws side to side (its actual swimming stroke) instead of
+        // pitching up/down like the dragon's whip tail — see the
+        // SHARK_* tuning constants' doc comment.
+        isShark ? SHARK_FIN_REST_TILT_RAD : 0,
+        isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+        isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
+        isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
+        isShark ? getSharkTailPivotY(DRAGON_LENGTH) : 0,
       );
     }
 
