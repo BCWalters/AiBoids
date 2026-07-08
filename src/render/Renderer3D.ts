@@ -1776,7 +1776,68 @@ export class Renderer3D {
     this.camera.position.set(target.x + distance * 0.7, target.y + distance * 0.35, target.z + distance * 0.9);
     this.camera.updateProjectionMatrix();
     this.controls.target.copy(target);
+    // ensureScene's world-scale zoom clamp (controls.minDistance =
+    // maxDim * 0.05) is tuned for the whole-world view and is often far
+    // larger than a small creature's tight gallery framing distance
+    // (e.g. a sparrow vs. a 1000-unit-deep world) — OrbitControls.update()
+    // would otherwise silently push the camera back out past that floor,
+    // undoing the close-up framing entirely. Relax the floor down to
+    // this call's own distance (never *raise* it, since that's still
+    // meaningful for normal, non-gallery browsing) so the requested
+    // distance actually sticks. resetCameraFraming restores the normal
+    // world-scale floor when the gallery closes.
+    const effectiveDistance = target.distanceTo(this.camera.position);
+    this.controls.minDistance = Math.min(this.controls.minDistance, effectiveDistance * 0.5);
     this.controls.update();
+  }
+
+  /**
+   * Model Gallery: computes a `debugFrameCamera` distance that frames the
+   * *currently instanced* creature as tightly as the camera's field of
+   * view allows (small margin so the silhouette doesn't clip), based on
+   * the union of that creature's part geometries (body, wings, tail,
+   * legs, beak). A single flat distance (the old approach) only ever
+   * looked "maximally zoomed in" for whichever creature it happened to
+   * be tuned against — every other kind, being a very different
+   * physical size (a sparrow vs. a dragon, say), ended up looking
+   * comparatively tiny/zoomed-out at that same distance. Falls back to
+   * `fallbackDistance` if the instance set for `kind` doesn't exist yet
+   * (e.g. called before the gallery entity has spawned on this frame).
+   */
+  getGalleryFramingDistance(kind: PredatorKind | BoidSpecies, fallbackDistance = 220): number {
+    const set = (['hawk', 'unicorn'] as const).includes(kind as PredatorKind)
+      ? this.predatorInstances.get(kind as PredatorKind)
+      : this.speciesInstances.get(kind as BoidSpecies);
+    if (!set) return fallbackDistance;
+
+    // Union the bounding boxes of every part (body, wings, tail, legs,
+    // beak) rather than just the body — a hawk/sparrow's wingspan or a
+    // unicorn's tail reaches well past the body mesh alone, and using
+    // only the body underestimates how large the creature actually
+    // reads on screen. All parts share the same single-instance local
+    // coordinate space, so their geometries combine directly.
+    const box = new THREE.Box3();
+    for (const mesh of [set.body, set.wingLeft, set.wingRight, set.tail, set.legs, set.beak]) {
+      if (!mesh) continue;
+      const geometry = mesh.geometry;
+      if (!geometry.boundingBox) geometry.computeBoundingBox();
+      if (geometry.boundingBox) box.union(geometry.boundingBox);
+    }
+    if (box.isEmpty()) return fallbackDistance;
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const radius = sphere.radius;
+    if (!radius) return fallbackDistance;
+
+    // Matches debugFrameCamera's (0.7, 0.35, 0.9) offset vector — the
+    // actual camera-to-target distance is `distance * offsetMagnitude`,
+    // not `distance` itself.
+    const offsetMagnitude = Math.sqrt(0.7 ** 2 + 0.35 ** 2 + 0.9 ** 2);
+    const verticalFovRad = THREE.MathUtils.degToRad(this.camera.fov);
+    // Small margin (1.15x) so the silhouette doesn't clip against the
+    // frame edges when solving for the distance that makes the
+    // bounding sphere fill the viewport height.
+    const effectiveRadius = radius * 1.15;
+    return effectiveRadius / Math.tan(verticalFovRad / 2) / offsetMagnitude;
   }
 
   /**
@@ -1794,6 +1855,11 @@ export class Renderer3D {
     this.camera.position.set(center.x + maxDim * 0.6, center.y + maxDim * 0.4, center.z + maxDim * 0.9);
     this.camera.updateProjectionMatrix();
     this.controls.target.copy(center);
+    // Undo debugFrameCamera's possible relaxation of the zoom-in floor
+    // (see its comment) — restores the normal world-scale clamp so
+    // regular, non-gallery browsing can't zoom the camera through the
+    // ground/boundary box.
+    this.controls.minDistance = maxDim * 0.05;
     this.controls.update();
   }
 
