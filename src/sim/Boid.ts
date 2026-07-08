@@ -175,6 +175,8 @@ export class Boid {
     let alignCount = 0;
     let cohesionSum = V.create();
     let cohesionCount = 0;
+    let interspeciesSum = V.create();
+    let interspeciesCount = 0;
 
     for (const other of allBoids) {
       if (other === this) continue;
@@ -189,6 +191,16 @@ export class Boid {
         const away = V.scale(V.sub(this.position, other.position), 1 / d);
         sepSum = V.add(sepSum, away);
         sepCount++;
+      }
+
+      // Softer, longer-range avoidance between different species only
+      // (see interspeciesAvoidRadius/Weight doc comment in params.ts) —
+      // keeps whole flocks from drifting through/over each other, on top
+      // of (not instead of) the tight same-radius collision check above.
+      if (other.species !== this.species && d < p.interspeciesAvoidRadius && d > 1e-6) {
+        const away = V.scale(V.sub(this.position, other.position), 1 / d);
+        interspeciesSum = V.add(interspeciesSum, away);
+        interspeciesCount++;
       }
 
       // Alignment/cohesion ("flocking" proper) only counts same-species
@@ -211,6 +223,12 @@ export class Boid {
       const desired = V.setMagnitude(V.scale(sepSum, 1 / sepCount), p.boidMaxSpeed);
       const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
       acceleration = V.add(acceleration, V.scale(steer, p.separationWeight));
+    }
+
+    if (interspeciesCount > 0) {
+      const desired = V.setMagnitude(V.scale(interspeciesSum, 1 / interspeciesCount), p.boidMaxSpeed);
+      const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
+      acceleration = V.add(acceleration, V.scale(steer, p.interspeciesAvoidWeight));
     }
 
     if (alignCount > 0) {
