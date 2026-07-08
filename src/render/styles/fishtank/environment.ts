@@ -81,7 +81,7 @@ const CEILING_COLOR = 0xf2efe6;
 // this, a big enough room to read as "a real room" makes a tank sized
 // to the raw sim bounds (and the fish inside it) look tiny/bug-sized
 // once the camera pulls back far enough to frame that room.
-export const TANK_VISUAL_SCALE = 1.8;
+export const TANK_VISUAL_SCALE = 4;
 
 function disposeObject3D(root: THREE.Object3D): void {
   root.traverse((child) => {
@@ -621,13 +621,16 @@ export function placeFishtankEnvironment(
 
   // Fog is meant to read as mild water murkiness for fish approaching the
   // far glass wall when viewed from up close/inside the tank — but
-  // THREE.Fog measures distance from the *camera*, not from the tank, so
-  // its far distance must comfortably exceed the camera's own max
-  // zoom-out distance (see Renderer3D's fishtank maxDistance clamp,
-  // ~visualMaxDim * 4.5) or the entire room reads as a flat wall of fog
-  // color the moment the camera pulls back to see the table/room (the
-  // same "blown-out fog wall" failure mode nature's environment avoids
-  // by keeping its fog.far comfortably beyond its own zoom clamp).
-  env.fog.near = maxDim * 2;
-  env.fog.far = maxDim * 8;
+  // THREE.Fog measures distance from the *camera*, not from the tank.
+  // The camera is always somewhere inside the room (maxDistance is
+  // clamped below wallMargin — see Renderer3D), so the farthest any
+  // room surface (e.g. the wall behind the camera, seen reflected
+  // across the room) can be is roughly 2 * wallMargin away. fog.near
+  // must clear that worst case entirely, or walls/decor read as
+  // washed out in a flat blue haze instead of being clearly visible —
+  // exactly the "can't see the walls" bug this previously caused when
+  // near/far were set relative to the tank's own (much smaller) size
+  // rather than the room's.
+  env.fog.near = wallMargin * 2.5;
+  env.fog.far = wallMargin * 6;
 }

@@ -951,6 +951,7 @@ export class Renderer3D {
     }
 
     if (this.currentStyle !== style) {
+      const wasFishtank = this.currentStyle === 'fishtank';
       this.currentStyle = style;
       this.bloomPass.enabled = !isOrganic;
       // The screen-space afterimage/motion-trail effect persists whole
@@ -981,6 +982,25 @@ export class Renderer3D {
       // camera never ends up outside the room's walls/floor.
       const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
       this.controls.maxDistance = isFishtank ? maxDim * TANK_VISUAL_SCALE * 4.5 : isNature ? maxDim * 5.5 : maxDim * 25;
+
+      // Re-frame the camera when crossing into/out of fishtank
+      // specifically (not just on world-dimension changes, handled
+      // separately below) — fishtank renders at TANK_VISUAL_SCALE, so a
+      // camera position/distance that was correct for arcade/nature
+      // would otherwise end up far too close (effectively "inside" the
+      // now much-bigger tank) the moment fishtank is selected, or too
+      // far out the moment it's left again.
+      if (isFishtank !== wasFishtank) {
+        const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+        const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+        this.camera.position.set(
+          center.x + maxDim * 0.6 * cameraDistScale,
+          center.y + maxDim * 0.4 * cameraDistScale,
+          center.z + maxDim * 0.9 * cameraDistScale,
+        );
+        this.controls.target.copy(center);
+        this.controls.update();
+      }
     }
 
     // Applied every frame (cheap) rather than gated on style-change, so
