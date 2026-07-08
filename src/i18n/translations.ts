@@ -98,6 +98,11 @@ const en = {
 export type TranslationKey = keyof typeof en;
 type TranslationDict = Record<TranslationKey, string>;
 
+// Exported (in addition to the `t()` lookup helper below) so tests can
+// assert on dictionary shape/content directly, e.g. checking that every
+// language defines the same non-empty strings for each key.
+export { en };
+
 const es: TranslationDict = {
   documentTitle: 'AiBoids — Simulación de bandadas',
   subtitle: 'Una simulación de bandadas con depredadores',
@@ -275,6 +280,7 @@ const fr: TranslationDict = {
 };
 
 const translations: Record<Language, TranslationDict> = { en, es, fr };
+export { translations };
 
 /**
  * Looks up `key` in the current language's dictionary (see
