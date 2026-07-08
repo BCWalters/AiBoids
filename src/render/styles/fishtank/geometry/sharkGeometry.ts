@@ -2,11 +2,14 @@ import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
 import { mergeGeometriesWithColor } from '../../../geometry/creatureGeometry';
 
-// Fish tank style: a duplicate of nature's dragonGeometry.ts, kept as its
-// own independent copy so a future pass reskinning this predator into a
+// Fish tank style: originally a duplicate of nature's dragonGeometry.ts,
+// kept as its own independent copy (renamed file/exports to sharkGeometry
+// .ts/createSharkGeometries in anticipation of that reskin) so a future
+// pass reskinning this predator's still-dragon-shaped body below into a
 // mini-shark can freely rewrite it without touching nature's dragon.
 /**
- * "Dragon" predator geometry: a bulkier, longer-necked lathed body with a
+ * "Dragon" predator geometry (pending reskin into a shark — see the
+ * file-level comment above): a bulkier, longer-necked lathed body with a
  * bent, raised neck and a downward-tilted head (rather than a straight
  * bird-like spine), a spiky dorsal frill running from the skull down the
  * neck (in place of simple flat brow horns), broad scalloped bat/dragon-
@@ -17,7 +20,7 @@ import { mergeGeometriesWithColor } from '../../../geometry/creatureGeometry';
  * angle instead of vanishing edge-on. Deliberately much bigger than the
  * hawk predator geometry it replaces.
  */
-export function createDragonGeometries(length: number, width: number): CreatureGeometries {
+export function createSharkGeometries(length: number, width: number): CreatureGeometries {
   const body = buildDragonBodyGeometry(length, width);
 
   const wingSpan = length * 1.5;
@@ -183,7 +186,7 @@ function applyNeckBend(
  * the lathe's naturally dead-straight axis.
  */
 // Neck/head bend parameters shared between the body geometry (see
-// applyNeckBend) and computeDragonMouthTransform below — kept as named
+// applyNeckBend) and computeSharkMouthTransform below — kept as named
 // constants (rather than inlined twice) so the fire-breath origin/
 // direction in Renderer3D can never silently drift out of sync with
 // where the geometry actually puts the snout tip.
@@ -208,7 +211,7 @@ const SNOUT_TIP_FRACTION = 1.1; // elongated snout tip, past the body's nominal 
  * angles above) instead of the raw body-forward heading, which ignored
  * the raised/tilted neck entirely.
  */
-export function computeDragonMouthTransform(length: number): {
+export function computeSharkMouthTransform(length: number): {
   offsetForward: number;
   offsetUp: number;
   dirForward: number;

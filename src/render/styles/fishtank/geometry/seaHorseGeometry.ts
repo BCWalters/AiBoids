@@ -6,13 +6,17 @@ import {
   addRainbowVertexColors,
   addRainbowVertexColorsByDistance,
 } from '../../../geometry/creatureGeometry';
-import { buildFingeredWingGeometry } from './birdGeometry';
+import { buildFingeredWingGeometry } from './fishGeometry';
 
-// Fish tank style: a duplicate of nature's unicornGeometry.ts, kept as
-// its own independent copy so a future pass reskinning this into another
-// tank creature can freely rewrite it without touching nature's unicorn.
+// Fish tank style: originally a duplicate of nature's unicornGeometry.ts,
+// kept as its own independent copy (renamed file/exports to
+// seaHorseGeometry.ts/createSeaHorseGeometries in anticipation of that
+// reskin) so a future pass reskinning this still-unicorn-shaped body
+// below into a seahorse can freely rewrite it without touching nature's
+// unicorn.
 /**
- * "Unicorn" predator geometry: a proper horse-like silhouette — a barrel-
+ * "Unicorn" predator geometry (pending reskin into a seahorse — see the
+ * file-level comment above): a proper horse-like silhouette — a barrel-
  * chested lathed torso with a distinctly slender neck and blunt muzzle
  * (not the plump, beaked hawk taper), four straight hoofed legs (the same
  * "read as a real creature, not a bird" cue the dragon's clawed legs give
@@ -21,7 +25,7 @@ import { buildFingeredWingGeometry } from './birdGeometry';
  * rainbow vertex-color gradient — see addRainbowVertexColors) and a
  * flowing fanned tail.
  */
-export function createUnicornGeometries(length: number, width: number): CreatureGeometries {
+export function createSeaHorseGeometries(length: number, width: number): CreatureGeometries {
   const body = buildUnicornBodyGeometry(length, width);
 
   const wingSpan = length * 1.3;
