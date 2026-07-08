@@ -83,6 +83,126 @@ const CEILING_COLOR = 0xf2efe6;
 // once the camera pulls back far enough to frame that room.
 export const TANK_VISUAL_SCALE = 4;
 
+/**
+ * Room extents and a safe camera distance, derived from the sim's raw
+ * (unscaled) world bounds using the exact same formulas as
+ * `placeFishtankEnvironment` below. Exported so Renderer3D's camera
+ * distance clamps can stay in lockstep with the room's actual size
+ * without duplicating/drifting from this math — previously the camera
+ * clamp was derived from a since-removed depth-dominated `maxDim`
+ * formula that no longer matches the room's true footprint.
+ */
+export interface FishtankRoomBounds {
+  /** Horizontal distance from room center to each wall. */
+  wallMargin: number;
+  /** Vertical distance from the floor to the ceiling. */
+  roomHeight: number;
+  /** World-space Y of the floor. */
+  roomFloorY: number;
+  /**
+   * World-space Y of the tank's true vertical middle (bottom-anchored at
+   * y=0, see placeFishtankEnvironment's `center.y` doc comment) — the
+   * right height for the orbit camera to look at, rather than the sim's
+   * raw/unscaled vertical center, which sits near the tank's *bottom*
+   * once the tank is scaled up (since the tank only grows upward from
+   * y=0, not around its raw center).
+   */
+  tankCenterY: number;
+  /**
+   * Largest orbit-camera distance (from the tank's true center, see
+   * `tankCenterY`) that still keeps the camera comfortably inside the
+   * room's floor/ceiling/walls at every *permitted* orbit tilt (see
+   * `cameraTiltLimitRad`). The tank's table height is intentionally kept
+   * fixed rather than scaling with TANK_VISUAL_SCALE (see
+   * placeFishtankEnvironment's tableHeight doc comment), so the tank's
+   * center ends up fairly close to the floor — a fully unrestricted
+   * "any tilt, any distance" bound would clamp zoom-out to a tiny
+   * fraction of the room's actual horizontal size (wallMargin), which is
+   * what previously made fishtank's zoom-out feel badly restricted
+   * compared to nature. Restricting *tilt* instead (steep straight-up/
+   * straight-down orbits are rarely useful for viewing a tank anyway)
+   * buys back a much more generous zoom-out range while remaining
+   * mathematically guaranteed never to clip through the floor/ceiling —
+   * see `cameraTiltLimitRad`'s doc comment for the derivation.
+   */
+  maxCameraDistance: number;
+  /**
+   * Max allowed tilt (radians) away from perfectly horizontal, applied
+   * as Renderer3D's OrbitControls minPolarAngle/maxPolarAngle
+   * (Math.PI/2 ∓ this value). Paired 1:1 with `maxCameraDistance`: at
+   * this tilt and that distance, `distance * sin(tilt)` exactly equals
+   * the tighter of the floor/ceiling clearance (times a small safety
+   * factor), so the camera can never poke through either surface no
+   * matter how the user orbits within the permitted tilt range. A
+   * tighter tilt limit would allow a larger maxCameraDistance (and vice
+   * versa) — this value was chosen as a reasonable "look around a room"
+   * range (30° above/below horizontal) that still leaves a usable
+   * zoom-out distance, rather than solving for the absolute maximum
+   * distance at the cost of barely any tilt freedom.
+   */
+  cameraTiltLimitRad: number;
+}
+
+export function computeFishtankRoomBounds(
+  rawWorldWidth: number,
+  rawWorldHeight: number,
+  rawWorldDepth: number,
+): FishtankRoomBounds {
+  const simMaxDim = Math.max(rawWorldWidth, rawWorldHeight, rawWorldDepth);
+  const worldWidth = rawWorldWidth * TANK_VISUAL_SCALE;
+  const worldHeight = rawWorldHeight * TANK_VISUAL_SCALE;
+  const worldDepth = rawWorldDepth * TANK_VISUAL_SCALE;
+
+  const tableHeight = simMaxDim * 0.5;
+  const tableFootprintX = worldWidth * 1.6;
+  const tableFootprintZ = worldDepth * 1.6;
+  const tankFootprint = Math.max(tableFootprintX, tableFootprintZ);
+  // Pulled back in (1.3x the tank/table footprint, was 2.6x — an
+  // earlier pass had briefly pushed the walls out much farther purely
+  // to buy zoom headroom) per an explicit ask for a visually smaller,
+  // closer-walled room while keeping the ceiling (roomHeight below)
+  // unchanged. doorHeight is still derived from tankTopY, not from
+  // wallMargin or roomHeight, so door/tank proportions are unaffected.
+  const wallMargin = tankFootprint * 1.3;
+
+  const tankTopY = tableHeight + worldHeight;
+  const doorHeight = tankTopY * 1.05;
+  const roomHeight = doorHeight * 3.2;
+
+  const maxDim = Math.max(worldWidth, worldHeight, worldDepth);
+  const glassThickness = maxDim * 0.012;
+  const tableGap = glassThickness * 1.5;
+  const roomFloorY = -tableGap - tableHeight;
+
+  // The tank is bottom-anchored at y=0 and grows upward (see
+  // placeFishtankEnvironment's `center.y` doc comment), so its true
+  // vertical middle — the right point for the camera to look at — is
+  // simply half its (scaled) height, not the sim's raw vertical center.
+  const tankCenterY = worldHeight / 2;
+  const distToCeiling = roomFloorY + roomHeight - tankCenterY;
+  const distToFloor = tankCenterY - roomFloorY;
+  // See `cameraTiltLimitRad`'s doc comment: this is a "look around a
+  // room" tilt range (18° above/below horizontal — loosened from an
+  // earlier 14° pass per an explicit ask to allow panning up closer to
+  // the ceiling, at the cost of a somewhat shorter maxCameraDistance)
+  // rather than full vertical freedom, chosen specifically so that
+  // `maxCameraDistance` below can safely be derived from it without ever
+  // risking a floor/ceiling clip.
+  const cameraTiltLimitRad = Math.PI * (18 / 180);
+  // Solve for the largest distance where, even at the steepest permitted
+  // tilt, `distance * sin(tilt)` still clears the tighter of the two
+  // vertical clearances (with a small safety factor). wallMargin caps
+  // the *horizontal* side of the same worst-case tilt (`distance *
+  // cos(tilt)`, cos being close to 1 at this tilt so it's rarely the
+  // binding constraint) so the camera also can't be pushed out past the
+  // walls at a shallow tilt.
+  const verticalCap = (Math.min(distToFloor, distToCeiling) / Math.sin(cameraTiltLimitRad)) * 0.9;
+  const horizontalCap = (wallMargin / Math.cos(cameraTiltLimitRad)) * 0.9;
+  const maxCameraDistance = Math.min(verticalCap, horizontalCap);
+
+  return { wallMargin, roomHeight, roomFloorY, tankCenterY, maxCameraDistance, cameraTiltLimitRad };
+}
+
 function disposeObject3D(root: THREE.Object3D): void {
   root.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -384,30 +504,47 @@ export function placeFishtankEnvironment(
   worldHeight: number,
   worldDepth: number,
 ): void {
+  // Computed once, from the raw (unscaled) args, before they're inflated
+  // below — reused for the room/door sizing further down so this stays
+  // in lockstep with Renderer3D's camera clamp (which calls this same
+  // function) rather than duplicating and risking drift between the two.
+  const roomBounds = computeFishtankRoomBounds(worldWidth, worldHeight, worldDepth);
+
   // Table height must stay anchored to the sim's actual (unscaled) size,
   // not the inflated visual tank size below — otherwise a bigger tank
   // would also stand on a taller table, when the ask is a bigger tank on
   // the *same* table.
   const simMaxDim = Math.max(worldWidth, worldHeight, worldDepth);
-  // The tank's center point is fixed at the sim's actual (unscaled)
-  // center — computed here, before worldWidth/Height/Depth are inflated
-  // below — so the visually-bigger tank grows symmetrically around the
-  // same point in space rather than shifting away from it. This matters
-  // because Renderer3D's camera target/framing is computed from this
-  // same raw sim center; if the tank's *position* moved when its size
-  // was inflated, the camera would end up looking at empty space instead
-  // of the tank. (Renderer3D applies the equivalent "grow around center"
-  // transform to fishtank's own boid positions — see TANK_VISUAL_SCALE's
-  // doc comment.)
-  const center = new THREE.Vector3(worldWidth / 2, worldHeight / 2, worldDepth / 2);
+  // Horizontally (X/Z), the tank's center is fixed at the sim's actual
+  // (unscaled) center — computed here, before worldWidth/Height/Depth are
+  // inflated below — so the visually-bigger tank grows symmetrically
+  // outward from the same point rather than shifting away from it. This
+  // matters because Renderer3D's camera target/framing and fish
+  // positions (see TANK_VISUAL_SCALE's doc comment) are anchored to this
+  // same raw sim center horizontally.
+  //
+  // Vertically (Y) the tank is intentionally NOT grown around its
+  // center: its bottom always sits at y=0 (on the table, matching the
+  // sim's own y=0 swim-space floor) and it grows upward from there as
+  // TANK_VISUAL_SCALE increases. Growing around the vertical center
+  // instead (as this used to) makes the tank's bottom sink further and
+  // further *through* the table/floor the bigger the scale, since half
+  // of the added height extends downward — which is also what made the
+  // tank look disproportionately short next to the room/door: only half
+  // of its height growth was visible above the table. Renderer3D mirrors
+  // this bottom-anchored growth for fish (via `fishtankCenter`, y=0).
+  const center = new THREE.Vector3(worldWidth / 2, 0, worldDepth / 2);
 
   // Inflate the tank's rendered dimensions (see TANK_VISUAL_SCALE's doc
   // comment) — every tank/water/room *size* measurement below is derived
   // from these scaled values, not the raw sim bounds passed in. Only
-  // sizes are scaled here, never the center computed above.
+  // sizes are scaled here, never the horizontal center computed above.
   worldWidth *= TANK_VISUAL_SCALE;
   worldHeight *= TANK_VISUAL_SCALE;
   worldDepth *= TANK_VISUAL_SCALE;
+  // Now that worldHeight is inflated, place the tank's vertical center
+  // so its bottom lands at y=0 (see comment above).
+  center.y = worldHeight / 2;
 
   const maxDim = Math.max(worldWidth, worldHeight, worldDepth);
   // Thin glass shell just outside the tank's actual swim bounds.
@@ -515,29 +652,34 @@ export function placeFishtankEnvironment(
   });
 
   // Room: floor, ceiling, and four walls fully enclosing a box around
-  // the tank/table, sized generously relative to the (already-inflated,
-  // see TANK_VISUAL_SCALE) tank so it reads as a real room rather than a
-  // tight diorama shell.
-  // Room size must comfortably exceed the camera's max zoom-out distance
-  // (see Renderer3D's fishtank maxDistance clamp, ~visualMaxDim * 4.5,
-  // which is itself derived from this same scaled maxDim) or the camera
-  // can end up outside the wall/floor planes — which, since these are
-  // single-sided, makes them vanish entirely (backface culling) rather
-  // than fade, producing a "ghostly" look where wall-mounted objects
-  // (art/door/window) appear to float with nothing solid behind them.
-  // An earlier version of this pushed the margin far beyond that
-  // (maxDim * 16 / roomHeight maxDim * 20) to be extra safe, but that
-  // made the floor/walls so large relative to the tank that the room
-  // read as an unbounded, horizon-less plane with decor "floating" in
-  // the distance — a worse artifact than the one it was avoiding. This
-  // more modest margin still comfortably clears the camera clamp below
-  // without that side effect. Floor/ceiling are sized to exactly match
-  // the wall footprint (rather than independently) so the floor never
-  // visibly runs out past the walls either.
-  const wallMargin = maxDim * 6;
+  // the tank/table, sized generously relative to the tank/table's own
+  // horizontal footprint so it reads as a real room rather than a tight
+  // diorama shell. wallMargin/roomHeight/roomFloorY come from
+  // computeFishtankRoomBounds (computed once at the top of this
+  // function) so they always stay exactly in sync with Renderer3D's
+  // camera clamp, which calls that same function independently.
+  const tankFootprint = Math.max(tableFootprintX, tableFootprintZ);
+  const wallMargin = roomBounds.wallMargin;
   const roomFloorSize = wallMargin * 2;
-  const roomHeight = maxDim * 7;
-  const roomFloorY = -tableGap - tableHeight;
+
+  // Door height is anchored to the tank's own vertical size (tankTopY:
+  // floor to the top of the glass, as actually installed on the table)
+  // rather than a generic maxDim, so the tank always visually reads as
+  // reaching up to about the height of the doors regardless of how big
+  // TANK_VISUAL_SCALE makes it.
+  const tankTopY = tableHeight + worldHeight;
+  const doorHeight = tankTopY * 1.05;
+  const doorScale = doorHeight / 1.7;
+  const roomHeight = roomBounds.roomHeight;
+  const roomFloorY = roomBounds.roomFloorY;
+
+  // Small epsilon used to hug door/window/art flush against a wall
+  // surface without exact z-fighting coincidence — sized off wallMargin
+  // (the room's own scale) rather than maxDim, so it stays a small
+  // fraction of the room at any tank size instead of ballooning into a
+  // gap large enough to read as the decor "floating" in front of the
+  // wall instead of on it.
+  const wallHug = wallMargin * 0.003;
 
   env.roomFloor.scale.set(roomFloorSize, roomFloorSize, 1);
   env.roomFloor.position.set(center.x, roomFloorY, center.z);
@@ -546,7 +688,10 @@ export function placeFishtankEnvironment(
   // whole floor.
   const floorMap = (env.roomFloor.material as THREE.MeshStandardMaterial).map;
   if (floorMap) {
-    const tileRepeats = roomFloorSize / (maxDim * 2.4);
+    // Divisor doubled (tankFootprint * 1.0, was * 0.5) so each tile
+    // reads as twice as large per an explicit ask, without changing how
+    // tileRepeats scales with the room's own footprint.
+    const tileRepeats = roomFloorSize / (tankFootprint * 1.0);
     floorMap.repeat.set(tileRepeats, tileRepeats);
   }
 
@@ -571,38 +716,39 @@ export function placeFishtankEnvironment(
   env.roomWallRight.position.set(center.x + wallMargin, roomFloorY + roomHeight / 2, center.z);
 
   // Door on the right wall, standing on the floor.
-  const doorScale = maxDim * 1.3;
   env.door.scale.set(doorScale, doorScale * 1.7, doorScale);
   env.door.position.set(
-    center.x + wallMargin - maxDim * 0.02,
+    center.x + wallMargin - wallHug,
     roomFloorY + (doorScale * 1.7) / 2,
     center.z - wallMargin * 0.35,
   );
   env.door.rotation.y = -Math.PI / 2;
 
   // Windows: one on the left wall, one on the front wall, both at
-  // roughly eye-level height above the floor.
-  const windowScale = maxDim * 1.6;
+  // roughly eye-level height above the floor. Sized off doorHeight
+  // (a fixed, sane real-world-ish reference) rather than the old
+  // depth-dominated maxDim.
+  const windowScale = doorHeight * 0.7;
   const windowY = roomFloorY + roomHeight * 0.35;
   env.windowLeft.scale.set(windowScale, windowScale, windowScale);
-  env.windowLeft.position.set(center.x - wallMargin + maxDim * 0.02, windowY, center.z + wallMargin * 0.4);
+  env.windowLeft.position.set(center.x - wallMargin + wallHug, windowY, center.z + wallMargin * 0.4);
   env.windowLeft.rotation.y = Math.PI / 2;
 
   env.windowFront.scale.set(windowScale, windowScale, windowScale);
-  env.windowFront.position.set(center.x - wallMargin * 0.45, windowY, center.z + wallMargin - maxDim * 0.02);
+  env.windowFront.position.set(center.x - wallMargin * 0.45, windowY, center.z + wallMargin - wallHug);
   env.windowFront.rotation.y = Math.PI;
 
   // Art: two pieces on the back accent wall flanking the tank, one on
   // the front wall beside its window.
-  const artScale = maxDim * 1.1;
+  const artScale = doorHeight * 0.5;
   const artY = roomFloorY + roomHeight * 0.4;
   const [artBackLeft, artBackRight, artFront] = env.artPieces;
   artBackLeft.scale.set(artScale, artScale, artScale);
-  artBackLeft.position.set(center.x - wallMargin * 0.55, artY, center.z - wallMargin + maxDim * 0.02);
+  artBackLeft.position.set(center.x - wallMargin * 0.55, artY, center.z - wallMargin + wallHug);
   artBackRight.scale.set(artScale, artScale, artScale);
-  artBackRight.position.set(center.x + wallMargin * 0.55, artY, center.z - wallMargin + maxDim * 0.02);
+  artBackRight.position.set(center.x + wallMargin * 0.55, artY, center.z - wallMargin + wallHug);
   artFront.scale.set(artScale, artScale, artScale);
-  artFront.position.set(center.x + wallMargin * 0.45, artY, center.z + wallMargin - maxDim * 0.02);
+  artFront.position.set(center.x + wallMargin * 0.45, artY, center.z + wallMargin - wallHug);
   artFront.rotation.y = Math.PI;
 
   // Overhead lamp: hangs from the ceiling directly above the tank, aimed
