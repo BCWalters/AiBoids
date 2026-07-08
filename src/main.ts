@@ -132,6 +132,14 @@ let galleryDistance = galleryFromURL?.distance ?? 220;
 if (galleryFromURL) params.galleryCreature = galleryFromURL.kind;
 
 let previousGalleryCreature: GalleryCreature | null = null;
+// Tracks the visual style last posed/framed for, while the gallery is
+// active — lets the loop below detect a mid-gallery style switch (e.g.
+// via the "Visual style" dropdown, which stays fully usable while
+// isolating a creature) and re-pose/re-frame for the new style, since
+// the tank/ground environments differ enough in scale and layout that
+// the old camera framing would otherwise leave the creature off-center
+// or absurdly tiny in a corner of the new environment.
+let previousGalleryVisualStyle: SimParams['visualStyle'] | null = null;
 let galleryPosed = false;
 let gallerySnapshot: Pick<
   SimParams,
@@ -151,6 +159,13 @@ let gallerySnapshot: Pick<
 function enterGallery(kind: GalleryCreature): void {
   gallerySnapshot = {
     mode: params.mode,
+    // Snapshotted (and restored on exit) same as the other fields below,
+    // but deliberately *not* reset to a fixed style here — the gallery
+    // keeps whatever visual style was already active, and the "Visual
+    // style" dropdown stays fully usable while the gallery is open (see
+    // the previousGalleryVisualStyle check in the main loop) so a model
+    // can be inspected/compared across nature, fishtank, and arcade
+    // without ever leaving gallery mode.
     visualStyle: params.visualStyle,
     boidCount: params.boidCount,
     parrotCount: params.parrotCount,
@@ -164,7 +179,6 @@ function enterGallery(kind: GalleryCreature): void {
   };
 
   params.mode = '3d';
-  params.visualStyle = 'nature';
   params.boidCount = 0;
   params.parrotCount = 0;
   params.goldfinchCount = 0;
@@ -186,6 +200,7 @@ function enterGallery(kind: GalleryCreature): void {
   else if (kind === 'bluejay') params.bluejayCount = 1;
 
   galleryPosed = false;
+  previousGalleryVisualStyle = null;
   applyMode(params.mode);
   controlPanel.refresh();
 }
@@ -194,22 +209,25 @@ function exitGallery(): void {
   if (gallerySnapshot) Object.assign(params, gallerySnapshot);
   gallerySnapshot = null;
   galleryPosed = false;
+  previousGalleryVisualStyle = null;
   applyMode(params.mode);
   renderer3D?.resetCameraFraming(sim);
   controlPanel.refresh();
 }
 
 /**
- * Runs once per gallery visit, as soon as the isolated creature has
- * actually spawned (syncPopulation runs synchronously inside
- * sim.update, so this is typically ready by the very first frame after
- * entering). Poses it at world center with a fixed, camera-friendly
- * velocity (facing right/slightly up, for a 3/4 climbing-flight look),
- * then freezes the whole sim (params.running = false) so the pose and
- * camera framing hold steady. Wing/tail flap animation still plays
- * (it's driven by elapsed time, not sim.update), so the creature doesn't
- * look like a static prop. The camera stays fully orbit/zoom-able
- * afterward via OrbitControls.
+ * Runs once per gallery visit (and again whenever the visual style is
+ * switched while the gallery is active — see the previousGalleryVisualStyle
+ * check in the main loop, which clears galleryPosed to force a re-run),
+ * as soon as the isolated creature has actually spawned (syncPopulation
+ * runs synchronously inside sim.update, so this is typically ready by
+ * the very first frame after entering). Poses it at world center with a
+ * fixed, camera-friendly velocity (facing right/slightly up, for a 3/4
+ * climbing-flight look), then freezes the whole sim (params.running =
+ * false) so the pose and camera framing hold steady. Wing/tail flap
+ * animation still plays (it's driven by elapsed time, not sim.update),
+ * so the creature doesn't look like a static prop. The camera stays
+ * fully orbit/zoom-able afterward via OrbitControls.
  */
 function poseGalleryEntityIfReady(): void {
   if (!params.galleryCreature || galleryPosed || !renderer3D) return;
@@ -229,7 +247,17 @@ function poseGalleryEntityIfReady(): void {
 
   params.running = false;
   galleryPosed = true;
+  previousGalleryVisualStyle = params.visualStyle;
 
+  // Unlike normal (non-gallery) fishtank browsing — which frames the
+  // camera outside the tank looking in — the gallery keeps the same
+  // close, creature-relative distance across all styles so the model
+  // stays large and inspectable regardless of the (much bigger) tank/
+  // world scale. This puts the camera inside the tank/water volume for
+  // fishtank style; Renderer3D.setRoomVisible(false) (see ensureScene)
+  // hides the surrounding room while gallery is active so the
+  // transparent glass/water doesn't show the room incongruously right
+  // behind the creature.
   renderer3D.debugFrameCamera(center.x, center.y, center.z, galleryDistance);
 
   // Exposed for an external screenshot/automation script to poll for
@@ -368,6 +396,18 @@ function loop(now: number): void {
     if (params.galleryCreature) enterGallery(params.galleryCreature);
     else exitGallery();
     previousGalleryCreature = params.galleryCreature;
+  }
+
+  // Detect a visual style switch made *while* the gallery is active (the
+  // "Visual style" dropdown stays fully interactive during gallery mode
+  // — see ControlPanel's render()) and force a re-pose/re-frame for it.
+  // Without this, switching styles mid-gallery leaves the camera at its
+  // old framing while the environment underneath changes shape/scale
+  // (e.g. nature's open ground vs. fishtank's room-and-tank), so the
+  // creature can end up tiny and off-center in a corner instead of
+  // nicely centered for the newly-selected style.
+  if (params.galleryCreature && params.visualStyle !== previousGalleryVisualStyle) {
+    galleryPosed = false;
   }
 
   sim.update(dt);

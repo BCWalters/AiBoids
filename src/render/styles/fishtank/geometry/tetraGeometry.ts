@@ -2,11 +2,15 @@ import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
 import { mergeGeometriesWithColor, extrudeRingGeometry, mergePositionOnlyGeometries } from '../../../geometry/creatureGeometry';
 
-// Fish tank style: a duplicate of nature's parrotGeometry.ts, kept as its
-// own independent copy so a future pass reskinning this into an exotic
-// fish species can freely rewrite it without touching nature's parrot.
+// Fish tank style: originally a duplicate of nature's parrotGeometry.ts,
+// kept as its own independent copy (renamed file/exports to
+// tetraGeometry.ts/createTetraGeometries in anticipation of that reskin)
+// so a future pass reskinning this still-parrot-shaped body below into an
+// exotic tetra/fish species can freely rewrite it without touching
+// nature's parrot.
 /**
- * Parrot-specific geometry — split out from the shared "realistic bird"
+ * Parrot-specific geometry (pending reskin into a tetra — see the
+ * file-level comment above) — split out from the shared "realistic bird"
  * builder (birdGeometry.ts, still used by hawks/sparrows/goldfinch/
  * cardinal/bluejay) so a macaw-style silhouette (large curved hooked
  * beak, compact rounded body, long trailing tail streamers, broad
@@ -27,7 +31,7 @@ import { mergeGeometriesWithColor, extrudeRingGeometry, mergePositionOnlyGeometr
 const BEAK_COLOR = new THREE.Color(0x2b2620);
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
 
-export function createParrotGeometries(length: number, width: number): CreatureGeometries {
+export function createTetraGeometries(length: number, width: number): CreatureGeometries {
   const body = buildParrotBodyGeometry(length, width);
 
   // Parrots have proportionally broader, more paddle-shaped wings than a
