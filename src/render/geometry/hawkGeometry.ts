@@ -59,20 +59,39 @@ export function createHawkGeometries(length: number, width: number): CreatureGeo
  * raptors are bulkier relative to their length), with a distinctly
  * separate white head region (baked, not just a lighter body tint), a
  * large yellow hooked beak, and near-black eyes.
+ *
+ * Torso radii trimmed down from an earlier pass (belly/chest up to
+ * 0.48-0.5*width) that read as "too fat" once seen next to the slimmed-
+ * down small-bird/parrot shapes — still noticeably bulkier than a
+ * songbird (a real raptor is bulkier relative to its length), just not
+ * as extreme. The head region also gets the same 25%-narrower/10%-longer
+ * treatment requested for the small birds and parrot, pivoting at the
+ * neck pinch so only the head elongates, not the torso below it.
  */
+const HEAD_NARROW_SCALE = 0.75;
+const HEAD_LENGTHEN_SCALE = 1.1;
+const HEAD_START_FRAC = 0.4; // neck pinch
+const HEAD_END_FRAC = HEAD_START_FRAC + (0.82 - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE; // face point (was faceY = halfLen*0.82)
+// Extra narrowing on top of HEAD_NARROW_SCALE, specific to the hawk: even
+// after the shared 25% head-narrow treatment, the hawk's head still read
+// as noticeably wider/rounder than the sparrow/parrot heads once
+// compared side-by-side (a raptor's head should be sleeker, not round).
+const HEAD_EXTRA_NARROW = 0.82;
+
 function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const faceRadius = width * 0.14;
-  const faceY = halfLen * 0.82;
+  const headFrac = (frac: number) => HEAD_START_FRAC + (frac - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE;
+  const faceRadius = width * 0.14 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW;
+  const faceY = halfLen * HEAD_END_FRAC;
   const profile = [
-    new THREE.Vector2(width * 0.05, -halfLen * 1.0), // tail tip
-    new THREE.Vector2(width * 0.28, -halfLen * 0.68),
-    new THREE.Vector2(width * 0.5, -halfLen * 0.22), // broad belly — bulkier than a songbird
-    new THREE.Vector2(width * 0.48, halfLen * 0.14), // broad chest/shoulders
-    new THREE.Vector2(width * 0.18, halfLen * 0.4), // neck pinch
-    new THREE.Vector2(width * 0.3, halfLen * 0.54), // head base
-    new THREE.Vector2(width * 0.32, halfLen * 0.64), // crown
-    new THREE.Vector2(width * 0.24, halfLen * 0.74), // brow, just above the eyes
+    new THREE.Vector2(width * 0.04, -halfLen * 1.0), // tail tip
+    new THREE.Vector2(width * 0.2, -halfLen * 0.68),
+    new THREE.Vector2(width * 0.36, -halfLen * 0.22), // belly — bulkier than a songbird, but trimmed from an earlier too-fat pass
+    new THREE.Vector2(width * 0.34, halfLen * 0.14), // chest/shoulders
+    new THREE.Vector2(width * 0.16, halfLen * HEAD_START_FRAC), // neck pinch
+    new THREE.Vector2(width * 0.3 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW, halfLen * headFrac(0.54)), // head base
+    new THREE.Vector2(width * 0.32 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW, halfLen * headFrac(0.64)), // crown
+    new THREE.Vector2(width * 0.24 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW, halfLen * headFrac(0.74)), // brow, just above the eyes
     new THREE.Vector2(faceRadius, faceY), // face, where the beak attaches
   ];
   // The torso/chest/neck portion of the profile stays the dark plumage
@@ -86,15 +105,19 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   const torso = new THREE.LatheGeometry(torsoProfile, 14);
   const head = new THREE.LatheGeometry(headProfile, 14);
 
-  // Raptor beak: shallower hook than a macaw's (a real eagle's beak
-  // curves down but not nearly as far under itself) — shared sweep
-  // builder, different curvature/length tuning.
-  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.22, 70, 0.8);
+  // Straighter beak than a macaw's full curl — a bald eagle's beak is
+  // mostly straight along its length with the hook concentrated right
+  // at the tip, not curving continuously from the base. maxAngleDeg
+  // controls the total curvature swept across the beak's spine, and
+  // buildHookedBeakGeometry biases most of that curl toward the tip
+  // already (angle grows with t^1.6), so a modest max angle reads as
+  // "mostly straight, hooked tip" instead of the parrot's full hook.
+  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.22, 28, 0.8);
 
-  const eyeY = halfLen * 0.7;
-  const eyeX = width * 0.24;
-  const eyeZ = width * 0.05;
-  const eyeRadius = width * 0.048;
+  const eyeY = halfLen * headFrac(0.7);
+  const eyeX = width * 0.24 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW;
+  const eyeZ = width * 0.05 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW;
+  const eyeRadius = width * 0.048 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW;
   const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
   return mergeGeometriesWithColor([
