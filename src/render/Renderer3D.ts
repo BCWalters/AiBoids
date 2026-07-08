@@ -1458,6 +1458,37 @@ export class Renderer3D {
     this.controls.update();
   }
 
+  /**
+   * Snapshot of the exact current camera position + OrbitControls
+   * target, as plain [x, y, z] tuples — used by main.ts's "Copy deep
+   * link" feature to serialize the current view into a shareable URL
+   * (see setCameraState for the restore side). Deliberately returns
+   * plain tuples rather than THREE.Vector3 so the caller can JSON.stringify
+   * it directly without a custom serializer.
+   */
+  getCameraState(): { position: [number, number, number]; target: [number, number, number] } {
+    return {
+      position: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
+      target: [this.controls.target.x, this.controls.target.y, this.controls.target.z],
+    };
+  }
+
+  /**
+   * Restores an exact camera position + orbit target previously captured
+   * via getCameraState — used when loading a "Copy deep link" URL, so
+   * the view on load matches exactly what was captured, not just an
+   * auto-framed approximation. Like debugFrameCamera, this is safe to
+   * call any time and doesn't fight ensureScene's one-time auto-framing
+   * as long as it's called after that first render() call has run (see
+   * main.ts's pendingCameraState handling).
+   */
+  setCameraState(position: [number, number, number], target: [number, number, number]): void {
+    this.camera.position.set(position[0], position[1], position[2]);
+    this.camera.updateProjectionMatrix();
+    this.controls.target.set(target[0], target[1], target[2]);
+    this.controls.update();
+  }
+
   render(sim: Simulation): void {
     this.ensureScene(sim);
     const elapsed = (performance.now() - this.startTime) / 1000;
