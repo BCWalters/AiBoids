@@ -148,14 +148,17 @@ function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): 
 }
 
 function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  // Anchor point exactly matches spine[0] in buildSeaHorseShellGeometry (the body's
-  // rearmost/lowest point) so the tail reads as a continuation of the body, not a
-  // separately-attached tube.
-  const anchorY = -length * 0.5 * 0.22;
-  const anchorZ = -length * 0.38;
-  // Body radius at spine[0] is width * 0.05 (xScale 0.32, zScale 0.58); start the tube
-  // at a comparable thickness so it tapers smoothly out of the body instead of bulging.
-  const bodyEndRadius = width * 0.05;
+  // Anchor the tail so it starts overlapping inside the body's thicker taper
+  // (around spine[1]/spine[2] in buildSeaHorseShellGeometry) rather than at the
+  // body's pointed tip (spine[0]). Since the body and tail are separate meshes
+  // (not vertex-welded), anchoring right at the tapered-to-a-point tip leaves a
+  // visible "point meets disc" seam; starting the tail a bit further up, with a
+  // radius that comfortably covers the body's cross-section there, hides the
+  // seam by burying it inside the overlapping solid volume instead.
+  const halfLen = length * 0.5;
+  const anchorY = -halfLen * 0.16;
+  const anchorZ = -length * 0.28;
+  const bodyEndRadius = width * 0.2;
   const tailTipRadius = width * 0.014;
   const maxRadius = length * 0.205;
   const minRadius = length * 0.038;
@@ -175,7 +178,10 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
     const theta = startTheta + turns * t;
     const radius = THREE.MathUtils.lerp(maxRadius, minRadius, t);
     path.push(new THREE.Vector3(0, centerY + Math.cos(theta) * radius, centerZ + Math.sin(theta) * radius));
-    radii.push(THREE.MathUtils.lerp(bodyEndRadius, tailTipRadius, t));
+    // Ease the taper with a squared falloff so the thick root persists briefly
+    // before narrowing, rather than shrinking linearly right away.
+    const taper = 1 - (1 - t) * (1 - t);
+    radii.push(THREE.MathUtils.lerp(bodyEndRadius, tailTipRadius, taper));
   }
 
   return buildTubeGeometry(path, radii, 8);
