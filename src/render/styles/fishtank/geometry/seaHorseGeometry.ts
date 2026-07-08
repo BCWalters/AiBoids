@@ -148,22 +148,34 @@ function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): 
 }
 
 function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  const centerY = length * 0.04;
-  const centerZ = -length * 0.53;
-  const startTheta = 2.28;
-  const turns = 5.2;
-  const samples = 14;
+  // Anchor point exactly matches spine[0] in buildSeaHorseShellGeometry (the body's
+  // rearmost/lowest point) so the tail reads as a continuation of the body, not a
+  // separately-attached tube.
+  const anchorY = -length * 0.5 * 0.22;
+  const anchorZ = -length * 0.38;
+  // Body radius at spine[0] is width * 0.05 (xScale 0.32, zScale 0.58); start the tube
+  // at a comparable thickness so it tapers smoothly out of the body instead of bulging.
+  const bodyEndRadius = width * 0.05;
+  const tailTipRadius = width * 0.014;
   const maxRadius = length * 0.205;
   const minRadius = length * 0.038;
+  // Starting at theta = -PI with theta increasing (turns > 0) makes the initial tangent
+  // point straight down (-Z) from the anchor, then curls the tail counterclockwise:
+  // down -> forward (+Y, toward the head) -> up -> back under itself, tapering as it goes.
+  const centerY = anchorY + maxRadius;
+  const centerZ = anchorZ;
+  const startTheta = -Math.PI;
+  const turns = 5.2;
+  const samples = 14;
 
   const path: THREE.Vector3[] = [];
   const radii: number[] = [];
   for (let i = 0; i < samples; i++) {
     const t = i / (samples - 1);
-    const theta = startTheta - turns * t;
+    const theta = startTheta + turns * t;
     const radius = THREE.MathUtils.lerp(maxRadius, minRadius, t);
     path.push(new THREE.Vector3(0, centerY + Math.cos(theta) * radius, centerZ + Math.sin(theta) * radius));
-    radii.push(THREE.MathUtils.lerp(width * 0.095, width * 0.014, t));
+    radii.push(THREE.MathUtils.lerp(bodyEndRadius, tailTipRadius, t));
   }
 
   return buildTubeGeometry(path, radii, 8);
