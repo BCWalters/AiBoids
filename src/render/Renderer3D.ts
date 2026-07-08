@@ -728,7 +728,15 @@ export class Renderer3D {
   private lastElapsed = 0;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // logarithmicDepthBuffer: the camera's near/far planes span a huge
+    // ratio (1 to 30000, for the nature sky dome) — with a standard
+    // depth buffer that leaves almost no precision at typical fishtank
+    // viewing distances, causing z-fighting on any thin, closely-stacked
+    // surfaces (e.g. the tank windows' frame/backdrop/glass layers),
+    // which shows up as flickering/jumping that gets worse the farther
+    // the camera zooms or orbits. A logarithmic depth buffer distributes
+    // precision far more evenly across that whole range.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     // ACES tone mapping keeps the physically-based Sky shader from blowing
     // out to solid white and gives the nature-style earth tones more depth.
