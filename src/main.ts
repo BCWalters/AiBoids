@@ -67,14 +67,20 @@ let renderer3D: Renderer3D | null = null;
 const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['unicorn', 'dragon', 'hawk']);
 const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['sparrow', 'parrot', 'goldfinch', 'cardinal', 'bluejay']);
 
-function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number } | null {
+function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number | null } | null {
   const searchParams = new URLSearchParams(window.location.search);
   const kind = searchParams.get('galleryCreature')?.toLowerCase() ?? null;
   if (!kind || !(GALLERY_PREDATOR_KINDS.has(kind as GalleryCreature) || GALLERY_BOID_SPECIES.has(kind as GalleryCreature))) {
     return null;
   }
   const distanceParam = Number(searchParams.get('galleryDistance'));
-  const distance = Number.isFinite(distanceParam) && distanceParam > 0 ? distanceParam : 220;
+  // null (rather than a flat default) when the URL doesn't explicitly
+  // request a distance — poseGalleryEntityIfReady then computes a
+  // per-creature "as zoomed in as possible" distance instead (see
+  // Renderer3D.getGalleryFramingDistance), since a single flat default
+  // only ever looks right for whichever creature it happened to be
+  // tuned against.
+  const distance = Number.isFinite(distanceParam) && distanceParam > 0 ? distanceParam : null;
   return { kind: kind as GalleryCreature, distance };
 }
 
@@ -128,7 +134,10 @@ const galleryFromURL = stateFromURL ? null : readGalleryCreatureFromURL();
 // automation) — the interactive dropdown leaves the panel exactly as
 // the user had it, since they need it open to use the dropdown itself.
 const galleryLaunchedFromURL = galleryFromURL !== null || (stateFromURL?.params.galleryCreature ?? null) !== null;
-let galleryDistance = galleryFromURL?.distance ?? 220;
+// null means "no explicit override" — poseGalleryEntityIfReady computes
+// a tight, per-creature distance in that case (see galleryDistanceOverride
+// usage below and Renderer3D.getGalleryFramingDistance).
+let galleryDistanceOverride = galleryFromURL?.distance ?? null;
 if (galleryFromURL) params.galleryCreature = galleryFromURL.kind;
 
 let previousGalleryCreature: GalleryCreature | null = null;
@@ -258,7 +267,16 @@ function poseGalleryEntityIfReady(): void {
   // hides the surrounding room while gallery is active so the
   // transparent glass/water doesn't show the room incongruously right
   // behind the creature.
-  renderer3D.debugFrameCamera(center.x, center.y, center.z, galleryDistance);
+  //
+  // Distance is per-creature (tightest zoom that fits its actual
+  // rendered size) unless the URL explicitly overrode it — see
+  // getGalleryFramingDistance for why a single flat distance doesn't
+  // work across wildly different creature sizes. Dragons render through
+  // the 'hawk' predator instance slot (see Predator.kind/dragonPredators),
+  // so they key off 'hawk' here too.
+  const instanceKind = kind === 'dragon' ? 'hawk' : kind;
+  const distance = galleryDistanceOverride ?? renderer3D.getGalleryFramingDistance(instanceKind);
+  renderer3D.debugFrameCamera(center.x, center.y, center.z, distance);
 
   // Exposed for an external screenshot/automation script to poll for
   // readiness and to inspect/tweak the posed entity directly.
