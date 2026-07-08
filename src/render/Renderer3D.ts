@@ -976,6 +976,14 @@ export class Renderer3D {
     this.natureEnv.setFogEnabled(params.fogEnabled);
     this.fishtankEnv.setFogEnabled(params.fogEnabled);
 
+    // Model Gallery uses a close, creature-relative camera distance that
+    // sits *inside* the tank/water volume (see main.ts's
+    // poseGalleryEntityIfReady) rather than the far-outside "view the
+    // whole tank" distance normal fishtank browsing uses — hide the
+    // surrounding room while it's active so the transparent glass/water
+    // doesn't show the room incongruously right behind the creature.
+    this.fishtankEnv.setRoomVisible(params.galleryCreature === null);
+
     const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
     if (this.boundsHelper?.userData.key !== expectedKey) {
       if (this.boundsHelper) {
