@@ -164,12 +164,13 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
   // radius that comfortably covers the body's cross-section there, hides the
   // seam by burying it inside the overlapping solid volume instead.
   const halfLen = length * 0.5;
-  const anchorY = -halfLen * 0.16;
+  // Moved forward slightly (was -halfLen * 0.16) per feedback.
+  const anchorY = -halfLen * 0.1;
   const anchorZ = -length * 0.28;
-  // Another 25% thinner (0.15 -> ~0.1125), paired with another 25%-wider body
-  // taper near the attachment point, so the tail reads as a natural extension
-  // of the body rather than an oversized stub.
-  const bodyEndRadius = width * 0.1125;
+  // 30% thinner than before (0.1125 -> ~0.0788), paired with the body's
+  // existing wider taper near the attachment point, so the tail base looks
+  // more proportional.
+  const bodyEndRadius = width * 0.0788;
   const tailTipRadius = width * 0.014;
   const maxRadius = length * 0.205;
   const minRadius = length * 0.038;
