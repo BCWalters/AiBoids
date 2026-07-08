@@ -48,6 +48,15 @@ export interface FishtankEnvironment {
   setVisible(visible: boolean): void;
   /** Independently toggle scene fog on/off without affecting overall fishtank-style visibility. */
   setFogEnabled(enabled: boolean): void;
+  /**
+   * Independently hides/shows just the surrounding room (table, floor,
+   * ceiling, walls, door, windows, art, lamp) without touching the tank
+   * itself (glass/water/tank lighting) — used by the Model Gallery so a
+   * close-up, creature-relative camera distance can sit *inside* the
+   * tank/water volume without the room being visible (nonsensically)
+   * through the transparent glass behind the creature.
+   */
+  setRoomVisible(visible: boolean): void;
   dispose(): void;
 }
 
@@ -273,6 +282,30 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       // unconditionally assigning here would clobber whichever fog the
       // other (currently-visible) environment just set.
       if (waterFill.visible) scene.fog = enabled ? fog : null;
+    },
+    setRoomVisible(visible: boolean) {
+      // Guarded by waterFill.visible (same pattern as setFogEnabled) so
+      // this only touches the room while fishtank is actually the active
+      // style — Renderer3D calls this every frame regardless of which
+      // style is active, and unconditionally setting visible here would
+      // un-hide the whole room even while nature/arcade is active (the
+      // room's still in the scene graph, just hidden via setVisible).
+      if (!waterFill.visible) return;
+      table.visible = visible;
+      roomFloor.visible = visible;
+      roomCeiling.visible = visible;
+      roomWallBack.visible = visible;
+      roomWallLeft.visible = visible;
+      roomWallRight.visible = visible;
+      roomWallFront.visible = visible;
+      door.visible = visible;
+      windowLeft.visible = visible;
+      windowFront.visible = visible;
+      artPieces.forEach((piece) => {
+        piece.visible = visible;
+      });
+      lamp.group.visible = visible;
+      lamp.light.visible = visible;
     },
     dispose() {
       scene.remove(
