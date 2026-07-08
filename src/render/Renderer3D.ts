@@ -1397,7 +1397,20 @@ export class Renderer3D {
         // original motivation for the wider rollout: since regular boids
         // are allowed to fly upside-down again, they no longer need (or
         // hit the singularity of) a world-up-anchored basis at all.
-        this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpForward);
+        // Right/up must be built so that Right x Forward = Up (matching
+        // MODEL_RIGHT_AXIS x FORWARD_AXIS = MODEL_UP_AXIS, i.e. local
+        // (1,0,0) x (0,1,0) = (0,0,1)) — otherwise the resulting basis
+        // matrix is left-handed (determinant -1), which is not a valid
+        // rotation. Quaternion.setFromRotationMatrix silently produces a
+        // garbage orientation for such a matrix instead of erroring, so
+        // this previously read `crossVectors(WORLD_UP_AXIS, tmpForward)`
+        // (giving Right x Forward = -Up, det -1) and models ended up
+        // facing a direction unrelated to their actual heading — most
+        // visible as the fishtank seahorse (a unicorn reskin) appearing
+        // to swim backwards, since its asymmetric head/tail shape makes
+        // a wrong-facing orientation obvious in a way a roughly-
+        // symmetric dragon/pegasus silhouette does not.
+        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
         if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
           this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
           // Re-orthogonalize: remove any component along the *current*
@@ -1408,13 +1421,13 @@ export class Renderer3D {
             // Last-ditch fallback: the persisted vector itself has
             // collapsed (forward jumped drastically frame to frame) —
             // vanishingly rare, but keep the math well-defined.
-            this.tmpPersistedRight.crossVectors(UP_REFERENCE_FALLBACK_AXIS, this.tmpForward);
+            this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
           }
           this.tmpRight.copy(this.tmpPersistedRight);
         }
         this.tmpRight.normalize();
         entity.renderRight = { x: this.tmpRight.x, y: this.tmpRight.y, z: this.tmpRight.z };
-        this.tmpUp.crossVectors(this.tmpForward, this.tmpRight).normalize();
+        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
         // Columns are where each local axis (X, Y, Z) maps to in world
         // space: local X -> right, local Y -> forward (matches
         // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
@@ -1428,9 +1441,14 @@ export class Renderer3D {
         // instability the dragon path works around simply doesn't arise
         // for unicorns. No persisted-right fallback, no re-
         // orthogonalization, just a direct cross product every frame.
-        this.tmpRight.crossVectors(WORLD_UP_AXIS, this.tmpForward).normalize();
+        // See the dragon branch above for why the operand order here
+        // (Forward x WorldUp, then Right x Forward) matters — the
+        // reversed order previously used produced a left-handed
+        // (determinant -1) basis, which is what caused seahorses (this
+        // predator kind's fishtank reskin) to visibly swim backwards.
+        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
         entity.renderRight = { x: this.tmpRight.x, y: this.tmpRight.y, z: this.tmpRight.z };
-        this.tmpUp.crossVectors(this.tmpForward, this.tmpRight).normalize();
+        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
         this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
         this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
       } else {
