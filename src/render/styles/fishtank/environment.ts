@@ -5,6 +5,8 @@ import {
   createDoor,
   createOverheadLamp,
   createBench,
+  createCornerStatue,
+  type CornerStatueKind,
   createTankWindow,
   rebuildTankWindow,
   createExhibitLabel,
@@ -55,6 +57,8 @@ export interface FishtankEnvironment {
   lamps: OverheadLamp[];
   /** 4 backless wooden gallery benches, one on each side of the tank (N/E/S/W), about halfway between the tank and the walls — museum/aquarium-hall seating. */
   benches: THREE.Group[];
+  /** 4 aquarium-themed corner sculptures (coral/starfish/shell clusters), one in each open corner floor square. */
+  cornerSculptures: THREE.Group[];
   /** Small static "other tank" wall windows, filling open wall stretches not covered by a mural — suggesting a wing of smaller neighboring exhibit tanks. No animation, just a dim static backdrop + a glossy glass pane. */
   tankWindows: THREE.Group[];
   /** Small museum-style placards mounted beside each tank window (see tankWindows) — sells the exhibit-hall feel. */
@@ -417,6 +421,16 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     bench.visible = false;
   });
 
+  // 4 bronze marine-animal statues (whale, dolphin, sea turtle, shark),
+  // one per diagonal corner floor square — each a distinct species so
+  // the four don't repeat, matching a real aquarium's habit of putting
+  // a different sculpture centerpiece in each gallery corner.
+  const cornerStatueKinds: CornerStatueKind[] = ['whale', 'dolphin', 'turtle', 'shark'];
+  const cornerSculptures = cornerStatueKinds.map((kind) => createCornerStatue(kind));
+  cornerSculptures.forEach((sculpture) => {
+    sculpture.visible = false;
+  });
+
   // Small static "other tank" windows, filling open wall stretches that
   // aren't already covered by a door/mural — 2 per wall, positioned in
   // placeFishtankEnvironment below.
@@ -485,6 +499,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     ...exitDoors,
     ...artPieces,
     ...benches,
+    ...cornerSculptures,
     ...tankWindows,
     ...exhibitLabels,
     ...lamps.map((lamp) => lamp.group),
@@ -509,6 +524,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     exitDoors,
     artPieces,
     benches,
+    cornerSculptures,
     tankWindows,
     exhibitLabels,
     lamps,
@@ -538,6 +554,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       });
       benches.forEach((bench) => {
         bench.visible = visible;
+      });
+      cornerSculptures.forEach((sculpture) => {
+        sculpture.visible = visible;
       });
       tankWindows.forEach((win) => {
         win.visible = visible;
@@ -588,6 +607,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       benches.forEach((bench) => {
         bench.visible = visible;
       });
+      cornerSculptures.forEach((sculpture) => {
+        sculpture.visible = visible;
+      });
       tankWindows.forEach((win) => {
         win.visible = visible;
       });
@@ -615,6 +637,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         ...exitDoors,
         ...artPieces,
         ...benches,
+        ...cornerSculptures,
         ...tankWindows,
         ...exhibitLabels,
         ...lamps.map((lamp) => lamp.group),
@@ -641,6 +664,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       exitDoors.forEach(disposeObject3D);
       artPieces.forEach(disposeObject3D);
       benches.forEach(disposeObject3D);
+      cornerSculptures.forEach(disposeObject3D);
       tankWindows.forEach(disposeObject3D);
       exhibitLabels.forEach(disposeObject3D);
       lamps.forEach((lamp) => disposeObject3D(lamp.group));
@@ -936,6 +960,23 @@ export function placeFishtankEnvironment(
     // The bench's local long axis is X; rotate it so that axis runs
     // tangentially (perpendicular to the radius) at the east/west spots.
     bench.rotation.y = angle;
+  });
+
+  // Corner sculptures: one aquarium-themed coral/shell/starfish cluster
+  // in each of the room's 4 diagonal corner floor squares — parked
+  // halfway between the lamp ring's radius (where they first sat, too
+  // close to the tank per feedback) and the room's true diagonal wall
+  // corner (wallMargin * sqrt(2), assuming a square room footprint), so
+  // they land in the open floor space nearer the actual corners.
+  const lampRingRadius = benchRadius; // same "(tankFootprint / 2 + wallMargin) / 2" radius as the lamp ring
+  const trueCornerRadius = wallMargin * Math.SQRT2;
+  const cornerRadius = (lampRingRadius + trueCornerRadius) / 2;
+  const cornerScale = doorHeight * 1.7;
+  const cornerAngles = [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4];
+  env.cornerSculptures.forEach((sculpture, i) => {
+    const angle = cornerAngles[i];
+    sculpture.position.set(center.x + Math.cos(angle) * cornerRadius, roomFloorY, center.z + Math.sin(angle) * cornerRadius);
+    sculpture.scale.set(cornerScale, cornerScale, cornerScale);
   });
 
   // "Other tank" wall windows: small static portholes filling the open
