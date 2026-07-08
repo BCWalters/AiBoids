@@ -520,17 +520,22 @@ export function createBench(): THREE.Group {
 
   const seatHeight = 0.45;
   const seatThickness = 0.06;
-  const seat = new THREE.Mesh(new THREE.BoxGeometry(1.6, seatThickness, 0.5), woodMaterial);
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(3.2, seatThickness, 0.5), woodMaterial);
   seat.position.y = seatHeight - seatThickness / 2;
   group.add(seat);
 
+  // Twice the original bench length (3.2 vs 1.6), so a middle pair of
+  // legs/rails is added for support — a real museum bench this long
+  // wouldn't just span on its two end pairs of legs.
   const legHeight = seatHeight - seatThickness;
   const legGeometry = new THREE.BoxGeometry(0.08, legHeight, 0.08);
   const legOffsets: [number, number][] = [
-    [-0.72, -0.19],
-    [-0.72, 0.19],
-    [0.72, -0.19],
-    [0.72, 0.19],
+    [-1.44, -0.19],
+    [-1.44, 0.19],
+    [0, -0.19],
+    [0, 0.19],
+    [1.44, -0.19],
+    [1.44, 0.19],
   ];
   for (const [x, z] of legOffsets) {
     const leg = new THREE.Mesh(legGeometry, woodMaterial);
@@ -538,9 +543,10 @@ export function createBench(): THREE.Group {
     group.add(leg);
   }
 
-  // A thin stretcher rail between each pair of legs, for a bit of visual
-  // structure (real benches aren't just seat + 4 floating legs).
-  const railGeometry = new THREE.BoxGeometry(1.44, 0.04, 0.04);
+  // A thin stretcher rail spanning the full length between the end legs
+  // on each side, for a bit of visual structure (real benches aren't
+  // just seat + floating legs).
+  const railGeometry = new THREE.BoxGeometry(2.96, 0.04, 0.04);
   const railFront = new THREE.Mesh(railGeometry, woodMaterial);
   railFront.position.set(0, legHeight * 0.4, -0.19);
   group.add(railFront);
@@ -608,10 +614,28 @@ function buildTankWindowContents(group: THREE.Group, aspect: number): void {
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
   const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, '#123a42');
-  grad.addColorStop(1, '#041418');
+  grad.addColorStop(0, '#0f3a58');
+  grad.addColorStop(1, '#041426');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, width, height);
+
+  // A scattering of small, muted multicolored dots behind the main fish
+  // — suggesting a few more distant/blurry fish glimpsed deeper in the
+  // neighboring tank, without competing with the painted fish shapes.
+  const dotColors = ['#6f9aa8', '#a8895f', '#8a7a9e', '#7fa88f', '#a86f7f'];
+  const dotCount = Math.max(6, Math.round(10 * aspect));
+  for (let i = 0; i < dotCount; i++) {
+    const dx = width * ((i * 0.337 + 0.05) % 1);
+    const dy = height * ((i * 0.591 + 0.12) % 1);
+    const r = height * (0.015 + 0.015 * ((i * 0.271) % 1));
+    ctx.globalAlpha = 0.35 + 0.25 * ((i * 0.193) % 1);
+    ctx.fillStyle = dotColors[i % dotColors.length];
+    ctx.beginPath();
+    ctx.arc(dx, dy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
   const fishColors = ['#f4a340', '#f2d94e', '#7fd8e8', '#ff6f61', '#8fd6e7'];
   const fishCount = Math.max(3, Math.round(4 * aspect));
   for (let i = 0; i < fishCount; i++) {
@@ -694,6 +718,122 @@ export interface OverheadLamp {
 }
 
 /** A ceiling-mounted pendant lamp (rod + shade) with a spotlight aimed straight down, standing in for the room's overhead light source. */
+export type CornerStatueKind = 'whale' | 'dolphin' | 'turtle' | 'shark';
+
+/**
+ * A weathered-bronze statue of a marine animal on a low stone pedestal,
+ * for the room's four open diagonal corner floor squares — a museum
+ * "gallery centerpiece" per corner, each a different species so the
+ * four don't read as repeats of the same prop. All four share the same
+ * pedestal and a single uniform bronze-statue material (no color
+ * variation within a statue, unlike the murals/art), since real bronze
+ * garden/museum statues are monochrome — only `kind` changes the body
+ * shape built on top.
+ */
+export function createCornerStatue(kind: CornerStatueKind): THREE.Group {
+  const group = new THREE.Group();
+
+  const pedestalMaterial = new THREE.MeshStandardMaterial({ color: 0x8f8f88, roughness: 0.85 });
+  const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.18, 16), pedestalMaterial);
+  pedestal.position.y = 0.09;
+  group.add(pedestal);
+
+  const bronze = new THREE.MeshStandardMaterial({ color: 0x5e6a5c, roughness: 0.45, metalness: 0.6 });
+  const statue = new THREE.Group();
+  statue.position.y = 0.18;
+
+  if (kind === 'whale') {
+    // A stubby, rounded body with small pectoral fins and a broad,
+    // flattened tail fluke — reads as a breaching humpback silhouette.
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), bronze);
+    body.scale.set(1.5, 0.85, 0.95);
+    body.position.set(0, 0.24, 0);
+    statue.add(body);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.18, 4), bronze);
+    tail.scale.set(1, 0.25, 2.2);
+    tail.rotation.z = -Math.PI / 2;
+    tail.rotation.y = Math.PI / 4;
+    tail.position.set(-0.42, 0.3, 0);
+    statue.add(tail);
+    [-1, 1].forEach((side) => {
+      const fin = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.24, 4), bronze);
+      fin.scale.set(1, 0.3, 1.6);
+      fin.rotation.z = side * 0.9;
+      fin.position.set(0.05, 0.14, side * 0.22);
+      statue.add(fin);
+    });
+  } else if (kind === 'dolphin') {
+    // A sleek, arched body (leaping pose) with a curved dorsal fin,
+    // a tapered beak-like snout, and an upswept tail fluke.
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.42, 4, 10), bronze);
+    body.rotation.z = Math.PI / 2 - 0.35;
+    body.position.set(0, 0.3, 0);
+    statue.add(body);
+    const snout = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.16, 8), bronze);
+    snout.rotation.z = Math.PI / 2 - 0.35;
+    snout.position.set(0.32, 0.45, 0);
+    statue.add(snout);
+    const dorsalFin = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.16, 4), bronze);
+    dorsalFin.scale.set(1, 1, 0.3);
+    dorsalFin.position.set(-0.02, 0.42, 0);
+    statue.add(dorsalFin);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.05, 4), bronze);
+    tail.scale.set(1, 0.25, 2.4);
+    tail.rotation.x = Math.PI / 2;
+    tail.rotation.z = 1.0;
+    tail.position.set(-0.32, 0.14, 0);
+    statue.add(tail);
+  } else if (kind === 'turtle') {
+    // A domed carapace, a small head craning forward, and four
+    // paddle-like flippers splayed at the shell's corners.
+    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), bronze);
+    shell.position.set(0, 0.16, 0);
+    statue.add(shell);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), bronze);
+    head.position.set(0.28, 0.15, 0);
+    statue.add(head);
+    [
+      [0.16, 0.06, 0.22],
+      [0.16, 0.06, -0.22],
+      [-0.16, 0.06, 0.24],
+      [-0.16, 0.06, -0.24],
+    ].forEach(([fx, fy, fz]) => {
+      const flipper = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.2, 4), bronze);
+      flipper.scale.set(1, 0.25, 1.6);
+      flipper.rotation.z = Math.PI / 2;
+      flipper.rotation.y = Math.atan2(fz, fx);
+      flipper.position.set(fx, fy, fz);
+      statue.add(flipper);
+    });
+  } else {
+    // 'shark' — a torpedo-shaped body, a tall triangular dorsal fin,
+    // twin pectoral fins, and an asymmetric heterocercal tail.
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.46, 4, 10), bronze);
+    body.rotation.z = Math.PI / 2;
+    body.position.set(0, 0.28, 0);
+    statue.add(body);
+    const dorsalFin = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 4), bronze);
+    dorsalFin.scale.set(1, 1, 0.25);
+    dorsalFin.position.set(0, 0.44, 0);
+    statue.add(dorsalFin);
+    [-1, 1].forEach((side) => {
+      const fin = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.18, 4), bronze);
+      fin.scale.set(1, 0.3, 1.4);
+      fin.rotation.z = side * 1.1;
+      fin.position.set(0.1, 0.2, side * 0.16);
+      statue.add(fin);
+    });
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.24, 4), bronze);
+    tail.scale.set(1, 1.4, 0.2);
+    tail.rotation.z = -Math.PI / 2;
+    tail.position.set(-0.32, 0.34, 0);
+    statue.add(tail);
+  }
+
+  group.add(statue);
+  return group;
+}
+
 export function createOverheadLamp(): OverheadLamp {
   const group = new THREE.Group();
 

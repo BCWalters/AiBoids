@@ -353,6 +353,43 @@ const DRAGON_HEADING_SMOOTHING_RATE = 6;
 // smooth correction rather than a snap.
 const DRAGON_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(720);
 
+// Fishtank sharks reuse the dragon's keepUpright entity/animation plumbing
+// (same predator, same instance set — see isShark above) but get their
+// own "stay upright" orientation model instead of the dragon's free-pitch
+// one: real sharks (and the "shark" archetype generally) read as wrong
+// when they point steeply up or down for the swoop/dive dragons are
+// allowed, so — similar to unicorns — pitch is hard-clamped to a shallow
+// range around level. Unlike unicorns, sharks are allowed a small amount
+// of both nose-up and nose-down tilt (symmetric), since a shark gently
+// angling up/down while cruising still reads as natural, just never the
+// steep near-vertical dive/climb a dragon can do.
+const SHARK_ASCEND_PITCH_RADIANS = THREE.MathUtils.degToRad(15);
+const SHARK_DESCEND_PITCH_RADIANS = THREE.MathUtils.degToRad(15);
+// Same purpose as UNICORN_MAX_UP_TILT_RADIANS: a final hard ceiling on
+// how far the dorsal/up axis is ever allowed to tilt from true vertical,
+// applied after pitch and bank are both baked in.
+const SHARK_MAX_UP_TILT_RADIANS = THREE.MathUtils.degToRad(30);
+// Own heading-smoothing rate, same idea as DRAGON_HEADING_SMOOTHING_RATE/
+// UNICORN_HEADING_SMOOTHING_RATE but tuned separately rather than shared,
+// and noticeably faster than either: the fishtank is a small, cramped
+// space compared to the open sky dragons/unicorns fly in, so sharks
+// bounce off the boundary and reverse course far more often. A slow
+// heading-smoothing rate combined with a slow turn-rate cap (below) made
+// the displayed body lag well behind the sim's actual (unsmoothed)
+// position for a noticeable stretch after every reversal — reported as
+// the shark appearing to "swim backwards", nose still pointing the old
+// way while it visibly slides off in the new direction. Speeding both up
+// keeps the visible facing glued much more tightly to the actual
+// direction of travel.
+const SHARK_HEADING_SMOOTHING_RATE = 14;
+// Final safety-net turn-rate cap, tracked in its own per-shark map
+// (sharkDisplayQuats) — see dragonDisplayQuats'/unicornDisplayQuats' doc
+// comments for why this is kept independent rather than shared. Set
+// higher than the dragon's — see SHARK_HEADING_SMOOTHING_RATE's doc
+// comment for why sharks need to snap around faster than a large dragon
+// in open sky.
+const SHARK_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(1080);
+
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
 // "forward" direction we rotate onto each entity's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
@@ -619,6 +656,18 @@ export class Renderer3D {
    * final turn-rate clamp happens to be structurally similar.
    */
   private unicornDisplayQuats = new Map<number, THREE.Quaternion>();
+  /**
+   * Same turn-rate-limiting safety net again, this time for fishtank
+   * sharks (uprightStyle === 'shark') — kept as its own map/constant
+   * (SHARK_MAX_TURN_RADIANS_PER_SEC) rather than reusing dragonDisplayQuats
+   * even though sharks and dragons are the very same predator entities
+   * (see isShark above): the two styles clamp pitch completely
+   * differently, so sharing a display-quaternion map would let a stale
+   * dragon-style orientation (or vice versa) leak in as the rotateTowards
+   * starting point on a style switch. Cleared alongside dragonDisplayQuats
+   * whenever the shared hawk/dragon/shark instance set is rebuilt.
+   */
+  private sharkDisplayQuats = new Map<number, THREE.Quaternion>();
   /**
    * Per-unicorn accumulated flap phase (radians) — unicorns modulate
    * their flap *frequency* by vertical velocity (see UNICORN_CLIMB_FLAP_
@@ -1012,6 +1061,7 @@ export class Renderer3D {
       );
       this.predatorInstanceKeys.set('hawk', hawkKey);
       this.dragonDisplayQuats.clear();
+      this.sharkDisplayQuats.clear();
     }
 
     // Unicorns get the full pegasus-with-rainbow-wings geometry in nature
@@ -1224,12 +1274,16 @@ export class Renderer3D {
     keepUpright: boolean = false,
     // Which "stay upright" orientation model to use when keepUpright is
     // true — 'dragon' (near-pole-safe basis + free pitch, for full
-    // swoop/dive/roll acrobatics) or 'unicorn' (hard-clamped pitch +
-    // final up-tilt safety clamp, for a flat, floaty pegasus-style
-    // flight). These are deliberately separate code paths below, not a
-    // shared one parameterized by a bias knob — see the UNICORN_* tuning
+    // swoop/dive/roll acrobatics), 'unicorn' (hard-clamped pitch + final
+    // up-tilt safety clamp, for a flat, floaty pegasus-style flight), or
+    // 'shark' (same hard-clamped-pitch shape as 'unicorn', but its own
+    // shallower symmetric pitch range/constants — see SHARK_ASCEND_PITCH_
+    // RADIANS' doc comment — for a shark that stays mostly horizontal
+    // instead of pointing steeply up/down like a dragon). These are
+    // deliberately separate code paths below, not a shared one
+    // parameterized by a bias knob — see the UNICORN_*/SHARK_* tuning
     // constants' doc comments.
-    uprightStyle: 'dragon' | 'unicorn' = 'dragon',
+    uprightStyle: 'dragon' | 'unicorn' | 'shark' = 'dragon',
     bankScale: number = 1,
     // Small-bird-only: a flat, distinct instance color for the separate
     // `beak` InstancedMesh part (see BoidSpeciesConfig.beakColor's doc
@@ -1302,7 +1356,7 @@ export class Renderer3D {
           // above for why this is needed in addition to whatever
           // per-style basis-building stabilization follows below. Each
           // style uses its own rate constant rather than sharing one.
-          const rate = 1 - Math.exp(-dt * (uprightStyle === 'unicorn' ? UNICORN_HEADING_SMOOTHING_RATE : DRAGON_HEADING_SMOOTHING_RATE));
+          const rate = 1 - Math.exp(-dt * (uprightStyle === 'unicorn' ? UNICORN_HEADING_SMOOTHING_RATE : uprightStyle === 'shark' ? SHARK_HEADING_SMOOTHING_RATE : DRAGON_HEADING_SMOOTHING_RATE));
           let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
           let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
           let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
@@ -1315,15 +1369,18 @@ export class Renderer3D {
       const dir = entity.renderHeading;
       this.tmpForward.set(dir.x, dir.y, dir.z);
 
-      if (keepUpright && uprightStyle === 'unicorn') {
+      if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
         // Hard pitch clamp (not a proportional flatten) — see
-        // UNICORN_ASCEND_PITCH_RADIANS / UNICORN_DESCEND_PITCH_RADIANS'
-        // doc comment: ascending is clamped to exactly flat, descending
-        // gets a small allowed nose-down droop for a "floating down"
-        // feel. Only the orientation basis is touched here, not
+        // UNICORN_ASCEND_PITCH_RADIANS / UNICORN_DESCEND_PITCH_RADIANS
+        // (or SHARK_ASCEND_PITCH_RADIANS / SHARK_DESCEND_PITCH_RADIANS for
+        // sharks) doc comments: unicorns clamp ascending to exactly flat
+        // with a small allowed nose-down droop while descending; sharks
+        // instead get a small *symmetric* range on both sides, since a
+        // shark gently angling up as well as down still reads as natural.
+        // Only the orientation basis is touched here, not
         // entity.renderHeading/velocity, so the actual flight path
-        // (where the flock logic takes the unicorn) is unaffected —
-        // just how level the model looks while following it.
+        // (where the flock logic takes the entity) is unaffected — just
+        // how level the model looks while following it.
         this.tmpUnicornHorizontal.set(this.tmpForward.x, 0, this.tmpForward.z);
         const horizontalLen = this.tmpUnicornHorizontal.length();
         if (horizontalLen > 1e-6) {
@@ -1331,8 +1388,11 @@ export class Renderer3D {
           const rawPitch = Math.atan2(this.tmpForward.y, horizontalLen);
           // Ceiling is UNICORN_ASCEND_PITCH_RADIANS (0 — never nose-up),
           // floor is -UNICORN_DESCEND_PITCH_RADIANS (a small allowed
-          // nose-down droop while sinking).
-          const clampedPitch = THREE.MathUtils.clamp(rawPitch, -UNICORN_DESCEND_PITCH_RADIANS, UNICORN_ASCEND_PITCH_RADIANS);
+          // nose-down droop while sinking). Sharks use their own shallow
+          // symmetric ceiling/floor instead.
+          const ascendLimit = uprightStyle === 'shark' ? SHARK_ASCEND_PITCH_RADIANS : UNICORN_ASCEND_PITCH_RADIANS;
+          const descendLimit = uprightStyle === 'shark' ? SHARK_DESCEND_PITCH_RADIANS : UNICORN_DESCEND_PITCH_RADIANS;
+          const clampedPitch = THREE.MathUtils.clamp(rawPitch, -descendLimit, ascendLimit);
           this.tmpForward.copy(this.tmpUnicornHorizontal).multiplyScalar(Math.cos(clampedPitch));
           this.tmpForward.y = Math.sin(clampedPitch);
         }
@@ -1433,19 +1493,20 @@ export class Renderer3D {
         // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
         this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
         this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
-      } else if (keepUpright && uprightStyle === 'unicorn') {
-        // Unicorns: a much simpler basis than the dragon path above, and
-        // deliberately so — since pitch was already hard-clamped to a
-        // small angle further up, tmpForward here is never anywhere near
-        // parallel to WORLD_UP_AXIS, so the near-pole "right" vector
-        // instability the dragon path works around simply doesn't arise
-        // for unicorns. No persisted-right fallback, no re-
-        // orthogonalization, just a direct cross product every frame.
+      } else if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
+        // Unicorns/sharks: a much simpler basis than the dragon path
+        // above, and deliberately so — since pitch was already
+        // hard-clamped to a small angle further up, tmpForward here is
+        // never anywhere near parallel to WORLD_UP_AXIS, so the near-pole
+        // "right" vector instability the dragon path works around simply
+        // doesn't arise for either of these styles. No persisted-right
+        // fallback, no re-orthogonalization, just a direct cross product
+        // every frame.
         // See the dragon branch above for why the operand order here
         // (Forward x WorldUp, then Right x Forward) matters — the
         // reversed order previously used produced a left-handed
-        // (determinant -1) basis, which is what caused seahorses (this
-        // predator kind's fishtank reskin) to visibly swim backwards.
+        // (determinant -1) basis, which is what caused seahorses (the
+        // fishtank reskin of unicorns) to visibly swim backwards.
         this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
         entity.renderRight = { x: this.tmpRight.x, y: this.tmpRight.y, z: this.tmpRight.z };
         this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
@@ -1528,6 +1589,33 @@ export class Renderer3D {
           }
         }
         this.bodyQuat.copy(displayQuat);
+      } else if (keepUpright && uprightStyle === 'shark') {
+        // Same turn-rate-limiting + final up-tilt safety clamp as the
+        // unicorn branch above, reusing its own map/constants (see
+        // sharkDisplayQuats' / SHARK_MAX_TURN_RADIANS_PER_SEC' /
+        // SHARK_MAX_UP_TILT_RADIANS' doc comments) rather than sharing the
+        // unicorn's, since sharks/unicorns are otherwise-unrelated
+        // entities that just happen to use the same shape of orientation
+        // model.
+        let displayQuat = this.sharkDisplayQuats.get(entity.id);
+        if (!displayQuat) {
+          displayQuat = this.bodyQuat.clone();
+          this.sharkDisplayQuats.set(entity.id, displayQuat);
+        } else {
+          displayQuat.rotateTowards(this.bodyQuat, SHARK_MAX_TURN_RADIANS_PER_SEC * dt);
+        }
+
+        this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
+        const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
+        if (upTilt > SHARK_MAX_UP_TILT_RADIANS) {
+          this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
+          if (this.tmpUnicornTiltAxis.lengthSq() > 1e-10) {
+            this.tmpUnicornTiltAxis.normalize();
+            this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - SHARK_MAX_UP_TILT_RADIANS);
+            displayQuat.premultiply(this.unicornTiltCorrection);
+          }
+        }
+        this.bodyQuat.copy(displayQuat);
       }
 
       // Body: just position + orientation, no flap. Caught boids shrink
@@ -1551,10 +1639,11 @@ export class Renderer3D {
       set.body.setMatrixAt(i, this.dummy.matrix);
       if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
       if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
-      // Dragon tails get an extra sway (see DRAGON_TAIL_SWAY_AMPLITUDE)
-      // computed below once the wingbeat phase is known; every other
-      // creature's tail just follows the body rigidly, as before.
-      if (set.tail && uprightStyle !== 'dragon') set.tail.setMatrixAt(i, this.dummy.matrix);
+      // Dragon/shark tails get an extra sway (see DRAGON_TAIL_SWAY_
+      // AMPLITUDE / SHARK_TAIL_SWAY_AMPLITUDE) computed below once the
+      // wingbeat phase is known; every other creature's tail just
+      // follows the body rigidly, as before.
+      if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
 
       // Wings: apply an extra local flap rotation around the forward axis
       // before combining with the shared body orientation, so both wings
@@ -1599,7 +1688,7 @@ export class Renderer3D {
       // motion rather than an unrelated animation, without necessarily
       // moving in lockstep with it.
       if (set.tail) {
-        if (uprightStyle === 'dragon') {
+        if (uprightStyle === 'dragon' || uprightStyle === 'shark') {
           const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
           const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
           this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
@@ -2118,7 +2207,7 @@ export class Renderer3D {
         // geometry has no baked vertex colors to read yet).
         !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
         isDragon,
-        'dragon',
+        isShark ? 'shark' : 'dragon',
         1,
         undefined,
         // Sharks: fins droop down at rest and barely flap; the tail
@@ -2173,6 +2262,42 @@ export class Renderer3D {
         isFishtank ? TANK_VISUAL_SCALE : 1,
         isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
       );
+    }
+
+    if (isFishtank) {
+      // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
+      // maxCameraDistance (set once, in ensureScene) has to satisfy the
+      // *worst-case* permitted tilt at all times, which is overly
+      // conservative at/near a level (untitled) view — there's no
+      // floor/ceiling to clip through at all when looking straight
+      // across the room. Recomputed every frame (cheap pure math, no
+      // allocations worth caching) from the camera's *current* polar
+      // angle via OrbitControls' own getPolarAngle(), so at level view
+      // the camera can pull back much farther, right up near the far
+      // wall (per an explicit ask to "zoom out farther... virtually
+      // close to the wall behind"), while steeper tilts still clamp
+      // down toward the same safe distance computed by
+      // computeFishtankRoomBounds.
+      const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+      const polarAngle = this.controls.getPolarAngle();
+      // 0 at a level/horizontal view, growing toward cameraTiltUpRad
+      // (looking down) or cameraTiltDownRad (looking up) at the tilt
+      // extremes — see FishtankRoomBounds' cameraTiltUpRad/DownRad.
+      const elevation = Math.abs(polarAngle - Math.PI / 2);
+      const distToCeiling = bounds.roomFloorY + bounds.roomHeight - bounds.tankCenterY;
+      const distToFloor = bounds.tankCenterY - bounds.roomFloorY;
+      // Looking down (polarAngle < PI/2) rises toward the ceiling as
+      // distance grows; looking up (polarAngle > PI/2) drops toward the
+      // floor — each direction is clamped by its own clearance.
+      const vertClearance = polarAngle < Math.PI / 2 ? distToCeiling : distToFloor;
+      const sinE = Math.sin(elevation);
+      const cosE = Math.cos(elevation);
+      // Safety factor (0.92) matches computeFishtankRoomBounds' own 0.9,
+      // just shy of 1 so the camera never grazes the actual floor/
+      // ceiling/wall plane.
+      const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
+      const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
+      this.controls.maxDistance = Math.min(vertCap, horizCap);
     }
 
     this.controls.update();

@@ -5,6 +5,8 @@ import {
   createDoor,
   createOverheadLamp,
   createBench,
+  createCornerStatue,
+  type CornerStatueKind,
   createTankWindow,
   rebuildTankWindow,
   createExhibitLabel,
@@ -55,6 +57,8 @@ export interface FishtankEnvironment {
   lamps: OverheadLamp[];
   /** 4 backless wooden gallery benches, one on each side of the tank (N/E/S/W), about halfway between the tank and the walls — museum/aquarium-hall seating. */
   benches: THREE.Group[];
+  /** 4 aquarium-themed corner sculptures (coral/starfish/shell clusters), one in each open corner floor square. */
+  cornerSculptures: THREE.Group[];
   /** Small static "other tank" wall windows, filling open wall stretches not covered by a mural — suggesting a wing of smaller neighboring exhibit tanks. No animation, just a dim static backdrop + a glossy glass pane. */
   tankWindows: THREE.Group[];
   /** Small museum-style placards mounted beside each tank window (see tankWindows) — sells the exhibit-hall feel. */
@@ -183,6 +187,24 @@ export interface FishtankRoomBounds {
    * "human scale" reference has to duplicate the formula.
    */
   doorHeight: number;
+  /**
+   * Multiplier applied to the tank's raw (sim-derived) swim height to
+   * get the actual rendered glass box height — intentionally taller
+   * than the sim's own vertical swim range (rather than exactly matching
+   * it, as this used to) so there's headroom above the highest point any
+   * fish/predator can actually reach, and the water fill (see
+   * `waterLevelFrac`) can sit clearly above that range too — fixing
+   * fish/sharks visually poking their nose/tail out of the water at the
+   * top of their swim range.
+   */
+  tankHeightScale: number;
+  /**
+   * Fraction of the (already-taller, see `tankHeightScale`) glass box
+   * height that the water actually fills, leaving a thin air gap at the
+   * very top of the glass — like a real aquarium's water line sitting
+   * just under the rim, rather than flush with the glass top.
+   */
+  waterLevelFrac: number;
 }
 
 export function computeFishtankRoomBounds(
@@ -213,8 +235,16 @@ export function computeFishtankRoomBounds(
 
   // The tank now stands directly on the floor (bottom-anchored at y=0,
   // no table beneath it — see placeFishtankEnvironment's `center.y` doc
-  // comment), so its own top is simply its full (scaled) height.
-  const tankTopY = worldHeight;
+  // comment). Its glass top is intentionally taller than the sim's own
+  // vertical swim range (`worldHeight`, the fish's actual max Y) — see
+  // `tankHeightScale`'s doc comment — so there's headroom above the
+  // highest a fish/predator can actually reach, and the water fill (see
+  // `waterLevelFrac`) sits clearly above that range too, instead of
+  // flush with the glass top as it used to (which left fish/sharks at
+  // the top of their swim range visibly poking out of the water).
+  const tankHeightScale = 1.22;
+  const waterLevelFrac = 0.94;
+  const tankTopY = worldHeight * tankHeightScale;
   const maxDim = Math.max(worldWidth, worldHeight, worldDepth);
   const glassThickness = maxDim * 0.012;
   // Tiny gap between the glass box's bottom face and the floor beneath
@@ -257,7 +287,18 @@ export function computeFishtankRoomBounds(
   const horizontalCap = (wallMargin / Math.cos(Math.max(cameraTiltUpRad, cameraTiltDownRad))) * 0.9;
   const maxCameraDistance = Math.min(upCap, downCap, horizontalCap);
 
-  return { wallMargin, roomHeight, roomFloorY, tankCenterY, maxCameraDistance, cameraTiltUpRad, cameraTiltDownRad, doorHeight };
+  return {
+    wallMargin,
+    roomHeight,
+    roomFloorY,
+    tankCenterY,
+    maxCameraDistance,
+    cameraTiltUpRad,
+    cameraTiltDownRad,
+    doorHeight,
+    tankHeightScale,
+    waterLevelFrac,
+  };
 }
 
 function disposeObject3D(root: THREE.Object3D): void {
@@ -417,6 +458,16 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     bench.visible = false;
   });
 
+  // 4 bronze marine-animal statues (whale, dolphin, sea turtle, shark),
+  // one per diagonal corner floor square — each a distinct species so
+  // the four don't repeat, matching a real aquarium's habit of putting
+  // a different sculpture centerpiece in each gallery corner.
+  const cornerStatueKinds: CornerStatueKind[] = ['whale', 'dolphin', 'turtle', 'shark'];
+  const cornerSculptures = cornerStatueKinds.map((kind) => createCornerStatue(kind));
+  cornerSculptures.forEach((sculpture) => {
+    sculpture.visible = false;
+  });
+
   // Small static "other tank" windows, filling open wall stretches that
   // aren't already covered by a door/mural — 2 per wall, positioned in
   // placeFishtankEnvironment below.
@@ -485,6 +536,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     ...exitDoors,
     ...artPieces,
     ...benches,
+    ...cornerSculptures,
     ...tankWindows,
     ...exhibitLabels,
     ...lamps.map((lamp) => lamp.group),
@@ -509,6 +561,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     exitDoors,
     artPieces,
     benches,
+    cornerSculptures,
     tankWindows,
     exhibitLabels,
     lamps,
@@ -538,6 +591,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       });
       benches.forEach((bench) => {
         bench.visible = visible;
+      });
+      cornerSculptures.forEach((sculpture) => {
+        sculpture.visible = visible;
       });
       tankWindows.forEach((win) => {
         win.visible = visible;
@@ -588,6 +644,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       benches.forEach((bench) => {
         bench.visible = visible;
       });
+      cornerSculptures.forEach((sculpture) => {
+        sculpture.visible = visible;
+      });
       tankWindows.forEach((win) => {
         win.visible = visible;
       });
@@ -615,6 +674,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         ...exitDoors,
         ...artPieces,
         ...benches,
+        ...cornerSculptures,
         ...tankWindows,
         ...exhibitLabels,
         ...lamps.map((lamp) => lamp.group),
@@ -641,6 +701,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       exitDoors.forEach(disposeObject3D);
       artPieces.forEach(disposeObject3D);
       benches.forEach(disposeObject3D);
+      cornerSculptures.forEach(disposeObject3D);
       tankWindows.forEach(disposeObject3D);
       exhibitLabels.forEach(disposeObject3D);
       lamps.forEach((lamp) => disposeObject3D(lamp.group));
@@ -694,15 +755,23 @@ export function placeFishtankEnvironment(
   worldWidth *= TANK_VISUAL_SCALE;
   worldHeight *= TANK_VISUAL_SCALE;
   worldDepth *= TANK_VISUAL_SCALE;
-  // Now that worldHeight is inflated, place the tank's vertical center
-  // so its bottom lands at y=0 (see comment above).
-  center.y = worldHeight / 2;
+  // The rendered glass box is intentionally taller than the fish's own
+  // swim height (`worldHeight`) — see `tankHeightScale`'s doc comment on
+  // FishtankRoomBounds — so there's headroom above the highest a
+  // fish/predator can actually reach. Now that glassHeight is inflated,
+  // place the tank's vertical center so its bottom lands at y=0 (see
+  // comment above) — note this is the glass box's own center, NOT
+  // `tankCenterY` (which stays anchored to the fish's actual swim range,
+  // for the camera to look at, rather than drifting up into the now
+  // taller-than-necessary glass).
+  const glassHeight = worldHeight * roomBounds.tankHeightScale;
+  center.y = glassHeight / 2;
 
-  const maxDim = Math.max(worldWidth, worldHeight, worldDepth);
+  const maxDim = Math.max(worldWidth, glassHeight, worldDepth);
   // Thin glass shell just outside the tank's actual swim bounds.
   const glassThickness = maxDim * 0.012;
 
-  env.glassPanels.scale.set(worldWidth + glassThickness * 2, worldHeight + glassThickness * 2, worldDepth + glassThickness * 2);
+  env.glassPanels.scale.set(worldWidth + glassThickness * 2, glassHeight + glassThickness * 2, worldDepth + glassThickness * 2);
   env.glassPanels.position.copy(center);
 
   // Metal frame: 12 thin bars tracing the outer glass box's edges,
@@ -711,7 +780,7 @@ export function placeFishtankEnvironment(
   // aquarium framing.
   const frameBarThickness = maxDim * 0.016;
   const halfW = (worldWidth + glassThickness * 2) / 2;
-  const halfH = (worldHeight + glassThickness * 2) / 2;
+  const halfH = (glassHeight + glassThickness * 2) / 2;
   const halfD = (worldDepth + glassThickness * 2) / 2;
   const edgeSpecs: { axis: 'x' | 'y' | 'z'; oy: number; oz: number; ox: number }[] = [
     // 4 edges running along X, at each Y/Z corner.
@@ -732,7 +801,7 @@ export function placeFishtankEnvironment(
   ];
   edgeSpecs.forEach((spec, i) => {
     const bar = env.frame.getObjectByName(`frameBar${i}`) as THREE.Mesh;
-    const length = spec.axis === 'x' ? worldWidth + glassThickness * 2 : spec.axis === 'y' ? worldHeight + glassThickness * 2 : worldDepth + glassThickness * 2;
+    const length = spec.axis === 'x' ? worldWidth + glassThickness * 2 : spec.axis === 'y' ? glassHeight + glassThickness * 2 : worldDepth + glassThickness * 2;
     if (spec.axis === 'x') bar.scale.set(length, frameBarThickness, frameBarThickness);
     else if (spec.axis === 'y') bar.scale.set(frameBarThickness, length, frameBarThickness);
     else bar.scale.set(frameBarThickness, frameBarThickness, length);
@@ -744,8 +813,15 @@ export function placeFishtankEnvironment(
   // gap here causes visible z-fighting moiré stripes at grazing viewing
   // angles (most noticeable looking across the tank floor).
   const inset = glassThickness * 4;
-  env.waterFill.scale.set(worldWidth - inset, worldHeight - inset, worldDepth - inset);
-  env.waterFill.position.copy(center);
+  // Water height is a fraction of the (taller-than-swim-range) glass
+  // height — see `waterLevelFrac`'s doc comment — leaving a thin air gap
+  // at the very top of the glass, like a real aquarium's water line.
+  // Bottom-anchored at y=0 like the glass box itself (not centered on
+  // the glass's own vertical middle), so the water surface sits at a
+  // fixed height above the floor regardless of the inset.
+  const waterHeight = glassHeight * roomBounds.waterLevelFrac;
+  env.waterFill.scale.set(worldWidth - inset, waterHeight - inset, worldDepth - inset);
+  env.waterFill.position.set(center.x, waterHeight / 2, center.z);
 
   // Base trim: a dark plastic plinth bridging the small gap between the
   // glass box's bottom edge and the room floor beneath it (no table
@@ -936,6 +1012,23 @@ export function placeFishtankEnvironment(
     // The bench's local long axis is X; rotate it so that axis runs
     // tangentially (perpendicular to the radius) at the east/west spots.
     bench.rotation.y = angle;
+  });
+
+  // Corner sculptures: one aquarium-themed coral/shell/starfish cluster
+  // in each of the room's 4 diagonal corner floor squares — parked
+  // halfway between the lamp ring's radius (where they first sat, too
+  // close to the tank per feedback) and the room's true diagonal wall
+  // corner (wallMargin * sqrt(2), assuming a square room footprint), so
+  // they land in the open floor space nearer the actual corners.
+  const lampRingRadius = benchRadius; // same "(tankFootprint / 2 + wallMargin) / 2" radius as the lamp ring
+  const trueCornerRadius = wallMargin * Math.SQRT2;
+  const cornerRadius = (lampRingRadius + trueCornerRadius) / 2;
+  const cornerScale = doorHeight * 1.7;
+  const cornerAngles = [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4];
+  env.cornerSculptures.forEach((sculpture, i) => {
+    const angle = cornerAngles[i];
+    sculpture.position.set(center.x + Math.cos(angle) * cornerRadius, roomFloorY, center.z + Math.sin(angle) * cornerRadius);
+    sculpture.scale.set(cornerScale, cornerScale, cornerScale);
   });
 
   // "Other tank" wall windows: small static portholes filling the open
