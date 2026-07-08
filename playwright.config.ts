@@ -15,11 +15,25 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:4319',
     trace: 'retain-on-failure',
+    // CI runners have no GPU, so Chromium falls back to software WebGL
+    // (SwiftShader). It works, but is much slower than a real GPU —
+    // giving actions more time to complete avoids flaky timeouts there.
+    actionTimeout: 15_000,
   },
+  timeout: process.env.CI ? 60_000 : 30_000,
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: {
+          // Explicitly force the software GL (SwiftShader) rasterizer
+          // rather than relying on Chromium's default GPU-detection
+          // fallback, which can be inconsistent across CI environments
+          // and occasionally yields a canvas with no WebGL context at all.
+          args: ['--use-gl=swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'],
+        },
+      },
     },
   ],
   webServer: {

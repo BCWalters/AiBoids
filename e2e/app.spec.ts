@@ -40,7 +40,15 @@ function failOnConsoleErrors(page: Page): void {
  * compositing output, so it reliably captures what's actually on screen.
  */
 async function canvasHasVisibleContent(page: Page, canvasSelector: string): Promise<boolean> {
-  const png = await page.locator(canvasSelector).screenshot();
+  // Use a clipped full-page screenshot rather than locator.screenshot():
+  // the locator variant runs Playwright's element actionability checks
+  // (scroll-into-view + "wait until stable") first, which can time out
+  // on CI runners doing slow software WebGL rendering even though the
+  // canvas itself is perfectly stable — a full-page screenshot skips
+  // those per-element checks entirely.
+  const box = await page.locator(canvasSelector).boundingBox();
+  if (!box) return false;
+  const png = await page.screenshot({ clip: box });
   // A canvas that's just a single flat clear color compresses to a tiny
   // PNG (often well under 1KB) regardless of resolution; real rendered
   // content (sky gradients, terrain, creatures) compresses to something
