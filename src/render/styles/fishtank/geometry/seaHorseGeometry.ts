@@ -72,9 +72,12 @@ function buildSeaHorseShellGeometry(
 } {
   const halfLen = length * 0.5;
   const spine: SpinePoint[] = [
-    { y: -halfLen * 0.22, z: -length * 0.38, radius: width * 0.05, xScale: 0.32, zScale: 0.58 },
-    { y: -halfLen * 0.18, z: -length * 0.31, radius: width * 0.14, xScale: 0.42, zScale: 0.84 },
-    { y: -halfLen * 0.125, z: -length * 0.24, radius: width * 0.22, xScale: 0.54, zScale: 1.02 },
+    // Radii here are widened another 25% (now ~0.078/0.219/0.344, cumulative
+    // ~1.56x the original 0.05/0.14/0.22) so the body tapers more gradually
+    // into the tail attachment, matching a correspondingly thinner tail base.
+    { y: -halfLen * 0.22, z: -length * 0.38, radius: width * 0.078, xScale: 0.32, zScale: 0.58 },
+    { y: -halfLen * 0.18, z: -length * 0.31, radius: width * 0.219, xScale: 0.42, zScale: 0.84 },
+    { y: -halfLen * 0.125, z: -length * 0.24, radius: width * 0.344, xScale: 0.54, zScale: 1.02 },
     { y: -halfLen * 0.06, z: -length * 0.14, radius: width * 0.27, xScale: 0.58, zScale: 1.18 },
     { y: 0, z: -length * 0.02, radius: width * 0.295, xScale: 0.6, zScale: 1.28 },
     { y: halfLen * 0.05, z: length * 0.08, radius: width * 0.255, xScale: 0.56, zScale: 1.2 },
@@ -158,7 +161,10 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
   const halfLen = length * 0.5;
   const anchorY = -halfLen * 0.16;
   const anchorZ = -length * 0.28;
-  const bodyEndRadius = width * 0.2;
+  // Another 25% thinner (0.15 -> ~0.1125), paired with another 25%-wider body
+  // taper near the attachment point, so the tail reads as a natural extension
+  // of the body rather than an oversized stub.
+  const bodyEndRadius = width * 0.1125;
   const tailTipRadius = width * 0.014;
   const maxRadius = length * 0.205;
   const minRadius = length * 0.038;
