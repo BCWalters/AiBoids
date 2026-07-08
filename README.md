@@ -27,9 +27,18 @@ dev server hot-reloads as you edit source files.
 ### Other scripts
 
 ```bash
-npm run build     # type-check (tsc) + production build to dist/
-npm run preview   # locally preview the production build
+npm run build      # type-check (tsc) + production build to dist/
+npm run preview    # locally preview the production build
+npm test           # unit tests (Vitest) — pure sim/i18n logic
+npm run test:watch # unit tests in watch mode
+npm run test:e2e   # end-to-end smoke tests (Playwright Test) — boots a
+                    # real browser against a dev server and checks the
+                    # app loads, mode/visual-style switching keeps
+                    # rendering, and boids are actually visible on screen
 ```
+
+`npm run test:e2e` auto-starts its own dev server on port 4319 and needs
+Chromium installed once via `npx playwright install chromium`.
 
 ## Documentation
 
