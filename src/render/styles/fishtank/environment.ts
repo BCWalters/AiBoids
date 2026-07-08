@@ -6,6 +6,8 @@ import {
   createOverheadLamp,
   createBench,
   createTankWindow,
+  rebuildTankWindow,
+  createExhibitLabel,
   type OverheadLamp,
 } from './roomDecor';
 
@@ -55,6 +57,8 @@ export interface FishtankEnvironment {
   benches: THREE.Group[];
   /** Small static "other tank" wall windows, filling open wall stretches not covered by a mural — suggesting a wing of smaller neighboring exhibit tanks. No animation, just a dim static backdrop + a glossy glass pane. */
   tankWindows: THREE.Group[];
+  /** Small museum-style placards mounted beside each tank window (see tankWindows) — sells the exhibit-hall feel. */
+  exhibitLabels: THREE.Group[];
   ambientLight: THREE.AmbientLight;
   keyLight: THREE.DirectionalLight;
   fog: THREE.Fog;
@@ -421,6 +425,24 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     win.visible = false;
   });
 
+  // A small museum-style placard beside each tank window above, with a
+  // generic exhibit-hall title/subtitle — sells the "real aquarium wing"
+  // feel, matching the (window order: back-left, back-right, front-left,
+  // front-right, left-far, left-near, right-far, right-near) ordering.
+  const exhibitLabels = [
+    createExhibitLabel('Coral Shallows', 'Reef community exhibit'),
+    createExhibitLabel('Open Water School', 'Pelagic species'),
+    createExhibitLabel('Tide Pool Wing', 'Coastal species'),
+    createExhibitLabel('Kelp Forest', 'Temperate species'),
+    createExhibitLabel('Deep Blue Wing', 'Mid-water species'),
+    createExhibitLabel('Mangrove Shallows', 'Juvenile species'),
+    createExhibitLabel('Cold Water Wing', 'Northern species'),
+    createExhibitLabel('Estuary Habitat', 'Brackish species'),
+  ];
+  exhibitLabels.forEach((label) => {
+    label.visible = false;
+  });
+
   // 8 ceiling lamps distributed around the floor outside the tank
   // footprint (positioned in placeFishtankEnvironment below), replacing
   // the old single lamp centered directly above the tank — eight simple
@@ -464,6 +486,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     ...artPieces,
     ...benches,
     ...tankWindows,
+    ...exhibitLabels,
     ...lamps.map((lamp) => lamp.group),
     ambientLight,
     keyLight,
@@ -487,6 +510,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     artPieces,
     benches,
     tankWindows,
+    exhibitLabels,
     lamps,
     ambientLight,
     keyLight,
@@ -517,6 +541,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       });
       tankWindows.forEach((win) => {
         win.visible = visible;
+      });
+      exhibitLabels.forEach((label) => {
+        label.visible = visible;
       });
       lamps.forEach((lamp) => {
         lamp.group.visible = visible;
@@ -564,6 +591,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       tankWindows.forEach((win) => {
         win.visible = visible;
       });
+      exhibitLabels.forEach((label) => {
+        label.visible = visible;
+      });
       lamps.forEach((lamp) => {
         lamp.group.visible = visible;
         lamp.light.visible = visible;
@@ -586,6 +616,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         ...artPieces,
         ...benches,
         ...tankWindows,
+        ...exhibitLabels,
         ...lamps.map((lamp) => lamp.group),
         ambientLight,
         keyLight,
@@ -611,6 +642,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       artPieces.forEach(disposeObject3D);
       benches.forEach(disposeObject3D);
       tankWindows.forEach(disposeObject3D);
+      exhibitLabels.forEach(disposeObject3D);
       lamps.forEach((lamp) => disposeObject3D(lamp.group));
     },
   };
@@ -843,17 +875,28 @@ export function placeFishtankEnvironment(
   // walls (see the per-wall x/z fractions used above).
   const [, , , , muralWhale, muralWelcome] = env.artPieces;
   const muralY = roomFloorY + roomHeight * 0.45;
+  // createArtPiece's frame is BoxGeometry(1.12 * aspect, 1.12, 0.06), so
+  // half-width in world units is scale * aspect * 0.56 — used below to
+  // compute exact open-gap boundaries for the small tank windows so they
+  // can never overlap a mural, regardless of the room's actual (runtime-
+  // dependent) dimensions.
+  const artHalfWidth = artScale * 0.56;
+  const doorHalfWidth = doorScale * 0.54; // door frame local width 1.08
 
   // Blue whale landscape mural: centered on the (otherwise mostly bare)
   // left wall, clear of exitLeft (parked at wallMargin * 0.4 along Z).
+  const whaleAspect = 2.4;
   const whaleScale = doorHeight * 2.2;
+  const whaleHalfWidth = whaleScale * whaleAspect * 0.56;
   muralWhale.scale.set(whaleScale, whaleScale, whaleScale);
   muralWhale.position.set(center.x - wallMargin + wallHug, muralY, center.z);
   muralWhale.rotation.y = Math.PI / 2;
 
   // "Lily and Mia's Aquarium" welcome mural: centered on the front wall,
   // clear of exitFront/artFront (parked at ±wallMargin * 0.45 along X).
+  const welcomeAspect = 2.2;
   const welcomeScale = doorHeight * 1.8;
+  const welcomeHalfWidth = welcomeScale * welcomeAspect * 0.56;
   muralWelcome.scale.set(welcomeScale, welcomeScale, welcomeScale);
   muralWelcome.position.set(center.x, muralY, center.z + wallMargin - wallHug);
   muralWelcome.rotation.y = Math.PI;
@@ -862,14 +905,18 @@ export function placeFishtankEnvironment(
   // beige wall without a big feature), clear of the main door (parked
   // at -wallMargin * 0.35) and artRight (parked at +wallMargin * 0.4).
   const [, , , , , , muralSquid, muralTurtle] = env.artPieces;
+  const squidAspect = 2.2;
   const squidScale = doorHeight * 2.0;
+  const squidHalfWidth = squidScale * squidAspect * 0.56;
   muralSquid.scale.set(squidScale, squidScale, squidScale);
   muralSquid.position.set(center.x + wallMargin - wallHug, muralY, center.z);
   muralSquid.rotation.y = -Math.PI / 2;
 
   // Sea turtle landscape mural: centered on the back accent (green)
   // wall, clear of artBackLeft/artBackRight (parked at ±wallMargin * 0.55).
+  const turtleAspect = 2.0;
   const turtleScale = doorHeight * 1.9;
+  const turtleHalfWidth = turtleScale * turtleAspect * 0.56;
   muralTurtle.scale.set(turtleScale, turtleScale, turtleScale);
   muralTurtle.position.set(center.x, muralY, center.z - wallMargin + wallHug);
 
@@ -895,8 +942,38 @@ export function placeFishtankEnvironment(
   // wall stretches on either side of each wall's big mural (but clear of
   // doors/small art) — 2 per wall, suggesting a wider wing of smaller
   // neighboring exhibit tanks without any actual extra scene/animation.
-  const windowScale = doorHeight * 0.75;
-  const windowY = roomFloorY + roomHeight * 0.42;
+  // Positioned low (near eye/chest height, like a real viewing window)
+  // rather than up near the art line. Each gets a small museum-style
+  // placard mounted right beside it (not above — there's no headroom
+  // between the low window and the mural/art line above). Both are
+  // fitted into each open gap together as a single [window][placard]
+  // cluster (see fitWindowAndLabelToGap below), sized from the real
+  // occupant half-widths so neither one can ever land behind/overlapping
+  // a mural or door, regardless of the room's actual runtime dimensions.
+  const windowHeight = doorHeight * 0.75;
+  const windowY = roomFloorY + windowHeight * 0.6;
+  const labelScale = windowHeight * 0.5;
+  // createTankWindow's frame is BoxGeometry(1.1 * aspect, 1.1, 0.08), so
+  // full width in world units is windowHeight * aspect * 1.1.
+  // createExhibitLabel's backing is 0.62 wide at unit scale.
+  const labelWidth = labelScale * 0.62;
+  const clusterGap = windowHeight * 0.18; // small visual gap between window and its placard
+  interface WindowFit {
+    aspect: number;
+    windowCenter: number;
+    labelCenter: number;
+  }
+  function fitWindowAndLabelToGap(gapFrom: number, gapTo: number): WindowFit {
+    const gapWidth = gapTo - gapFrom;
+    const availableForWindow = Math.max(windowHeight, (gapWidth - labelWidth - clusterGap) * 0.85);
+    const aspect = Math.max(0.9, Math.min(3.5, availableForWindow / (windowHeight * 1.1)));
+    const windowWidth = aspect * windowHeight * 1.1;
+    const clusterWidth = windowWidth + clusterGap + labelWidth;
+    const clusterStart = gapFrom + (gapWidth - clusterWidth) / 2;
+    const windowCenter = clusterStart + windowWidth / 2;
+    const labelCenter = clusterStart + windowWidth + clusterGap + labelWidth / 2;
+    return { aspect, windowCenter, labelCenter };
+  }
   const [
     winBackLeft,
     winBackRight,
@@ -908,41 +985,61 @@ export function placeFishtankEnvironment(
     winRightNear,
   ] = env.tankWindows;
 
-  // Back wall: gaps between the center turtle mural and the flanking
-  // small art pieces (parked at ±wallMargin * 0.55).
-  winBackLeft.scale.set(windowScale, windowScale, windowScale);
-  winBackLeft.position.set(center.x - wallMargin * 0.28, windowY, center.z - wallMargin + wallHug);
-  winBackRight.scale.set(windowScale, windowScale, windowScale);
-  winBackRight.position.set(center.x + wallMargin * 0.28, windowY, center.z - wallMargin + wallHug);
+  // Each entry pairs a window/label with the gap it fills; `axis` is
+  // which world axis the gap's from/to run along ('x' for the front/back
+  // walls, 'z' for the left/right walls), and `wallCoord` is the fixed
+  // position along the wall's own normal axis. Windows and their labels
+  // are laid out and rebuilt together below, in one pass per wall, so
+  // the [window][placard] cluster from fitWindowAndLabelToGap always
+  // lands consistently regardless of which side of the gap is "near" or
+  // "far" on a given wall.
+  interface WindowSlot {
+    win: THREE.Group;
+    label: THREE.Group;
+    gapFrom: number;
+    gapTo: number;
+    axis: 'x' | 'z';
+    wallCoord: number;
+    rotationY: number;
+  }
+  const slots: WindowSlot[] = [
+    // Back wall (gaps flank the center turtle mural, ±wallMargin * 0.55 art).
+    { win: winBackLeft, label: env.exhibitLabels[0], gapFrom: -wallMargin * 0.55 + artHalfWidth, gapTo: -turtleHalfWidth, axis: 'x', wallCoord: center.z - wallMargin + wallHug, rotationY: 0 },
+    { win: winBackRight, label: env.exhibitLabels[1], gapFrom: turtleHalfWidth, gapTo: wallMargin * 0.55 - artHalfWidth, axis: 'x', wallCoord: center.z - wallMargin + wallHug, rotationY: 0 },
+    // Front wall (gaps flank the center welcome mural, ±wallMargin * 0.45 door/art).
+    { win: winFrontLeft, label: env.exhibitLabels[2], gapFrom: -wallMargin * 0.45 + doorHalfWidth, gapTo: -welcomeHalfWidth, axis: 'x', wallCoord: center.z + wallMargin - wallHug, rotationY: Math.PI },
+    { win: winFrontRight, label: env.exhibitLabels[3], gapFrom: welcomeHalfWidth, gapTo: wallMargin * 0.45 - artHalfWidth, axis: 'x', wallCoord: center.z + wallMargin - wallHug, rotationY: Math.PI },
+    // Left wall: small gap between the whale mural and exitLeft (+wallMargin * 0.4),
+    // and the large open stretch on the mural's far side out to the corner.
+    { win: winLeftNear, label: env.exhibitLabels[5], gapFrom: whaleHalfWidth, gapTo: wallMargin * 0.4 - doorHalfWidth, axis: 'z', wallCoord: center.x - wallMargin + wallHug, rotationY: Math.PI / 2 },
+    { win: winLeftFar, label: env.exhibitLabels[4], gapFrom: -wallMargin * 0.92, gapTo: -whaleHalfWidth, axis: 'z', wallCoord: center.x - wallMargin + wallHug, rotationY: Math.PI / 2 },
+    // Right wall: gap between the squid mural and the main door
+    // (-wallMargin * 0.35), and the gap between the squid mural and artRight.
+    { win: winRightNear, label: env.exhibitLabels[7], gapFrom: -wallMargin * 0.35 + doorHalfWidth, gapTo: -squidHalfWidth, axis: 'z', wallCoord: center.x + wallMargin - wallHug, rotationY: -Math.PI / 2 },
+    { win: winRightFar, label: env.exhibitLabels[6], gapFrom: squidHalfWidth, gapTo: wallMargin * 0.4 - artHalfWidth, axis: 'z', wallCoord: center.x + wallMargin - wallHug, rotationY: -Math.PI / 2 },
+  ];
 
-  // Front wall: gaps between the center welcome mural and
-  // exitFront/artFront (parked at ±wallMargin * 0.45).
-  winFrontLeft.scale.set(windowScale, windowScale, windowScale);
-  winFrontLeft.position.set(center.x - wallMargin * 0.28, windowY, center.z + wallMargin - wallHug);
-  winFrontLeft.rotation.y = Math.PI;
-  winFrontRight.scale.set(windowScale, windowScale, windowScale);
-  winFrontRight.position.set(center.x + wallMargin * 0.28, windowY, center.z + wallMargin - wallHug);
-  winFrontRight.rotation.y = Math.PI;
-
-  // Left wall: one in the gap between the whale mural and exitLeft
-  // (parked at +wallMargin * 0.4), one in the large open stretch on the
-  // opposite side of the mural.
-  winLeftNear.scale.set(windowScale, windowScale, windowScale);
-  winLeftNear.position.set(center.x - wallMargin + wallHug, windowY, center.z + wallMargin * 0.24);
-  winLeftNear.rotation.y = Math.PI / 2;
-  winLeftFar.scale.set(windowScale, windowScale, windowScale);
-  winLeftFar.position.set(center.x - wallMargin + wallHug, windowY, center.z - wallMargin * 0.5);
-  winLeftFar.rotation.y = Math.PI / 2;
-
-  // Right wall: one in the gap between the squid mural and the main
-  // door (parked at -wallMargin * 0.35), one in the gap between the
-  // squid mural and artRight (parked at +wallMargin * 0.4).
-  winRightNear.scale.set(windowScale, windowScale, windowScale);
-  winRightNear.position.set(center.x + wallMargin - wallHug, windowY, center.z - wallMargin * 0.2);
-  winRightNear.rotation.y = -Math.PI / 2;
-  winRightFar.scale.set(windowScale, windowScale, windowScale);
-  winRightFar.position.set(center.x + wallMargin - wallHug, windowY, center.z + wallMargin * 0.24);
-  winRightFar.rotation.y = -Math.PI / 2;
+  slots.forEach(({ win, label, gapFrom, gapTo, axis, wallCoord, rotationY }) => {
+    const fit = fitWindowAndLabelToGap(gapFrom, gapTo);
+    win.scale.set(windowHeight, windowHeight, windowHeight);
+    label.scale.set(labelScale, labelScale, labelScale);
+    win.rotation.y = rotationY;
+    label.rotation.y = rotationY;
+    if (axis === 'x') {
+      win.position.set(center.x + fit.windowCenter, windowY, wallCoord);
+      label.position.set(center.x + fit.labelCenter, windowY, wallCoord);
+    } else {
+      win.position.set(wallCoord, windowY, center.z + fit.windowCenter);
+      label.position.set(wallCoord, windowY, center.z + fit.labelCenter);
+    }
+    // Each window's aspect (and thus its glass/frame/backdrop geometry)
+    // is only known now that the exact gap widths above have been
+    // computed (they depend on the room's actual runtime dimensions),
+    // so rebuild its contents in place at the fitted aspect — cheap
+    // (small canvases/planes), done once per resize/style switch, never
+    // per frame.
+    rebuildTankWindow(win, fit.aspect);
+  });
 
   // Overhead lamps: 8 fixtures hang from the ceiling, spread in a ring
   // over the floor *around* the tank (not directly above it, per an

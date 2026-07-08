@@ -553,52 +553,77 @@ export function createBench(): THREE.Group {
 /**
  * A small "other tank" wall window — a static, non-animated porthole
  * suggesting a neighboring exhibit tank glimpsed through the wall: a
- * dark metal frame, a dim static canvas backdrop (murky blue-green water
- * with a couple of soft blurred silhouette shapes, painted once and
- * never animated), and a glossy glass pane in front with a low-roughness
- * clearcoat so it picks up specular highlights from the room's lamps —
- * enough of a glassy sheen to read as "somewhat real" without needing
- * a full reflection/environment-map setup. Built at 1x1 unit size in
- * local space (matching the door/art unit convention) so callers can
- * scale it non-uniformly to whatever window aspect they want.
+ * dark metal frame, a dim static canvas backdrop (murky blue-green
+ * water with a handful of small colorful fish silhouettes, painted once
+ * and never animated), and a glossy glass pane in front with a
+ * low-roughness clearcoat so it picks up specular highlights from the
+ * room's lamps — enough of a glassy sheen to read as "somewhat real"
+ * without needing a full reflection/environment-map setup. Pass
+ * `aspect` (width/height, default 1) for a wider window instead of the
+ * default square porthole.
  */
-export function createTankWindow(): THREE.Group {
+export function createTankWindow(aspect: number = 1): THREE.Group {
   const group = new THREE.Group();
+  buildTankWindowContents(group, aspect);
+  return group;
+}
 
+/**
+ * Rebuilds an existing tank-window group's contents at a new aspect
+ * ratio, in place — used when the actual per-wall open-gap width (and
+ * therefore the ideal window aspect) is only known once the room's
+ * runtime dimensions are computed in placeFishtankEnvironment, after
+ * the window groups already exist. Keeps the same THREE.Group identity
+ * (already wired into the scene graph/lifecycle) rather than swapping
+ * in a whole new object.
+ */
+export function rebuildTankWindow(group: THREE.Group, aspect: number): void {
+  for (const child of [...group.children]) {
+    group.remove(child);
+    if (child instanceof THREE.Mesh) {
+      child.geometry.dispose();
+      const material = child.material;
+      if (Array.isArray(material)) material.forEach((m) => m.dispose());
+      else material.dispose();
+    }
+  }
+  buildTankWindowContents(group, aspect);
+}
+
+function buildTankWindowContents(group: THREE.Group, aspect: number): void {
   const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x1c1f22, roughness: 0.5, metalness: 0.4 });
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 0.08), frameMaterial);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.1 * aspect, 1.1, 0.08), frameMaterial);
   frame.position.z = -0.03;
   group.add(frame);
 
-  // Static "other tank" backdrop: a dim gradient plus a couple of soft,
-  // out-of-focus blob silhouettes — deliberately vague/blurred so it
-  // reads as "another tank glimpsed in the distance" rather than a
-  // second fully-detailed scene competing with the room's real art.
-  const size = 128;
+  // Static "other tank" backdrop: a dim murky-water gradient with a
+  // handful of small colorful fish (reusing paintFish, same as the
+  // schoolOfFish art variant) — simulating a neighboring tank glimpsed
+  // through the wall without any real animation.
+  const height = 128;
+  const width = Math.round(height * aspect);
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d')!;
-  const grad = ctx.createLinearGradient(0, 0, 0, size);
+  const grad = ctx.createLinearGradient(0, 0, 0, height);
   grad.addColorStop(0, '#123a42');
   grad.addColorStop(1, '#041418');
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  ctx.filter = 'blur(6px)';
-  const blobs: [number, number, number, string][] = [
-    [0.35, 0.55, 0.16, 'rgba(120,180,190,0.35)'],
-    [0.68, 0.4, 0.11, 'rgba(150,200,180,0.3)'],
-  ];
-  for (const [bx, by, br, color] of blobs) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.ellipse(size * bx, size * by, size * br, size * br * 0.6, 0, 0, Math.PI * 2);
-    ctx.fill();
+  ctx.fillRect(0, 0, width, height);
+  const fishColors = ['#f4a340', '#f2d94e', '#7fd8e8', '#ff6f61', '#8fd6e7'];
+  const fishCount = Math.max(3, Math.round(4 * aspect));
+  for (let i = 0; i < fishCount; i++) {
+    const fx = width * (0.08 + 0.84 * ((i * 0.41 + 0.15) % 1));
+    const fy = height * (0.2 + 0.6 * ((i * 0.67 + 0.3) % 1));
+    const len = height * (0.14 + 0.06 * ((i * 0.31) % 1));
+    const angle = (((i * 0.47) % 1) - 0.5) * 0.9;
+    paintFish(ctx, fx, fy, len, angle, fishColors[i % fishColors.length]);
   }
   const backdropTexture = new THREE.CanvasTexture(canvas);
   backdropTexture.colorSpace = THREE.SRGBColorSpace;
   const backdropMaterial = new THREE.MeshStandardMaterial({ map: backdropTexture, roughness: 0.9 });
-  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.92), backdropMaterial);
+  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(0.92 * aspect, 0.92), backdropMaterial);
   backdrop.position.z = -0.01;
   group.add(backdrop);
 
@@ -612,9 +637,52 @@ export function createTankWindow(): THREE.Group {
     clearcoatRoughness: 0.05,
     side: THREE.DoubleSide,
   });
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.96), glassMaterial);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.96 * aspect, 0.96), glassMaterial);
   glass.position.z = 0.03;
   group.add(glass);
+}
+
+/**
+ * A small museum-style exhibit placard: a brass-toned backing plate plus
+ * a painted title + subtitle, meant to mount low on the wall next to a
+ * tank window (see createTankWindow) to sell the "real aquarium/museum
+ * exhibit hall" feel — the same kind of small placard real aquariums
+ * mount beside every viewing window. Built at 1x1 unit-ish local scale
+ * (roughly 0.6 wide x 0.35 tall) so callers can scale it uniformly.
+ */
+export function createExhibitLabel(title: string, subtitle: string): THREE.Group {
+  const group = new THREE.Group();
+
+  const backingMaterial = new THREE.MeshStandardMaterial({ color: 0x8a7143, roughness: 0.4, metalness: 0.6 });
+  const backing = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.36, 0.025), backingMaterial);
+  group.add(backing);
+
+  const width = 256;
+  const height = 150;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#1c1712';
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#c9a95c';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(6, 6, width - 12, height - 12);
+  ctx.fillStyle = '#e8d8a0';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${height * 0.18}px Georgia, serif`;
+  ctx.fillText(title.toUpperCase(), width / 2, height * 0.4);
+  ctx.font = `${height * 0.12}px Georgia, serif`;
+  ctx.fillStyle = '#b8ab86';
+  ctx.fillText(subtitle, width / 2, height * 0.68);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const faceMaterial = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.7 });
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.56, 0.328), faceMaterial);
+  face.position.z = 0.014;
+  group.add(face);
 
   return group;
 }
