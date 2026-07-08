@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
 import {
   extrudeRingGeometry,
+  extrudeRingGeometryAlongX,
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
@@ -146,9 +147,14 @@ const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
  * A single triangular dorsal fin standing up (+Z, the model's local "up")
  * from the fish's back, roughly over the widest part of the body — the
  * single most important silhouette cue that separates "a fish" from "a
- * slightly flattened egg". Built via extrudeRingGeometry (rather than a
- * flat zero-thickness plane) so it keeps its silhouette instead of
- * vanishing when viewed exactly edge-on from the front or back.
+ * slightly flattened egg". Built via extrudeRingGeometryAlongX rather
+ * than the shared (Z-axis) extrudeRingGeometry or a flat zero-thickness
+ * plane: this fin's ring lies in the Y-Z plane (every point has X=0), so
+ * it needs thickness added along X (flank-to-flank) to keep a visible
+ * silhouette from any angle — Z-axis extrusion would only nudge its
+ * already-dominant Y/Z shape, leaving it just as vanishingly thin when
+ * viewed edge-on from the front or back (the same bug the shark's dorsal
+ * fin had before this fix — see sharkGeometry.ts's history).
  */
 function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
@@ -156,8 +162,8 @@ function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeom
   const root = new THREE.Vector3(0, halfLen * 0.05, width * 0.3 * BODY_HEIGHT_STRETCH);
   const back = new THREE.Vector3(0, -halfLen * 0.35, width * 0.32 * BODY_HEIGHT_STRETCH);
   const tip = new THREE.Vector3(0, -halfLen * 0.12, width * 0.3 * BODY_HEIGHT_STRETCH + finHeight);
-  const thickness = width * 0.05;
-  return extrudeRingGeometry([root, back, tip], thickness);
+  const thickness = width * 0.12;
+  return extrudeRingGeometryAlongX([root, back, tip], thickness);
 }
 
 /**
@@ -167,28 +173,24 @@ function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeom
  * (+Y) so it reads as attached near the "gills", ahead of the body's
  * center, rather than dead-center like the wings this replaced. Built as
  * a 4-point kite (root -> leadingBulge -> tip -> trailingBulge, fanned
- * from the root) rather than a single thin 3-point spike, so it reads as
- * a rounded paddle rather than a sharp antenna/spike at small scale.
+ * from the root) extruded into a real 3D prism via extrudeRingGeometry
+ * (this ring lies flat in the X/Y plane, so the shared helper's own
+ * Z-thickening axis is exactly the right one here) rather than a flat
+ * zero-thickness pair of triangles, so it doesn't vanish when viewed
+ * from directly above or below — the same fix applied to the shark's
+ * pectoral fins.
  */
 function buildPectoralFinGeometry(length: number, span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
   const rootY = length * 0.12;
-  const geometry = new THREE.BufferGeometry();
   const tipX = span * side;
   const leadingBulgeX = span * 0.55 * side;
   const trailingBulgeX = span * 0.45 * side;
-  const positions = new Float32Array([
-    // triangle 1: root -> leading bulge -> tip
-    0, rootY, 0,
-    leadingBulgeX, rootY + chord * 0.4, 0,
-    tipX, rootY - chord * 0.1, 0,
-    // triangle 2: root -> tip -> trailing bulge
-    0, rootY, 0,
-    tipX, rootY - chord * 0.1, 0,
-    trailingBulgeX, rootY - chord * 0.5, 0,
-  ]);
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.computeVertexNormals();
-  return geometry;
+  const root = new THREE.Vector3(0, rootY, 0);
+  const leadingBulge = new THREE.Vector3(leadingBulgeX, rootY + chord * 0.4, 0);
+  const tip = new THREE.Vector3(tipX, rootY - chord * 0.1, 0);
+  const trailingBulge = new THREE.Vector3(trailingBulgeX, rootY - chord * 0.5, 0);
+  const thickness = chord * 0.08;
+  return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
 }
 
 
