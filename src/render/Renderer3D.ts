@@ -225,6 +225,21 @@ const SHARK_FIN_REST_TILT_RAD = 0.35; // ~20 degrees, tips angled down from hori
 const SHARK_TAIL_SWAY_AMPLITUDE = 0.5; // radians; a visibly wide side-to-side beat
 const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — the main swimming motion
 
+// Fish tank small fish (sparrow/goldfinch/cardinal/bluejay's fishtank
+// silhouette, and the plain fishtank predator): like the shark, a real
+// fish's tail beats side to side (a yaw around the model's local up
+// axis) rather than undulating up and down like the dragon's whip tail.
+// A small fish's tail beats noticeably faster than a shark's — quicker,
+// shorter strokes rather than the shark's slower, wider sweep — so this
+// uses a smaller amplitude but a distinctly higher frequency. Unlike the
+// shark's tail, this fish's caudal fin geometry is already rooted at the
+// model's own local origin (see fishGeometry.ts's buildCaudalFinGeometry),
+// so no separate tailSwayPivotY compensation is needed — the default 0
+// (rotate around the origin) already matches the fin's own attachment
+// point exactly.
+const FISH_TAIL_SWAY_AMPLITUDE = 0.4; // radians; a brisk but not exaggerated side-to-side flick
+const FISH_TAIL_SWAY_FREQUENCY = 5.2; // noticeably quicker than the shark's slower tail beat
+
 // Unicorns get their own dedicated "stay upright" orientation model in
 // updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
 // smaller-numbers reuse of the dragon's keepUpright path (see
@@ -902,11 +917,11 @@ export class Renderer3D {
                 : this.arcadeBoidGeometries;
         // Parrot geometry (nature + fishtank) bakes vertex colors for its
         // beak/eyes; small-bird geometry (sparrow/goldfinch/cardinal/
-        // bluejay) now does too, but only in the nature-style file — the
-        // fishtank small-bird geometry hasn't been given the same
-        // eye-detail treatment yet, so enabling vertexColors there would
-        // read as solid black (no 'color' attribute to multiply against).
-        const bodyVertexColors = config.useParrotGeometry ? isOrganic : isNature;
+        // bluejay) now does too in both the nature-style file and the
+        // fishtank small-fish reskin (fishGeometry.ts bakes its own eye
+        // dots the same way), so vertex colors are safe to enable for
+        // any organic (nature or fishtank) style, not just nature.
+        const bodyVertexColors = isOrganic;
         this.speciesInstances.set(
           config.species,
           this.buildInstanceSet(geometries, style, config.arcadeEmissive, count, false, false, bodyVertexColors),
@@ -946,7 +961,7 @@ export class Renderer3D {
             : this.arcadePredatorGeometries;
       this.predatorInstances.set(
         'hawk',
-        this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon || isNature),
+        this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon || isOrganic),
       );
       this.predatorInstanceKeys.set('hawk', hawkKey);
       this.dragonDisplayQuats.clear();
@@ -1761,7 +1776,68 @@ export class Renderer3D {
     this.camera.position.set(target.x + distance * 0.7, target.y + distance * 0.35, target.z + distance * 0.9);
     this.camera.updateProjectionMatrix();
     this.controls.target.copy(target);
+    // ensureScene's world-scale zoom clamp (controls.minDistance =
+    // maxDim * 0.05) is tuned for the whole-world view and is often far
+    // larger than a small creature's tight gallery framing distance
+    // (e.g. a sparrow vs. a 1000-unit-deep world) — OrbitControls.update()
+    // would otherwise silently push the camera back out past that floor,
+    // undoing the close-up framing entirely. Relax the floor down to
+    // this call's own distance (never *raise* it, since that's still
+    // meaningful for normal, non-gallery browsing) so the requested
+    // distance actually sticks. resetCameraFraming restores the normal
+    // world-scale floor when the gallery closes.
+    const effectiveDistance = target.distanceTo(this.camera.position);
+    this.controls.minDistance = Math.min(this.controls.minDistance, effectiveDistance * 0.5);
     this.controls.update();
+  }
+
+  /**
+   * Model Gallery: computes a `debugFrameCamera` distance that frames the
+   * *currently instanced* creature as tightly as the camera's field of
+   * view allows (small margin so the silhouette doesn't clip), based on
+   * the union of that creature's part geometries (body, wings, tail,
+   * legs, beak). A single flat distance (the old approach) only ever
+   * looked "maximally zoomed in" for whichever creature it happened to
+   * be tuned against — every other kind, being a very different
+   * physical size (a sparrow vs. a dragon, say), ended up looking
+   * comparatively tiny/zoomed-out at that same distance. Falls back to
+   * `fallbackDistance` if the instance set for `kind` doesn't exist yet
+   * (e.g. called before the gallery entity has spawned on this frame).
+   */
+  getGalleryFramingDistance(kind: PredatorKind | BoidSpecies, fallbackDistance = 220): number {
+    const set = (['hawk', 'unicorn'] as const).includes(kind as PredatorKind)
+      ? this.predatorInstances.get(kind as PredatorKind)
+      : this.speciesInstances.get(kind as BoidSpecies);
+    if (!set) return fallbackDistance;
+
+    // Union the bounding boxes of every part (body, wings, tail, legs,
+    // beak) rather than just the body — a hawk/sparrow's wingspan or a
+    // unicorn's tail reaches well past the body mesh alone, and using
+    // only the body underestimates how large the creature actually
+    // reads on screen. All parts share the same single-instance local
+    // coordinate space, so their geometries combine directly.
+    const box = new THREE.Box3();
+    for (const mesh of [set.body, set.wingLeft, set.wingRight, set.tail, set.legs, set.beak]) {
+      if (!mesh) continue;
+      const geometry = mesh.geometry;
+      if (!geometry.boundingBox) geometry.computeBoundingBox();
+      if (geometry.boundingBox) box.union(geometry.boundingBox);
+    }
+    if (box.isEmpty()) return fallbackDistance;
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    const radius = sphere.radius;
+    if (!radius) return fallbackDistance;
+
+    // Matches debugFrameCamera's (0.7, 0.35, 0.9) offset vector — the
+    // actual camera-to-target distance is `distance * offsetMagnitude`,
+    // not `distance` itself.
+    const offsetMagnitude = Math.sqrt(0.7 ** 2 + 0.35 ** 2 + 0.9 ** 2);
+    const verticalFovRad = THREE.MathUtils.degToRad(this.camera.fov);
+    // Small margin (1.15x) so the silhouette doesn't clip against the
+    // frame edges when solving for the distance that makes the
+    // bounding sphere fill the viewport height.
+    const effectiveRadius = radius * 1.15;
+    return effectiveRadius / Math.tan(verticalFovRad / 2) / offsetMagnitude;
   }
 
   /**
@@ -1779,6 +1855,11 @@ export class Renderer3D {
     this.camera.position.set(center.x + maxDim * 0.6, center.y + maxDim * 0.4, center.z + maxDim * 0.9);
     this.camera.updateProjectionMatrix();
     this.controls.target.copy(center);
+    // Undo debugFrameCamera's possible relaxation of the zoom-in floor
+    // (see its comment) — restores the normal world-scale clamp so
+    // regular, non-gallery browsing can't zoom the camera through the
+    // ground/boundary box.
+    this.controls.minDistance = maxDim * 0.05;
     this.controls.update();
   }
 
@@ -1873,6 +1954,16 @@ export class Renderer3D {
         const instances = this.speciesInstances.get(config.species);
         if (!instances) continue;
         const entities = boidsBySpecies.get(config.species) ?? [];
+        // Fish-tail wave (fishtank only): the plain small-fish geometry's
+        // caudal fin (sparrow/goldfinch/cardinal/bluejay's fishtank
+        // silhouette) is rooted at the model's own local origin, so it's
+        // safe to sway around the shared pivot with no detachment risk
+        // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment). The parrot
+        // species uses a different geometry (a "tetra" fish, via
+        // useParrotGeometry) whose tail fan is rooted further back —
+        // deliberately excluded here so it keeps its existing, already-
+        // tuned sway rather than picking up a pivot mismatch.
+        const isFishTail = isFishtank && !config.useParrotGeometry;
         this.updateInstances(
           instances,
           entities,
@@ -1893,9 +1984,9 @@ export class Renderer3D {
           1,
           config.beakColor,
           0,
-          MODEL_RIGHT_AXIS,
-          DRAGON_TAIL_SWAY_AMPLITUDE,
-          undefined,
+          isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+          isFishTail ? FISH_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
+          isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
           0,
           isFishtank ? TANK_VISUAL_SCALE : 1,
         );
