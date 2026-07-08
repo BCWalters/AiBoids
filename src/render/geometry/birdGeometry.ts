@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from './creatureGeometry';
+import { extrudeRingGeometry, mergePositionOnlyGeometries } from './creatureGeometry';
 
 /**
  * Builds a simple low-poly bird silhouette: an elongated diamond body
@@ -69,6 +70,15 @@ export function createRealisticBirdGeometries(length: number, width: number): Cr
  * Radially-symmetric (lathed) body profile: nose points along local +Y to
  * match FORWARD_AXIS. Tail end stays slim (a lathe can't produce a flat
  * fanned tail — that's added separately via buildTailGeometry).
+ *
+ * The neck now genuinely pinches in (much narrower than the chest) before
+ * the head bulge, and the head bulge itself is wider than the neck by a
+ * clear margin — without that pinch, the lathe reads as one continuous
+ * tapering blob (an "egg with a pointed tip") rather than a body + a
+ * separate head, which was the small-bird complaint ("looks like a yellow
+ * blob, no head"). A small beak cone is appended past the face point (see
+ * buildBeakGeometry) so there's an actual protruding beak shape instead of
+ * the lathe profile just pinching to a bare point.
  */
 function buildTaperedBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
@@ -77,11 +87,34 @@ function buildTaperedBodyGeometry(length: number, width: number): THREE.BufferGe
     new THREE.Vector2(width * 0.22, -halfLen * 0.7),
     new THREE.Vector2(width * 0.42, -halfLen * 0.25), // belly bulge
     new THREE.Vector2(width * 0.4, halfLen * 0.15), // chest
-    new THREE.Vector2(width * 0.2, halfLen * 0.55), // neck taper
-    new THREE.Vector2(width * 0.24, halfLen * 0.68), // head bulge
-    new THREE.Vector2(width * 0.03, halfLen * 0.82), // beak tip
+    new THREE.Vector2(width * 0.15, halfLen * 0.42), // neck pinch — clearly narrower than chest/head
+    new THREE.Vector2(width * 0.3, halfLen * 0.58), // head base bulge — clearly wider than the neck pinch
+    new THREE.Vector2(width * 0.32, halfLen * 0.66), // crown, the widest point of the head
+    new THREE.Vector2(width * 0.2, halfLen * 0.74), // forehead, narrowing toward the face
+    new THREE.Vector2(width * 0.09, halfLen * 0.8), // face point, where the beak attaches
   ];
-  return new THREE.LatheGeometry(profile, 10);
+  const body = new THREE.LatheGeometry(profile, 14);
+  const beak = buildBeakGeometry(length, halfLen * 0.8, width * 0.09);
+  return mergePositionOnlyGeometries([body, beak]);
+}
+
+/**
+ * A small solid cone forming the beak, attached at the body lathe's face
+ * point and pointing further forward along +Y. Gives small birds (and the
+ * hawk) an actual protruding beak shape instead of the lathe profile
+ * simply pinching down to a bare point (which reads as "no head/beak at
+ * all" from a distance, especially on uniformly-colored small birds).
+ */
+function buildBeakGeometry(length: number, faceY: number, faceRadius: number): THREE.BufferGeometry {
+  const beakLen = length * 0.22;
+  const geometry = new THREE.ConeGeometry(faceRadius * 0.85, beakLen, 8);
+  geometry.scale(1, 1, 0.75); // slightly flattened, taller than wide
+  // ConeGeometry's axis already runs along +Y (apex at +height/2, base at
+  // -height/2), matching the body's own forward axis — no rotation
+  // needed, just slide it forward so the base sits at the body's face
+  // point and the apex protrudes further ahead of it.
+  geometry.translate(0, faceY + beakLen * 0.5, 0);
+  return geometry;
 }
 
 
@@ -150,20 +183,20 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
 
 
 /**
- * A flat, fanned tail trailing behind the body (toward local -Y), built
- * from two mirrored triangles meeting at a rear center point — reads as a
- * spread tail fan from a distance. Static (does not flap).
+ * A fanned tail trailing behind the body (toward local -Y), built from a
+ * quadrilateral boundary (root -> leftTip -> backCenter -> rightTip)
+ * extruded into a real 3D prism via extrudeRingGeometry — reads as a
+ * spread tail fan from a distance, but (unlike a flat zero-thickness
+ * plane) doesn't disappear when viewed edge-on from directly the side.
+ * Static (does not flap).
  */
 function buildTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  const root = [0, 0, 0];
-  const leftTip = [-width * 0.9, -length * 0.55, 0];
-  const rightTip = [width * 0.9, -length * 0.55, 0];
-  const backCenter = [0, -length * 0.85, 0];
+  const root = new THREE.Vector3(0, 0, 0);
+  const leftTip = new THREE.Vector3(-width * 0.9, -length * 0.55, 0);
+  const rightTip = new THREE.Vector3(width * 0.9, -length * 0.55, 0);
+  const backCenter = new THREE.Vector3(0, -length * 0.85, 0);
+  const thickness = width * 0.05;
 
-  const positions = new Float32Array([...root, ...leftTip, ...backCenter, ...root, ...backCenter, ...rightTip]);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.computeVertexNormals();
-  return geometry;
+  return extrudeRingGeometry([root, leftTip, backCenter, rightTip], thickness);
 }
 
