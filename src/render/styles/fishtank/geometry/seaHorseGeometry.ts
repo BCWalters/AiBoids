@@ -173,12 +173,19 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
   const tailTipRadius = width * 0.014;
   const maxRadius = length * 0.205;
   const minRadius = length * 0.038;
-  // Starting at theta = -PI with theta increasing (turns > 0) makes the initial tangent
-  // point straight down (-Z) from the anchor, then curls the tail counterclockwise:
-  // down -> forward (+Y, toward the head) -> up -> back under itself, tapering as it goes.
-  const centerY = anchorY + maxRadius;
-  const centerZ = anchorZ;
-  const startTheta = -Math.PI;
+  // Tilt the tail's initial direction back (toward -Y, the rear of the body)
+  // by 30 degrees from straight down, instead of exactly straight down --
+  // exiting perfectly vertically left a visible hump where the tail crossed
+  // back through the body's rear taper on its way to curling forward.
+  const tiltRadians = THREE.MathUtils.degToRad(30);
+  // Starting at theta = -PI - tiltRadians with theta increasing (turns > 0)
+  // makes the initial tangent point down-and-back (tilted 30 degrees behind
+  // straight down) from the anchor, then curls the tail counterclockwise:
+  // down/back -> down -> forward (+Y, toward the head) -> up -> back under
+  // itself, tapering as it goes.
+  const startTheta = -Math.PI - tiltRadians;
+  const centerY = anchorY - maxRadius * Math.cos(startTheta);
+  const centerZ = anchorZ - maxRadius * Math.sin(startTheta);
   const turns = 5.2;
   const samples = 28;
 
