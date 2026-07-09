@@ -731,7 +731,7 @@ export interface OverheadLamp {
   light: THREE.SpotLight;
 }
 
-/** A ceiling-mounted pendant lamp (rod + shade) with a spotlight aimed straight down, standing in for the room's overhead light source. */
+/** A ceiling-mounted pendant lamp (rod + shade) with a broad spotlight aimed straight down, standing in for the room's overhead light source. */
 export type CornerStatueKind = 'whale' | 'dolphin' | 'turtle' | 'shark';
 
 /**
@@ -879,7 +879,7 @@ export function createOverheadLamp(): OverheadLamp {
   bulb.position.y = -0.58;
   group.add(bulb);
 
-  const light = new THREE.SpotLight(0xfff3d6, 1.4, 0, Math.PI / 5, 0.5, 1.2);
+  const light = new THREE.SpotLight(0xfff3d6, 0.95, 0, Math.PI / 3.4, 0.7, 1.2);
   light.position.set(0, -0.55, 0);
   const target = new THREE.Object3D();
   target.position.set(0, -1, 0);
