@@ -6,10 +6,13 @@ import {
   createOverheadLamp,
   createBench,
   createCornerStatue,
+  createUpperFrieze,
   type CornerStatueKind,
   createTankWindow,
   rebuildTankWindow,
   createExhibitLabel,
+  createServiceVent,
+  createWayfindingSign,
   type OverheadLamp,
 } from './roomDecor';
 
@@ -61,8 +64,12 @@ export interface FishtankEnvironment {
   cornerSculptures: THREE.Group[];
   /** Small static "other tank" wall windows, filling open wall stretches not covered by a mural — suggesting a wing of smaller neighboring exhibit tanks. No animation, just a dim static backdrop + a glossy glass pane. */
   tankWindows: THREE.Group[];
+  sectionWindows: THREE.Group[];
   /** Small museum-style placards mounted beside each tank window (see tankWindows) — sells the exhibit-hall feel. */
   exhibitLabels: THREE.Group[];
+  upperFriezeSegments: THREE.Group[];
+  serviceVents: THREE.Group[];
+  wayfindingSigns: THREE.Group[];
   ambientLight: THREE.AmbientLight;
   hemisphereLight: THREE.HemisphereLight;
   keyLight: THREE.DirectionalLight;
@@ -478,6 +485,14 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     win.visible = false;
   });
 
+  // Two larger windows into neighboring aquarium sections, one on each
+  // long side wall, so the room feels like part of a bigger aquarium wing
+  // rather than a completely sealed box.
+  const sectionWindows = [createTankWindow(2.8), createTankWindow(2.8)];
+  sectionWindows.forEach((win) => {
+    win.visible = false;
+  });
+
   // A small museum-style placard beside each tank window above, with a
   // generic exhibit-hall title/subtitle — sells the "real aquarium wing"
   // feel, matching the (window order: back-left, back-right, front-left,
@@ -494,6 +509,29 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   ];
   exhibitLabels.forEach((label) => {
     label.visible = false;
+  });
+
+  // Simple upper-wall dressing: a thin frieze band, a few service vents,
+  // and small wayfinding plaques so the top of the room doesn't read as
+  // a huge empty rectangle.
+  const upperFriezeSegments = Array.from({ length: 4 }, () => createUpperFrieze());
+  upperFriezeSegments.forEach((segment) => {
+    segment.visible = false;
+  });
+
+  const serviceVents = Array.from({ length: 6 }, () => createServiceVent());
+  serviceVents.forEach((vent) => {
+    vent.visible = false;
+  });
+
+  const wayfindingSigns = [
+    createWayfindingSign('Gallery Wing', 'right'),
+    createWayfindingSign('Exhibits', 'left'),
+    createWayfindingSign('Aquarium Hall', 'right'),
+    createWayfindingSign('Entry Lobby', 'left'),
+  ];
+  wayfindingSigns.forEach((sign) => {
+    sign.visible = false;
   });
 
   // 8 ceiling lamps distributed around the floor outside the tank
@@ -547,7 +585,11 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     ...benches,
     ...cornerSculptures,
     ...tankWindows,
+    ...sectionWindows,
     ...exhibitLabels,
+    ...upperFriezeSegments,
+    ...serviceVents,
+    ...wayfindingSigns,
     ...lamps.map((lamp) => lamp.group),
     ambientLight,
     hemisphereLight,
@@ -574,7 +616,11 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     benches,
     cornerSculptures,
     tankWindows,
+    sectionWindows,
     exhibitLabels,
+    upperFriezeSegments,
+    serviceVents,
+    wayfindingSigns,
     lamps,
     ambientLight,
     hemisphereLight,
@@ -611,8 +657,20 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       tankWindows.forEach((win) => {
         win.visible = visible;
       });
+      sectionWindows.forEach((win) => {
+        win.visible = visible;
+      });
       exhibitLabels.forEach((label) => {
         label.visible = visible;
+      });
+      upperFriezeSegments.forEach((segment) => {
+        segment.visible = visible;
+      });
+      serviceVents.forEach((vent) => {
+        vent.visible = visible;
+      });
+      wayfindingSigns.forEach((sign) => {
+        sign.visible = visible;
       });
       lamps.forEach((lamp) => {
         lamp.group.visible = visible;
@@ -667,8 +725,20 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       tankWindows.forEach((win) => {
         win.visible = visible;
       });
+      sectionWindows.forEach((win) => {
+        win.visible = visible;
+      });
       exhibitLabels.forEach((label) => {
         label.visible = visible;
+      });
+      upperFriezeSegments.forEach((segment) => {
+        segment.visible = visible;
+      });
+      serviceVents.forEach((vent) => {
+        vent.visible = visible;
+      });
+      wayfindingSigns.forEach((sign) => {
+        sign.visible = visible;
       });
       lamps.forEach((lamp) => {
         lamp.group.visible = visible;
@@ -693,7 +763,11 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         ...benches,
         ...cornerSculptures,
         ...tankWindows,
+        ...sectionWindows,
         ...exhibitLabels,
+        ...upperFriezeSegments,
+        ...serviceVents,
+        ...wayfindingSigns,
         ...lamps.map((lamp) => lamp.group),
         ambientLight,
         hemisphereLight,
@@ -722,7 +796,11 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       benches.forEach(disposeObject3D);
       cornerSculptures.forEach(disposeObject3D);
       tankWindows.forEach(disposeObject3D);
+      sectionWindows.forEach(disposeObject3D);
       exhibitLabels.forEach(disposeObject3D);
+      upperFriezeSegments.forEach(disposeObject3D);
+      serviceVents.forEach(disposeObject3D);
+      wayfindingSigns.forEach(disposeObject3D);
       lamps.forEach((lamp) => disposeObject3D(lamp.group));
     },
   };
@@ -951,8 +1029,14 @@ export function placeFishtankEnvironment(
   // (beside its exit door), and the right wall (beside the main door) —
   // a proper little aquarium gallery rather than a single decor pair.
   const artScale = doorHeight * 0.5;
-  const artY = roomFloorY + roomHeight * 0.4;
   const [artBackLeft, artBackRight, artFront, artRight] = env.artPieces;
+  // Lower all wall art together so the large landscape murals sit a bit
+  // more human-scale: their lower edge lands near the top of the doors,
+  // and the smaller paintings drop by the same amount.
+  const largeMuralScale = doorHeight * 2.2;
+  const largeMuralHalfHeight = largeMuralScale * 0.56;
+  const wallArtDrop = roomFloorY + doorHeight - (roomFloorY + roomHeight * 0.45 - largeMuralHalfHeight);
+  const artY = roomFloorY + roomHeight * 0.4 + wallArtDrop;
   artBackLeft.scale.set(artScale, artScale, artScale);
   artBackLeft.position.set(center.x - wallMargin * 0.55, artY, center.z - wallMargin + wallHug);
   artBackRight.scale.set(artScale, artScale, artScale);
@@ -969,7 +1053,7 @@ export function placeFishtankEnvironment(
   // above — positioned clear of the doors/small art already on their
   // walls (see the per-wall x/z fractions used above).
   const [, , , , muralWhale, muralWelcome] = env.artPieces;
-  const muralY = roomFloorY + roomHeight * 0.45;
+  const muralY = roomFloorY + roomHeight * 0.45 + wallArtDrop;
   // createArtPiece's frame is BoxGeometry(1.12 * aspect, 1.12, 0.06), so
   // half-width in world units is scale * aspect * 0.56 — used below to
   // compute exact open-gap boundaries for the small tank windows so they
@@ -981,7 +1065,7 @@ export function placeFishtankEnvironment(
   // Blue whale landscape mural: centered on the (otherwise mostly bare)
   // left wall, clear of exitLeft (parked at wallMargin * 0.4 along Z).
   const whaleAspect = 2.4;
-  const whaleScale = doorHeight * 2.2;
+  const whaleScale = largeMuralScale;
   const whaleHalfWidth = whaleScale * whaleAspect * 0.56;
   muralWhale.scale.set(whaleScale, whaleScale, whaleScale);
   muralWhale.position.set(center.x - wallMargin + wallHug, muralY, center.z);
@@ -1014,6 +1098,59 @@ export function placeFishtankEnvironment(
   const turtleHalfWidth = turtleScale * turtleAspect * 0.56;
   muralTurtle.scale.set(turtleScale, turtleScale, turtleScale);
   muralTurtle.position.set(center.x, muralY, center.z - wallMargin + wallHug);
+
+  // Upper-wall dressing: a continuous frieze band just under the ceiling,
+  // a few service vents, and some directional plaques so the room has
+  // visual structure above the murals instead of a tall blank void.
+  const friezeY = roomFloorY + roomHeight - doorHeight * 0.55;
+  const friezeScale = doorHeight * 0.42;
+  const [friezeBack, friezeFront, friezeLeft, friezeRight] = env.upperFriezeSegments;
+  friezeBack.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeBack.position.set(center.x, friezeY, center.z - wallMargin + wallHug);
+  friezeFront.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeFront.position.set(center.x, friezeY, center.z + wallMargin - wallHug);
+  friezeFront.rotation.y = Math.PI;
+  friezeLeft.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeLeft.position.set(center.x - wallMargin + wallHug, friezeY, center.z);
+  friezeLeft.rotation.y = Math.PI / 2;
+  friezeRight.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeRight.position.set(center.x + wallMargin - wallHug, friezeY, center.z);
+  friezeRight.rotation.y = -Math.PI / 2;
+
+  const ventY = roomFloorY + roomHeight - doorHeight * 0.42;
+  const ventScale = doorHeight * 0.42;
+  const [ventBackLeft, ventBackRight, ventFrontLeft, ventFrontRight, ventLeft, ventRight] = env.serviceVents;
+  ventBackLeft.scale.set(ventScale, ventScale, ventScale);
+  ventBackLeft.position.set(center.x - wallMargin * 0.55, ventY, center.z - wallMargin + wallHug);
+  ventBackRight.scale.set(ventScale, ventScale, ventScale);
+  ventBackRight.position.set(center.x + wallMargin * 0.55, ventY, center.z - wallMargin + wallHug);
+  ventFrontLeft.scale.set(ventScale, ventScale, ventScale);
+  ventFrontLeft.position.set(center.x - wallMargin * 0.55, ventY, center.z + wallMargin - wallHug);
+  ventFrontLeft.rotation.y = Math.PI;
+  ventFrontRight.scale.set(ventScale, ventScale, ventScale);
+  ventFrontRight.position.set(center.x + wallMargin * 0.55, ventY, center.z + wallMargin - wallHug);
+  ventFrontRight.rotation.y = Math.PI;
+  ventLeft.scale.set(ventScale, ventScale, ventScale);
+  ventLeft.position.set(center.x - wallMargin + wallHug, ventY, center.z - wallMargin * 0.5);
+  ventLeft.rotation.y = Math.PI / 2;
+  ventRight.scale.set(ventScale, ventScale, ventScale);
+  ventRight.position.set(center.x + wallMargin - wallHug, ventY, center.z + wallMargin * 0.5);
+  ventRight.rotation.y = -Math.PI / 2;
+
+  const signY = roomFloorY + roomHeight - doorHeight * 0.24;
+  const signScale = doorHeight * 0.45;
+  const [signBack, signFront, signLeft, signRight] = env.wayfindingSigns;
+  signBack.scale.set(signScale, signScale, signScale);
+  signBack.position.set(center.x, signY, center.z - wallMargin + wallHug);
+  signFront.scale.set(signScale, signScale, signScale);
+  signFront.position.set(center.x, signY, center.z + wallMargin - wallHug);
+  signFront.rotation.y = Math.PI;
+  signLeft.scale.set(signScale, signScale, signScale);
+  signLeft.position.set(center.x - wallMargin + wallHug, signY, center.z);
+  signLeft.rotation.y = Math.PI / 2;
+  signRight.scale.set(signScale, signScale, signScale);
+  signRight.position.set(center.x + wallMargin - wallHug, signY, center.z);
+  signRight.rotation.y = -Math.PI / 2;
 
   // Benches: 4 plain backless wooden benches, one on each side of the
   // tank (N/E/S/W), parked about halfway between the tank's own
@@ -1152,6 +1289,21 @@ export function placeFishtankEnvironment(
     // per frame.
     rebuildTankWindow(win, fit.aspect);
   });
+
+  // Larger side-wall windows into neighboring exhibit halls. These sit
+  // higher than the lower portholes so they read like bigger gallery
+  // openings rather than duplicate the small viewports below.
+  const sectionWindowScale = doorHeight * 0.7;
+  const sectionWindowY = roomFloorY + roomHeight * 0.67;
+  const [sectionLeft, sectionRight] = env.sectionWindows;
+  sectionLeft.scale.set(sectionWindowScale, sectionWindowScale, sectionWindowScale);
+  sectionLeft.position.set(center.x - wallMargin + wallHug, sectionWindowY, center.z);
+  sectionLeft.rotation.y = Math.PI / 2;
+  rebuildTankWindow(sectionLeft, 2.8, 'hallway');
+  sectionRight.scale.set(sectionWindowScale, sectionWindowScale, sectionWindowScale);
+  sectionRight.position.set(center.x + wallMargin - wallHug, sectionWindowY, center.z);
+  sectionRight.rotation.y = -Math.PI / 2;
+  rebuildTankWindow(sectionRight, 2.8, 'hallway');
 
   // Overhead lamps: 8 fixtures hang from the ceiling, spread in a ring
   // over the floor *around* the tank (not directly above it, per an
