@@ -951,8 +951,14 @@ export function placeFishtankEnvironment(
   // (beside its exit door), and the right wall (beside the main door) —
   // a proper little aquarium gallery rather than a single decor pair.
   const artScale = doorHeight * 0.5;
-  const artY = roomFloorY + roomHeight * 0.4;
   const [artBackLeft, artBackRight, artFront, artRight] = env.artPieces;
+  // Lower all wall art together so the large landscape murals sit a bit
+  // more human-scale: their lower edge lands near the top of the doors,
+  // and the smaller paintings drop by the same amount.
+  const largeMuralScale = doorHeight * 2.2;
+  const largeMuralHalfHeight = largeMuralScale * 0.56;
+  const wallArtDrop = roomFloorY + doorHeight - (roomFloorY + roomHeight * 0.45 - largeMuralHalfHeight);
+  const artY = roomFloorY + roomHeight * 0.4 + wallArtDrop;
   artBackLeft.scale.set(artScale, artScale, artScale);
   artBackLeft.position.set(center.x - wallMargin * 0.55, artY, center.z - wallMargin + wallHug);
   artBackRight.scale.set(artScale, artScale, artScale);
@@ -969,7 +975,7 @@ export function placeFishtankEnvironment(
   // above — positioned clear of the doors/small art already on their
   // walls (see the per-wall x/z fractions used above).
   const [, , , , muralWhale, muralWelcome] = env.artPieces;
-  const muralY = roomFloorY + roomHeight * 0.45;
+  const muralY = roomFloorY + roomHeight * 0.45 + wallArtDrop;
   // createArtPiece's frame is BoxGeometry(1.12 * aspect, 1.12, 0.06), so
   // half-width in world units is scale * aspect * 0.56 — used below to
   // compute exact open-gap boundaries for the small tank windows so they
@@ -981,7 +987,7 @@ export function placeFishtankEnvironment(
   // Blue whale landscape mural: centered on the (otherwise mostly bare)
   // left wall, clear of exitLeft (parked at wallMargin * 0.4 along Z).
   const whaleAspect = 2.4;
-  const whaleScale = doorHeight * 2.2;
+  const whaleScale = largeMuralScale;
   const whaleHalfWidth = whaleScale * whaleAspect * 0.56;
   muralWhale.scale.set(whaleScale, whaleScale, whaleScale);
   muralWhale.position.set(center.x - wallMargin + wallHug, muralY, center.z);
