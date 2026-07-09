@@ -149,6 +149,11 @@ let previousGalleryCreature: GalleryCreature | null = null;
 // the old camera framing would otherwise leave the creature off-center
 // or absurdly tiny in a corner of the new environment.
 let previousGalleryVisualStyle: SimParams['visualStyle'] | null = null;
+// Tracks the last mode seen so gallery pose state can be invalidated when
+// switching away from 3D and back again. Without this, the gallery's
+// one-shot pose would stay marked "done" across a 2D detour, so returning
+// to 3D would not re-frame the isolated creature.
+let previousMode: SimMode = params.mode;
 let galleryPosed = false;
 let gallerySnapshot: Pick<
   SimParams,
@@ -239,7 +244,7 @@ function exitGallery(): void {
  * fully orbit/zoom-able afterward via OrbitControls.
  */
 function poseGalleryEntityIfReady(): void {
-  if (!params.galleryCreature || galleryPosed || !renderer3D) return;
+  if (!params.galleryCreature || galleryPosed || !renderer3D || params.mode !== '3d') return;
   const kind = params.galleryCreature;
   const entity = GALLERY_PREDATOR_KINDS.has(kind) ? sim.predators[0] : sim.boids[0];
   if (!entity) return;
@@ -418,6 +423,17 @@ function loop(now: number): void {
   // here rather than via a params change-event system (none exists for
   // most of SimParams) since this is the one place already running
   // every frame.
+  if (params.mode !== previousMode) {
+    // Gallery framing is 3D-specific, so any mode flip should clear the
+    // one-shot pose flag and let the creature be re-framed when 3D comes
+    // back.
+    if (params.galleryCreature) {
+      galleryPosed = false;
+      previousGalleryVisualStyle = null;
+    }
+    previousMode = params.mode;
+  }
+
   if (params.galleryCreature !== previousGalleryCreature) {
     if (params.galleryCreature) enterGallery(params.galleryCreature);
     else exitGallery();
