@@ -15,9 +15,10 @@ export interface UFOVisual {
    * Called once per frame. When `active` is false the saucer/beam are
    * hidden and the rest of the arguments are ignored. `beamStrength` is
    * 0..1 (smoothed on/off); `beamLength` is how far down the beam cone
-   * should reach in world units.
+   * should reach in world units. `modelScale` uniformly scales the whole
+   * UFO visual (hull + beam) in rendered world-space.
    */
-  setState(active: boolean, position: THREE.Vector3, beamStrength: number, beamLength: number): void;
+  setState(active: boolean, position: THREE.Vector3, beamStrength: number, beamLength: number, modelScale?: number): void;
   update(dt: number): void;
   dispose(): void;
 }
@@ -108,14 +109,16 @@ export function createUFOVisual(scene: THREE.Scene): UFOVisual {
   let spin = 0;
 
   return {
-    setState(active, position, beamStrength, beamLength) {
+    setState(active, position, beamStrength, beamLength, modelScale = 1) {
       group.visible = active;
       if (!active) return;
       group.position.copy(position);
+      group.scale.setScalar(Math.max(0.001, modelScale));
       const clampedStrength = Math.max(0, Math.min(1, beamStrength));
       beam.scale.set(1, Math.max(0.001, beamLength), 1);
       beamMaterial.opacity = 0.55 * clampedStrength;
       beamLight.intensity = 3.5 * clampedStrength;
+      beamLight.distance = 500 * Math.max(0.001, modelScale);
       lightMaterial.emissiveIntensity = 1.5 + clampedStrength * 2.5;
     },
     update(dt) {
