@@ -6,10 +6,13 @@ import {
   createOverheadLamp,
   createBench,
   createCornerStatue,
+  createUpperFrieze,
   type CornerStatueKind,
   createTankWindow,
   rebuildTankWindow,
   createExhibitLabel,
+  createServiceVent,
+  createWayfindingSign,
   type OverheadLamp,
 } from './roomDecor';
 
@@ -63,6 +66,9 @@ export interface FishtankEnvironment {
   tankWindows: THREE.Group[];
   /** Small museum-style placards mounted beside each tank window (see tankWindows) — sells the exhibit-hall feel. */
   exhibitLabels: THREE.Group[];
+  upperFriezeSegments: THREE.Group[];
+  serviceVents: THREE.Group[];
+  wayfindingSigns: THREE.Group[];
   ambientLight: THREE.AmbientLight;
   hemisphereLight: THREE.HemisphereLight;
   keyLight: THREE.DirectionalLight;
@@ -496,6 +502,29 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     label.visible = false;
   });
 
+  // Simple upper-wall dressing: a thin frieze band, a few service vents,
+  // and small wayfinding plaques so the top of the room doesn't read as
+  // a huge empty rectangle.
+  const upperFriezeSegments = Array.from({ length: 4 }, () => createUpperFrieze());
+  upperFriezeSegments.forEach((segment) => {
+    segment.visible = false;
+  });
+
+  const serviceVents = Array.from({ length: 6 }, () => createServiceVent());
+  serviceVents.forEach((vent) => {
+    vent.visible = false;
+  });
+
+  const wayfindingSigns = [
+    createWayfindingSign('Gallery Wing', 'right'),
+    createWayfindingSign('Exhibits', 'left'),
+    createWayfindingSign('Aquarium Hall', 'right'),
+    createWayfindingSign('Entry Lobby', 'left'),
+  ];
+  wayfindingSigns.forEach((sign) => {
+    sign.visible = false;
+  });
+
   // 8 ceiling lamps distributed around the floor outside the tank
   // footprint (positioned in placeFishtankEnvironment below), replacing
   // the old single lamp centered directly above the tank — eight simple
@@ -548,6 +577,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     ...cornerSculptures,
     ...tankWindows,
     ...exhibitLabels,
+    ...upperFriezeSegments,
+    ...serviceVents,
+    ...wayfindingSigns,
     ...lamps.map((lamp) => lamp.group),
     ambientLight,
     hemisphereLight,
@@ -575,6 +607,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     cornerSculptures,
     tankWindows,
     exhibitLabels,
+    upperFriezeSegments,
+    serviceVents,
+    wayfindingSigns,
     lamps,
     ambientLight,
     hemisphereLight,
@@ -613,6 +648,15 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       });
       exhibitLabels.forEach((label) => {
         label.visible = visible;
+      });
+      upperFriezeSegments.forEach((segment) => {
+        segment.visible = visible;
+      });
+      serviceVents.forEach((vent) => {
+        vent.visible = visible;
+      });
+      wayfindingSigns.forEach((sign) => {
+        sign.visible = visible;
       });
       lamps.forEach((lamp) => {
         lamp.group.visible = visible;
@@ -670,6 +714,15 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       exhibitLabels.forEach((label) => {
         label.visible = visible;
       });
+      upperFriezeSegments.forEach((segment) => {
+        segment.visible = visible;
+      });
+      serviceVents.forEach((vent) => {
+        vent.visible = visible;
+      });
+      wayfindingSigns.forEach((sign) => {
+        sign.visible = visible;
+      });
       lamps.forEach((lamp) => {
         lamp.group.visible = visible;
         lamp.light.visible = visible;
@@ -694,6 +747,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         ...cornerSculptures,
         ...tankWindows,
         ...exhibitLabels,
+        ...upperFriezeSegments,
+        ...serviceVents,
+        ...wayfindingSigns,
         ...lamps.map((lamp) => lamp.group),
         ambientLight,
         hemisphereLight,
@@ -723,6 +779,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       cornerSculptures.forEach(disposeObject3D);
       tankWindows.forEach(disposeObject3D);
       exhibitLabels.forEach(disposeObject3D);
+      upperFriezeSegments.forEach(disposeObject3D);
+      serviceVents.forEach(disposeObject3D);
+      wayfindingSigns.forEach(disposeObject3D);
       lamps.forEach((lamp) => disposeObject3D(lamp.group));
     },
   };
@@ -1020,6 +1079,59 @@ export function placeFishtankEnvironment(
   const turtleHalfWidth = turtleScale * turtleAspect * 0.56;
   muralTurtle.scale.set(turtleScale, turtleScale, turtleScale);
   muralTurtle.position.set(center.x, muralY, center.z - wallMargin + wallHug);
+
+  // Upper-wall dressing: a continuous frieze band just under the ceiling,
+  // a few service vents, and some directional plaques so the room has
+  // visual structure above the murals instead of a tall blank void.
+  const friezeY = roomFloorY + roomHeight - doorHeight * 0.35;
+  const friezeScale = doorHeight * 0.42;
+  const [friezeBack, friezeFront, friezeLeft, friezeRight] = env.upperFriezeSegments;
+  friezeBack.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeBack.position.set(center.x, friezeY, center.z - wallMargin + wallHug);
+  friezeFront.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeFront.position.set(center.x, friezeY, center.z + wallMargin - wallHug);
+  friezeFront.rotation.y = Math.PI;
+  friezeLeft.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeLeft.position.set(center.x - wallMargin + wallHug, friezeY, center.z);
+  friezeLeft.rotation.y = Math.PI / 2;
+  friezeRight.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
+  friezeRight.position.set(center.x + wallMargin - wallHug, friezeY, center.z);
+  friezeRight.rotation.y = -Math.PI / 2;
+
+  const ventY = roomFloorY + roomHeight - doorHeight * 0.18;
+  const ventScale = doorHeight * 0.28;
+  const [ventBackLeft, ventBackRight, ventFrontLeft, ventFrontRight, ventLeft, ventRight] = env.serviceVents;
+  ventBackLeft.scale.set(ventScale, ventScale, ventScale);
+  ventBackLeft.position.set(center.x - wallMargin * 0.55, ventY, center.z - wallMargin + wallHug);
+  ventBackRight.scale.set(ventScale, ventScale, ventScale);
+  ventBackRight.position.set(center.x + wallMargin * 0.55, ventY, center.z - wallMargin + wallHug);
+  ventFrontLeft.scale.set(ventScale, ventScale, ventScale);
+  ventFrontLeft.position.set(center.x - wallMargin * 0.55, ventY, center.z + wallMargin - wallHug);
+  ventFrontLeft.rotation.y = Math.PI;
+  ventFrontRight.scale.set(ventScale, ventScale, ventScale);
+  ventFrontRight.position.set(center.x + wallMargin * 0.55, ventY, center.z + wallMargin - wallHug);
+  ventFrontRight.rotation.y = Math.PI;
+  ventLeft.scale.set(ventScale, ventScale, ventScale);
+  ventLeft.position.set(center.x - wallMargin + wallHug, ventY, center.z - wallMargin * 0.5);
+  ventLeft.rotation.y = Math.PI / 2;
+  ventRight.scale.set(ventScale, ventScale, ventScale);
+  ventRight.position.set(center.x + wallMargin - wallHug, ventY, center.z + wallMargin * 0.5);
+  ventRight.rotation.y = -Math.PI / 2;
+
+  const signY = roomFloorY + roomHeight - doorHeight * 0.08;
+  const signScale = doorHeight * 0.35;
+  const [signBack, signFront, signLeft, signRight] = env.wayfindingSigns;
+  signBack.scale.set(signScale, signScale, signScale);
+  signBack.position.set(center.x, signY, center.z - wallMargin + wallHug);
+  signFront.scale.set(signScale, signScale, signScale);
+  signFront.position.set(center.x, signY, center.z + wallMargin - wallHug);
+  signFront.rotation.y = Math.PI;
+  signLeft.scale.set(signScale, signScale, signScale);
+  signLeft.position.set(center.x - wallMargin + wallHug, signY, center.z);
+  signLeft.rotation.y = Math.PI / 2;
+  signRight.scale.set(signScale, signScale, signScale);
+  signRight.position.set(center.x + wallMargin - wallHug, signY, center.z);
+  signRight.rotation.y = -Math.PI / 2;
 
   // Benches: 4 plain backless wooden benches, one on each side of the
   // tank (N/E/S/W), parked about halfway between the tank's own

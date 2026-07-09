@@ -726,6 +726,109 @@ export function createExhibitLabel(title: string, subtitle: string): THREE.Group
   return group;
 }
 
+/** A thin decorative frieze strip for the upper wall line — simple molding plus a subtle aquarium-wave pattern. */
+export function createUpperFrieze(aspect: number = 1): THREE.Group {
+  const group = new THREE.Group();
+
+  const baseMaterial = new THREE.MeshStandardMaterial({ color: 0x6c7d83, roughness: 0.75, metalness: 0.1 });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1 * aspect, 0.16, 0.03), baseMaterial);
+  group.add(base);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#17394a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = 'rgba(192, 233, 244, 0.95)';
+  ctx.lineWidth = 5;
+  for (let i = 0; i < 6; i++) {
+    const y = 18 + i * 13;
+    ctx.beginPath();
+    ctx.moveTo(-16, y);
+    for (let x = 0; x <= canvas.width + 16; x += 32) {
+      ctx.quadraticCurveTo(x - 8, y + (i % 2 === 0 ? -8 : 8), x + 8, y);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(255, 221, 135, 0.85)';
+  for (let i = 0; i < 10; i++) {
+    const x = 34 + i * 48;
+    ctx.beginPath();
+    ctx.arc(x, 54 + ((i % 2) * 8 - 4), 4.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(aspect * 3.2, 1);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const faceMaterial = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8 });
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(1 * aspect, 0.12), faceMaterial);
+  face.position.z = 0.018;
+  group.add(face);
+
+  return group;
+}
+
+/** A compact upper-wall service vent: slotted grille plus frame. */
+export function createServiceVent(): THREE.Group {
+  const group = new THREE.Group();
+  const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x5e666b, roughness: 0.7, metalness: 0.2 });
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.22, 0.03), frameMaterial);
+  group.add(frame);
+
+  const slatMaterial = new THREE.MeshStandardMaterial({ color: 0x394449, roughness: 0.5, metalness: 0.35 });
+  for (let i = -2; i <= 2; i++) {
+    const slat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.02, 0.01), slatMaterial);
+    slat.position.y = i * 0.04;
+    group.add(slat);
+  }
+
+  const accent = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.012), new THREE.MeshStandardMaterial({ color: 0xb8c6ca, roughness: 0.45 }));
+  accent.position.set(0.16, 0, 0.012);
+  group.add(accent);
+  return group;
+}
+
+/** A small upper-wall wayfinding sign with a label and arrow. */
+export function createWayfindingSign(label: string, arrow: 'left' | 'right' | 'none' = 'none'): THREE.Group {
+  const group = new THREE.Group();
+  const backingMaterial = new THREE.MeshStandardMaterial({ color: 0x2a4d66, roughness: 0.55, metalness: 0.1 });
+  const backing = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.24, 0.03), backingMaterial);
+  group.add(backing);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 72;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#f3f0e7';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#2a4d66';
+  ctx.lineWidth = 5;
+  ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+  ctx.fillStyle = '#17394a';
+  ctx.font = `bold 30px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, canvas.width / 2, canvas.height / 2 - 1);
+  if (arrow !== 'none') {
+    ctx.font = `bold 24px sans-serif`;
+    ctx.fillText(arrow === 'left' ? '←' : '→', arrow === 'left' ? 26 : canvas.width - 26, canvas.height / 2);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const face = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.84, 0.18),
+    new THREE.MeshStandardMaterial({ map: texture, roughness: 0.8 }),
+  );
+  face.position.z = 0.018;
+  group.add(face);
+  return group;
+}
+
 export interface OverheadLamp {
   group: THREE.Group;
   light: THREE.SpotLight;
