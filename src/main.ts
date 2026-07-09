@@ -13,8 +13,15 @@ const controlPanelBody = document.querySelector<HTMLElement>('#control-panel-bod
 const controlPanel_el = document.querySelector<HTMLElement>('#control-panel')!;
 const controlPanelToggle = document.querySelector<HTMLButtonElement>('#control-panel-toggle')!;
 const canvasStack = document.querySelector<HTMLElement>('#canvas-stack')!;
+const appTitle = document.querySelector<HTMLElement>('#app-title')!;
 const appSubtitle = document.querySelector<HTMLElement>('#app-subtitle')!;
 const controlPanelHeading = document.querySelector<HTMLElement>('#control-panel-heading')!;
+
+function getAppTitle(): string {
+  const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+  const branch = import.meta.env.DEV && isLocalHost ? import.meta.env.VITE_GIT_BRANCH?.trim() : '';
+  return branch ? `AiBoids - ${branch}` : 'AiBoids';
+}
 
 /**
  * Applies the current language to the handful of static (non-ControlPanel)
@@ -24,6 +31,7 @@ const controlPanelHeading = document.querySelector<HTMLElement>('#control-panel-
  */
 function applyStaticTranslations(): void {
   document.title = t('documentTitle');
+  appTitle.textContent = getAppTitle();
   appSubtitle.textContent = t('subtitle');
   controlPanelHeading.textContent = t('controlsHeading');
   controlPanelToggle.title = t('togglePanelTitle');

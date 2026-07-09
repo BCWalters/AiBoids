@@ -2,15 +2,15 @@
 
 ## Overview
 A browser-based recreation of the classic "Boids" flocking simulation (Craig
-Reynolds, 1986). Birds ("boids") flock on a 2D field using local perception
-and simple steering rules. Predators can be introduced to scatter the flock,
-which then reforms once the threat passes. All key parameters are tunable
-live via a control panel.
+Reynolds, 1986). Birds ("boids") flock on a 2D field or in one of several 3D
+scene styles using local perception and simple steering rules. Predators can
+be introduced to scatter the flock, which then reforms once the threat
+passes. All key parameters are tunable live via a control panel.
 
 ## Tech Stack
 - **Language**: TypeScript
 - **Build tooling**: Vite (vanilla TS template, no framework)
-- **Rendering**: HTML5 Canvas (2D context)
+- **Rendering**: HTML5 Canvas (2D context) plus three.js for the 3D modes
 - **UI**: Plain HTML/CSS control panel (sliders, number inputs, buttons)
 - No external simulation/physics libraries — core logic is hand-rolled so
   it stays transparent and easy to extend.
@@ -19,7 +19,8 @@ live via a control panel.
 Simulation/state logic (boid data, update loop, spatial partitioning) is
 kept fully decoupled from the rendering layer, so a future V2 could swap
 the Canvas2D renderer for a 3D renderer (e.g. Three.js) without touching
-core flocking logic.
+core flocking logic. That separation is what later made the arcade/nature/
+fishtank 3D styles possible without rewriting the sim itself.
 
 ### V2 update: 3D mode shipped
 V2 added a live-switchable 3D mode alongside the original 2D mode:
@@ -65,6 +66,28 @@ V2 added a live-switchable 3D mode alongside the original 2D mode:
   - Both styles reuse the same instancing/steering/animation pipeline;
     only geometry, materials, lighting, and the sky/ground environment
     swap based on the selected style.
+
+### V4 update: second 3D scene (fishtank)
+- **Visual style split**: 3D mode now offers three styles — `arcade`,
+  `nature`, and `fishtank`. The style toggle is cosmetic, but it now
+  drives different geometry sets, environment modules, and some
+  style-specific behavior.
+- **Independent fishtank scene**: `src/render/styles/fishtank/` contains
+  its own aquarium-room environment plus separate fish/shark/seahorse
+  geometry, so the underwater scene can evolve without coupling to the
+  nature sky/ground code.
+- **Per-style population snapshots**: the control panel preserves separate
+  outdoor vs. fishtank population mixes when switching styles, since the
+  same counts read very differently in an open sky versus a compact tank.
+- **Shared renderer, different world framing**: the 3D renderer keeps one
+  camera/composer pipeline, but switches environment visibility, creature
+  geometry, and framing rules based on the active style. The model gallery
+  uses the same machinery to hide the surrounding room when inspecting
+  fishtank creatures up close.
+- **Underwater visual language**: the fishtank style uses a sealed room
+  with a glass tank, surrounding exhibit props, and fish-themed creature
+  skins so it reads as a separate scene rather than a reskin of the
+  nature environment.
 
 ## World Model
 - 2D continuous coordinate space (not a discrete grid) rendered on a
@@ -159,7 +182,8 @@ fly without resetting existing positions.
 AiBoids/
   index.html
   src/
-    main.ts            # bootstraps canvas, control panel, sim loop
+    main.ts            # bootstraps canvases, control panel, sim loop,
+                       # mode/style/gallery switching
     sim/
       Boid.ts           # boid entity + steering rule implementations
       Predator.ts       # predator entity + pursuit logic
@@ -169,6 +193,10 @@ AiBoids/
                          # of truth read by both UI and sim)
     render/
       Renderer.ts       # draws current sim state to canvas each frame
+      Renderer3D.ts     # shared three.js renderer for arcade/nature/fishtank
+      styles/
+        nature/         # outdoor 3D scene assets
+        fishtank/       # underwater 3D scene assets
     ui/
       ControlPanel.ts   # wires up sliders/inputs to params + buttons
   style.css
@@ -181,9 +209,9 @@ AiBoids/
   radius+angle), compute steering (sep/align/cohesion/flee), update
   velocity + position (with wraparound), then render.
 
-## Out of Scope for V1 (possible future work)
-- 3D rendering
+## Out of Scope for V1 (historic)
 - Obstacles/walls within the world
 - Predator pack coordination / multiple predator "species"
 - Saving/loading parameter presets
 - Mobile/touch-optimized control panel
+- More scene themes/styles beyond the current 3D set

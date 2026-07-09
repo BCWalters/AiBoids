@@ -598,9 +598,19 @@ export function rebuildTankWindow(group: THREE.Group, aspect: number): void {
 }
 
 function buildTankWindowContents(group: THREE.Group, aspect: number): void {
+  // Frame, backdrop, and glass are stacked along local z as three
+  // separate coplanar-ish surfaces. Earlier revisions packed them within
+  // ~0.02-0.04 units of each other (and even had the backdrop plane
+  // sitting *inside* the frame box's own depth range), which caused
+  // depth-buffer z-fighting — visible as flickering/glitching fish
+  // patterns, worse the farther the camera zooms out (depth precision
+  // degrades with distance). Spacing them well apart (frame recessed
+  // deep in back, backdrop clearly in front of the frame's front face,
+  // glass clearly in front of the backdrop) keeps each surface's depth
+  // unambiguous at any zoom level.
   const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x1c1f22, roughness: 0.5, metalness: 0.4 });
   const frame = new THREE.Mesh(new THREE.BoxGeometry(1.1 * aspect, 1.1, 0.08), frameMaterial);
-  frame.position.z = -0.03;
+  frame.position.z = -0.09;
   group.add(frame);
 
   // Static "other tank" backdrop: a dim murky-water gradient with a
@@ -649,7 +659,10 @@ function buildTankWindowContents(group: THREE.Group, aspect: number): void {
   backdropTexture.colorSpace = THREE.SRGBColorSpace;
   const backdropMaterial = new THREE.MeshStandardMaterial({ map: backdropTexture, roughness: 0.9 });
   const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(0.92 * aspect, 0.92), backdropMaterial);
-  backdrop.position.z = -0.01;
+  // Clearly in front of the frame's front face (frame spans -0.13 to
+  // -0.05) — a comfortable gap rather than the sliver that used to
+  // cause z-fighting.
+  backdrop.position.z = 0.0;
   group.add(backdrop);
 
   const glassMaterial = new THREE.MeshPhysicalMaterial({
@@ -663,7 +676,8 @@ function buildTankWindowContents(group: THREE.Group, aspect: number): void {
     side: THREE.DoubleSide,
   });
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.96 * aspect, 0.96), glassMaterial);
-  glass.position.z = 0.03;
+  // Clearly in front of the backdrop, same reasoning as above.
+  glass.position.z = 0.08;
   group.add(glass);
 }
 
@@ -717,7 +731,7 @@ export interface OverheadLamp {
   light: THREE.SpotLight;
 }
 
-/** A ceiling-mounted pendant lamp (rod + shade) with a spotlight aimed straight down, standing in for the room's overhead light source. */
+/** A ceiling-mounted pendant lamp (rod + shade) with a broad spotlight aimed straight down, standing in for the room's overhead light source. */
 export type CornerStatueKind = 'whale' | 'dolphin' | 'turtle' | 'shark';
 
 /**
@@ -865,7 +879,7 @@ export function createOverheadLamp(): OverheadLamp {
   bulb.position.y = -0.58;
   group.add(bulb);
 
-  const light = new THREE.SpotLight(0xfff3d6, 1.4, 0, Math.PI / 5, 0.5, 1.2);
+  const light = new THREE.SpotLight(0xfff3d6, 0.95, 0, Math.PI / 3.4, 0.7, 1.2);
   light.position.set(0, -0.55, 0);
   const target = new THREE.Object3D();
   target.position.set(0, -1, 0);
