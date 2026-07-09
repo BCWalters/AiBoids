@@ -64,6 +64,7 @@ export interface FishtankEnvironment {
   cornerSculptures: THREE.Group[];
   /** Small static "other tank" wall windows, filling open wall stretches not covered by a mural — suggesting a wing of smaller neighboring exhibit tanks. No animation, just a dim static backdrop + a glossy glass pane. */
   tankWindows: THREE.Group[];
+  sectionWindows: THREE.Group[];
   /** Small museum-style placards mounted beside each tank window (see tankWindows) — sells the exhibit-hall feel. */
   exhibitLabels: THREE.Group[];
   upperFriezeSegments: THREE.Group[];
@@ -484,6 +485,14 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     win.visible = false;
   });
 
+  // Two larger windows into neighboring aquarium sections, one on each
+  // long side wall, so the room feels like part of a bigger aquarium wing
+  // rather than a completely sealed box.
+  const sectionWindows = [createTankWindow(2.8), createTankWindow(2.8)];
+  sectionWindows.forEach((win) => {
+    win.visible = false;
+  });
+
   // A small museum-style placard beside each tank window above, with a
   // generic exhibit-hall title/subtitle — sells the "real aquarium wing"
   // feel, matching the (window order: back-left, back-right, front-left,
@@ -576,6 +585,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     ...benches,
     ...cornerSculptures,
     ...tankWindows,
+    ...sectionWindows,
     ...exhibitLabels,
     ...upperFriezeSegments,
     ...serviceVents,
@@ -606,6 +616,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     benches,
     cornerSculptures,
     tankWindows,
+    sectionWindows,
     exhibitLabels,
     upperFriezeSegments,
     serviceVents,
@@ -644,6 +655,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         sculpture.visible = visible;
       });
       tankWindows.forEach((win) => {
+        win.visible = visible;
+      });
+      sectionWindows.forEach((win) => {
         win.visible = visible;
       });
       exhibitLabels.forEach((label) => {
@@ -711,6 +725,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       tankWindows.forEach((win) => {
         win.visible = visible;
       });
+      sectionWindows.forEach((win) => {
+        win.visible = visible;
+      });
       exhibitLabels.forEach((label) => {
         label.visible = visible;
       });
@@ -746,6 +763,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         ...benches,
         ...cornerSculptures,
         ...tankWindows,
+        ...sectionWindows,
         ...exhibitLabels,
         ...upperFriezeSegments,
         ...serviceVents,
@@ -778,6 +796,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       benches.forEach(disposeObject3D);
       cornerSculptures.forEach(disposeObject3D);
       tankWindows.forEach(disposeObject3D);
+      sectionWindows.forEach(disposeObject3D);
       exhibitLabels.forEach(disposeObject3D);
       upperFriezeSegments.forEach(disposeObject3D);
       serviceVents.forEach(disposeObject3D);
@@ -1270,6 +1289,21 @@ export function placeFishtankEnvironment(
     // per frame.
     rebuildTankWindow(win, fit.aspect);
   });
+
+  // Larger side-wall windows into neighboring exhibit halls. These sit
+  // higher than the lower portholes so they read like bigger gallery
+  // openings rather than duplicate the small viewports below.
+  const sectionWindowScale = doorHeight * 0.7;
+  const sectionWindowY = roomFloorY + roomHeight * 0.67;
+  const [sectionLeft, sectionRight] = env.sectionWindows;
+  sectionLeft.scale.set(sectionWindowScale, sectionWindowScale, sectionWindowScale);
+  sectionLeft.position.set(center.x - wallMargin + wallHug, sectionWindowY, center.z);
+  sectionLeft.rotation.y = Math.PI / 2;
+  rebuildTankWindow(sectionLeft, 2.8, 'hallway');
+  sectionRight.scale.set(sectionWindowScale, sectionWindowScale, sectionWindowScale);
+  sectionRight.position.set(center.x + wallMargin - wallHug, sectionWindowY, center.z);
+  sectionRight.rotation.y = -Math.PI / 2;
+  rebuildTankWindow(sectionRight, 2.8, 'hallway');
 
   // Overhead lamps: 8 fixtures hang from the ceiling, spread in a ring
   // over the floor *around* the tank (not directly above it, per an

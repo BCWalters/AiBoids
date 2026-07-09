@@ -557,21 +557,21 @@ export function createBench(): THREE.Group {
   return group;
 }
 
+type WallWindowView = 'tank' | 'hallway';
+
 /**
- * A small "other tank" wall window — a static, non-animated porthole
- * suggesting a neighboring exhibit tank glimpsed through the wall: a
- * dark metal frame, a dim static canvas backdrop (murky blue-green
- * water with a handful of small colorful fish silhouettes, painted once
- * and never animated), and a glossy glass pane in front with a
- * low-roughness clearcoat so it picks up specular highlights from the
- * room's lamps — enough of a glassy sheen to read as "somewhat real"
- * without needing a full reflection/environment-map setup. Pass
- * `aspect` (width/height, default 1) for a wider window instead of the
- * default square porthole.
+ * A small wall window — a static, non-animated porthole suggesting a
+ * neighboring space glimpsed through the wall: a dark metal frame, a dim
+ * static backdrop, and a glossy glass pane in front with a low-roughness
+ * clearcoat so it picks up specular highlights from the room's lamps —
+ * enough of a glassy sheen to read as "somewhat real" without needing a
+ * full reflection/environment-map setup. Pass `aspect` (width/height,
+ * default 1) for a wider window instead of the default square porthole,
+ * and `view` to choose between a neighboring tank or a hallway.
  */
-export function createTankWindow(aspect: number = 1): THREE.Group {
+export function createTankWindow(aspect: number = 1, view: WallWindowView = 'tank'): THREE.Group {
   const group = new THREE.Group();
-  buildTankWindowContents(group, aspect);
+  buildTankWindowContents(group, aspect, view);
   return group;
 }
 
@@ -584,7 +584,7 @@ export function createTankWindow(aspect: number = 1): THREE.Group {
  * (already wired into the scene graph/lifecycle) rather than swapping
  * in a whole new object.
  */
-export function rebuildTankWindow(group: THREE.Group, aspect: number): void {
+export function rebuildTankWindow(group: THREE.Group, aspect: number, view: WallWindowView = 'tank'): void {
   for (const child of [...group.children]) {
     group.remove(child);
     if (child instanceof THREE.Mesh) {
@@ -594,10 +594,10 @@ export function rebuildTankWindow(group: THREE.Group, aspect: number): void {
       else material.dispose();
     }
   }
-  buildTankWindowContents(group, aspect);
+  buildTankWindowContents(group, aspect, view);
 }
 
-function buildTankWindowContents(group: THREE.Group, aspect: number): void {
+function buildTankWindowContents(group: THREE.Group, aspect: number, view: WallWindowView): void {
   // Frame, backdrop, and glass are stacked along local z as three
   // separate coplanar-ish surfaces. Earlier revisions packed them within
   // ~0.02-0.04 units of each other (and even had the backdrop plane
@@ -613,47 +613,83 @@ function buildTankWindowContents(group: THREE.Group, aspect: number): void {
   frame.position.z = -0.09;
   group.add(frame);
 
-  // Static "other tank" backdrop: a dim murky-water gradient with a
-  // handful of small colorful fish (reusing paintFish, same as the
-  // schoolOfFish art variant) — simulating a neighboring tank glimpsed
-  // through the wall without any real animation.
+  // Static backdrop: either a neighboring tank or a hallway corridor.
   const height = 128;
   const width = Math.round(height * aspect);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
-  const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, '#0f3a58');
-  grad.addColorStop(1, '#041426');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, width, height);
+  if (view === 'tank') {
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, '#0f3a58');
+    grad.addColorStop(1, '#041426');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
 
-  // A scattering of small, muted multicolored dots behind the main fish
-  // — suggesting a few more distant/blurry fish glimpsed deeper in the
-  // neighboring tank, without competing with the painted fish shapes.
-  const dotColors = ['#6f9aa8', '#a8895f', '#8a7a9e', '#7fa88f', '#a86f7f'];
-  const dotCount = Math.max(6, Math.round(10 * aspect));
-  for (let i = 0; i < dotCount; i++) {
-    const dx = width * ((i * 0.337 + 0.05) % 1);
-    const dy = height * ((i * 0.591 + 0.12) % 1);
-    const r = height * (0.015 + 0.015 * ((i * 0.271) % 1));
-    ctx.globalAlpha = 0.35 + 0.25 * ((i * 0.193) % 1);
-    ctx.fillStyle = dotColors[i % dotColors.length];
+    const dotColors = ['#6f9aa8', '#a8895f', '#8a7a9e', '#7fa88f', '#a86f7f'];
+    const dotCount = Math.max(6, Math.round(10 * aspect));
+    for (let i = 0; i < dotCount; i++) {
+      const dx = width * ((i * 0.337 + 0.05) % 1);
+      const dy = height * ((i * 0.591 + 0.12) % 1);
+      const r = height * (0.015 + 0.015 * ((i * 0.271) % 1));
+      ctx.globalAlpha = 0.35 + 0.25 * ((i * 0.193) % 1);
+      ctx.fillStyle = dotColors[i % dotColors.length];
+      ctx.beginPath();
+      ctx.arc(dx, dy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    const fishColors = ['#f4a340', '#f2d94e', '#7fd8e8', '#ff6f61', '#8fd6e7'];
+    const fishCount = Math.max(3, Math.round(4 * aspect));
+    for (let i = 0; i < fishCount; i++) {
+      const fx = width * (0.08 + 0.84 * ((i * 0.41 + 0.15) % 1));
+      const fy = height * (0.2 + 0.6 * ((i * 0.67 + 0.3) % 1));
+      const len = height * (0.14 + 0.06 * ((i * 0.31) % 1));
+      const angle = (((i * 0.47) % 1) - 0.5) * 0.9;
+      paintFish(ctx, fx, fy, len, angle, fishColors[i % fishColors.length]);
+    }
+  } else {
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, '#e8e2d7');
+    grad.addColorStop(0.45, '#c9c1b2');
+    grad.addColorStop(1, '#8d8478');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    // Hallway ceiling/walls with a bright opening and a simple vanishing
+    // point, so these read as adjacent corridors instead of another tank.
+    ctx.fillStyle = 'rgba(48, 63, 79, 0.95)';
+    ctx.fillRect(0, height * 0.1, width, height * 0.18);
+    ctx.fillStyle = 'rgba(70, 78, 86, 0.9)';
+    ctx.fillRect(0, height * 0.72, width, height * 0.28);
+
+    const vanishingX = width * 0.54;
+    const horizonY = height * 0.56;
+    ctx.fillStyle = '#f3efe5';
+    ctx.fillRect(width * 0.4, height * 0.18, width * 0.28, height * 0.2);
+    ctx.fillStyle = 'rgba(255, 244, 214, 0.85)';
+    ctx.fillRect(width * 0.45, height * 0.22, width * 0.18, height * 0.1);
+
+    ctx.strokeStyle = 'rgba(88, 97, 108, 0.75)';
+    ctx.lineWidth = Math.max(1, height * 0.01);
     ctx.beginPath();
-    ctx.arc(dx, dy, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
+    ctx.moveTo(0, horizonY);
+    ctx.lineTo(width, horizonY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(width * 0.2, height * 0.72);
+    ctx.lineTo(vanishingX, horizonY);
+    ctx.lineTo(width * 0.8, height * 0.72);
+    ctx.stroke();
 
-  const fishColors = ['#f4a340', '#f2d94e', '#7fd8e8', '#ff6f61', '#8fd6e7'];
-  const fishCount = Math.max(3, Math.round(4 * aspect));
-  for (let i = 0; i < fishCount; i++) {
-    const fx = width * (0.08 + 0.84 * ((i * 0.41 + 0.15) % 1));
-    const fy = height * (0.2 + 0.6 * ((i * 0.67 + 0.3) % 1));
-    const len = height * (0.14 + 0.06 * ((i * 0.31) % 1));
-    const angle = (((i * 0.47) % 1) - 0.5) * 0.9;
-    paintFish(ctx, fx, fy, len, angle, fishColors[i % fishColors.length]);
+    ctx.fillStyle = 'rgba(33, 42, 52, 0.75)';
+    ctx.fillRect(width * 0.12, height * 0.28, width * 0.08, height * 0.34);
+    ctx.fillRect(width * 0.8, height * 0.28, width * 0.08, height * 0.34);
+    ctx.fillStyle = 'rgba(255, 248, 227, 0.65)';
+    ctx.fillRect(width * 0.13, height * 0.31, width * 0.06, height * 0.08);
+    ctx.fillRect(width * 0.81, height * 0.31, width * 0.06, height * 0.08);
   }
   const backdropTexture = new THREE.CanvasTexture(canvas);
   backdropTexture.colorSpace = THREE.SRGBColorSpace;
