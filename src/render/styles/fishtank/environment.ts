@@ -1083,7 +1083,7 @@ export function placeFishtankEnvironment(
   // Upper-wall dressing: a continuous frieze band just under the ceiling,
   // a few service vents, and some directional plaques so the room has
   // visual structure above the murals instead of a tall blank void.
-  const friezeY = roomFloorY + roomHeight - doorHeight * 0.35;
+  const friezeY = roomFloorY + roomHeight - doorHeight * 0.55;
   const friezeScale = doorHeight * 0.42;
   const [friezeBack, friezeFront, friezeLeft, friezeRight] = env.upperFriezeSegments;
   friezeBack.scale.set(roomFloorSize * 0.95, friezeScale, friezeScale);
@@ -1098,8 +1098,8 @@ export function placeFishtankEnvironment(
   friezeRight.position.set(center.x + wallMargin - wallHug, friezeY, center.z);
   friezeRight.rotation.y = -Math.PI / 2;
 
-  const ventY = roomFloorY + roomHeight - doorHeight * 0.18;
-  const ventScale = doorHeight * 0.28;
+  const ventY = roomFloorY + roomHeight - doorHeight * 0.42;
+  const ventScale = doorHeight * 0.42;
   const [ventBackLeft, ventBackRight, ventFrontLeft, ventFrontRight, ventLeft, ventRight] = env.serviceVents;
   ventBackLeft.scale.set(ventScale, ventScale, ventScale);
   ventBackLeft.position.set(center.x - wallMargin * 0.55, ventY, center.z - wallMargin + wallHug);
@@ -1118,8 +1118,8 @@ export function placeFishtankEnvironment(
   ventRight.position.set(center.x + wallMargin - wallHug, ventY, center.z + wallMargin * 0.5);
   ventRight.rotation.y = -Math.PI / 2;
 
-  const signY = roomFloorY + roomHeight - doorHeight * 0.08;
-  const signScale = doorHeight * 0.35;
+  const signY = roomFloorY + roomHeight - doorHeight * 0.24;
+  const signScale = doorHeight * 0.45;
   const [signBack, signFront, signLeft, signRight] = env.wayfindingSigns;
   signBack.scale.set(signScale, signScale, signScale);
   signBack.position.set(center.x, signY, center.z - wallMargin + wallHug);
