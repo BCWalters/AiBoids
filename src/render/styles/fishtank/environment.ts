@@ -64,7 +64,9 @@ export interface FishtankEnvironment {
   /** Small museum-style placards mounted beside each tank window (see tankWindows) — sells the exhibit-hall feel. */
   exhibitLabels: THREE.Group[];
   ambientLight: THREE.AmbientLight;
+  hemisphereLight: THREE.HemisphereLight;
   keyLight: THREE.DirectionalLight;
+  bounceLights: THREE.PointLight[];
   fog: THREE.Fog;
   /** Call once per frame while fishtank style is active (currently a no-op stub — reserved for future caustics/particle animation). */
   update(elapsed: number): void;
@@ -506,12 +508,19 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     lamp.light.visible = false;
   });
 
-  const ambientLight = new THREE.AmbientLight(0xd8ecff, 0.55);
+  const ambientLight = new THREE.AmbientLight(0xd8ecff, 0.38);
+  const hemisphereLight = new THREE.HemisphereLight(0xcfeeff, 0x675042, 0.42);
+  const bounceLights = Array.from({ length: 4 }, (_, i) => {
+    const light = new THREE.PointLight(i % 2 === 0 ? 0xe3f4ff : 0xfff0df, 0.14, 0, 2);
+    light.visible = false;
+    return light;
+  });
   const keyLight = new THREE.DirectionalLight(0xfff6e8, 0.7);
   // Soft light from above, like an overhead room/tank hood lamp rather
   // than nature's low sun angle.
   keyLight.position.set(0.4, 1, 0.5);
   ambientLight.visible = false;
+  hemisphereLight.visible = false;
   keyLight.visible = false;
 
   // Fog is scoped tightly to roughly the tank's own scale (see
@@ -541,6 +550,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     ...exhibitLabels,
     ...lamps.map((lamp) => lamp.group),
     ambientLight,
+    hemisphereLight,
+    ...bounceLights,
     keyLight,
   );
 
@@ -566,7 +577,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     exhibitLabels,
     lamps,
     ambientLight,
+    hemisphereLight,
     keyLight,
+    bounceLights,
     fog,
     update() {
       // No animated elements yet (see doc comment above).
@@ -606,6 +619,10 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         lamp.light.visible = visible;
       });
       ambientLight.visible = visible;
+      hemisphereLight.visible = visible;
+      bounceLights.forEach((light) => {
+        light.visible = visible;
+      });
       keyLight.visible = visible;
       // Same "only actually attach if both visible and not independently
       // disabled" pattern as nature's setVisible (see ../../environment.ts).
@@ -679,6 +696,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         ...exhibitLabels,
         ...lamps.map((lamp) => lamp.group),
         ambientLight,
+        hemisphereLight,
+        ...bounceLights,
         keyLight,
       );
       if (scene.fog === fog) scene.fog = null;
@@ -1153,6 +1172,19 @@ export function placeFishtankEnvironment(
     // Light distance/decay are absolute world-space values, unaffected by
     // the group's transform scale, so they're set directly here.
     lamp.light.distance = roomHeight * 3;
+  });
+
+  // Extra diffuse fill: one soft hemisphere light and four very low
+  // intensity point lights around the tank. The visible ceiling fixtures
+  // are still the primary room dressing, but these hidden sources keep the
+  // aquarium from reading like a single hard key light when the camera
+  // orbits close to the glass.
+  env.hemisphereLight.position.set(center.x, roomFloorY + roomHeight, center.z);
+  env.bounceLights.forEach((light, i) => {
+    const angle = (i / env.bounceLights.length) * Math.PI * 2;
+    light.position.set(center.x + Math.cos(angle) * lampRadius * 0.72, roomFloorY + roomHeight * 0.7, center.z + Math.sin(angle) * lampRadius * 0.72);
+    light.distance = roomHeight * 2.4;
+    light.decay = 2;
   });
 
   // Fog is meant to read as mild water murkiness for fish approaching the
