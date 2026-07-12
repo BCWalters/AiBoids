@@ -4,6 +4,8 @@ A browser-based flocking ("Boids") simulation built entirely with an AI
 coding agent (GitHub Copilot CLI), used as a running exercise in
 iterative, agent-driven development.
 
+Hosted on my projects site: [Ben's Page](https://victorious-forest-06eb42803.7.azurestaticapps.net/)
+
 Small "boids" (sparrows, parrots, goldfinches, cardinals, blue jays) flock
 together using the classic separation/alignment/cohesion rules, while
 predators (hawks, and optionally fire-breathing dragons or an alien
