@@ -21,8 +21,8 @@ const populationSpeedSpecs: SliderSpec[] = [
   { key: 'goldfinchCount', labelKey: 'goldfinchCount', min: 0, max: 300, step: 1 },
   { key: 'cardinalCount', labelKey: 'cardinalCount', min: 0, max: 300, step: 1 },
   { key: 'bluejayCount', labelKey: 'bluejayCount', min: 0, max: 300, step: 1 },
-  { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 10, step: 1 },
-  { key: 'unicornCount', labelKey: 'unicornCount', min: 0, max: 10, step: 1 },
+  { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 25, step: 1 },
+  { key: 'unicornCount', labelKey: 'unicornCount', min: 0, max: 25, step: 1 },
   { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
   { key: 'predatorMaxSpeed', labelKey: 'predatorMaxSpeed', min: 20, max: 350, step: 5 },
 ];
@@ -431,7 +431,7 @@ export class ControlPanel {
       this.sim.spawnUFO();
       // Immediate, unmistakable feedback that the click registered —
       // the saucer itself takes a moment to descend into view, and the
-      // button doesn't visibly grey out until 3 are active, so without
+      // button doesn't visibly grey out until the cap is reached, so without
       // this a click can otherwise feel like it did nothing.
       button.classList.remove('button-pulse');
       // Force a reflow so re-adding the class restarts the animation
