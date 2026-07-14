@@ -25,7 +25,7 @@ const MAX_CATCH_EVENTS = 16;
 // How many alien-invasion saucers can be active at once. Each one is
 // fully independent (its own descend/beam/ascend lifecycle and flock-
 // centroid tracking), so multiple can be in flight simultaneously.
-export const MAX_CONCURRENT_UFOS = 3;
+export const MAX_CONCURRENT_UFOS = 5;
 
 // How long a UFO-abducted boid stays "gone" before flying back out of the
 // coop — instant respawn (still used for ordinary predator catches, which

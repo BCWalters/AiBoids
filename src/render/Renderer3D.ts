@@ -92,8 +92,8 @@ const PARROT_COLOR_PATTERNS: SpeciesColorSet[] = [
   { body: new THREE.Color(0xc0242f), wing: new THREE.Color(0x1f9e58), tail: new THREE.Color(0x2f6fdc) },
   // Sun conure
   { body: new THREE.Color(0xf5d327), wing: new THREE.Color(0xe8791a), tail: new THREE.Color(0xd8202a) },
-  // Hyacinth macaw
-  { body: new THREE.Color(0x2f4fa0), wing: new THREE.Color(0x1c3878), tail: new THREE.Color(0xf0b429) },
+  // Purple parrot variant with sky-blue accents
+  { body: new THREE.Color(0x8d4dff), wing: new THREE.Color(0x87ceeb), tail: new THREE.Color(0x66c7f4) },
 ];
 const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
 const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
@@ -184,8 +184,13 @@ const PREDATOR_LENGTH = 12;
 const PREDATOR_WIDTH = 4.4;
 // Dragons should read as dramatically larger than boids, not just a
 // slightly bigger hawk — roughly 2x the nature-style hawk's footprint.
-const DRAGON_LENGTH = PREDATOR_LENGTH * 3.0;
-const DRAGON_WIDTH = PREDATOR_WIDTH * 3.6;
+const DRAGON_SIZE_SCALE = 1.25;
+const DRAGON_LENGTH_BASE = PREDATOR_LENGTH * 3.0;
+const DRAGON_WIDTH_BASE = PREDATOR_WIDTH * 3.6;
+const DRAGON_LENGTH = DRAGON_LENGTH_BASE * DRAGON_SIZE_SCALE;
+const DRAGON_WIDTH = DRAGON_WIDTH_BASE * DRAGON_SIZE_SCALE;
+const SHARK_LENGTH = DRAGON_LENGTH_BASE;
+const SHARK_WIDTH = DRAGON_WIDTH_BASE;
 // Unicorns: a large, substantial creature — a little smaller than the
 // dragon, not just a slightly bigger hawk (the earlier hawk-relative
 // sizing read as bird-sized, not horse-sized).
@@ -797,7 +802,7 @@ export class Renderer3D {
     );
     this.fishtankButterflyfishGeometries = createButterflyfishGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
     this.fishtankPredatorGeometries = createFishtankFishGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
-    this.fishtankSharkPredatorGeometries = createFishtankSharkGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
+    this.fishtankSharkPredatorGeometries = createFishtankSharkGeometries(SHARK_LENGTH, SHARK_WIDTH);
     this.fishtankUnicornPredatorGeometries = createFishtankSeaHorseGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
 
     this.composer = new EffectComposer(this.renderer);
@@ -2236,7 +2241,7 @@ export class Renderer3D {
         isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
         isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
         isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
-        isShark ? getSharkTailPivotY(DRAGON_LENGTH) : 0,
+        isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
         isFishtank ? TANK_VISUAL_SCALE : 1,
         isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
       );
