@@ -5,7 +5,6 @@ import {
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
   buildHookedBeakGeometry,
-  buildEyeDotsGeometry,
 } from '../../../geometry/creatureGeometry';
 
 /**
@@ -130,31 +129,11 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   const beakCollar = new THREE.CylinderGeometry(beakRootRadius * 1.08, beakRootRadius * 0.98, length * 0.05, 16, 1, true);
   beakCollar.translate(0, beakRootY + length * 0.01, 0);
 
-  // Most macaws/parrots have pale bare facial skin around the beak/eye
-  // region; subtle cheek patches make the face read less like one uniform
-  // colored blob.
-  const facePatchRadius = width * 0.09;
-  const facePatchY = halfLen * headFrac(0.76);
-  const facePatchX = width * 0.285 * HEAD_NARROW_SCALE;
-  const facePatchZ = width * 0.085 * HEAD_NARROW_SCALE;
-  const facePatchLeft = new THREE.SphereGeometry(facePatchRadius, 10, 8);
-  facePatchLeft.scale(1, 1, 0.55);
-  facePatchLeft.translate(facePatchX, facePatchY, facePatchZ);
-  const facePatchRight = new THREE.SphereGeometry(facePatchRadius, 10, 8);
-  facePatchRight.scale(1, 1, 0.55);
-  facePatchRight.translate(-facePatchX, facePatchY, facePatchZ);
-  const facePatches = mergePositionOnlyGeometries([facePatchLeft, facePatchRight]);
-
-  // A pair of small dark eye dots on either side of the head, just above
-  // and slightly behind the face point — the single biggest missing
-  // "facial feature" cue reported (a parrot with no visible eyes reads
-  // as a smooth featureless head no matter how good the beak/head shape
-  // is otherwise).
   const eyeY = halfLen * headFrac(0.78);
-  const eyeX = width * 0.26 * HEAD_NARROW_SCALE;
+  const eyeX = width * 0.23 * HEAD_NARROW_SCALE;
   const eyeZ = width * 0.06 * HEAD_NARROW_SCALE;
-  const eyeRadius = width * 0.055 * HEAD_NARROW_SCALE;
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  const eyeRing = buildParrotEyeDisks(eyeX, eyeY, eyeZ, width * 0.078 * HEAD_NARROW_SCALE, width * 0.012);
+  const pupils = buildParrotEyeDisks(eyeX, eyeY, eyeZ, width * 0.038 * HEAD_NARROW_SCALE, width * 0.016);
 
   return mergeGeometriesWithColor([
     { geometry: torso, color: WHITE_VERTEX_COLOR },
@@ -163,9 +142,9 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
     { geometry: beakSocketFill, color: WHITE_VERTEX_COLOR },
     { geometry: beakThroatPlug, color: WHITE_VERTEX_COLOR },
     { geometry: beakCollar, color: BEAK_COLOR },
-    { geometry: facePatches, color: FACE_PATCH_COLOR },
+    { geometry: eyeRing, color: FACE_PATCH_COLOR },
     { geometry: beak, color: BEAK_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
+    { geometry: pupils, color: EYE_COLOR },
   ]);
 }
 
@@ -191,6 +170,22 @@ function buildDoubleSidedDiskCap(y: number, radius: number, segments: number): T
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function buildParrotEyeDisks(
+  eyeX: number,
+  eyeY: number,
+  eyeZ: number,
+  radius: number,
+  thickness: number,
+): THREE.BufferGeometry {
+  const left = new THREE.CylinderGeometry(radius, radius, thickness, 16);
+  left.rotateZ(Math.PI * 0.5);
+  left.translate(eyeX, eyeY, eyeZ);
+  const right = new THREE.CylinderGeometry(radius, radius, thickness, 16);
+  right.rotateZ(Math.PI * 0.5);
+  right.translate(-eyeX, eyeY, eyeZ);
+  return mergePositionOnlyGeometries([left, right]);
 }
 
 /**
