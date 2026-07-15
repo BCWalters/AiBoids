@@ -4,7 +4,6 @@ import {
   mergeGeometriesWithColor,
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
-  buildHookedBeakGeometry,
 } from '../../../geometry/creatureGeometry';
 
 /**
@@ -112,7 +111,7 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   // cannot peek through as a visible hole from front/oblique angles.
   const beakRootY = faceY - length * 0.025;
   const beakRootRadius = faceRadius * 1.08;
-  const beak = buildHookedBeakGeometry(beakRootY, beakRootRadius, length * 0.29, 126, 0.8, false);
+  const beak = buildSolidParrotBeakGeometry(faceY, faceRadius, length * 0.29);
 
   // Close both open lathe ends so no line-of-sight can pass through the
   // hollow body cavity from the beak junction to the rear opening.
@@ -126,8 +125,8 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   beakSocketFill.translate(0, faceY - length * 0.03, 0);
   const beakThroatPlug = new THREE.CylinderGeometry(beakRootRadius * 0.62, beakRootRadius * 0.4, length * 0.12, 10);
   beakThroatPlug.translate(0, faceY - length * 0.005, 0);
-  const beakBlend = new THREE.CylinderGeometry(faceRadius * 0.88, beakRootRadius * 0.9, length * 0.05, 14);
-  beakBlend.translate(0, beakRootY + length * 0.018, 0);
+  const beakBlend = new THREE.CylinderGeometry(faceRadius * 0.9, beakRootRadius * 0.86, length * 0.05, 14);
+  beakBlend.translate(0, beakRootY + length * 0.012, 0);
 
   const eyeY = halfLen * headFrac(0.78);
   const eyeX = width * 0.255 * HEAD_NARROW_SCALE;
@@ -186,6 +185,26 @@ function buildParrotEyeDisks(
   right.rotateZ(Math.PI * 0.5);
   right.translate(-eyeX - thickness * 0.6, eyeY, eyeZ);
   return mergePositionOnlyGeometries([left, right]);
+}
+
+function buildSolidParrotBeakGeometry(faceY: number, faceRadius: number, beakLen: number): THREE.BufferGeometry {
+  const rootBulb = new THREE.SphereGeometry(faceRadius * 0.9, 12, 10);
+  rootBulb.scale(1, 1.08, 0.86);
+  rootBulb.translate(0, faceY + beakLen * 0.04, 0);
+
+  const bridge = new THREE.CylinderGeometry(faceRadius * 0.64, faceRadius * 0.48, beakLen * 0.44, 12);
+  bridge.scale(1, 1, 0.86);
+  bridge.translate(0, faceY + beakLen * 0.28, -beakLen * 0.04);
+
+  const hookCore = new THREE.ConeGeometry(faceRadius * 0.44, beakLen * 0.56, 12);
+  hookCore.scale(1, 1, 0.82);
+  hookCore.translate(0, faceY + beakLen * 0.58, -beakLen * 0.1);
+
+  const tipNub = new THREE.SphereGeometry(faceRadius * 0.2, 10, 8);
+  tipNub.scale(1, 1, 0.8);
+  tipNub.translate(0, faceY + beakLen * 0.82, -beakLen * 0.2);
+
+  return mergePositionOnlyGeometries([rootBulb, bridge, hookCore, tipNub]);
 }
 
 /**
