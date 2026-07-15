@@ -270,6 +270,8 @@ const UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
 // to them.
 const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
 const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
+const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
+const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
 
 // Fish tank sharks: unlike a dragon's flapping bat wings, a shark's
 // pectoral fins (which reuse the wingLeft/wingRight slots) are rigid
@@ -552,6 +554,8 @@ interface BoidSpeciesConfig {
    * comment on why this can't just be baked into the shared body
    * geometry's vertex colors the way parrot/hawk beaks are. */
   beakColor?: THREE.Color;
+  /** Nature-style local-Y tail joint pivot for tail sway compensation. */
+  tailSwayPivotY?: number;
 }
 
 const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
@@ -573,6 +577,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     getColors: getParrotColors,
     useSmallGeometry: false,
     useParrotGeometry: true,
+    tailSwayPivotY: PARROT_TAIL_SWAY_PIVOT_Y,
   },
   {
     species: 'goldfinch',
@@ -2318,9 +2323,13 @@ export class Renderer3D {
           config.beakColor,
           0,
           isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-          isFishTail ? FISH_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
+          isFishTail
+            ? FISH_TAIL_SWAY_AMPLITUDE
+            : isNatureParrot
+              ? PARROT_TAIL_SWAY_AMPLITUDE
+              : DRAGON_TAIL_SWAY_AMPLITUDE,
           isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
-          0,
+          isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
           isFishtank ? TANK_VISUAL_SCALE : 1,
           isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
         );
