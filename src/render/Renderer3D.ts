@@ -205,9 +205,9 @@ const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
 // Nature parrots should read as heavier, broad-winged fliers than the
 // smaller songbirds, with slower, wider wingbeats.
-const PARROT_FLAP_FREQUENCY = 5.8;
-const PARROT_FLAP_IDLE_AMPLITUDE = 0.33;
-const PARROT_FLAP_SPEED_AMPLITUDE = 0.82;
+const PARROT_FLAP_FREQUENCY = 5.4;
+const PARROT_FLAP_IDLE_AMPLITUDE = 0.4;
+const PARROT_FLAP_SPEED_AMPLITUDE = 0.95;
 const CLIMB_FLAP_FREQ_BOOST = 0.12;
 const DIVE_FLAP_FREQ_CUT = 0.1;
 const TURN_FLAP_FREQ_BOOST = 0.06;

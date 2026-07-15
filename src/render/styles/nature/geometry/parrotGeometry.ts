@@ -287,12 +287,13 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   // Rounded, convex leading edge (bulges forward then curves back to a
   // blunt tip) rather than one sharp shoulder-to-tip line.
   const boundary: number[][] = [
-    [0.28 * span * s, chord * 0.44, 0],
-    [0.64 * span * s, chord * 0.37, 0],
-    [0.9 * span * s, chord * 0.19, 0],
-    [1.0 * span * s, -chord * 0.06, 0], // blunt rounded tip, not a sharp point
-    [0.84 * span * s, -chord * 0.3, 0],
-    [0.38 * span * s, -chord * 0.2, 0],
+    [0.24 * span * s, chord * 0.52, 0],
+    [0.58 * span * s, chord * 0.45, 0],
+    [0.86 * span * s, chord * 0.22, 0],
+    [0.98 * span * s, chord * 0.02, 0], // rounded tip, near-vertical upstroke silhouette
+    [0.9 * span * s, -chord * 0.24, 0],
+    [0.66 * span * s, -chord * 0.43, 0],
+    [0.26 * span * s, -chord * 0.3, 0],
   ];
 
   for (let i = 0; i < boundary.length; i++) {
@@ -306,13 +307,13 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   // span) and closely spaced so they read as soft feather tips, not
   // long spiky needles.
   const trailOuter = boundary[3]; // blunt tip
-  const trailInner = boundary[5]; // trailing-inner point
+  const trailInner = boundary[6]; // trailing-inner point
   const lerp = (a: number[], b: number[], t: number) => [
     a[0] + (b[0] - a[0]) * t,
     a[1] + (b[1] - a[1]) * t,
     a[2] + (b[2] - a[2]) * t,
   ];
-  const fingerCount = 3;
+  const fingerCount = 5;
   const halfGap = 0.08;
   const dirX = trailOuter[0] - trailInner[0];
   const dirY = trailOuter[1] - trailInner[1];
@@ -323,7 +324,7 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     const t = i / (fingerCount - 1);
     const baseA = lerp(trailInner, trailOuter, Math.max(0, t - halfGap));
     const baseB = lerp(trailInner, trailOuter, Math.min(1, t + halfGap));
-    const fingerLen = span * (0.07 + 0.045 * t); // short rounded tips, less "spiky"
+    const fingerLen = span * (0.09 + 0.07 * t);
     const midBase = lerp(baseA, baseB, 0.5);
     const tip = [midBase[0] + ndx * fingerLen, midBase[1] + ndy * fingerLen, 0];
     pushTri(baseA, baseB, tip);
