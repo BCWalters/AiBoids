@@ -4,7 +4,6 @@ import {
   mergeGeometriesWithColor,
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
-  buildHookedBeakGeometry,
 } from '../../../geometry/creatureGeometry';
 
 /**
@@ -26,14 +25,20 @@ import {
 // body color a given macaw color-pattern uses, see Renderer3D's
 // getParrotColors) rather than left the same white-vertex default as the
 // rest of the body.
-const BEAK_COLOR = new THREE.Color(0x2b2620);
+const BEAK_COLOR = new THREE.Color(0x23201c);
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
 const FACE_PATCH_COLOR = new THREE.Color(0xe6ded1);
+const BACK_REGION_COLOR = new THREE.Color(0x6d88c2);
+const BELLY_REGION_COLOR = new THREE.Color(0xf2bf84);
+const WING_FRONT_COLOR = new THREE.Color(0xf6c187);
+const WING_REAR_COLOR = new THREE.Color(0x6a84bc);
 // Near-black eye dots — stay near-black under any per-instance body tint
 // multiply (see the multiply-color reasoning in unicornGeometry.ts), so
 // this single baked color works correctly across every macaw color
 // pattern in PARROT_COLOR_PATTERNS.
 const EYE_COLOR = new THREE.Color(0x0d0b08);
+const PARROT_EYE_SIDE_ANGLE_DEG = 70;
+const PARROT_BODY_LATHE_SEGMENTS = 24;
 
 export function createParrotGeometries(length: number, width: number): CreatureGeometries {
   const body = buildParrotBodyGeometry(length, width);
@@ -103,31 +108,23 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
     new THREE.Vector2(width * 0.22 * HEAD_NARROW_SCALE, halfLen * headFrac(0.84)), // brow, just above the eyes
     new THREE.Vector2(faceRadius, faceY), // face, where the beak attaches
   ];
-  const torso = new THREE.LatheGeometry(profile, 16);
+  const torso = new THREE.LatheGeometry(profile, PARROT_BODY_LATHE_SEGMENTS);
+  tintParrotTorsoRegions(torso, halfLen);
 
-  // Macaws have a deeply hooked beak curling well past straight-down
-  // (still stronger than the hawk's shallower raptor
-  // hook (see hawkGeometry.ts) — shared sweep builder, different tuning.
-  // Slightly oversized/embedded beak root so the body's open lathe face
-  // cannot peek through as a visible hole from front/oblique angles.
-  const beakRootY = faceY - length * 0.025;
-  const beakRootRadius = faceRadius * 1.08;
-  const beak = buildHookedBeakGeometry(beakRootY, beakRootRadius, length * 0.29, 126, 0.8, false);
+  // Two-part macaw beak: a large, strongly hooked upper mandible that
+  // overhangs a shorter, triangular lower mandible with a slight gape.
+  const beak = buildSolidParrotBeakGeometry(faceY, faceRadius, length * 0.29);
 
   // Close both open lathe ends so no line-of-sight can pass through the
   // hollow body cavity from the beak junction to the rear opening.
-  const faceCap = buildDoubleSidedDiskCap(faceY - length * 0.018, faceRadius * 0.98, 16);
+  const faceCap = buildDoubleSidedDiskCap(faceY + length * 0.01, faceRadius * 1.16, 18);
   const rearCap = buildDoubleSidedDiskCap(-halfLen * 0.95, width * 0.07, 12);
 
-  // Internal "socket fill" and short throat plug to robustly seal the
-  // beak/body junction even at grazing front angles.
-  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.04, 10, 8);
-  beakSocketFill.scale(1, 1.02, 0.96);
-  beakSocketFill.translate(0, faceY - length * 0.03, 0);
-  const beakThroatPlug = new THREE.CylinderGeometry(beakRootRadius * 0.62, beakRootRadius * 0.4, length * 0.12, 10);
-  beakThroatPlug.translate(0, faceY - length * 0.005, 0);
-  const beakBlend = new THREE.CylinderGeometry(faceRadius * 0.88, beakRootRadius * 0.9, length * 0.05, 14);
-  beakBlend.translate(0, beakRootY + length * 0.018, 0);
+  // Keep one internal filler behind the face cap so the beak/body
+  // junction never reveals the lathe cavity from front angles.
+  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.2, 12, 10);
+  beakSocketFill.scale(1.06, 0.94, 0.86);
+  beakSocketFill.translate(0, faceY - length * 0.004, -length * 0.02);
 
   const eyeY = halfLen * headFrac(0.78);
   const eyeX = width * 0.255 * HEAD_NARROW_SCALE;
@@ -140,10 +137,9 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
     { geometry: faceCap, color: WHITE_VERTEX_COLOR },
     { geometry: rearCap, color: WHITE_VERTEX_COLOR },
     { geometry: beakSocketFill, color: WHITE_VERTEX_COLOR },
-    { geometry: beakThroatPlug, color: WHITE_VERTEX_COLOR },
-    { geometry: beakBlend, color: WHITE_VERTEX_COLOR },
     { geometry: eyeRing, color: FACE_PATCH_COLOR },
-    { geometry: beak, color: BEAK_COLOR },
+    { geometry: beak.upper, color: BEAK_COLOR },
+    { geometry: beak.lower, color: BEAK_COLOR },
     { geometry: pupils, color: EYE_COLOR },
   ]);
 }
@@ -179,13 +175,90 @@ function buildParrotEyeDisks(
   radius: number,
   thickness: number,
 ): THREE.BufferGeometry {
-  const left = new THREE.CylinderGeometry(radius, radius, thickness, 16);
-  left.rotateZ(Math.PI * 0.5);
-  left.translate(eyeX + thickness * 0.6, eyeY, eyeZ);
-  const right = new THREE.CylinderGeometry(radius, radius, thickness, 16);
-  right.rotateZ(Math.PI * 0.5);
-  right.translate(-eyeX - thickness * 0.6, eyeY, eyeZ);
+  const sideTiltRad = THREE.MathUtils.degToRad(90 - PARROT_EYE_SIDE_ANGLE_DEG);
+  const buildEyeDisk = (side: 1 | -1): THREE.BufferGeometry => {
+    const disk = new THREE.CylinderGeometry(radius, radius, thickness, 16);
+    const axis = new THREE.Vector3(side * Math.cos(sideTiltRad), Math.sin(sideTiltRad), 0).normalize();
+    const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+    disk.applyQuaternion(rotation);
+    disk.translate(
+      side * (eyeX + thickness * Math.cos(sideTiltRad) * 0.62),
+      eyeY + thickness * Math.sin(sideTiltRad) * 0.4,
+      eyeZ,
+    );
+    return disk;
+  };
+  const left = buildEyeDisk(1);
+  const right = buildEyeDisk(-1);
   return mergePositionOnlyGeometries([left, right]);
+}
+
+function buildSolidParrotBeakGeometry(
+  faceY: number,
+  faceRadius: number,
+  beakLen: number,
+): { upper: THREE.BufferGeometry; lower: THREE.BufferGeometry } {
+  const upperLen = beakLen * 0.4464;
+  const lowerLen = beakLen * 0.252;
+
+  // Upper beak mostly straight; the final section is explicitly rotated
+  // downward so the hook is visibly curved (not just a slight skew).
+  const upper = new THREE.ConeGeometry(faceRadius * 0.54, upperLen, 18, 10);
+  upper.scale(1, 1, 0.8);
+  const upperPos = upper.getAttribute('position');
+  const upperYMin = -upperLen * 0.5;
+  const upperYMax = upperLen * 0.5;
+  const upperSpan = upperYMax - upperYMin;
+  const hookStartT = 0.4;
+  const hookPivotY = upperYMin + upperSpan * hookStartT;
+  const maxHookAngle = THREE.MathUtils.degToRad(45);
+  for (let i = 0; i < upperPos.count; i++) {
+    const y = upperPos.getY(i);
+    const t = THREE.MathUtils.clamp((y - upperYMin) / upperSpan, 0, 1);
+    const hookT = THREE.MathUtils.smoothstep(t, hookStartT, 1);
+    const tipNarrow = THREE.MathUtils.lerp(1.0, 0.76, hookT);
+    const x = upperPos.getX(i) * tipNarrow;
+    const z = upperPos.getZ(i);
+    const angle = -maxHookAngle * hookT;
+    const dy = y - hookPivotY;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    const bentY = hookPivotY + dy * cosA - z * sinA;
+    const bentZ = dy * sinA + z * cosA;
+    upperPos.setX(i, x);
+    upperPos.setY(i, bentY);
+    upperPos.setZ(i, bentZ);
+  }
+  upperPos.needsUpdate = true;
+  upper.computeVertexNormals();
+  upper.translate(0, faceY + upperLen * 0.54 + beakLen * 0.1, beakLen * 0.045);
+
+  // Triangular lower mandible (slightly open) so the upper hook visibly
+  // overlaps it in side profile.
+  const lower = new THREE.ConeGeometry(faceRadius * 0.5, lowerLen, 3);
+  lower.rotateY(Math.PI / 3);
+  lower.scale(1, 1, 0.74);
+  const lowerPos = lower.getAttribute('position');
+  const lowerYMin = -lowerLen * 0.5;
+  const lowerYMax = lowerLen * 0.5;
+  const lowerSpan = lowerYMax - lowerYMin;
+  for (let i = 0; i < lowerPos.count; i++) {
+    const y = lowerPos.getY(i);
+    const t = THREE.MathUtils.clamp((y - lowerYMin) / lowerSpan, 0, 1);
+    const taper = THREE.MathUtils.lerp(0.98, 0.56, t);
+    const rearTrim = THREE.MathUtils.smoothstep(t, 0.08, 0.46);
+    lowerPos.setX(i, lowerPos.getX(i) * taper);
+    lowerPos.setZ(i, lowerPos.getZ(i) + beakLen * 0.1 * Math.pow(t, 1.3));
+    lowerPos.setY(i, lowerPos.getY(i) + beakLen * 0.08 * Math.pow(t, 1.2));
+    lowerPos.setX(i, lowerPos.getX(i) * (0.68 + 0.32 * rearTrim));
+    lowerPos.setY(i, y + beakLen * 0.01 * Math.pow(t, 1.2));
+  }
+  lowerPos.needsUpdate = true;
+  lower.computeVertexNormals();
+  lower.rotateX(THREE.MathUtils.degToRad(1));
+  lower.translate(0, faceY + lowerLen * 0.82 + faceRadius * 0.45, -beakLen * 0.16);
+
+  return { upper, lower };
 }
 
 /**
@@ -206,7 +279,7 @@ function buildParrotEyeDisks(
  * vanish edge-on.
  */
 function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  const thickness = width * 0.035;
+  const thickness = width * 0.046;
 
   // Root sits at (or slightly ahead of, for guaranteed overlap) the
   // body lathe's own tail-root profile point (-halfLen*0.95 = -length*0.475
@@ -215,12 +288,17 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
   // tail began, reading as "the tail is separated from the body".
   const rootY = -length * 0.46;
 
-  const featherCount = 7;
-  const maxSpreadDeg = 30; // total angular spread of the fan, center feather at 0deg
-  const maxLen = length * 0.54; // center (longest) feather length
-  const minLenFrac = 0.5; // outermost feathers' length relative to maxLen
+  const featherCount = 9;
+  const maxSpreadDeg = 34; // total angular spread of the fan, center feather at 0deg
+  const maxLen = length * 0.63; // center (longest) feather length
+  const minLenFrac = 0.54; // outermost feathers' length relative to maxLen
 
   const featherGeometries: THREE.BufferGeometry[] = [];
+  // Blend tail fan into the body so the root doesn't read as a hard collar.
+  const rootBlend = new THREE.SphereGeometry(width * 0.14, 10, 8);
+  rootBlend.scale(1.25, 0.55, 0.75);
+  rootBlend.translate(0, rootY + length * 0.03, -length * 0.015);
+  featherGeometries.push(rootBlend);
   for (let i = 0; i < featherCount; i++) {
     // -1 (leftmost) .. 0 (center) .. +1 (rightmost)
     const t = (i / (featherCount - 1)) * 2 - 1;
@@ -230,7 +308,7 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
 
     const dirX = Math.sin(angle);
     const dirY = -Math.cos(angle); // fan opens backward (-Y)
-    const droop = -length * 0.08 * lenFrac; // longer feathers droop a bit more
+    const droop = -length * 0.09 * lenFrac; // longer feathers droop a bit more
 
     // Vane outline: a slender quill at the root widening to its
     // fullest a bit past the middle, then tapering to a fine point —
@@ -239,7 +317,7 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
     // vane rather than a wire.
     const perpX = Math.cos(angle);
     const perpY = Math.sin(angle);
-    const vaneHalfWidth = width * 0.055 * lenFrac;
+    const vaneHalfWidth = width * 0.082 * lenFrac;
     const bulgeAt = 0.55; // fraction along the feather where it's widest
 
     const root = new THREE.Vector3(0, rootY, 0);
@@ -255,9 +333,34 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
       bulgeCenterY + perpY * vaneHalfWidth,
       droop * bulgeAt,
     );
-    const tip = new THREE.Vector3(dirX * featherLen, rootY + dirY * featherLen, droop);
+    const tipCoreX = dirX * featherLen;
+    const tipCoreY = rootY + dirY * featherLen;
+    const tipHalfWidth = vaneHalfWidth * 0.52;
+    const leftShoulder = new THREE.Vector3(
+      dirX * featherLen * 0.84 - perpX * vaneHalfWidth * 0.72,
+      rootY + dirY * featherLen * 0.84 - perpY * vaneHalfWidth * 0.72,
+      droop * 0.84,
+    );
+    const rightShoulder = new THREE.Vector3(
+      dirX * featherLen * 0.84 + perpX * vaneHalfWidth * 0.72,
+      rootY + dirY * featherLen * 0.84 + perpY * vaneHalfWidth * 0.72,
+      droop * 0.84,
+    );
+    const leftTip = new THREE.Vector3(
+      tipCoreX - perpX * tipHalfWidth,
+      tipCoreY - perpY * tipHalfWidth,
+      droop * 0.98,
+    );
+    const tipCap = new THREE.Vector3(dirX * featherLen * 1.04, rootY + dirY * featherLen * 1.04, droop * 1.05);
+    const rightTip = new THREE.Vector3(
+      tipCoreX + perpX * tipHalfWidth,
+      tipCoreY + perpY * tipHalfWidth,
+      droop * 0.98,
+    );
 
-    featherGeometries.push(extrudeRingGeometry([root, leftBulge, tip, rightBulge], thickness));
+    featherGeometries.push(
+      extrudeRingGeometry([root, leftBulge, leftShoulder, leftTip, tipCap, rightTip, rightShoulder, rightBulge], thickness),
+    );
   }
 
   return mergePositionOnlyGeometries(featherGeometries);
@@ -282,16 +385,18 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
 
   const root: number[] = [0, 0, 0];
-  // Rounded, convex leading edge (bulges forward then curves back to a
-  // blunt tip) rather than one sharp shoulder-to-tip line.
+  // Broad wing with a comparatively straighter front edge and a more
+  // curved trailing edge, matching typical parrot/macaw silhouettes.
   const boundary: number[][] = [
-    [0.24 * span * s, chord * 0.52, 0],
-    [0.58 * span * s, chord * 0.45, 0],
-    [0.86 * span * s, chord * 0.22, 0],
-    [0.98 * span * s, chord * 0.02, 0], // rounded tip, near-vertical upstroke silhouette
-    [0.9 * span * s, -chord * 0.24, 0],
-    [0.66 * span * s, -chord * 0.43, 0],
-    [0.26 * span * s, -chord * 0.3, 0],
+    [0.22 * span * s, chord * 0.5, 0],
+    [0.56 * span * s, chord * 0.49, 0],
+    [0.82 * span * s, chord * 0.45, 0],
+    [1.0 * span * s, chord * 0.28, 0],
+    [0.95 * span * s, -chord * 0.04, 0],
+    [0.86 * span * s, -chord * 0.28, 0],
+    [0.68 * span * s, -chord * 0.47, 0],
+    [0.46 * span * s, -chord * 0.58, 0],
+    [0.22 * span * s, -chord * 0.46, 0],
   ];
 
   for (let i = 0; i < boundary.length; i++) {
@@ -304,32 +409,125 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   // point) rather than floating separately — kept short (relative to
   // span) and closely spaced so they read as soft feather tips, not
   // long spiky needles.
-  const trailOuter = boundary[3]; // blunt tip
-  const trailInner = boundary[6]; // trailing-inner point
+  const trailOuter = boundary[4];
+  const trailInner = boundary[8];
   const lerp = (a: number[], b: number[], t: number) => [
     a[0] + (b[0] - a[0]) * t,
     a[1] + (b[1] - a[1]) * t,
     a[2] + (b[2] - a[2]) * t,
   ];
-  const fingerCount = 5;
-  const halfGap = 0.08;
-  const dirX = trailOuter[0] - trailInner[0];
-  const dirY = trailOuter[1] - trailInner[1];
-  const dirLen = Math.hypot(dirX, dirY) || 1;
-  const ndx = dirX / dirLen;
-  const ndy = dirY / dirLen;
+  const fingerCount = 8;
+  const fingerGeometries: THREE.BufferGeometry[] = [];
+  const shoulderCovert = new THREE.SphereGeometry(chord * 0.17, 12, 10);
+  shoulderCovert.scale(0.92, 0.58, 0.5);
+  shoulderCovert.translate(0.13 * span * s, chord * 0.01, -chord * 0.01);
+  const trailingCovertStrip = extrudeRingGeometry(
+    [
+      new THREE.Vector3(trailInner[0], trailInner[1] + chord * 0.04, 0),
+      new THREE.Vector3(trailOuter[0], trailOuter[1] + chord * 0.035, 0),
+      new THREE.Vector3(trailOuter[0], trailOuter[1] - chord * 0.035, 0),
+      new THREE.Vector3(trailInner[0], trailInner[1] - chord * 0.03, 0),
+    ],
+    chord * 0.028,
+  );
+  const halfGap = 0.048;
   for (let i = 0; i < fingerCount; i++) {
     const t = i / (fingerCount - 1);
-    const baseA = lerp(trailInner, trailOuter, Math.max(0, t - halfGap));
-    const baseB = lerp(trailInner, trailOuter, Math.min(1, t + halfGap));
-    const fingerLen = span * (0.09 + 0.07 * t);
+    const featherT = THREE.MathUtils.smoothstep(t, 0, 1);
+    const baseA = lerp(trailInner, trailOuter, Math.max(0, featherT - halfGap));
+    const baseB = lerp(trailInner, trailOuter, Math.min(1, featherT + halfGap));
+    const fingerLen = span * (0.14 + 0.16 * featherT);
     const midBase = lerp(baseA, baseB, 0.5);
-    const tip = [midBase[0] + ndx * fingerLen, midBase[1] + ndy * fingerLen, 0];
-    pushTri(baseA, baseB, tip);
+    // Inner feathers trail almost straight back; outer feathers cant outward
+    // progressively toward the wingtip.
+    const outwardBias = Math.pow(featherT, 1.1);
+    const outerTwoBoost = i >= fingerCount - 2 ? 0.22 : 0;
+    const lateral = 0.02 + 0.46 * outwardBias + outerTwoBoost;
+    const forward = new THREE.Vector2(s * lateral, -(1.04 + 0.16 * t)).normalize();
+    const sideward = new THREE.Vector2(-forward.y, forward.x);
+    const rootHalfWidth = Math.max(0.0001, Math.hypot(baseB[0] - baseA[0], baseB[1] - baseA[1]) * 0.5) * 1.38;
+    const shoulderDist = fingerLen * 0.56;
+    const tipDist = fingerLen * 0.88;
+    const capDist = fingerLen * 1.01;
+    const shoulderHalfWidth = rootHalfWidth * 0.98;
+    const tipHalfWidth = rootHalfWidth * 0.9;
+    const capHalfWidth = rootHalfWidth * 0.74;
+    const capMidHalfWidth = capHalfWidth * 0.72;
+    const zDroop = -chord * (0.01 + 0.06 * t);
+    const toPoint = (dist: number, halfWidth: number, sideSign: 1 | -1, z: number): THREE.Vector3 =>
+      new THREE.Vector3(
+        midBase[0] + forward.x * dist + sideward.x * halfWidth * sideSign,
+        midBase[1] + forward.y * dist + sideward.y * halfWidth * sideSign,
+        z,
+      );
+    const ring = [
+      new THREE.Vector3(baseA[0], baseA[1], 0),
+      toPoint(shoulderDist, shoulderHalfWidth, -1, zDroop * 0.58),
+      toPoint(tipDist, tipHalfWidth, -1, zDroop * 0.94),
+      toPoint(capDist * 0.97, capHalfWidth, -1, zDroop),
+      toPoint(capDist * 1.02, capMidHalfWidth, -1, zDroop),
+      toPoint(capDist * 1.08, 0, 1, zDroop),
+      toPoint(capDist * 1.02, capMidHalfWidth, 1, zDroop),
+      toPoint(capDist * 0.97, capHalfWidth, 1, zDroop),
+      toPoint(tipDist, tipHalfWidth, 1, zDroop * 0.94),
+      toPoint(shoulderDist, shoulderHalfWidth, 1, zDroop * 0.58),
+      new THREE.Vector3(baseB[0], baseB[1], 0),
+    ];
+    fingerGeometries.push(extrudeRingGeometry(ring, chord * 0.041));
   }
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  const baseWing = new THREE.BufferGeometry();
+  baseWing.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  const geometry = mergePositionOnlyGeometries([baseWing, shoulderCovert, trailingCovertStrip, ...fingerGeometries]);
+  baseWing.dispose();
+  shoulderCovert.dispose();
+  trailingCovertStrip.dispose();
+  fingerGeometries.forEach((f) => f.dispose());
+  tintParrotWingRegions(geometry, chord);
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number): void {
+  const pos = geometry.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const backT = THREE.MathUtils.clamp((z / (halfLen * 0.2) + 1) * 0.5, 0, 1);
+    const bellyT = THREE.MathUtils.clamp((-z / (halfLen * 0.24) + 1) * 0.5, 0, 1);
+    const bodyForwardT = THREE.MathUtils.clamp((y + halfLen * 0.25) / (halfLen * 1.2), 0, 1);
+    const backWeight = backT * bodyForwardT * 1.1;
+    const bellyWeight = bellyT * 1.05;
+    const backDominant = backWeight >= bellyWeight;
+    const target = backDominant ? BACK_REGION_COLOR : BELLY_REGION_COLOR;
+    const strength = Math.min(0.92, (backDominant ? backWeight : bellyWeight) * 1.05);
+    const r = THREE.MathUtils.lerp(1, target.r, strength);
+    const g = THREE.MathUtils.lerp(1, target.g, strength);
+    const b = THREE.MathUtils.lerp(1, target.b, strength);
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+
+function tintParrotWingRegions(geometry: THREE.BufferGeometry, chord: number): void {
+  const pos = geometry.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const frontT = THREE.MathUtils.clamp((y / (chord * 0.55) + 1) * 0.5, 0, 1);
+    const rearT = THREE.MathUtils.clamp((-y / (chord * 0.55) + 1) * 0.5, 0, 1);
+    const frontDominant = frontT >= rearT;
+    const target = frontDominant ? WING_FRONT_COLOR : WING_REAR_COLOR;
+    const strength = Math.min(0.9, (frontDominant ? frontT : rearT) * 0.95);
+    const r = THREE.MathUtils.lerp(1, target.r, strength);
+    const g = THREE.MathUtils.lerp(1, target.g, strength);
+    const b = THREE.MathUtils.lerp(1, target.b, strength);
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
