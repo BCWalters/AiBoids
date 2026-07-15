@@ -94,6 +94,10 @@ const PARROT_COLOR_PATTERNS: SpeciesColorSet[] = [
   { body: new THREE.Color(0xe7c83b), wing: new THREE.Color(0xcc7a2c), tail: new THREE.Color(0xc9463b) },
   // Purple parrot variant with sky-blue accents
   { body: new THREE.Color(0x7f61cc), wing: new THREE.Color(0x8cc9e4), tail: new THREE.Color(0x6fb6da) },
+  // Blue-back / yellow-belly macaw-style split (driven by parrotGeometry's region tints)
+  { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0x2f5ea8) },
+  // Variant of the same split with a deeper cobalt tail
+  { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0x214986) },
 ];
 const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
 const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
@@ -504,21 +508,22 @@ const FISHTANK_SEAHORSE_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, w
 const ARCADE_UNICORN_COLORS: SpeciesColorSet = { body: ARCADE_UNICORN_BASE, wing: ARCADE_UNICORN_BASE, tail: ARCADE_UNICORN_BASE };
 
 /**
- * Deterministically picks one of PARROT_COLOR_PATTERNS (nature style) or
- * BUTTERFLYFISH_COLOR_PATTERNS (fish tank style) per individual (stable
- * across frames since it's keyed only on the entity's own id, not time)
- * so the flock reads as several distinct real-world color patterns
- * rather than one uniform hue jittered slightly — updateInstances layers
- * its own small per-individual jitter on top of whichever pattern this
- * returns, for the same "no two look identical" variety the other
- * species get. Branches on the current visual style since this is the
- * one species whose fish tank skin (a butterflyfish) is a completely
- * different creature from its nature skin (a macaw/conure), unlike
- * every other species sharing one palette across styles.
+ * Picks one of PARROT_COLOR_PATTERNS (nature style) or
+ * BUTTERFLYFISH_COLOR_PATTERNS (fish tank style) per individual.
+ *
+ * Normal flock mode stays deterministic (keyed only on id) so each bird's
+ * pattern remains stable across frames. In gallery mode for parrots, cycle
+ * patterns over time so a single showcased parrot can display the full set
+ * without changing URL/state repeatedly.
  */
 function getParrotColors(entity: Boid | Predator): SpeciesColorSet {
   const patterns = params.visualStyle === 'fishtank' ? BUTTERFLYFISH_COLOR_PATTERNS : PARROT_COLOR_PATTERNS;
-  const index = Math.floor(idHash(entity.id, 42) * patterns.length) % patterns.length;
+  const baseIndex = Math.floor(idHash(entity.id, 42) * patterns.length) % patterns.length;
+  if (params.galleryCreature === 'parrot') {
+    const cycleStep = Math.floor(performance.now() / 3200);
+    return patterns[(baseIndex + cycleStep) % patterns.length];
+  }
+  const index = baseIndex;
   return patterns[index];
 }
 
@@ -1419,6 +1424,9 @@ export class Renderer3D {
     // (no-op) for arcade/nature and for fishtank predators/species that
     // don't opt into the boost.
     meshScaleBoost: number = 1,
+    // Keeps non-dragon/non-unicorn creatures right-side-up by deriving
+    // roll from WORLD_UP instead of shortest-arc quaternion roll freedom.
+    preferUpright: boolean = false,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -1604,6 +1612,23 @@ export class Renderer3D {
         // (determinant -1) basis, which is what caused seahorses (the
         // fishtank reskin of unicorns) to visibly swim backwards.
         this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
+        entity.renderRight.x = this.tmpRight.x;
+        entity.renderRight.y = this.tmpRight.y;
+        entity.renderRight.z = this.tmpRight.z;
+        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
+        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+      } else if (preferUpright) {
+        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
+        if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
+          this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
+          this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
+          if (this.tmpPersistedRight.lengthSq() < 1e-10) {
+            this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
+          }
+          this.tmpRight.copy(this.tmpPersistedRight);
+        }
+        this.tmpRight.normalize();
         entity.renderRight.x = this.tmpRight.x;
         entity.renderRight.y = this.tmpRight.y;
         entity.renderRight.z = this.tmpRight.z;
@@ -2332,6 +2357,7 @@ export class Renderer3D {
           isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
           isFishtank ? TANK_VISUAL_SCALE : 1,
           isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+          true,
         );
       }
     }
@@ -2375,6 +2401,7 @@ export class Renderer3D {
         isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
         isFishtank ? TANK_VISUAL_SCALE : 1,
         isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
+        true,
       );
     }
 
