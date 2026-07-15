@@ -80,7 +80,7 @@ async function canvasHasVisibleContent(page: Page, canvasSelector: string): Prom
   // those per-element checks entirely.
   const box = await page.locator(canvasSelector).boundingBox();
   if (!box) return false;
-  const png = await page.screenshot({ clip: box });
+  const png = await page.screenshot({ clip: box, timeout: 60_000 });
   // A canvas that's just a single flat clear color compresses to a tiny
   // PNG (often well under 1KB) regardless of resolution; real rendered
   // content (sky gradients, terrain, creatures) compresses to something
