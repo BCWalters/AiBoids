@@ -130,7 +130,7 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   beakCollar.translate(0, beakRootY + length * 0.01, 0);
 
   const eyeY = halfLen * headFrac(0.78);
-  const eyeX = width * 0.23 * HEAD_NARROW_SCALE;
+  const eyeX = width * 0.255 * HEAD_NARROW_SCALE;
   const eyeZ = width * 0.06 * HEAD_NARROW_SCALE;
   const eyeRing = buildParrotEyeDisks(eyeX, eyeY, eyeZ, width * 0.078 * HEAD_NARROW_SCALE, width * 0.012);
   const pupils = buildParrotEyeDisks(eyeX, eyeY, eyeZ, width * 0.038 * HEAD_NARROW_SCALE, width * 0.016);
@@ -181,10 +181,10 @@ function buildParrotEyeDisks(
 ): THREE.BufferGeometry {
   const left = new THREE.CylinderGeometry(radius, radius, thickness, 16);
   left.rotateZ(Math.PI * 0.5);
-  left.translate(eyeX, eyeY, eyeZ);
+  left.translate(eyeX + thickness * 0.6, eyeY, eyeZ);
   const right = new THREE.CylinderGeometry(radius, radius, thickness, 16);
   right.rotateZ(Math.PI * 0.5);
-  right.translate(-eyeX, eyeY, eyeZ);
+  right.translate(-eyeX - thickness * 0.6, eyeY, eyeZ);
   return mergePositionOnlyGeometries([left, right]);
 }
 
