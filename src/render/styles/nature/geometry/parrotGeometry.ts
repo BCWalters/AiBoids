@@ -110,24 +110,24 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   // hook (see hawkGeometry.ts) — shared sweep builder, different tuning.
   // Slightly oversized/embedded beak root so the body's open lathe face
   // cannot peek through as a visible hole from front/oblique angles.
-  const beakRootY = faceY - length * 0.05;
-  const beakRootRadius = faceRadius * 1.24;
-  const beak = buildHookedBeakGeometry(beakRootY, beakRootRadius, length * 0.29, 126, 0.8);
+  const beakRootY = faceY - length * 0.025;
+  const beakRootRadius = faceRadius * 1.08;
+  const beak = buildHookedBeakGeometry(beakRootY, beakRootRadius, length * 0.29, 126, 0.8, false);
 
   // Close both open lathe ends so no line-of-sight can pass through the
   // hollow body cavity from the beak junction to the rear opening.
-  const faceCap = buildDoubleSidedDiskCap(faceY, faceRadius * 1.16, 16);
+  const faceCap = buildDoubleSidedDiskCap(faceY - length * 0.018, faceRadius * 0.98, 16);
   const rearCap = buildDoubleSidedDiskCap(-halfLen * 0.95, width * 0.07, 12);
 
   // Internal "socket fill" and short throat plug to robustly seal the
   // beak/body junction even at grazing front angles.
-  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.24, 10, 8);
-  beakSocketFill.scale(1, 1.08, 0.98);
-  beakSocketFill.translate(0, faceY + length * 0.005, 0);
+  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.04, 10, 8);
+  beakSocketFill.scale(1, 1.02, 0.96);
+  beakSocketFill.translate(0, faceY - length * 0.03, 0);
   const beakThroatPlug = new THREE.CylinderGeometry(beakRootRadius * 0.62, beakRootRadius * 0.4, length * 0.12, 10);
-  beakThroatPlug.translate(0, faceY + length * 0.025, 0);
-  const beakCollar = new THREE.CylinderGeometry(beakRootRadius * 1.08, beakRootRadius * 0.98, length * 0.05, 16, 1, true);
-  beakCollar.translate(0, beakRootY + length * 0.01, 0);
+  beakThroatPlug.translate(0, faceY - length * 0.005, 0);
+  const beakBlend = new THREE.CylinderGeometry(faceRadius * 0.88, beakRootRadius * 0.9, length * 0.05, 14);
+  beakBlend.translate(0, beakRootY + length * 0.018, 0);
 
   const eyeY = halfLen * headFrac(0.78);
   const eyeX = width * 0.255 * HEAD_NARROW_SCALE;
@@ -141,7 +141,7 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
     { geometry: rearCap, color: WHITE_VERTEX_COLOR },
     { geometry: beakSocketFill, color: WHITE_VERTEX_COLOR },
     { geometry: beakThroatPlug, color: WHITE_VERTEX_COLOR },
-    { geometry: beakCollar, color: BEAK_COLOR },
+    { geometry: beakBlend, color: WHITE_VERTEX_COLOR },
     { geometry: eyeRing, color: FACE_PATCH_COLOR },
     { geometry: beak, color: BEAK_COLOR },
     { geometry: pupils, color: EYE_COLOR },
