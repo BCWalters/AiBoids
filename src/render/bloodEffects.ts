@@ -18,9 +18,12 @@ export interface BloodEffects {
 const BURST_DURATION = 0.55;
 const PARTICLES_PER_BURST = 9;
 const GRAVITY = 60;
+const MAX_ACTIVE_BURSTS = 36;
+const MAX_POOLED_PARTICLES = 512;
 
 interface Particle {
   sprite: THREE.Sprite;
+  material: THREE.SpriteMaterial;
   velocity: THREE.Vector3;
 }
 
@@ -60,13 +63,44 @@ export function createBloodEffects(scene: THREE.Scene): BloodEffects {
   });
 
   const active: Burst[] = [];
+  const pooled: Particle[] = [];
+  const allocated: Particle[] = [];
+
+  const acquireParticle = (): Particle => {
+    const fromPool = pooled.pop();
+    if (fromPool) {
+      fromPool.sprite.visible = true;
+      return fromPool;
+    }
+    const material = baseMaterial.clone();
+    const sprite = new THREE.Sprite(material);
+    sprite.visible = true;
+    root.add(sprite);
+    const particle = { sprite, material, velocity: new THREE.Vector3() };
+    allocated.push(particle);
+    return particle;
+  };
+
+  const releaseParticle = (particle: Particle): void => {
+    particle.sprite.visible = false;
+    if (pooled.length < MAX_POOLED_PARTICLES) {
+      pooled.push(particle);
+      return;
+    }
+    root.remove(particle.sprite);
+    particle.material.dispose();
+    const idx = allocated.indexOf(particle);
+    if (idx >= 0) allocated.splice(idx, 1);
+  };
 
   return {
     spawn(position: THREE.Vector3, direction: THREE.Vector3, scale: number) {
+      if (active.length >= MAX_ACTIVE_BURSTS) return;
       const particles: Particle[] = [];
       for (let i = 0; i < PARTICLES_PER_BURST; i++) {
-        const material = baseMaterial.clone();
-        const sprite = new THREE.Sprite(material);
+        const particle = acquireParticle();
+        const { sprite, material } = particle;
+        material.opacity = 1;
         sprite.position.copy(position);
         const spriteScale = scale * (0.5 + Math.random() * 0.6);
         sprite.scale.setScalar(spriteScale);
@@ -88,8 +122,8 @@ export function createBloodEffects(scene: THREE.Scene): BloodEffects {
           .multiplyScalar(speed);
         velocity.y += scale * 1.2; // initial upward pop
 
-        root.add(sprite);
-        particles.push({ sprite, velocity });
+        particle.velocity.copy(velocity);
+        particles.push(particle);
       }
       active.push({ particles, elapsed: 0 });
     },
@@ -102,12 +136,11 @@ export function createBloodEffects(scene: THREE.Scene): BloodEffects {
         for (const particle of burst.particles) {
           particle.velocity.y -= GRAVITY * dt;
           particle.sprite.position.addScaledVector(particle.velocity, dt);
-          (particle.sprite.material as THREE.SpriteMaterial).opacity = fade;
+          particle.material.opacity = fade;
         }
         if (t >= 1) {
           for (const particle of burst.particles) {
-            root.remove(particle.sprite);
-            (particle.sprite.material as THREE.Material).dispose();
+            releaseParticle(particle);
           }
           active.splice(i, 1);
         }
@@ -119,11 +152,16 @@ export function createBloodEffects(scene: THREE.Scene): BloodEffects {
     dispose() {
       for (const burst of active) {
         for (const particle of burst.particles) {
-          root.remove(particle.sprite);
-          (particle.sprite.material as THREE.Material).dispose();
+          releaseParticle(particle);
         }
       }
       active.length = 0;
+      for (const particle of allocated) {
+        root.remove(particle.sprite);
+        particle.material.dispose();
+      }
+      pooled.length = 0;
+      allocated.length = 0;
       scene.remove(root);
       texture.dispose();
       baseMaterial.dispose();

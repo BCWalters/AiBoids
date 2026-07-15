@@ -1,4 +1,4 @@
-import { params, resetParams, type SimParams, type SimMode, type VisualStyle, type GalleryCreature } from '../sim/params';
+import { params, resetParams, type SimParams, type SimMode, type VisualStyle, type GalleryCreature, type TimeOfDayPreset } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES, type Language } from '../i18n/language';
@@ -59,6 +59,7 @@ const boundarySliderSpecs: SliderSpec[] = [
 // Cosmetic motion-trail effect (afterimage fade) — not a "behavior" setting,
 // kept ungrouped near the top alongside the mode/style toggles.
 const trailSliderSpec: SliderSpec = { key: 'trailAmount', labelKey: 'trailAmount', min: 0, max: 0.95, step: 0.01 };
+const animationBlendSliderSpec: SliderSpec = { key: 'animationBlendStrength', labelKey: 'animationBlendStrength', min: 0, max: 1, step: 0.05 };
 
 // Fishtank swims with a much smaller population than the wide-open
 // outdoor styles by default — a giant public-aquarium tank reads oddly
@@ -103,9 +104,13 @@ export class ControlPanel {
   private sim: Simulation;
   private onModeChange: (mode: SimMode) => void;
   private getDeepLinkURL: () => string;
+  private onDownloadDiagnostics: () => 'downloaded' | 'no_data' | 'error';
+  private onClearDiagnostics: () => number;
   private alienButton: HTMLButtonElement | null = null;
   private respawnButton: HTMLButtonElement | null = null;
   private unsubscribeLanguage: () => void;
+  private lastAlienButtonState: { activeCount: number; wrongMode: boolean; atCapacity: boolean } | null = null;
+  private lastRespawnPendingCount: number | null = null;
   // Tracks each collapsible section's open/closed state across re-renders
   // (keyed by a stable section id, not the translated title — titles
   // change with language). Without this, buildSection's `defaultOpen`
@@ -117,11 +122,20 @@ export class ControlPanel {
   // picking a creature from its own dropdown.
   private sectionOpenState = new Map<string, boolean>();
 
-  constructor(container: HTMLElement, sim: Simulation, onModeChange: (mode: SimMode) => void, getDeepLinkURL: () => string) {
+  constructor(
+    container: HTMLElement,
+    sim: Simulation,
+    onModeChange: (mode: SimMode) => void,
+    getDeepLinkURL: () => string,
+    onDownloadDiagnostics: () => 'downloaded' | 'no_data' | 'error',
+    onClearDiagnostics: () => number,
+  ) {
     this.container = container;
     this.sim = sim;
     this.onModeChange = onModeChange;
     this.getDeepLinkURL = getDeepLinkURL;
+    this.onDownloadDiagnostics = onDownloadDiagnostics;
+    this.onClearDiagnostics = onClearDiagnostics;
     // Full re-render on language change — simplest way to refresh every
     // label/title in the panel, consistent with how other setting
     // changes (mode, visual style) already trigger a re-render.
@@ -147,6 +161,8 @@ export class ControlPanel {
 
   private render(): void {
     this.container.innerHTML = '';
+    this.lastAlienButtonState = null;
+    this.lastRespawnPendingCount = null;
 
     this.container.appendChild(this.buildModeToggle());
 
@@ -176,12 +192,21 @@ export class ControlPanel {
     // the 2D canvas renderer, so grey that out whenever 3D mode is active.
     const trailDisabled = params.mode === '3d' && params.visualStyle !== 'arcade';
     const debugDisabled = params.mode === '3d';
-    const visualSettingsChildren = [this.buildSlider(trailSliderSpec, trailDisabled), this.buildDebugToggle(debugDisabled)];
+    const visualSettingsChildren = [
+      this.buildSlider(trailSliderSpec, trailDisabled),
+      this.buildDebugToggle(debugDisabled),
+      this.buildRenderingStatsToggle(),
+      this.buildDiagnosticsCaptureToggle(),
+      this.buildDiagnosticsButtons(),
+    ];
     if (params.mode === '3d' && params.visualStyle !== 'arcade') {
+      visualSettingsChildren.push(this.buildTimeOfDayToggle());
+      visualSettingsChildren.push(this.buildSoftShadowsToggle());
       visualSettingsChildren.push(this.buildDragonPredatorsToggle());
-    }
-    if (params.mode === '3d' && params.visualStyle !== 'arcade') {
+      visualSettingsChildren.push(this.buildLightShaftsToggle());
       visualSettingsChildren.push(this.buildFogToggle());
+      visualSettingsChildren.push(this.buildSlider(animationBlendSliderSpec));
+      if (params.visualStyle === 'fishtank') visualSettingsChildren.push(this.buildWaterEffectsToggle());
     }
     this.container.appendChild(this.buildSection('visualSettings', t('sectionVisualSettings'), visualSettingsChildren, false));
 
@@ -421,6 +446,103 @@ export class ControlPanel {
     return wrapper;
   }
 
+  private buildTimeOfDayToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row';
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'control-label-row';
+    const label = document.createElement('label');
+    label.textContent = t('timeOfDayLabel');
+    labelRow.appendChild(label);
+    wrapper.appendChild(labelRow);
+
+    const select = document.createElement('select');
+    select.id = 'param-time-of-day';
+    const options: { value: TimeOfDayPreset; textKey: TranslationKey }[] = [
+      { value: 'dawn', textKey: 'timeOfDayDawn' },
+      { value: 'noon', textKey: 'timeOfDayNoon' },
+      { value: 'sunset', textKey: 'timeOfDaySunset' },
+      { value: 'night', textKey: 'timeOfDayNight' },
+    ];
+    for (const opt of options) {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = t(opt.textKey);
+      if (opt.value === params.timeOfDay) option.selected = true;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      params.timeOfDay = select.value as TimeOfDayPreset;
+    });
+
+    wrapper.appendChild(select);
+    return wrapper;
+  }
+
+  private buildSoftShadowsToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t('softShadowsLabel');
+    label.htmlFor = 'param-soft-shadows-enabled';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-soft-shadows-enabled';
+    input.checked = params.softShadowsEnabled;
+    input.addEventListener('change', () => {
+      params.softShadowsEnabled = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildLightShaftsToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t('lightShaftsLabel');
+    label.htmlFor = 'param-light-shafts-enabled';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-light-shafts-enabled';
+    input.checked = params.lightShaftsEnabled;
+    input.addEventListener('change', () => {
+      params.lightShaftsEnabled = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildWaterEffectsToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t('waterEffectsLabel');
+    label.htmlFor = 'param-water-effects-enabled';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-water-effects-enabled';
+    input.checked = params.waterEffectsEnabled;
+    input.addEventListener('change', () => {
+      params.waterEffectsEnabled = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
   private buildAlienInvasionButton(): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-buttons';
@@ -473,6 +595,16 @@ export class ControlPanel {
     const activeCount = this.sim.ufos.length;
     const wrongMode = params.mode !== '3d';
     const atCapacity = activeCount >= MAX_CONCURRENT_UFOS;
+    const prev = this.lastAlienButtonState;
+    if (
+      prev
+      && prev.activeCount === activeCount
+      && prev.wrongMode === wrongMode
+      && prev.atCapacity === atCapacity
+    ) {
+      return;
+    }
+    this.lastAlienButtonState = { activeCount, wrongMode, atCapacity };
     const disabled = wrongMode || atCapacity;
     button.disabled = disabled;
     // Once at least one saucer is active, show the live count right on
@@ -497,6 +629,8 @@ export class ControlPanel {
     const button = this.respawnButton;
     if (!button) return;
     const pendingCount = this.sim.pendingRespawns.length;
+    if (this.lastRespawnPendingCount === pendingCount) return;
+    this.lastRespawnPendingCount = pendingCount;
     button.disabled = pendingCount === 0;
     button.textContent = pendingCount > 0 ? t('respawnButtonPending', { count: pendingCount }) : t('respawnButtonIdle');
     button.title = pendingCount > 0 ? t('respawnTitlePending') : t('respawnTitleIdle');
@@ -701,5 +835,81 @@ export class ControlPanel {
     wrapper.appendChild(input);
     wrapper.appendChild(label);
     return wrapper;
+  }
+
+  private buildRenderingStatsToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t('showRenderingStatsLabel');
+    label.htmlFor = 'param-rendering-stats';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-rendering-stats';
+    input.checked = params.showRenderingStats;
+    input.addEventListener('change', () => {
+      params.showRenderingStats = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildDiagnosticsCaptureToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t('enableDiagnosticsCaptureLabel');
+    label.htmlFor = 'param-diagnostics-capture';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-diagnostics-capture';
+    input.checked = params.enableDiagnosticsCapture;
+    input.addEventListener('change', () => {
+      params.enableDiagnosticsCapture = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildDiagnosticsButtons(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-buttons';
+
+    const downloadButton = document.createElement('button');
+    const downloadDefault = t('downloadDiagnosticsButton');
+    downloadButton.textContent = downloadDefault;
+    downloadButton.addEventListener('click', () => {
+      const result = this.onDownloadDiagnostics();
+      if (result === 'downloaded') this.flashButtonLabel(downloadButton, downloadDefault, t('diagnosticsDownloaded'));
+      else if (result === 'no_data') this.flashButtonLabel(downloadButton, downloadDefault, t('diagnosticsNoData'));
+      else this.flashButtonLabel(downloadButton, downloadDefault, t('diagnosticsDownloadFailed'));
+    });
+
+    const clearButton = document.createElement('button');
+    const clearDefault = t('clearDiagnosticsButton');
+    clearButton.textContent = clearDefault;
+    clearButton.addEventListener('click', () => {
+      const cleared = this.onClearDiagnostics();
+      this.flashButtonLabel(clearButton, clearDefault, t('diagnosticsCleared', { count: cleared }));
+    });
+
+    wrapper.appendChild(downloadButton);
+    wrapper.appendChild(clearButton);
+    return wrapper;
+  }
+
+  private flashButtonLabel(button: HTMLButtonElement, defaultLabel: string, flashLabel: string): void {
+    button.textContent = flashLabel;
+    setTimeout(() => {
+      button.textContent = defaultLabel;
+    }, 1800);
   }
 }

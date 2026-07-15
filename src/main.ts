@@ -16,6 +16,246 @@ const canvasStack = document.querySelector<HTMLElement>('#canvas-stack')!;
 const appTitle = document.querySelector<HTMLElement>('#app-title')!;
 const appSubtitle = document.querySelector<HTMLElement>('#app-subtitle')!;
 const controlPanelHeading = document.querySelector<HTMLElement>('#control-panel-heading')!;
+const renderingStatsOverlay = document.createElement('pre');
+renderingStatsOverlay.id = 'rendering-stats-overlay';
+renderingStatsOverlay.className = 'rendering-stats-overlay';
+renderingStatsOverlay.style.display = 'none';
+canvasStack.appendChild(renderingStatsOverlay);
+
+const FRAME_STATS_WINDOW = 120;
+const OVERLAY_UPDATE_INTERVAL_MS = 200;
+const FRAME_STATS_WARMUP_MS = 4000;
+const DIAGNOSTIC_LOG_MAX_ENTRIES = 6000;
+const DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES = 2048;
+const DIAGNOSTIC_SAMPLE_INTERVAL_MS = 250;
+const DIAGNOSTIC_SPIKE_THRESHOLD_MS = 40;
+const DIAGNOSTIC_RUNTIME_WINDOW_MS = 1000;
+const FRAME_GAP_ELEVATED_MS = 25;
+const FRAME_GAP_STALLED_MS = 40;
+type DiagnosticEventKind = 'sample' | 'spike';
+type FrameGapClass = 'steady' | 'elevated' | 'stalled';
+type RuntimeEventKind = 'longtask' | 'gc' | 'visibility' | 'focus';
+interface DiagnosticRecord {
+  event: DiagnosticEventKind;
+  tsMs: number;
+  frameMs: number;
+  frameGapClass: FrameGapClass;
+  simMs: number;
+  uiMs: number;
+  renderMs: number;
+  postMs: number;
+  unaccountedMs: number;
+  recentLongTaskMs: number;
+  recentLongTaskCount: number;
+  recentGcMs: number;
+  recentGcCount: number;
+  visibility: DocumentVisibilityState;
+  hasFocus: boolean;
+  jsHeapUsedMB: number | null;
+  jsHeapTotalMB: number | null;
+  jsHeapLimitMB: number | null;
+  boids: number;
+  predators: number;
+  ufos: number;
+  mode: SimMode;
+  visualStyle: SimParams['visualStyle'] | null;
+}
+interface DiagnosticRuntimeEventRecord {
+  kind: RuntimeEventKind;
+  tsMs: number;
+  durationMs: number;
+  visibility: DocumentVisibilityState | null;
+  hasFocus: boolean | null;
+}
+interface RuntimeWindowStats {
+  longTaskMs: number;
+  longTaskCount: number;
+  gcMs: number;
+  gcCount: number;
+}
+interface HeapSnapshotMb {
+  usedMB: number | null;
+  totalMB: number | null;
+  limitMB: number | null;
+}
+interface PerformanceMemoryLike {
+  usedJSHeapSize: number;
+  totalJSHeapSize: number;
+  jsHeapSizeLimit: number;
+}
+interface PerformanceWithMemory extends Performance {
+  memory?: PerformanceMemoryLike;
+}
+const frameDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
+const simDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
+const uiDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
+const renderDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
+const postDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
+const unaccountedDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
+let frameDurationsCount = 0;
+let frameDurationsCursor = 0;
+let frameDurationsSum = 0;
+let simDurationsSum = 0;
+let uiDurationsSum = 0;
+let renderDurationsSum = 0;
+let postDurationsSum = 0;
+let unaccountedDurationsSum = 0;
+let overlayLastUpdatedAt = 0;
+let statsCaptureStartedAt = performance.now();
+let renderingStatsVisibleLastFrame = false;
+const diagnosticRecords = new Array<DiagnosticRecord>(DIAGNOSTIC_LOG_MAX_ENTRIES);
+const diagnosticRuntimeEvents = new Array<DiagnosticRuntimeEventRecord>(DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES);
+let diagnosticCount = 0;
+let diagnosticCursor = 0;
+let diagnosticRuntimeEventCount = 0;
+let diagnosticRuntimeEventCursor = 0;
+let lastDiagnosticSampleAt = performance.now();
+let diagnosticsCaptureEnabledLastFrame = false;
+let diagnosticsCaptureStartedAt: number | null = null;
+let diagnosticsLongTaskSupported = false;
+let diagnosticsGcSupported = false;
+let diagnosticsLongTaskObservedCount = 0;
+let diagnosticsGcObservedCount = 0;
+let lastFrameGapClass: FrameGapClass = 'steady';
+const diagnosticPerformanceObservers: PerformanceObserver[] = [];
+
+function classifyFrameGap(frameMs: number): FrameGapClass {
+  if (frameMs >= FRAME_GAP_STALLED_MS) return 'stalled';
+  if (frameMs >= FRAME_GAP_ELEVATED_MS) return 'elevated';
+  return 'steady';
+}
+
+function formatTraceElapsed(now: number): string {
+  if (!params.enableDiagnosticsCapture || diagnosticsCaptureStartedAt === null) return 'off';
+  const seconds = Math.max(0, (now - diagnosticsCaptureStartedAt) / 1000);
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const totalSeconds = Math.floor(seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remSeconds = totalSeconds % 60;
+  return `${minutes}:${String(remSeconds).padStart(2, '0')}`;
+}
+
+function appendDiagnosticRuntimeEvent(record: DiagnosticRuntimeEventRecord): void {
+  if (!params.enableDiagnosticsCapture) return;
+  if (diagnosticRuntimeEventCount < DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES) {
+    diagnosticRuntimeEvents[diagnosticRuntimeEventCount++] = record;
+    return;
+  }
+  diagnosticRuntimeEvents[diagnosticRuntimeEventCursor] = record;
+  diagnosticRuntimeEventCursor = (diagnosticRuntimeEventCursor + 1) % DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES;
+}
+
+function getDiagnosticRuntimeEventsOrdered(): DiagnosticRuntimeEventRecord[] {
+  if (diagnosticRuntimeEventCount === 0) return [];
+  if (diagnosticRuntimeEventCount < DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES) {
+    return diagnosticRuntimeEvents.slice(0, diagnosticRuntimeEventCount);
+  }
+  const ordered = new Array<DiagnosticRuntimeEventRecord>(DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES);
+  for (let i = 0; i < DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES; i++) {
+    ordered[i] = diagnosticRuntimeEvents[(diagnosticRuntimeEventCursor + i) % DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES];
+  }
+  return ordered;
+}
+
+function getRuntimeWindowStats(now: number, windowMs: number): RuntimeWindowStats {
+  const cutoff = now - windowMs;
+  const stats: RuntimeWindowStats = { longTaskMs: 0, longTaskCount: 0, gcMs: 0, gcCount: 0 };
+  for (let i = 0; i < diagnosticRuntimeEventCount; i++) {
+    const idx =
+      diagnosticRuntimeEventCount < DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES
+        ? i
+        : (diagnosticRuntimeEventCursor + i) % DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES;
+    const event = diagnosticRuntimeEvents[idx];
+    if (!event || event.tsMs < cutoff) continue;
+    if (event.kind === 'longtask') {
+      stats.longTaskCount++;
+      stats.longTaskMs += event.durationMs;
+    } else if (event.kind === 'gc') {
+      stats.gcCount++;
+      stats.gcMs += event.durationMs;
+    }
+  }
+  return stats;
+}
+
+function getHeapSnapshotMb(): HeapSnapshotMb {
+  const perf = performance as PerformanceWithMemory;
+  const memory = perf.memory;
+  if (!memory) return { usedMB: null, totalMB: null, limitMB: null };
+  const mb = 1024 * 1024;
+  return {
+    usedMB: memory.usedJSHeapSize / mb,
+    totalMB: memory.totalJSHeapSize / mb,
+    limitMB: memory.jsHeapSizeLimit / mb,
+  };
+}
+
+function setupRuntimeDiagnosticsObservers(): void {
+  if (typeof PerformanceObserver === 'undefined') return;
+  const supportedTypes = Array.isArray(PerformanceObserver.supportedEntryTypes) ? PerformanceObserver.supportedEntryTypes : [];
+  diagnosticsLongTaskSupported = supportedTypes.includes('longtask');
+  diagnosticsGcSupported = supportedTypes.includes('gc');
+
+  if (diagnosticsLongTaskSupported) {
+    const longTaskObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (!params.enableDiagnosticsCapture) continue;
+        diagnosticsLongTaskObservedCount++;
+        appendDiagnosticRuntimeEvent({
+          kind: 'longtask',
+          tsMs: entry.startTime + entry.duration,
+          durationMs: entry.duration,
+          visibility: null,
+          hasFocus: null,
+        });
+      }
+    });
+    longTaskObserver.observe({ entryTypes: ['longtask'] });
+    diagnosticPerformanceObservers.push(longTaskObserver);
+  }
+
+  if (diagnosticsGcSupported) {
+    const gcObserver = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (!params.enableDiagnosticsCapture) continue;
+        diagnosticsGcObservedCount++;
+        appendDiagnosticRuntimeEvent({
+          kind: 'gc',
+          tsMs: entry.startTime + entry.duration,
+          durationMs: entry.duration,
+          visibility: null,
+          hasFocus: null,
+        });
+      }
+    });
+    gcObserver.observe({ entryTypes: ['gc'] });
+    diagnosticPerformanceObservers.push(gcObserver);
+  }
+
+  const recordVisibilityChange = (): void => {
+    appendDiagnosticRuntimeEvent({
+      kind: 'visibility',
+      tsMs: performance.now(),
+      durationMs: 0,
+      visibility: document.visibilityState,
+      hasFocus: null,
+    });
+  };
+  const recordFocusChange = (hasFocus: boolean): void => {
+    appendDiagnosticRuntimeEvent({
+      kind: 'focus',
+      tsMs: performance.now(),
+      durationMs: 0,
+      visibility: null,
+      hasFocus,
+    });
+  };
+  document.addEventListener('visibilitychange', recordVisibilityChange);
+  window.addEventListener('focus', () => recordFocusChange(true));
+  window.addEventListener('blur', () => recordFocusChange(false));
+  recordVisibilityChange();
+  recordFocusChange(document.hasFocus());
+}
 
 function getAppTitle(): string {
   const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
@@ -40,6 +280,7 @@ function applyStaticTranslations(): void {
 
 applyStaticTranslations();
 onLanguageChange(applyStaticTranslations);
+setupRuntimeDiagnosticsObservers();
 
 const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight || 600);
 
@@ -320,6 +561,268 @@ function applyPendingCameraStateIfReady(): void {
   pendingCameraState = null;
 }
 
+function recordFrameDuration(frameMs: number): void {
+  const clamped = Math.max(0, frameMs);
+  if (frameDurationsCount < FRAME_STATS_WINDOW) {
+    frameDurationsMs[frameDurationsCount++] = clamped;
+    frameDurationsSum += clamped;
+    return;
+  }
+  const old = frameDurationsMs[frameDurationsCursor];
+  frameDurationsSum += clamped - old;
+  frameDurationsMs[frameDurationsCursor] = clamped;
+  frameDurationsCursor = (frameDurationsCursor + 1) % FRAME_STATS_WINDOW;
+}
+
+function resetFrameStats(now: number): void {
+  frameDurationsCount = 0;
+  frameDurationsCursor = 0;
+  frameDurationsSum = 0;
+  simDurationsSum = 0;
+  uiDurationsSum = 0;
+  renderDurationsSum = 0;
+  postDurationsSum = 0;
+  unaccountedDurationsSum = 0;
+  statsCaptureStartedAt = now;
+}
+
+function appendDiagnosticRecord(record: DiagnosticRecord): void {
+  if (diagnosticCount < DIAGNOSTIC_LOG_MAX_ENTRIES) {
+    diagnosticRecords[diagnosticCount++] = record;
+    return;
+  }
+  diagnosticRecords[diagnosticCursor] = record;
+  diagnosticCursor = (diagnosticCursor + 1) % DIAGNOSTIC_LOG_MAX_ENTRIES;
+}
+
+function getDiagnosticRecordsOrdered(): DiagnosticRecord[] {
+  if (diagnosticCount === 0) return [];
+  if (diagnosticCount < DIAGNOSTIC_LOG_MAX_ENTRIES) return diagnosticRecords.slice(0, diagnosticCount);
+  const ordered = new Array<DiagnosticRecord>(DIAGNOSTIC_LOG_MAX_ENTRIES);
+  for (let i = 0; i < DIAGNOSTIC_LOG_MAX_ENTRIES; i++) {
+    ordered[i] = diagnosticRecords[(diagnosticCursor + i) % DIAGNOSTIC_LOG_MAX_ENTRIES];
+  }
+  return ordered;
+}
+
+function clearDiagnosticRecords(): number {
+  const cleared = diagnosticCount + diagnosticRuntimeEventCount;
+  diagnosticCount = 0;
+  diagnosticCursor = 0;
+  diagnosticRuntimeEventCount = 0;
+  diagnosticRuntimeEventCursor = 0;
+  diagnosticsLongTaskObservedCount = 0;
+  diagnosticsGcObservedCount = 0;
+  return cleared;
+}
+
+function downloadDiagnostics(): 'downloaded' | 'no_data' | 'error' {
+  const records = getDiagnosticRecordsOrdered();
+  if (records.length === 0) return 'no_data';
+  try {
+    const payload = {
+      meta: {
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        maxEntries: DIAGNOSTIC_LOG_MAX_ENTRIES,
+        maxRuntimeEntries: DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES,
+        sampleIntervalMs: DIAGNOSTIC_SAMPLE_INTERVAL_MS,
+        spikeThresholdMs: DIAGNOSTIC_SPIKE_THRESHOLD_MS,
+        runtimeWindowMs: DIAGNOSTIC_RUNTIME_WINDOW_MS,
+        frameGapElevatedMs: FRAME_GAP_ELEVATED_MS,
+        frameGapStalledMs: FRAME_GAP_STALLED_MS,
+        supportsLongTaskObserver: diagnosticsLongTaskSupported,
+        supportsGcObserver: diagnosticsGcSupported,
+        observedLongTaskCount: diagnosticsLongTaskObservedCount,
+        observedGcCount: diagnosticsGcObservedCount,
+      },
+      records,
+      runtimeEvents: getDiagnosticRuntimeEventsOrdered(),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `aiboids-diagnostics-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    return 'downloaded';
+  } catch {
+    return 'error';
+  }
+}
+
+function recordPhaseDuration(kind: 'sim' | 'ui' | 'render' | 'post', valueMs: number): void {
+  if (frameDurationsCount === 0) return;
+  const idx = frameDurationsCount < FRAME_STATS_WINDOW ? frameDurationsCount - 1 : (frameDurationsCursor + FRAME_STATS_WINDOW - 1) % FRAME_STATS_WINDOW;
+  const clamped = Math.max(0, valueMs);
+  if (kind === 'sim') {
+    const old = simDurationsMs[idx] ?? 0;
+    simDurationsMs[idx] = clamped;
+    simDurationsSum += clamped - old;
+    return;
+  }
+  if (kind === 'ui') {
+    const old = uiDurationsMs[idx] ?? 0;
+    uiDurationsMs[idx] = clamped;
+    uiDurationsSum += clamped - old;
+    return;
+  }
+  if (kind === 'render') {
+    const old = renderDurationsMs[idx] ?? 0;
+    renderDurationsMs[idx] = clamped;
+    renderDurationsSum += clamped - old;
+    return;
+  }
+  const old = postDurationsMs[idx] ?? 0;
+  postDurationsMs[idx] = clamped;
+  postDurationsSum += clamped - old;
+}
+
+function recordUnaccountedDuration(valueMs: number): void {
+  if (frameDurationsCount === 0) return;
+  const idx = frameDurationsCount < FRAME_STATS_WINDOW ? frameDurationsCount - 1 : (frameDurationsCursor + FRAME_STATS_WINDOW - 1) % FRAME_STATS_WINDOW;
+  const clamped = Math.max(0, valueMs);
+  const old = unaccountedDurationsMs[idx] ?? 0;
+  unaccountedDurationsMs[idx] = clamped;
+  unaccountedDurationsSum += clamped - old;
+}
+
+function captureDiagnosticRecord(
+  now: number,
+  frameMs: number,
+  simMs: number,
+  uiMs: number,
+  renderMs: number,
+  postMs: number,
+  unaccountedMs: number,
+): void {
+  if (!params.enableDiagnosticsCapture) return;
+  const isSpike = frameMs >= DIAGNOSTIC_SPIKE_THRESHOLD_MS;
+  const shouldSample = now - lastDiagnosticSampleAt >= DIAGNOSTIC_SAMPLE_INTERVAL_MS;
+  if (!isSpike && !shouldSample) return;
+  if (shouldSample) lastDiagnosticSampleAt = now;
+  const runtimeWindow = getRuntimeWindowStats(now, DIAGNOSTIC_RUNTIME_WINDOW_MS);
+  const heapSnapshot = getHeapSnapshotMb();
+  const visibility = document.visibilityState;
+  const hasFocus = document.hasFocus();
+  const frameGapClass = classifyFrameGap(frameMs);
+  appendDiagnosticRecord({
+    event: isSpike ? 'spike' : 'sample',
+    tsMs: now,
+    frameMs,
+    frameGapClass,
+    simMs,
+    uiMs,
+    renderMs,
+    postMs,
+    unaccountedMs,
+    recentLongTaskMs: runtimeWindow.longTaskMs,
+    recentLongTaskCount: runtimeWindow.longTaskCount,
+    recentGcMs: runtimeWindow.gcMs,
+    recentGcCount: runtimeWindow.gcCount,
+    visibility,
+    hasFocus,
+    jsHeapUsedMB: heapSnapshot.usedMB,
+    jsHeapTotalMB: heapSnapshot.totalMB,
+    jsHeapLimitMB: heapSnapshot.limitMB,
+    boids: sim.boids.length,
+    predators: sim.predators.length,
+    ufos: sim.ufos.length,
+    mode: params.mode,
+    visualStyle: params.mode === '3d' ? params.visualStyle : null,
+  });
+}
+
+function getFramePercentile(percentile: number): number {
+  if (frameDurationsCount === 0) return 0;
+  const sorted = frameDurationsMs.slice(0, frameDurationsCount).sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * percentile)));
+  return sorted[index];
+}
+
+function getRollingPeakFrameMs(): number {
+  let peak = 0;
+  for (let i = 0; i < frameDurationsCount; i++) {
+    if (frameDurationsMs[i] > peak) peak = frameDurationsMs[i];
+  }
+  return peak;
+}
+
+function getAverage(valuesSum: number): number {
+  if (frameDurationsCount === 0) return 0;
+  return valuesSum / frameDurationsCount;
+}
+
+function getPeak(values: number[]): number {
+  let peak = 0;
+  for (let i = 0; i < frameDurationsCount; i++) {
+    if ((values[i] ?? 0) > peak) peak = values[i];
+  }
+  return peak;
+}
+
+function syncRenderingStatsOverlay(now: number): void {
+  if (!params.showRenderingStats) {
+    renderingStatsVisibleLastFrame = false;
+    renderingStatsOverlay.style.display = 'none';
+    return;
+  }
+  if (!renderingStatsVisibleLastFrame) {
+    renderingStatsVisibleLastFrame = true;
+    resetFrameStats(now);
+  }
+  renderingStatsOverlay.style.display = 'block';
+  if (now - overlayLastUpdatedAt < OVERLAY_UPDATE_INTERVAL_MS) return;
+  overlayLastUpdatedAt = now;
+  const warmupRemainingMs = Math.max(0, FRAME_STATS_WARMUP_MS - (now - statsCaptureStartedAt));
+  if (warmupRemainingMs > 0) {
+    renderingStatsOverlay.textContent = [
+      'Rendering stats',
+      `mode: ${params.mode}${params.mode === '3d' ? ` (${params.visualStyle})` : ''}`,
+      `warming up: ${(warmupRemainingMs / 1000).toFixed(1)}s`,
+      `trace active: ${formatTraceElapsed(now)}`,
+      `diagnostics: ${params.enableDiagnosticsCapture ? 'on' : 'off'} (frames ${diagnosticCount}/${DIAGNOSTIC_LOG_MAX_ENTRIES}, runtime ${diagnosticRuntimeEventCount}/${DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES})`,
+    ].join('\n');
+    return;
+  }
+
+  const averageFrameMs = frameDurationsCount > 0 ? frameDurationsSum / frameDurationsCount : 0;
+  const averageFps = averageFrameMs > 1e-6 ? 1000 / averageFrameMs : 0;
+  const p95FrameMs = getFramePercentile(0.95);
+  const rollingPeakFrameMs = getRollingPeakFrameMs();
+  const simAvgMs = getAverage(simDurationsSum);
+  const uiAvgMs = getAverage(uiDurationsSum);
+  const renderAvgMs = getAverage(renderDurationsSum);
+  const postAvgMs = getAverage(postDurationsSum);
+  const unaccountedAvgMs = getAverage(unaccountedDurationsSum);
+  const simPeakMs = getPeak(simDurationsMs);
+  const uiPeakMs = getPeak(uiDurationsMs);
+  const renderPeakMs = getPeak(renderDurationsMs);
+  const postPeakMs = getPeak(postDurationsMs);
+  const unaccountedPeakMs = getPeak(unaccountedDurationsMs);
+  const totalAgents = sim.boids.length + sim.predators.length + sim.ufos.length;
+  const runtimeWindow = getRuntimeWindowStats(now, DIAGNOSTIC_RUNTIME_WINDOW_MS);
+  const focusState = document.hasFocus() ? 'focused' : 'blurred';
+
+  renderingStatsOverlay.textContent = [
+    'Rendering stats',
+    `mode: ${params.mode}${params.mode === '3d' ? ` (${params.visualStyle})` : ''}`,
+    `frame ms: avg ${averageFrameMs.toFixed(2)} | p95 ${p95FrameMs.toFixed(2)} | peak ${rollingPeakFrameMs.toFixed(2)}`,
+    `fps: ${averageFps.toFixed(1)}`,
+    `phase avg ms: sim ${simAvgMs.toFixed(2)} | render ${renderAvgMs.toFixed(2)} | ui ${uiAvgMs.toFixed(2)} | post ${postAvgMs.toFixed(2)}`,
+    `phase peak ms: sim ${simPeakMs.toFixed(2)} | render ${renderPeakMs.toFixed(2)} | ui ${uiPeakMs.toFixed(2)} | post ${postPeakMs.toFixed(2)}`,
+    `unaccounted ms: avg ${unaccountedAvgMs.toFixed(2)} | peak ${unaccountedPeakMs.toFixed(2)}`,
+    `runtime (${DIAGNOSTIC_RUNTIME_WINDOW_MS}ms): longtask ${runtimeWindow.longTaskCount}/${runtimeWindow.longTaskMs.toFixed(2)}ms | gc ${runtimeWindow.gcCount}/${runtimeWindow.gcMs.toFixed(2)}ms`,
+    `page: ${document.visibilityState} | ${focusState} | gap ${lastFrameGapClass}`,
+    `trace active: ${formatTraceElapsed(now)}`,
+    `diagnostics: ${params.enableDiagnosticsCapture ? 'on' : 'off'} (frames ${diagnosticCount}/${DIAGNOSTIC_LOG_MAX_ENTRIES}, runtime ${diagnosticRuntimeEventCount}/${DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES})`,
+    `entities: boids ${sim.boids.length} | predators ${sim.predators.length} | ufos ${sim.ufos.length} | total ${totalAgents}`,
+  ].join('\n');
+}
+
 /**
  * Builds the shareable "Copy deep link" URL: every current SimParams
  * field plus (if in 3D mode) the exact live camera position/orbit
@@ -399,7 +902,14 @@ function resizeCanvases(): void {
   sim.resize(width, height);
 }
 
-const controlPanel = new ControlPanel(controlPanelBody, sim, applyMode, buildDeepLinkURL);
+const controlPanel = new ControlPanel(
+  controlPanelBody,
+  sim,
+  applyMode,
+  buildDeepLinkURL,
+  downloadDiagnostics,
+  clearDiagnosticRecords,
+);
 applyMode(params.mode);
 
 if (galleryLaunchedFromURL) {
@@ -422,8 +932,36 @@ window.addEventListener('resize', () => {
 let lastTime = performance.now();
 
 function loop(now: number): void {
-  const dt = Math.min((now - lastTime) / 1000, 1 / 20); // clamp dt to avoid big jumps on tab-away
+  const rawFrameMs = Math.max(0, now - lastTime);
+  lastFrameGapClass = classifyFrameGap(rawFrameMs);
+  const dt = Math.min(rawFrameMs / 1000, 1 / 20); // clamp dt to avoid big jumps on tab-away
   lastTime = now;
+  if (params.enableDiagnosticsCapture !== diagnosticsCaptureEnabledLastFrame) {
+    diagnosticsCaptureEnabledLastFrame = params.enableDiagnosticsCapture;
+    if (params.enableDiagnosticsCapture) {
+      diagnosticsCaptureStartedAt = now;
+      lastDiagnosticSampleAt = now - DIAGNOSTIC_SAMPLE_INTERVAL_MS;
+      appendDiagnosticRuntimeEvent({
+        kind: 'visibility',
+        tsMs: now,
+        durationMs: 0,
+        visibility: document.visibilityState,
+        hasFocus: null,
+      });
+      appendDiagnosticRuntimeEvent({
+        kind: 'focus',
+        tsMs: now,
+        durationMs: 0,
+        visibility: null,
+        hasFocus: document.hasFocus(),
+      });
+    } else {
+      diagnosticsCaptureStartedAt = null;
+    }
+  }
+  if (params.showRenderingStats && now - statsCaptureStartedAt >= FRAME_STATS_WARMUP_MS) {
+    recordFrameDuration(rawFrameMs);
+  }
 
   // Detect Model Gallery selection changes (from the control panel
   // dropdown or the initial `?galleryCreature=` URL param) and
@@ -460,15 +998,19 @@ function loop(now: number): void {
     galleryPosed = false;
   }
 
+  const simStart = performance.now();
   sim.update(dt);
+  const simEnd = performance.now();
   controlPanel.syncAlienInvasionButton();
   controlPanel.syncRespawnButton();
+  const uiEnd = performance.now();
 
   if (params.mode === '3d') {
     renderer3D?.render(sim);
   } else {
     renderer2D?.render(sim);
   }
+  const renderEnd = performance.now();
 
   // Posed/camera-framed *after* this frame's render() call — render()'s
   // internal ensureScene does a one-time initial camera auto-frame the
@@ -484,6 +1026,24 @@ function loop(now: number): void {
   // clears its own "already applied" flag), so this ordering only
   // matters on the very first frame.
   applyPendingCameraStateIfReady();
+  const postEnd = performance.now();
+  const simMs = simEnd - simStart;
+  const uiMs = uiEnd - simEnd;
+  const renderMs = renderEnd - uiEnd;
+  const postMs = postEnd - renderEnd;
+  const measuredMs = simMs + uiMs + renderMs + postMs;
+  const unaccountedMs = Math.max(0, rawFrameMs - measuredMs);
+
+  captureDiagnosticRecord(now, rawFrameMs, simMs, uiMs, renderMs, postMs, unaccountedMs);
+
+  if (params.showRenderingStats && now - statsCaptureStartedAt >= FRAME_STATS_WARMUP_MS) {
+    recordPhaseDuration('sim', simMs);
+    recordPhaseDuration('ui', uiMs);
+    recordPhaseDuration('render', renderMs);
+    recordPhaseDuration('post', postMs);
+    recordUnaccountedDuration(unaccountedMs);
+  }
+  syncRenderingStatsOverlay(now);
 
   requestAnimationFrame(loop);
 }

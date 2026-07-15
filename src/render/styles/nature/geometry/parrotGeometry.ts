@@ -29,6 +29,7 @@ import {
 // rest of the body.
 const BEAK_COLOR = new THREE.Color(0x2b2620);
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
+const FACE_PATCH_COLOR = new THREE.Color(0xe6ded1);
 // Near-black eye dots — stay near-black under any per-instance body tint
 // multiply (see the multiply-color reasoning in unicornGeometry.ts), so
 // this single baked color works correctly across every macaw color
@@ -68,8 +69,8 @@ export function createParrotGeometries(length: number, width: number): CreatureG
 // doc comment) applied here too, for visual consistency across all three
 // bird shapes — 25% narrower, 10% longer, pivoting at the neck pinch so
 // only the head region (not the neck/torso below it) stretches.
-const HEAD_NARROW_SCALE = 0.75;
-const HEAD_LENGTHEN_SCALE = 1.2;
+const HEAD_NARROW_SCALE = 0.78;
+const HEAD_LENGTHEN_SCALE = 1.12;
 const HEAD_START_FRAC = 0.38; // neck pinch
 const HEAD_END_FRAC = HEAD_START_FRAC + (0.9 - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE; // face point (was faceY = halfLen*0.9)
 
@@ -106,9 +107,41 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   const torso = new THREE.LatheGeometry(profile, 16);
 
   // Macaws have a deeply hooked beak curling well past straight-down
-  // (132deg from forward) — much more than the hawk's shallower raptor
+  // (still stronger than the hawk's shallower raptor
   // hook (see hawkGeometry.ts) — shared sweep builder, different tuning.
-  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.34, 132, 0.85);
+  // Slightly oversized/embedded beak root so the body's open lathe face
+  // cannot peek through as a visible hole from front/oblique angles.
+  const beakRootY = faceY - length * 0.03;
+  const beakRootRadius = faceRadius * 1.18;
+  const beak = buildHookedBeakGeometry(beakRootY, beakRootRadius, length * 0.29, 126, 0.8);
+
+  // Close both open lathe ends so no line-of-sight can pass through the
+  // hollow body cavity from the beak junction to the rear opening.
+  const faceCap = buildDoubleSidedDiskCap(faceY - length * 0.01, faceRadius * 1.08, 16);
+  const rearCap = buildDoubleSidedDiskCap(-halfLen * 0.95, width * 0.07, 12);
+
+  // Internal "socket fill" and short throat plug to robustly seal the
+  // beak/body junction even at grazing front angles.
+  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.16, 10, 8);
+  beakSocketFill.scale(1, 1.04, 0.96);
+  beakSocketFill.translate(0, faceY - length * 0.005, 0);
+  const beakThroatPlug = new THREE.CylinderGeometry(beakRootRadius * 0.62, beakRootRadius * 0.4, length * 0.12, 10);
+  beakThroatPlug.translate(0, faceY + length * 0.025, 0);
+
+  // Most macaws/parrots have pale bare facial skin around the beak/eye
+  // region; subtle cheek patches make the face read less like one uniform
+  // colored blob.
+  const facePatchRadius = width * 0.09;
+  const facePatchY = halfLen * headFrac(0.76);
+  const facePatchX = width * 0.285 * HEAD_NARROW_SCALE;
+  const facePatchZ = width * 0.085 * HEAD_NARROW_SCALE;
+  const facePatchLeft = new THREE.SphereGeometry(facePatchRadius, 10, 8);
+  facePatchLeft.scale(1, 1, 0.55);
+  facePatchLeft.translate(facePatchX, facePatchY, facePatchZ);
+  const facePatchRight = new THREE.SphereGeometry(facePatchRadius, 10, 8);
+  facePatchRight.scale(1, 1, 0.55);
+  facePatchRight.translate(-facePatchX, facePatchY, facePatchZ);
+  const facePatches = mergePositionOnlyGeometries([facePatchLeft, facePatchRight]);
 
   // A pair of small dark eye dots on either side of the head, just above
   // and slightly behind the face point — the single biggest missing
@@ -118,14 +151,43 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   const eyeY = halfLen * headFrac(0.78);
   const eyeX = width * 0.26 * HEAD_NARROW_SCALE;
   const eyeZ = width * 0.06 * HEAD_NARROW_SCALE;
-  const eyeRadius = width * 0.05 * HEAD_NARROW_SCALE;
+  const eyeRadius = width * 0.055 * HEAD_NARROW_SCALE;
   const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
   return mergeGeometriesWithColor([
     { geometry: torso, color: WHITE_VERTEX_COLOR },
+    { geometry: faceCap, color: WHITE_VERTEX_COLOR },
+    { geometry: rearCap, color: WHITE_VERTEX_COLOR },
+    { geometry: beakSocketFill, color: WHITE_VERTEX_COLOR },
+    { geometry: beakThroatPlug, color: WHITE_VERTEX_COLOR },
+    { geometry: facePatches, color: FACE_PATCH_COLOR },
     { geometry: beak, color: BEAK_COLOR },
     { geometry: eyes, color: EYE_COLOR },
   ]);
+}
+
+function buildDoubleSidedDiskCap(y: number, radius: number, segments: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const x0 = Math.cos(a0) * radius;
+    const z0 = Math.sin(a0) * radius;
+    const x1 = Math.cos(a1) * radius;
+    const z1 = Math.sin(a1) * radius;
+    positions.push(
+      0, y, 0,
+      x0, y, z0,
+      x1, y, z1,
+      0, y, 0,
+      x1, y, z1,
+      x0, y, z0,
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 /**
@@ -156,9 +218,9 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
   const rootY = -length * 0.46;
 
   const featherCount = 7;
-  const maxSpreadDeg = 34; // total angular spread of the fan, center feather at 0deg
-  const maxLen = length * 0.62; // center (longest) feather length
-  const minLenFrac = 0.45; // outermost feathers' length relative to maxLen
+  const maxSpreadDeg = 30; // total angular spread of the fan, center feather at 0deg
+  const maxLen = length * 0.54; // center (longest) feather length
+  const minLenFrac = 0.5; // outermost feathers' length relative to maxLen
 
   const featherGeometries: THREE.BufferGeometry[] = [];
   for (let i = 0; i < featherCount; i++) {
@@ -225,12 +287,12 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   // Rounded, convex leading edge (bulges forward then curves back to a
   // blunt tip) rather than one sharp shoulder-to-tip line.
   const boundary: number[][] = [
-    [0.3 * span * s, chord * 0.4, 0],
-    [0.68 * span * s, chord * 0.34, 0],
-    [0.92 * span * s, chord * 0.16, 0],
-    [1.0 * span * s, -chord * 0.08, 0], // blunt rounded tip, not a sharp point
-    [0.86 * span * s, -chord * 0.32, 0],
-    [0.42 * span * s, -chord * 0.22, 0],
+    [0.28 * span * s, chord * 0.44, 0],
+    [0.64 * span * s, chord * 0.37, 0],
+    [0.9 * span * s, chord * 0.19, 0],
+    [1.0 * span * s, -chord * 0.06, 0], // blunt rounded tip, not a sharp point
+    [0.84 * span * s, -chord * 0.3, 0],
+    [0.38 * span * s, -chord * 0.2, 0],
   ];
 
   for (let i = 0; i < boundary.length; i++) {
@@ -250,7 +312,7 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     a[1] + (b[1] - a[1]) * t,
     a[2] + (b[2] - a[2]) * t,
   ];
-  const fingerCount = 4;
+  const fingerCount = 3;
   const halfGap = 0.08;
   const dirX = trailOuter[0] - trailInner[0];
   const dirY = trailOuter[1] - trailInner[1];
@@ -261,7 +323,7 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     const t = i / (fingerCount - 1);
     const baseA = lerp(trailInner, trailOuter, Math.max(0, t - halfGap));
     const baseB = lerp(trailInner, trailOuter, Math.min(1, t + halfGap));
-    const fingerLen = span * (0.08 + 0.06 * t); // short — outermost finger only ~14% of span
+    const fingerLen = span * (0.07 + 0.045 * t); // short rounded tips, less "spiky"
     const midBase = lerp(baseA, baseB, 0.5);
     const tip = [midBase[0] + ndx * fingerLen, midBase[1] + ndy * fingerLen, 0];
     pushTri(baseA, baseB, tip);

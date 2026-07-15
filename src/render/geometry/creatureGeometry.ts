@@ -279,6 +279,16 @@ export function buildHookedBeakGeometry(
     pushOutwardTri(tipCenter, tipRing[j], tipRing[k], tipCapBehind);
   }
 
+  // Cap the root ring too: without this, strongly hooked beaks can reveal
+  // the open back-face as a circular cutout when viewed near head-on.
+  const rootRing = rings[0];
+  const rootCenter = new THREE.Vector3(0, spine[0].y, spine[0].z);
+  const rootCapAhead = new THREE.Vector3(0, spine[1].y, spine[1].z);
+  for (let j = 0; j < angleSegments; j++) {
+    const k = (j + 1) % angleSegments;
+    pushOutwardTri(rootCenter, rootRing[k], rootRing[j], rootCapAhead);
+  }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.computeVertexNormals();

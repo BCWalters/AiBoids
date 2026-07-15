@@ -5,7 +5,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { params, type VisualStyle } from '../sim/params';
+import { params, type TimeOfDayPreset, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
@@ -85,15 +85,15 @@ const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing:
 // hue parrot stood out as flatter/less varied than those by comparison).
 const PARROT_COLOR_PATTERNS: SpeciesColorSet[] = [
   // Blue-and-gold macaw
-  { body: new THREE.Color(0xf0b429), wing: new THREE.Color(0x2f6fdc), tail: new THREE.Color(0x1c4fb0) },
+  { body: new THREE.Color(0xe0b247), wing: new THREE.Color(0x2f5fa8), tail: new THREE.Color(0x244b8f) },
   // Scarlet macaw
-  { body: new THREE.Color(0xd8202a), wing: new THREE.Color(0x1f6fd8), tail: new THREE.Color(0xf0b429) },
+  { body: new THREE.Color(0xc93a34), wing: new THREE.Color(0x1f5ea8), tail: new THREE.Color(0xd6ab46) },
   // Green-wing (military) macaw
-  { body: new THREE.Color(0xc0242f), wing: new THREE.Color(0x1f9e58), tail: new THREE.Color(0x2f6fdc) },
+  { body: new THREE.Color(0xae3c36), wing: new THREE.Color(0x2d7853), tail: new THREE.Color(0x2b5b9e) },
   // Sun conure
-  { body: new THREE.Color(0xf5d327), wing: new THREE.Color(0xe8791a), tail: new THREE.Color(0xd8202a) },
+  { body: new THREE.Color(0xe7c83b), wing: new THREE.Color(0xcc7a2c), tail: new THREE.Color(0xc9463b) },
   // Purple parrot variant with sky-blue accents
-  { body: new THREE.Color(0x8d4dff), wing: new THREE.Color(0x87ceeb), tail: new THREE.Color(0x66c7f4) },
+  { body: new THREE.Color(0x7f61cc), wing: new THREE.Color(0x8cc9e4), tail: new THREE.Color(0x6fb6da) },
 ];
 const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
 const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
@@ -189,6 +189,7 @@ const DRAGON_LENGTH_BASE = PREDATOR_LENGTH * 3.0;
 const DRAGON_WIDTH_BASE = PREDATOR_WIDTH * 3.6;
 const DRAGON_LENGTH = DRAGON_LENGTH_BASE * DRAGON_SIZE_SCALE;
 const DRAGON_WIDTH = DRAGON_WIDTH_BASE * DRAGON_SIZE_SCALE;
+const DRAGON_MOUTH = computeDragonMouthTransform(DRAGON_LENGTH);
 const SHARK_LENGTH = DRAGON_LENGTH_BASE;
 const SHARK_WIDTH = DRAGON_WIDTH_BASE;
 // Unicorns: a large, substantial creature — a little smaller than the
@@ -199,9 +200,23 @@ const UNICORN_WIDTH = DRAGON_WIDTH * 0.75;
 
 // Wing-flap tuning: base idle flutter plus extra amplitude proportional to
 // how fast the entity is currently moving (relative to its own max speed).
-const FLAP_FREQUENCY = 9; // radians/sec-ish; controls flap speed
+const FLAP_FREQUENCY = 7.6; // radians/sec-ish; controls flap speed
 const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
+// Nature parrots should read as heavier, broad-winged fliers than the
+// smaller songbirds, with slower, wider wingbeats.
+const PARROT_FLAP_FREQUENCY = 5.8;
+const PARROT_FLAP_IDLE_AMPLITUDE = 0.33;
+const PARROT_FLAP_SPEED_AMPLITUDE = 0.82;
+const CLIMB_FLAP_FREQ_BOOST = 0.12;
+const DIVE_FLAP_FREQ_CUT = 0.1;
+const TURN_FLAP_FREQ_BOOST = 0.06;
+const PANIC_FLAP_FREQ_BOOST = 0.1;
+const CLIMB_FLAP_AMP_BOOST = 0.12;
+const DIVE_FLAP_AMP_BOOST = 0.08;
+const TURN_FLAP_AMP_BOOST = 0.1;
+const PANIC_FLAP_AMP_BOOST = 0.12;
+const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 
 // Fishtank-only mesh-size boost applied on top of TANK_VISUAL_SCALE (see
 // updateInstances' meshScaleBoost param). TANK_VISUAL_SCALE alone grows
@@ -228,7 +243,7 @@ const FISHTANK_SHARK_MESH_BOOST = 1.5;
 // same fast hummingbird-like frequency read as a tiny insect (dragonfly/
 // hummingbird) rather than a huge beast — big wings should beat slower
 // and sweep through a wider arc.
-const DRAGON_FLAP_FREQUENCY = 2.6;
+const DRAGON_FLAP_FREQUENCY = 2.15;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 
@@ -673,21 +688,12 @@ export class Renderer3D {
    * whenever the shared hawk/dragon/shark instance set is rebuilt.
    */
   private sharkDisplayQuats = new Map<number, THREE.Quaternion>();
-  /**
-   * Per-unicorn accumulated flap phase (radians) — unicorns modulate
-   * their flap *frequency* by vertical velocity (see UNICORN_CLIMB_FLAP_
-   * BOOST / UNICORN_DESCEND_FLAP_CUT), so unlike every other creature's
-   * flap phase (which is just `elapsed * flapFrequency`, safe because
-   * their frequency is a constant), the phase has to be integrated
-   * frame-by-frame here — using a frequency that changes moment to
-   * moment directly in an `elapsed * frequency` formula would make the
-   * phase (and thus the wing angle) jump discontinuously every time the
-   * frequency itself changed, rather than smoothly speeding up/slowing
-   * down.
-   */
-  private unicornFlapPhase = new Map<number, number>();
+  /** Per-entity accumulated flap phase (radians), integrated every frame. */
+  private flapPhase = new WeakMap<Boid | Predator, number>();
   private boundsHelper: THREE.LineSegments | null = null;
   private currentStyle: VisualStyle | null = null;
+  private warmedShaderStyles = new Set<VisualStyle>();
+  private pendingShaderWarmupStyles = new Set<VisualStyle>();
 
   private lastSeenCatchId = 0;
   private nextFireBreathTime = new WeakMap<Predator, number>();
@@ -695,6 +701,7 @@ export class Renderer3D {
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
   private tailSwayQuat = new THREE.Quaternion();
+  private pitchQuat = new THREE.Quaternion();
   // Scratch objects for composing "rotate the tail around its own
   // attachment point rather than the model's shared local origin" (see
   // tailSwayPivotY's doc comment on updateInstances).
@@ -703,6 +710,12 @@ export class Renderer3D {
   private tailOriginToPivot = new THREE.Matrix4();
   private rollQuat = new THREE.Quaternion();
   private tmpVec3 = new THREE.Vector3();
+  private tmpSpawnPosition = new THREE.Vector3();
+  private tmpSpawnDirection = new THREE.Vector3();
+  private tmpFireOrigin = new THREE.Vector3();
+  private tmpFireDirection = new THREE.Vector3();
+  private tmpFireOffset = new THREE.Vector3();
+  private tmpFireEmitterVelocity = new THREE.Vector3();
   // Sim world center, recomputed once per frame in render() while
   // fishtank style is active — used to "grow" fishtank's boid positions
   // symmetrically around the tank's true center (see TANK_VISUAL_SCALE's
@@ -731,6 +744,11 @@ export class Renderer3D {
   private hsl = { h: 0, s: 0, l: 0 };
   private startTime = performance.now();
   private lastElapsed = 0;
+  private appliedFogEnabled: boolean | null = null;
+  private appliedTimeOfDay: TimeOfDayPreset | null = null;
+  private appliedLightShaftsEnabled: boolean | null = null;
+  private appliedWaterEffectsEnabled: boolean | null = null;
+  private appliedShadowsEnabled: boolean | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     // logarithmicDepthBuffer: the camera's near/far planes span a huge
@@ -747,6 +765,8 @@ export class Renderer3D {
     // out to solid white and gives the nature-style earth tones more depth.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.65;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x05070a);
@@ -760,6 +780,9 @@ export class Renderer3D {
     this.ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
     this.keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
     this.keyLight.position.set(1, 1, 1);
+    this.keyLight.castShadow = true;
+    this.keyLight.shadow.mapSize.set(1536, 1536);
+    this.keyLight.shadow.radius = 3;
     this.scene.add(this.ambientLight, this.keyLight);
 
     this.natureEnv = createNatureEnvironment(this.scene, this.renderer);
@@ -894,6 +917,12 @@ export class Renderer3D {
     body.frustumCulled = false;
     wingLeft.frustumCulled = false;
     wingRight.frustumCulled = false;
+    body.castShadow = true;
+    body.receiveShadow = true;
+    wingLeft.castShadow = true;
+    wingLeft.receiveShadow = true;
+    wingRight.castShadow = true;
+    wingRight.receiveShadow = true;
     this.scene.add(body, wingLeft, wingRight);
 
     let tail: THREE.InstancedMesh | undefined;
@@ -909,6 +938,8 @@ export class Renderer3D {
       tail = new THREE.InstancedMesh(geometries.tail, tailMaterial, Math.max(count, 1));
       tail.count = count;
       tail.frustumCulled = false;
+      tail.castShadow = true;
+      tail.receiveShadow = true;
       this.scene.add(tail);
     }
 
@@ -921,6 +952,8 @@ export class Renderer3D {
       legs = new THREE.InstancedMesh(geometries.legs, legsMaterial, Math.max(count, 1));
       legs.count = count;
       legs.frustumCulled = false;
+      legs.castShadow = true;
+      legs.receiveShadow = true;
       this.scene.add(legs);
     }
 
@@ -935,6 +968,8 @@ export class Renderer3D {
       beak = new THREE.InstancedMesh(geometries.beak, beakMaterial, Math.max(count, 1));
       beak.count = count;
       beak.frustumCulled = false;
+      beak.castShadow = true;
+      beak.receiveShadow = true;
       this.scene.add(beak);
     }
 
@@ -979,6 +1014,18 @@ export class Renderer3D {
       this.scene.remove(mesh);
       (mesh.material as THREE.Material).dispose();
     }
+  }
+
+  /** Defers a one-time shader/material compile for the currently active visual style. */
+  private scheduleShaderWarmup(style: VisualStyle): void {
+    if (this.warmedShaderStyles.has(style) || this.pendingShaderWarmupStyles.has(style)) return;
+    this.pendingShaderWarmupStyles.add(style);
+    window.setTimeout(() => {
+      this.pendingShaderWarmupStyles.delete(style);
+      if (this.currentStyle !== style) return;
+      this.renderer.compile(this.scene, this.camera);
+      this.warmedShaderStyles.add(style);
+    }, 0);
   }
 
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
@@ -1115,7 +1162,6 @@ export class Renderer3D {
       );
       this.predatorInstanceKeys.set('unicorn', unicornKey);
       this.unicornDisplayQuats.clear();
-      this.unicornFlapPhase.clear();
     }
 
     if (this.currentStyle !== style) {
@@ -1185,11 +1231,35 @@ export class Renderer3D {
       }
     }
 
-    // Applied every frame (cheap) rather than gated on style-change, so
-    // toggling the fog checkbox takes effect immediately without needing
-    // a full style switch.
-    this.natureEnv.setFogEnabled(params.fogEnabled);
-    this.fishtankEnv.setFogEnabled(params.fogEnabled);
+    // Apply environment toggles when the underlying params actually change,
+    // so UI changes still take effect immediately without redundant work
+    // every render frame.
+    if (this.appliedFogEnabled !== params.fogEnabled) {
+      this.natureEnv.setFogEnabled(params.fogEnabled);
+      this.fishtankEnv.setFogEnabled(params.fogEnabled);
+      this.appliedFogEnabled = params.fogEnabled;
+    }
+    if (this.appliedTimeOfDay !== params.timeOfDay) {
+      this.natureEnv.setTimeOfDay(params.timeOfDay);
+      this.fishtankEnv.setTimeOfDay(params.timeOfDay);
+      this.appliedTimeOfDay = params.timeOfDay;
+    }
+    if (this.appliedLightShaftsEnabled !== params.lightShaftsEnabled) {
+      this.natureEnv.setLightShaftsEnabled(params.lightShaftsEnabled);
+      this.appliedLightShaftsEnabled = params.lightShaftsEnabled;
+    }
+    if (this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled) {
+      this.fishtankEnv.setWaterEffectsEnabled(params.waterEffectsEnabled);
+      this.appliedWaterEffectsEnabled = params.waterEffectsEnabled;
+    }
+    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled;
+    if (this.appliedShadowsEnabled !== shadowsEnabled) {
+      this.renderer.shadowMap.enabled = shadowsEnabled;
+      this.keyLight.castShadow = shadowsEnabled;
+      this.natureEnv.sunLight.castShadow = shadowsEnabled;
+      this.fishtankEnv.keyLight.castShadow = shadowsEnabled;
+      this.appliedShadowsEnabled = shadowsEnabled;
+    }
 
     // Model Gallery uses a close, creature-relative camera distance that
     // sits *inside* the tank/water volume (see main.ts's
@@ -1267,6 +1337,8 @@ export class Renderer3D {
       this.controls.minDistance = maxDim * 0.05;
       this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
     }
+
+    this.scheduleShaderWarmup(style);
   }
 
   private updateInstances(
@@ -1374,9 +1446,13 @@ export class Renderer3D {
           let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
           let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
           const len = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
-          entity.renderHeading = { x: hx / len, y: hy / len, z: hz / len };
+          entity.renderHeading.x = hx / len;
+          entity.renderHeading.y = hy / len;
+          entity.renderHeading.z = hz / len;
         } else {
-          entity.renderHeading = { x: targetX, y: targetY, z: targetZ };
+          entity.renderHeading.x = targetX;
+          entity.renderHeading.y = targetY;
+          entity.renderHeading.z = targetZ;
         }
       }
       const dir = entity.renderHeading;
@@ -1499,7 +1575,9 @@ export class Renderer3D {
           this.tmpRight.copy(this.tmpPersistedRight);
         }
         this.tmpRight.normalize();
-        entity.renderRight = { x: this.tmpRight.x, y: this.tmpRight.y, z: this.tmpRight.z };
+        entity.renderRight.x = this.tmpRight.x;
+        entity.renderRight.y = this.tmpRight.y;
+        entity.renderRight.z = this.tmpRight.z;
         this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
         // Columns are where each local axis (X, Y, Z) maps to in world
         // space: local X -> right, local Y -> forward (matches
@@ -1521,7 +1599,9 @@ export class Renderer3D {
         // (determinant -1) basis, which is what caused seahorses (the
         // fishtank reskin of unicorns) to visibly swim backwards.
         this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
-        entity.renderRight = { x: this.tmpRight.x, y: this.tmpRight.y, z: this.tmpRight.z };
+        entity.renderRight.x = this.tmpRight.x;
+        entity.renderRight.y = this.tmpRight.y;
+        entity.renderRight.z = this.tmpRight.z;
         this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
         this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
         this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
@@ -1545,8 +1625,14 @@ export class Renderer3D {
       // flip — "it's fine if they bank hard, but they should prefer to
       // be right-side up" the rest of the time.
       const turnSignal = this.tmpPrevDir.cross(this.tmpForward).y;
+      const turnWeight = THREE.MathUtils.clamp(Math.abs(turnSignal) * 16, 0, 1);
+      const climbWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, 0, 1) : 0;
+      const diveWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(-vel.y / maxSpeed, 0, 1) : 0;
+      const panicWeight = THREE.MathUtils.clamp(getIntensity(entity), 0, 1);
+      const cruiseWeight = Math.max(0, 1 - Math.max(climbWeight, diveWeight, turnWeight, panicWeight * 0.75));
+      const blendStrength = THREE.MathUtils.clamp(params.animationBlendStrength, 0, 1);
       const targetBank = THREE.MathUtils.clamp(
-        -turnSignal * BANK_GAIN * bankScale,
+        -turnSignal * BANK_GAIN * bankScale * (1 + turnWeight * 0.3 + panicWeight * 0.2),
         -MAX_BANK_RADIANS * bankScale,
         MAX_BANK_RADIANS * bankScale,
       );
@@ -1554,6 +1640,11 @@ export class Renderer3D {
       entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
       this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
       this.bodyQuat.multiply(this.rollQuat);
+      if (!keepUpright) {
+        const blendedPitch = (diveWeight - climbWeight) * STATE_PITCH_SCALE * blendStrength;
+        this.pitchQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, blendedPitch);
+        this.bodyQuat.multiply(this.pitchQuat);
+      }
 
       if (keepUpright && uprightStyle === 'dragon') {
         // Final safety net (see dragonDisplayQuats doc comment): never
@@ -1662,25 +1753,45 @@ export class Renderer3D {
       // before combining with the shared body orientation, so both wings
       // swing up/down in sync regardless of which way the bird is heading.
       const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
-      const amplitude = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
+      const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
+      const stateResponse = (uprightStyle === 'dragon' || uprightStyle === 'unicorn' || uprightStyle === 'shark') ? 0.55 : 0.75;
+      const stateFrequencyMultRaw =
+        1
+        + blendStrength * stateResponse * (
+          climbWeight * CLIMB_FLAP_FREQ_BOOST
+          - diveWeight * DIVE_FLAP_FREQ_CUT
+          + turnWeight * TURN_FLAP_FREQ_BOOST
+          + panicWeight * PANIC_FLAP_FREQ_BOOST
+          - cruiseWeight * 0.04
+        );
+      const stateAmplitudeMultRaw =
+        1
+        + blendStrength * stateResponse * (
+          climbWeight * CLIMB_FLAP_AMP_BOOST
+          + diveWeight * DIVE_FLAP_AMP_BOOST
+          + turnWeight * TURN_FLAP_AMP_BOOST
+          + panicWeight * PANIC_FLAP_AMP_BOOST
+          - cruiseWeight * 0.06
+        );
+      const stateFrequencyMult = THREE.MathUtils.clamp(stateFrequencyMultRaw, 0.8, 1.18);
+      const stateAmplitudeMult = THREE.MathUtils.clamp(stateAmplitudeMultRaw, 0.82, 1.24);
+      const amplitude = amplitudeBase * stateAmplitudeMult;
       let phase: number;
+      let effectiveFrequency = flapFrequency * stateFrequencyMult;
       if (uprightStyle === 'unicorn') {
         // Flap frequency scales with vertical velocity instead of the
         // constant-frequency formula everyone else uses — "flap faster
         // as they go up, slower as they descend" — so the phase has to
-        // be integrated (see unicornFlapPhase's doc comment) rather than
-        // computed directly from elapsed time.
+        // be integrated frame-by-frame.
         const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
         const freqMultiplier = climbFrac >= 0
           ? 1 + UNICORN_CLIMB_FLAP_BOOST * climbFrac
           : 1 - UNICORN_DESCEND_FLAP_CUT * -climbFrac;
-        const effectiveFrequency = flapFrequency * freqMultiplier;
-        const prevPhase = this.unicornFlapPhase.get(entity.id) ?? entity.id * 1.7;
-        phase = prevPhase + effectiveFrequency * dt;
-        this.unicornFlapPhase.set(entity.id, phase);
-      } else {
-        phase = elapsed * flapFrequency + entity.id * 1.7;
+        effectiveFrequency = flapFrequency * freqMultiplier * stateFrequencyMult;
       }
+      const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
+      phase = prevPhase + effectiveFrequency * dt;
+      this.flapPhase.set(entity, phase);
       const flapAngle = amplitude * Math.sin(phase) + finRestBiasRad;
 
       this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
@@ -1844,9 +1955,9 @@ export class Renderer3D {
     for (const catchEvent of sim.catchEvents) {
       if (catchEvent.id <= this.lastSeenCatchId) continue;
       this.lastSeenCatchId = catchEvent.id;
-      const position = new THREE.Vector3(catchEvent.position.x, catchEvent.position.y, catchEvent.position.z);
-      const direction = new THREE.Vector3(catchEvent.direction.x, catchEvent.direction.y, catchEvent.direction.z);
-      this.bloodEffects.spawn(position, direction, BOID_LENGTH * 0.9);
+      this.tmpSpawnPosition.set(catchEvent.position.x, catchEvent.position.y, catchEvent.position.z);
+      this.tmpSpawnDirection.set(catchEvent.direction.x, catchEvent.direction.y, catchEvent.direction.z);
+      this.bloodEffects.spawn(this.tmpSpawnPosition, this.tmpSpawnDirection, BOID_LENGTH * 0.9);
     }
   }
 
@@ -1890,17 +2001,14 @@ export class Renderer3D {
       // the raw heading only matters for a single early frame before any
       // display quaternion has been computed yet.
       const displayQuat = this.dragonDisplayQuats.get(predator.id);
-      const mouth = computeDragonMouthTransform(DRAGON_LENGTH);
-      let direction: THREE.Vector3;
-      let origin: THREE.Vector3;
       if (displayQuat) {
-        direction = this.tmpVec3.set(0, mouth.dirForward, mouth.dirUp).applyQuaternion(displayQuat).normalize().clone();
-        const localOffset = new THREE.Vector3(0, mouth.offsetForward, mouth.offsetUp).applyQuaternion(displayQuat);
-        origin = new THREE.Vector3(predator.position.x, predator.position.y, predator.position.z).add(localOffset);
+        this.tmpFireDirection.set(0, DRAGON_MOUTH.dirForward, DRAGON_MOUTH.dirUp).applyQuaternion(displayQuat).normalize();
+        this.tmpFireOffset.set(0, DRAGON_MOUTH.offsetForward, DRAGON_MOUTH.offsetUp).applyQuaternion(displayQuat);
+        this.tmpFireOrigin.set(predator.position.x, predator.position.y, predator.position.z).add(this.tmpFireOffset);
       } else {
         const dir = predator.renderHeading;
-        direction = this.tmpVec3.set(dir.x, dir.y, dir.z).clone();
-        origin = new THREE.Vector3(
+        this.tmpFireDirection.set(dir.x, dir.y, dir.z);
+        this.tmpFireOrigin.set(
           predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
           predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
           predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
@@ -1915,9 +2023,15 @@ export class Renderer3D {
       const vel = predator.velocity;
       const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
       const speedFraction = THREE.MathUtils.clamp(speed / Math.max(params.predatorMaxSpeed, 1e-6), 0, 1);
-      const emitterVelocity = new THREE.Vector3(vel.x, vel.y, vel.z);
+      this.tmpFireEmitterVelocity.set(vel.x, vel.y, vel.z);
 
-      this.fireBreathEffects.spawn(origin, direction, DRAGON_LENGTH * 0.5, emitterVelocity, speedFraction);
+      this.fireBreathEffects.spawn(
+        this.tmpFireOrigin,
+        this.tmpFireDirection,
+        DRAGON_LENGTH * 0.5,
+        this.tmpFireEmitterVelocity,
+        speedFraction,
+      );
       this.nextFireBreathTime.set(predator, elapsed + 2 + Math.random() * 2.5);
     }
   }
@@ -2124,8 +2238,15 @@ export class Renderer3D {
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
-    this.natureEnv.update(elapsed);
-    this.fishtankEnv.update(elapsed);
+    if (isNature) this.natureEnv.update(elapsed);
+    if (isFishtank) this.fishtankEnv.update(elapsed);
+    const exposureByTime = {
+      dawn: 0.62,
+      noon: 0.7,
+      sunset: 0.6,
+      night: 0.44,
+    } as const;
+    this.renderer.toneMappingExposure = exposureByTime[params.timeOfDay];
     this.driftingClouds.update(dt);
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
@@ -2168,6 +2289,7 @@ export class Renderer3D {
         const instances = this.speciesInstances.get(config.species);
         if (!instances) continue;
         const entities = boidsBySpecies.get(config.species) ?? [];
+        const isNatureParrot = config.species === 'parrot' && isNature;
         // Fish-tail wave (fishtank only): every fishtank species' caudal
         // fin is rooted at the model's own local origin (sparrow/
         // goldfinch/cardinal/bluejay's plain small-fish geometry, and
@@ -2184,9 +2306,9 @@ export class Renderer3D {
           isOrganic ? config.natureBase : config.arcadeBase,
           isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
           (entity) => (entity as Boid).panicLevel,
-          FLAP_FREQUENCY,
-          FLAP_IDLE_AMPLITUDE,
-          FLAP_SPEED_AMPLITUDE,
+          isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
+          isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+          isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
           (entity) => (entity as Boid).scale,
           config.colors || config.getColors ? true : isOrganic,
           config.getColors ?? (config.colors ? () => config.colors! : undefined),

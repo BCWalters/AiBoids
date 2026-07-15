@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import type { TimeOfDayPreset } from '../../../sim/params';
 
 /**
  * "Nature" style environment: a physically-based sky dome (with a
@@ -38,6 +39,7 @@ export interface NatureEnvironment {
   sunSprite: THREE.Sprite;
   /** Larger, softer glow sprite rendered behind the sun disc for a warm corona effect. */
   sunHalo: THREE.Sprite;
+  lightShafts: THREE.Sprite[];
   /** Unit vector pointing from the world toward the sun. */
   sunDirection: THREE.Vector3;
   fog: THREE.Fog;
@@ -46,6 +48,8 @@ export interface NatureEnvironment {
   setVisible(visible: boolean): void;
   /** Independently toggle scene fog on/off without affecting overall nature-style visibility. */
   setFogEnabled(enabled: boolean): void;
+  setTimeOfDay(preset: TimeOfDayPreset): void;
+  setLightShaftsEnabled(enabled: boolean): void;
   dispose(): void;
 }
 
@@ -611,6 +615,80 @@ function createForestAlphaTexture(): THREE.Texture {
   return new THREE.CanvasTexture(canvas);
 }
 
+interface TimeOfDaySettings {
+  elevationDeg: number;
+  azimuthDeg: number;
+  skyTurbidity: number;
+  skyRayleigh: number;
+  skyMie: number;
+  sunColor: number;
+  sunIntensity: number;
+  sunSpriteScale: number;
+  sunHaloScale: number;
+  fogColor: number;
+  lakeColor: number;
+  lakeOpacity: number;
+}
+
+const TIME_OF_DAY_SETTINGS: Record<TimeOfDayPreset, TimeOfDaySettings> = {
+  dawn: {
+    elevationDeg: 14,
+    azimuthDeg: 112,
+    skyTurbidity: 4.5,
+    skyRayleigh: 1.9,
+    skyMie: 0.008,
+    sunColor: 0xffd1a8,
+    sunIntensity: 1.1,
+    sunSpriteScale: 5600,
+    sunHaloScale: 7600,
+    fogColor: 0xffdfc6,
+    lakeColor: 0x336f92,
+    lakeOpacity: 0.86,
+  },
+  noon: {
+    elevationDeg: 52,
+    azimuthDeg: 148,
+    skyTurbidity: 2.4,
+    skyRayleigh: 1.1,
+    skyMie: 0.006,
+    sunColor: 0xfff4df,
+    sunIntensity: 1.8,
+    sunSpriteScale: 4800,
+    sunHaloScale: 6200,
+    fogColor: 0xf2f5f4,
+    lakeColor: 0x2f698b,
+    lakeOpacity: 0.9,
+  },
+  sunset: {
+    elevationDeg: 12,
+    azimuthDeg: 240,
+    skyTurbidity: 5.2,
+    skyRayleigh: 2.2,
+    skyMie: 0.009,
+    sunColor: 0xffaf7c,
+    sunIntensity: 1.2,
+    sunSpriteScale: 5800,
+    sunHaloScale: 8000,
+    fogColor: 0xffceb2,
+    lakeColor: 0x2f6484,
+    lakeOpacity: 0.82,
+  },
+  night: {
+    elevationDeg: -8,
+    azimuthDeg: 210,
+    skyTurbidity: 1.8,
+    skyRayleigh: 0.45,
+    skyMie: 0.004,
+    sunColor: 0xa9b8ff,
+    sunIntensity: 0.18,
+    sunSpriteScale: 3400,
+    sunHaloScale: 4600,
+    fogColor: 0x1c2537,
+    lakeColor: 0x21465d,
+    lakeOpacity: 0.78,
+  },
+};
+
 export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer): NatureEnvironment {
   const sky = new Sky();
   sky.scale.setScalar(20000);
@@ -636,14 +714,15 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   // are finite-distance points that do shift slightly with the camera).
   skyUniforms.showSunDisc.value = 0;
 
-  // Fixed mid-afternoon sun position (elevation ~35°, azimuth ~135°).
-  const elevation = THREE.MathUtils.degToRad(35);
-  const azimuth = THREE.MathUtils.degToRad(135);
-  const sunPosition = new THREE.Vector3().setFromSphericalCoords(1, Math.PI / 2 - elevation, azimuth);
-  skyUniforms.sunPosition.value.copy(sunPosition);
+  const SUN_DISTANCE = 15000; // inside the 20000-radius sky dome
+  const sunDirection = new THREE.Vector3();
+  skyUniforms.sunPosition.value.copy(sunDirection);
 
   const sunLight = new THREE.DirectionalLight(0xfff2d9, 1.6);
-  sunLight.position.copy(sunPosition).multiplyScalar(1000);
+  sunLight.position.copy(sunDirection).multiplyScalar(1000);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(2048, 2048);
+  sunLight.shadow.radius = 4;
 
   // The Sky shader technically has a sun disc (showSunDisc uniform), but
   // its physically-accurate angular size is only a couple of screen
@@ -651,17 +730,25 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   // the light source in the sky actually visible. A larger, much softer
   // halo sprite sits just behind it (rendered first, further away) to
   // give the sun a warm corona/radiance instead of a hard-edged coin.
-  const SUN_DISTANCE = 15000; // inside the 20000-radius sky dome
   const sunHalo = new THREE.Sprite(createSunHaloMaterial());
-  sunHalo.position.copy(sunPosition).multiplyScalar(SUN_DISTANCE - 50);
+  sunHalo.position.copy(sunDirection).multiplyScalar(SUN_DISTANCE - 50);
   sunHalo.scale.setScalar(6600);
 
   const sunSprite = new THREE.Sprite(createSunMaterial());
-  sunSprite.position.copy(sunPosition).multiplyScalar(SUN_DISTANCE);
+  sunSprite.position.copy(sunDirection).multiplyScalar(SUN_DISTANCE);
   sunSprite.scale.setScalar(5200);
+  const shaftMaterial = createSunHaloMaterial();
+  shaftMaterial.opacity = 0.1;
+  shaftMaterial.color.setHex(0xffe4c2);
+  const lightShafts = Array.from({ length: 3 }, () => {
+    const shaft = new THREE.Sprite(shaftMaterial.clone());
+    shaft.visible = true;
+    return shaft;
+  });
 
   const ground = new THREE.Mesh(createGroundGeometry(), new THREE.MeshStandardMaterial());
   ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
   (ground.material as THREE.MeshStandardMaterial).vertexColors = true;
   configureGroundTexture(ground.material as THREE.MeshStandardMaterial, renderer);
 
@@ -670,19 +757,77 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   // one shared flat-shaded material each) but they break up what would
   // otherwise be an infinite flat plain.
   const mountains = createMountainRing(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
-  const skyEnvMap = createSkyEnvMap(renderer, skyUniforms);
-  const lakes = LAKE_DEFS.map(() => createWaterPatch(skyEnvMap));
+  mountains.castShadow = true;
+  mountains.receiveShadow = true;
+  const lakes = LAKE_DEFS.map(() => createWaterPatch());
+  // Keep lake water from turning into near-black blotches under dense
+  // moving flock shadows; reflective water reads better with direct/fog
+  // lighting and env-map response, without receiving hard cast shadows.
+  lakes.forEach((lake) => {
+    lake.receiveShadow = false;
+  });
   const { ocean, beach } = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
+  ocean.receiveShadow = true;
+  beach.receiveShadow = true;
   const rocks = ROCK_CLUSTER_DEFS.map(() => createRockCluster());
+  rocks.forEach((rock) => {
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+  });
   const forestPatches = FOREST_PATCH_DEFS.map((def) => createForestPatch(def));
+  forestPatches.forEach((patch) => {
+    patch.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.castShadow = true;
+        obj.receiveShadow = true;
+      }
+    });
+  });
 
   // Pale horizon haze color (roughly matches this sky configuration's
   // horizon tone) — blended in via fog so the ground plane fades smoothly
   // into the sky instead of showing a hard, distracting edge.
   const fog = new THREE.Fog(0xf2f5f4, 1, 2);
   let fogEnabled = true;
+  let shaftsEnabled = true;
+  let sunDiscVisibleByTime = true;
 
-  scene.add(sky, ground, mountains, ...lakes, ocean, beach, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
+  const applyTimeOfDay = (preset: TimeOfDayPreset): void => {
+    const settings = TIME_OF_DAY_SETTINGS[preset];
+    const elevation = THREE.MathUtils.degToRad(settings.elevationDeg);
+    const azimuth = THREE.MathUtils.degToRad(settings.azimuthDeg);
+    sunDirection.setFromSphericalCoords(1, Math.PI / 2 - elevation, azimuth);
+    skyUniforms.sunPosition.value.copy(sunDirection);
+    skyUniforms.turbidity.value = settings.skyTurbidity;
+    skyUniforms.rayleigh.value = settings.skyRayleigh;
+    skyUniforms.mieCoefficient.value = settings.skyMie;
+    sunLight.color.setHex(settings.sunColor);
+    sunLight.intensity = settings.sunIntensity;
+    sunLight.position.copy(sunDirection).multiplyScalar(1000);
+    sunSprite.scale.setScalar(settings.sunSpriteScale);
+    sunHalo.scale.setScalar(settings.sunHaloScale);
+    sunSprite.position.copy(sunDirection).multiplyScalar(SUN_DISTANCE);
+    sunHalo.position.copy(sunDirection).multiplyScalar(SUN_DISTANCE - 50);
+    sunDiscVisibleByTime = preset !== 'night';
+    sunSprite.visible = sky.visible && sunDiscVisibleByTime;
+    sunHalo.visible = sky.visible && sunDiscVisibleByTime;
+    fog.color.setHex(settings.fogColor);
+    lakes.forEach((lake) => {
+      const lakeMaterial = lake.material as THREE.MeshPhongMaterial;
+      lakeMaterial.color.setHex(settings.lakeColor);
+      lakeMaterial.opacity = settings.lakeOpacity;
+    });
+    lightShafts.forEach((shaft, i) => {
+      shaft.material.color.setHex(settings.sunColor);
+      shaft.scale.setScalar(settings.sunHaloScale * (0.55 + i * 0.23));
+      const distance = SUN_DISTANCE * (0.35 + i * 0.16);
+      shaft.position.copy(sunDirection).multiplyScalar(distance);
+      shaft.material.opacity = preset === 'night' ? 0.02 : 0.12 - i * 0.025;
+    });
+  };
+  applyTimeOfDay('noon');
+
+  scene.add(sky, ground, mountains, ...lakes, ocean, beach, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite, ...lightShafts);
   sky.visible = false;
   ground.visible = false;
   mountains.visible = false;
@@ -694,6 +839,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   sunLight.visible = false;
   sunHalo.visible = false;
   sunSprite.visible = false;
+  lightShafts.forEach((shaft) => { shaft.visible = false; });
 
   return {
     sky,
@@ -707,7 +853,8 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
     sunLight,
     sunSprite,
     sunHalo,
-    sunDirection: sunPosition.clone(),
+    lightShafts,
+    sunDirection,
     fog,
     update(elapsed: number) {
       skyUniforms.time.value = elapsed;
@@ -721,9 +868,12 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       beach.visible = visible;
       rocks.forEach((rock) => { rock.visible = visible; });
       forestPatches.forEach((patch) => { patch.visible = visible; });
-      sunHalo.visible = visible;
+      sunHalo.visible = visible && sunDiscVisibleByTime;
       sunLight.visible = visible;
-      sunSprite.visible = visible;
+      sunSprite.visible = visible && sunDiscVisibleByTime;
+      lightShafts.forEach((shaft) => {
+        shaft.visible = visible && shaftsEnabled;
+      });
       // Only actually attach fog if the environment is both visible AND
       // fog hasn't been independently disabled via setFogEnabled — track
       // the "should fog be on" intent by checking whether it's currently
@@ -739,8 +889,17 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       // other (currently-visible) environment just set.
       if (sky.visible) scene.fog = enabled ? fog : null;
     },
+    setTimeOfDay(preset: TimeOfDayPreset) {
+      applyTimeOfDay(preset);
+    },
+    setLightShaftsEnabled(enabled: boolean) {
+      shaftsEnabled = enabled;
+      lightShafts.forEach((shaft) => {
+        shaft.visible = sky.visible && enabled;
+      });
+    },
     dispose() {
-      scene.remove(sky, ground, mountains, ...lakes, ocean, beach, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite);
+      scene.remove(sky, ground, mountains, ...lakes, ocean, beach, ...rocks, ...forestPatches, sunLight, sunHalo, sunSprite, ...lightShafts);
       if (scene.fog === fog) scene.fog = null;
       sky.geometry.dispose();
       (sky.material as THREE.Material).dispose();
@@ -756,7 +915,6 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
         (lake.material as THREE.MeshStandardMaterial).alphaMap?.dispose();
         (lake.material as THREE.Material).dispose();
       }
-      skyEnvMap.dispose();
       ocean.geometry.dispose();
       (ocean.material as THREE.Material).dispose();
       beach.geometry.dispose();
@@ -779,6 +937,10 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
       (sunHalo.material as THREE.Material).dispose();
       (sunSprite.material as THREE.SpriteMaterial).map?.dispose();
       (sunSprite.material as THREE.Material).dispose();
+      for (const shaft of lightShafts) {
+        (shaft.material as THREE.SpriteMaterial).map?.dispose();
+        (shaft.material as THREE.Material).dispose();
+      }
     },
   };
 }
@@ -1456,56 +1618,12 @@ function createBeachStrip(
 }
 
 /**
- * Bakes a static, roughly-hemispherical reflection environment map from
- * the actual Sky shader (same turbidity/rayleigh/sun-position uniforms
- * as the real sky dome) using THREE.PMREMGenerator, so the lakes' subtle
- * reflectivity actually shows blue sky / horizon tones rather than a
- * generic gray IBL default. Done once, in a throwaway scene containing
- * only a cloned Sky mesh (never added to the real scene), so it costs a
- * single extra render at startup and never touches the per-frame render
- * loop — intentional, since the sky's color doesn't change enough
- * frame-to-frame (only slow cloud drift) to justify a live-updating
- * reflection for gently rippling lake water.
- */
-function createSkyEnvMap(renderer: THREE.WebGLRenderer, skyUniforms: Sky['material']['uniforms']): THREE.Texture {
-  const envScene = new THREE.Scene();
-  const envSky = new Sky();
-  envSky.scale.setScalar(20000);
-  const envUniforms = envSky.material.uniforms;
-  envUniforms.turbidity.value = skyUniforms.turbidity.value;
-  envUniforms.rayleigh.value = skyUniforms.rayleigh.value;
-  envUniforms.mieCoefficient.value = skyUniforms.mieCoefficient.value;
-  envUniforms.mieDirectionalG.value = skyUniforms.mieDirectionalG.value;
-  envUniforms.cloudCoverage.value = skyUniforms.cloudCoverage.value;
-  envUniforms.cloudDensity.value = skyUniforms.cloudDensity.value;
-  envUniforms.cloudScale.value = skyUniforms.cloudScale.value;
-  envUniforms.sunPosition.value.copy(skyUniforms.sunPosition.value);
-  envUniforms.showSunDisc.value = 0;
-  envScene.add(envSky);
-
-  const pmremGenerator = new THREE.PMREMGenerator(renderer);
-  pmremGenerator.compileEquirectangularShader();
-  const renderTarget = pmremGenerator.fromScene(envScene, 0, 1, 30000);
-  pmremGenerator.dispose();
-  envSky.geometry.dispose();
-  envSky.material.dispose();
-  return renderTarget.texture;
-}
-
 /**
- * A lake patch with a soft, irregular shoreline and a darker, partially
- * reflective surface — a flat, hard-edged, dark-teal circle read as an odd
- * "dark circle" floating on the ground rather than water. Fixed by: (1) an
- * irregular (noisy, non-circular) outline instead of a perfect circle,
- * (2) an alpha map that feathers the edge into the grass rather than
- * cutting off sharply, (3) a darker base color plus a static sky
- * reflection (envMap, baked once from the actual Sky shader via
- * createSkyEnvMap — see that function) so it reads as reflective water
- * rather than a flat paint swatch, and (4) a soft bright "sun glint"
- * patch baked into the alpha-mapped texture standing in for a specular
- * highlight.
+ * A lake patch with a soft, irregular shoreline and stable, always-visible
+ * blue surface. Uses an unlit material so lake color stays readable even
+ * under darker lighting/time-of-day combinations.
  */
-function createWaterPatch(envMap: THREE.Texture): THREE.Mesh {
+function createWaterPatch(): THREE.Mesh {
   const segments = 48;
   const positions: number[] = [];
   const uvs: number[] = [];
@@ -1537,13 +1655,14 @@ function createWaterPatch(envMap: THREE.Texture): THREE.Mesh {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshStandardMaterial({
-    color: 0x1f4152, // darker blue-teal than the old flat medium blue, per feedback
-    roughness: 0.18,
-    metalness: 0.35,
-    envMap,
-    envMapIntensity: 0.55,
+  const material = new THREE.MeshPhongMaterial({
+    color: 0x2f698b,
+    emissive: 0x1b4660,
+    emissiveIntensity: 0.32,
+    specular: 0x9fd8ff,
+    shininess: 72,
     transparent: true,
+    opacity: 0.9,
     alphaMap: createWaterAlphaTexture(),
     depthWrite: false,
     // Extra safety against z-fighting with the ground plane just beneath
@@ -1683,6 +1802,10 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   const SUN_DISTANCE = 15000;
   env.sunSprite.position.copy(env.sunDirection).multiplyScalar(SUN_DISTANCE).add(center);
   env.sunHalo.position.copy(env.sunDirection).multiplyScalar(SUN_DISTANCE - 50).add(center);
+  env.lightShafts.forEach((shaft, i) => {
+    const distance = SUN_DISTANCE * (0.35 + i * 0.16);
+    shaft.position.copy(env.sunDirection).multiplyScalar(distance).add(center);
+  });
 
   // Fog range scales with the flock's own size (groundSize is the huge,
   // mostly-decorative ground plane, ~30x flockScale) so the ground fades

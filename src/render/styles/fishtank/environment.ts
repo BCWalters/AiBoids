@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { TimeOfDayPreset } from '../../../sim/params';
 import {
   createCheckerTexture,
   createArtPiece,
@@ -75,7 +76,9 @@ export interface FishtankEnvironment {
   keyLight: THREE.DirectionalLight;
   bounceLights: THREE.PointLight[];
   fog: THREE.Fog;
-  /** Call once per frame while fishtank style is active (currently a no-op stub — reserved for future caustics/particle animation). */
+  caustics: THREE.Mesh;
+  suspendedParticles: THREE.Points;
+  /** Call once per frame while fishtank style is active (animates caustics + suspended particles). */
   update(elapsed: number): void;
   setVisible(visible: boolean): void;
   /** Independently toggle scene fog on/off without affecting overall fishtank-style visibility. */
@@ -89,6 +92,8 @@ export interface FishtankEnvironment {
    * through the transparent glass behind the creature.
    */
   setRoomVisible(visible: boolean): void;
+  setTimeOfDay(preset: TimeOfDayPreset): void;
+  setWaterEffectsEnabled(enabled: boolean): void;
   dispose(): void;
 }
 
@@ -321,6 +326,99 @@ function disposeObject3D(root: THREE.Object3D): void {
   });
 }
 
+interface TankLightingPreset {
+  ambient: number;
+  hemi: number;
+  key: number;
+  keyColor: number;
+  fogColor: number;
+  waterColor: number;
+  wallColor: number;
+  accentWallColor: number;
+  ceilingColor: number;
+  causticsBaseOpacity: number;
+  particleOpacity: number;
+}
+
+const TANK_LIGHTING_PRESETS: Record<TimeOfDayPreset, TankLightingPreset> = {
+  dawn: {
+    ambient: 0.34,
+    hemi: 0.4,
+    key: 0.62,
+    keyColor: 0xffd7bb,
+    fogColor: 0x245b7f,
+    waterColor: 0x145b84,
+    wallColor: 0xe7dfd2,
+    accentWallColor: 0x809373,
+    ceilingColor: 0xf3ede0,
+    causticsBaseOpacity: 0.15,
+    particleOpacity: 0.27,
+  },
+  noon: {
+    ambient: 0.4,
+    hemi: 0.46,
+    key: 0.78,
+    keyColor: 0xfff6e8,
+    fogColor: WATER_COLOR,
+    waterColor: WATER_COLOR,
+    wallColor: WALL_COLOR,
+    accentWallColor: ACCENT_WALL_COLOR,
+    ceilingColor: CEILING_COLOR,
+    causticsBaseOpacity: 0.17,
+    particleOpacity: 0.3,
+  },
+  sunset: {
+    ambient: 0.33,
+    hemi: 0.39,
+    key: 0.6,
+    keyColor: 0xffc89f,
+    fogColor: 0x2d5a73,
+    waterColor: 0x11567a,
+    wallColor: 0xe2d7c9,
+    accentWallColor: 0x7a876b,
+    ceilingColor: 0xeee6d8,
+    causticsBaseOpacity: 0.14,
+    particleOpacity: 0.26,
+  },
+  night: {
+    ambient: 0.24,
+    hemi: 0.28,
+    key: 0.35,
+    keyColor: 0x97b7ff,
+    fogColor: 0x0c2334,
+    waterColor: 0x0a3858,
+    wallColor: 0xc8c2b8,
+    accentWallColor: 0x647364,
+    ceilingColor: 0xd8d3c8,
+    causticsBaseOpacity: 0.09,
+    particleOpacity: 0.2,
+  },
+};
+
+function createCausticsTexture(size = 256): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 26; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = size * (0.05 + Math.random() * 0.12);
+    const gradient = ctx.createRadialGradient(x, y, r * 0.1, x, y, r);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.6)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironment {
   // Placeholder 1x1x1 boxes — placeFishtankEnvironment resizes/positions
   // everything below once the sim's actual world dimensions are known.
@@ -336,6 +434,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   });
   const glassPanels = new THREE.Mesh(glassGeometry, glassMaterial);
   glassPanels.visible = false;
+  glassPanels.receiveShadow = true;
 
   // A dark plastic/rubber base plinth just under the glass, hiding the
   // seam where the tank meets the table — a detail seen on virtually
@@ -343,6 +442,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   const baseTrimMaterial = new THREE.MeshStandardMaterial({ color: FRAME_COLOR, roughness: 0.7, metalness: 0.1 });
   const baseTrim = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), baseTrimMaterial);
   baseTrim.visible = false;
+  baseTrim.castShadow = true;
+  baseTrim.receiveShadow = true;
 
   // Metal frame: thin brushed-aluminum bars along all 12 edges of the
   // glass box (4 vertical corner posts + 4 top edges + 4 bottom edges),
@@ -361,17 +462,57 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   frame.visible = false;
 
   const waterGeometry = new THREE.BoxGeometry(1, 1, 1);
-  const waterMaterial = new THREE.MeshStandardMaterial({
+  const waterMaterial = new THREE.MeshPhysicalMaterial({
     color: WATER_COLOR,
     transparent: true,
-    opacity: 0.28,
-    roughness: 0.15,
+    opacity: 0.34,
+    transmission: 0.35,
+    thickness: 0.8,
+    ior: 1.07,
+    roughness: 0.08,
     metalness: 0,
     side: THREE.DoubleSide,
     depthWrite: false,
   });
   const waterFill = new THREE.Mesh(waterGeometry, waterMaterial);
   waterFill.visible = false;
+  waterFill.receiveShadow = true;
+  const causticsTexture = createCausticsTexture();
+  const causticsMaterial = new THREE.MeshBasicMaterial({
+    color: 0x9fdfff,
+    map: causticsTexture,
+    transparent: true,
+    opacity: 0.2,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const caustics = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), causticsMaterial);
+  caustics.rotation.x = -Math.PI / 2;
+  caustics.visible = false;
+
+  const particleCount = 750;
+  const particlePositions = new Float32Array(particleCount * 3);
+  const particleSeeds = new Float32Array(particleCount);
+  for (let i = 0; i < particleCount; i++) {
+    particlePositions[i * 3 + 0] = Math.random() - 0.5;
+    particlePositions[i * 3 + 1] = Math.random() - 0.5;
+    particlePositions[i * 3 + 2] = Math.random() - 0.5;
+    particleSeeds[i] = Math.random();
+  }
+  const particleGeometry = new THREE.BufferGeometry();
+  particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+  particleGeometry.setAttribute('seed', new THREE.BufferAttribute(particleSeeds, 1));
+  const particleMaterial = new THREE.PointsMaterial({
+    color: 0xc9f1ff,
+    size: 0.8,
+    transparent: true,
+    opacity: 0.35,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const suspendedParticles = new THREE.Points(particleGeometry, particleMaterial);
+  suspendedParticles.visible = false;
 
   // Floor: black/white checker tile texture rather than a flat color.
   const floorTexture = createCheckerTexture('#1c1c1c', '#f2f2f2', 8);
@@ -385,6 +526,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   const roomFloor = new THREE.Mesh(floorGeometry, floorMaterial);
   roomFloor.rotation.x = -Math.PI / 2;
   roomFloor.visible = false;
+  roomFloor.receiveShadow = true;
 
   const ceilingGeometry = new THREE.PlaneGeometry(1, 1);
   const ceilingMaterial = new THREE.MeshStandardMaterial({
@@ -396,6 +538,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   const roomCeiling = new THREE.Mesh(ceilingGeometry, ceilingMaterial);
   roomCeiling.rotation.x = Math.PI / 2;
   roomCeiling.visible = false;
+  roomCeiling.receiveShadow = true;
 
   const wallGeometry = new THREE.PlaneGeometry(1, 1);
   // DoubleSide as a safety net: even with the room now sized to
@@ -415,18 +558,22 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   // "feature wall" backdrop directly behind the tank.
   const roomWallBack = new THREE.Mesh(wallGeometry, accentWallMaterial);
   roomWallBack.visible = false;
+  roomWallBack.receiveShadow = true;
   // Left/right/front walls share the same off-white material/geometry —
   // sharing is fine since none of these are ever disposed independently
   // (they all go away together in dispose()).
   const roomWallLeft = new THREE.Mesh(wallGeometry, wallMaterial);
   roomWallLeft.rotation.y = Math.PI / 2;
   roomWallLeft.visible = false;
+  roomWallLeft.receiveShadow = true;
   const roomWallRight = new THREE.Mesh(wallGeometry, wallMaterial);
   roomWallRight.rotation.y = -Math.PI / 2;
   roomWallRight.visible = false;
+  roomWallRight.receiveShadow = true;
   const roomWallFront = new THREE.Mesh(wallGeometry, wallMaterial);
   roomWallFront.rotation.y = Math.PI;
   roomWallFront.visible = false;
+  roomWallFront.receiveShadow = true;
 
   // Main entrance door on the right wall (no signage), exit doors (each
   // with its own illuminated "EXIT" sign) on the left and front walls —
@@ -557,6 +704,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   // Soft light from above, like an overhead room/tank hood lamp rather
   // than nature's low sun angle.
   keyLight.position.set(0.4, 1, 0.5);
+  keyLight.castShadow = true;
+  keyLight.shadow.mapSize.set(1536, 1536);
+  keyLight.shadow.radius = 3;
   ambientLight.visible = false;
   hemisphereLight.visible = false;
   keyLight.visible = false;
@@ -573,6 +723,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     frame,
     baseTrim,
     waterFill,
+    caustics,
+    suspendedParticles,
     roomFloor,
     roomCeiling,
     roomWallBack,
@@ -598,6 +750,25 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   );
 
   let fogEnabled = true;
+  let waterEffectsEnabled = true;
+  let causticsBaseOpacity = TANK_LIGHTING_PRESETS.noon.causticsBaseOpacity;
+  let particlesBaseOpacity = TANK_LIGHTING_PRESETS.noon.particleOpacity;
+
+  const applyTimeOfDay = (preset: TimeOfDayPreset): void => {
+    const settings = TANK_LIGHTING_PRESETS[preset];
+    ambientLight.intensity = settings.ambient;
+    hemisphereLight.intensity = settings.hemi;
+    keyLight.intensity = settings.key;
+    keyLight.color.setHex(settings.keyColor);
+    fog.color.setHex(settings.fogColor);
+    waterMaterial.color.setHex(settings.waterColor);
+    wallMaterial.color.setHex(settings.wallColor);
+    accentWallMaterial.color.setHex(settings.accentWallColor);
+    ceilingMaterial.color.setHex(settings.ceilingColor);
+    causticsBaseOpacity = settings.causticsBaseOpacity;
+    particlesBaseOpacity = settings.particleOpacity;
+  };
+  applyTimeOfDay('noon');
 
   return {
     waterFill,
@@ -627,14 +798,34 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     keyLight,
     bounceLights,
     fog,
-    update() {
-      // No animated elements yet (see doc comment above).
+    caustics,
+    suspendedParticles,
+    update(elapsed: number) {
+      if (!waterFill.visible) return;
+      const causticsMap = causticsMaterial.map;
+      if (causticsMap) {
+        causticsMap.offset.x = elapsed * 0.025;
+        causticsMap.offset.y = elapsed * 0.018;
+      }
+      causticsMaterial.opacity = waterEffectsEnabled ? causticsBaseOpacity + Math.sin(elapsed * 1.3) * 0.035 : 0;
+      particleMaterial.opacity = waterEffectsEnabled ? particlesBaseOpacity : 0;
+
+      const positions = particleGeometry.getAttribute('position') as THREE.BufferAttribute;
+      const seeds = particleGeometry.getAttribute('seed') as THREE.BufferAttribute;
+      for (let i = 0; i < positions.count; i++) {
+        const sx = seeds.getX(i);
+        const y = ((sx * 8 + elapsed * 0.035) % 1) - 0.5;
+        positions.setY(i, y);
+      }
+      positions.needsUpdate = true;
     },
     setVisible(visible: boolean) {
       glassPanels.visible = visible;
       frame.visible = visible;
       baseTrim.visible = visible;
       waterFill.visible = visible;
+      caustics.visible = visible && waterEffectsEnabled;
+      suspendedParticles.visible = visible && waterEffectsEnabled;
       roomFloor.visible = visible;
       roomCeiling.visible = visible;
       roomWallBack.visible = visible;
@@ -695,6 +886,15 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       // other (currently-visible) environment just set.
       if (waterFill.visible) scene.fog = enabled ? fog : null;
     },
+    setTimeOfDay(preset: TimeOfDayPreset) {
+      applyTimeOfDay(preset);
+    },
+    setWaterEffectsEnabled(enabled: boolean) {
+      waterEffectsEnabled = enabled;
+      const visible = waterFill.visible && enabled;
+      caustics.visible = visible;
+      suspendedParticles.visible = visible;
+    },
     setRoomVisible(visible: boolean) {
       // Guarded by waterFill.visible (same pattern as setFogEnabled) so
       // this only touches the room while fishtank is actually the active
@@ -751,6 +951,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         frame,
         baseTrim,
         waterFill,
+        caustics,
+        suspendedParticles,
         roomFloor,
         roomCeiling,
         roomWallBack,
@@ -782,6 +984,11 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       (baseTrim.material as THREE.Material).dispose();
       waterFill.geometry.dispose();
       (waterFill.material as THREE.Material).dispose();
+      caustics.geometry.dispose();
+      (caustics.material as THREE.MeshBasicMaterial).map?.dispose();
+      (caustics.material as THREE.Material).dispose();
+      suspendedParticles.geometry.dispose();
+      (suspendedParticles.material as THREE.Material).dispose();
       roomFloor.geometry.dispose();
       (roomFloor.material as THREE.MeshStandardMaterial).map?.dispose();
       (roomFloor.material as THREE.Material).dispose();
@@ -919,6 +1126,10 @@ export function placeFishtankEnvironment(
   const waterHeight = glassHeight * roomBounds.waterLevelFrac;
   env.waterFill.scale.set(worldWidth - inset, waterHeight - inset, worldDepth - inset);
   env.waterFill.position.set(center.x, waterHeight / 2, center.z);
+  env.caustics.scale.set(worldWidth * 0.98, worldDepth * 0.98, 1);
+  env.caustics.position.set(center.x, roomBounds.roomFloorY + glassThickness * 2, center.z);
+  env.suspendedParticles.scale.set(worldWidth - inset, waterHeight - inset, worldDepth - inset);
+  env.suspendedParticles.position.set(center.x, waterHeight / 2, center.z);
 
   // Base trim: a dark plastic plinth bridging the small gap between the
   // glass box's bottom edge and the room floor beneath it (no table

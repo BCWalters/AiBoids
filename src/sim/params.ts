@@ -14,6 +14,7 @@ export type SimMode = '2d' | '3d';
 // nature's creature geometry duplicated as a starting point, meant to be
 // reskinned into fish/tank scenery independently of nature's assets.
 export type VisualStyle = 'arcade' | 'nature' | 'fishtank';
+export type TimeOfDayPreset = 'dawn' | 'noon' | 'sunset' | 'night';
 
 export interface SimParams {
   // Rendering / dimensionality mode
@@ -96,6 +97,20 @@ export interface SimParams {
   // fading into the sky), but disabling it is useful for inspecting
   // distant geometry (e.g. the ocean) that's otherwise heavily faded.
   fogEnabled: boolean;
+  // 3D-only: lighting preset used by both nature and fishtank scenes.
+  timeOfDay: TimeOfDayPreset;
+  // 3D-only: enable soft shadow maps.
+  softShadowsEnabled: boolean;
+  // 3D-only: controls stylized sun shafts in nature style.
+  lightShaftsEnabled: boolean;
+  // 3D-only: strength of state-based flap/body/tail blending.
+  animationBlendStrength: number;
+  // Fishtank-only: animated caustics + suspended particle water FX.
+  waterEffectsEnabled: boolean;
+  // Optional in-app rendering HUD (frame-time/fps and related diagnostics).
+  showRenderingStats: boolean;
+  // Optional bounded in-memory diagnostics capture for export/debugging.
+  enableDiagnosticsCapture: boolean;
 
   // When true (default), a predator that gets close enough to a boid
   // catches it — the boid is removed (with a brief cartoony "swallowed"
@@ -162,6 +177,13 @@ export const defaultParams: SimParams = {
   visualStyle: 'nature',
   dragonPredators: true,
   fogEnabled: true,
+  timeOfDay: 'noon',
+  softShadowsEnabled: true,
+  lightShaftsEnabled: true,
+  animationBlendStrength: 1,
+  waterEffectsEnabled: true,
+  showRenderingStats: false,
+  enableDiagnosticsCapture: false,
   predatorCatchEnabled: true,
 
   running: true,

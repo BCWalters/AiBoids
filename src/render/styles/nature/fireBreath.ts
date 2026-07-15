@@ -27,6 +27,8 @@ export interface FireBreathEffects {
 
 const BREATH_DURATION = 0.75;
 const PARTICLES_PER_BREATH = 14;
+const MAX_ACTIVE_BURSTS = 24;
+const MAX_POOLED_PARTICLES = 512;
 const FLAME_COLORS = [0xfff2a8, 0xffb347, 0xff6a1a, 0xd6401a];
 // At full speed, particles get this much extra outward reach (both
 // initial stagger distance and outward speed) on top of the stationary
@@ -35,6 +37,7 @@ const REACH_SPEED_BOOST = 1.6;
 
 interface Particle {
   sprite: THREE.Sprite;
+  material: THREE.SpriteMaterial;
   velocity: THREE.Vector3;
   startScale: number;
 }
@@ -76,17 +79,52 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
   });
 
   const active: Burst[] = [];
+  const pooled: Particle[] = [];
+  const allocated: Particle[] = [];
   const up = new THREE.Vector3(0, 1, 0);
+  const fallbackSide = new THREE.Vector3(1, 0, 0);
+  const tmpDir = new THREE.Vector3();
+  const tmpSide = new THREE.Vector3();
+  const tmpPerp = new THREE.Vector3();
+  const tmpSpread = new THREE.Vector3();
+
+  const acquireParticle = (): Particle => {
+    const fromPool = pooled.pop();
+    if (fromPool) {
+      fromPool.sprite.visible = true;
+      return fromPool;
+    }
+    const material = baseMaterial.clone();
+    const sprite = new THREE.Sprite(material);
+    sprite.visible = true;
+    root.add(sprite);
+    const particle = { sprite, material, velocity: new THREE.Vector3(), startScale: 1 };
+    allocated.push(particle);
+    return particle;
+  };
+
+  const releaseParticle = (particle: Particle): void => {
+    particle.sprite.visible = false;
+    if (pooled.length < MAX_POOLED_PARTICLES) {
+      pooled.push(particle);
+      return;
+    }
+    root.remove(particle.sprite);
+    particle.material.dispose();
+    const idx = allocated.indexOf(particle);
+    if (idx >= 0) allocated.splice(idx, 1);
+  };
 
   return {
     spawn(origin: THREE.Vector3, direction: THREE.Vector3, scale: number, emitterVelocity: THREE.Vector3, speedFraction: number) {
-      const dir = direction.clone().normalize();
+      if (active.length >= MAX_ACTIVE_BURSTS) return;
+      tmpDir.copy(direction).normalize();
       // Build a small local basis perpendicular to the breath direction so
       // particles spread outward in a cone rather than a single line.
-      let side = new THREE.Vector3().crossVectors(dir, up);
-      if (side.lengthSq() < 1e-6) side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(1, 0, 0));
-      side.normalize();
-      const perp = new THREE.Vector3().crossVectors(dir, side).normalize();
+      tmpSide.crossVectors(tmpDir, up);
+      if (tmpSide.lengthSq() < 1e-6) tmpSide.crossVectors(tmpDir, fallbackSide);
+      tmpSide.normalize();
+      tmpPerp.crossVectors(tmpDir, tmpSide).normalize();
 
       // Reach grows with how fast the dragon is currently flying — a
       // stationary/slow dragon gets a short, close puff, while one at
@@ -98,33 +136,33 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
 
       const particles: Particle[] = [];
       for (let i = 0; i < PARTICLES_PER_BREATH; i++) {
-        const material = baseMaterial.clone();
+        const particle = acquireParticle();
+        const { sprite, material } = particle;
         const color = FLAME_COLORS[Math.floor(Math.random() * FLAME_COLORS.length)];
         material.color.setHex(color);
-        const sprite = new THREE.Sprite(material);
+        material.opacity = 1;
 
         // Stagger particles slightly behind the snout so the stream reads
         // as a continuous jet rather than one blob appearing all at once.
-        const startOffset = dir.clone().multiplyScalar(-Math.random() * scale * 0.4 * reach);
-        sprite.position.copy(origin).add(startOffset);
+        sprite.position.copy(origin).addScaledVector(tmpDir, -Math.random() * scale * 0.4 * reach);
         const startScale = scale * (0.35 + Math.random() * 0.35);
         sprite.scale.setScalar(startScale);
 
         const coneSpread = 0.22; // radians-ish spread factor
-        const spreadVec = side
-          .clone()
+        tmpSpread
+          .copy(tmpSide)
           .multiplyScalar((Math.random() - 0.5) * coneSpread)
-          .add(perp.clone().multiplyScalar((Math.random() - 0.5) * coneSpread));
+          .addScaledVector(tmpPerp, (Math.random() - 0.5) * coneSpread);
         const speed = scale * (3.5 + Math.random() * 3.5) * reach;
         // Inherit the dragon's own velocity on top of the outward flame
         // speed — without this, a dragon flying at max speed can easily
         // catch up to (and appear to fly through) its own slower-moving
         // fire, since the particles' outward speed alone has no idea how
         // fast the emitter itself is already moving forward.
-        const velocity = dir.clone().add(spreadVec).normalize().multiplyScalar(speed).add(emitterVelocity);
+        particle.velocity.copy(tmpDir).add(tmpSpread).normalize().multiplyScalar(speed).add(emitterVelocity);
 
-        root.add(sprite);
-        particles.push({ sprite, velocity, startScale });
+        particle.startScale = startScale;
+        particles.push(particle);
       }
       active.push({ particles, elapsed: 0 });
     },
@@ -137,12 +175,11 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
         for (const particle of burst.particles) {
           particle.sprite.position.addScaledVector(particle.velocity, dt);
           particle.sprite.scale.setScalar(particle.startScale * (1 + t * 0.6));
-          (particle.sprite.material as THREE.SpriteMaterial).opacity = fade;
+          particle.material.opacity = fade;
         }
         if (t >= 1) {
           for (const particle of burst.particles) {
-            root.remove(particle.sprite);
-            (particle.sprite.material as THREE.Material).dispose();
+            releaseParticle(particle);
           }
           active.splice(i, 1);
         }
@@ -154,11 +191,16 @@ export function createFireBreathEffects(scene: THREE.Scene): FireBreathEffects {
     dispose() {
       for (const burst of active) {
         for (const particle of burst.particles) {
-          root.remove(particle.sprite);
-          (particle.sprite.material as THREE.Material).dispose();
+          releaseParticle(particle);
         }
       }
       active.length = 0;
+      for (const particle of allocated) {
+        root.remove(particle.sprite);
+        particle.material.dispose();
+      }
+      pooled.length = 0;
+      allocated.length = 0;
       scene.remove(root);
       texture.dispose();
       baseMaterial.dispose();

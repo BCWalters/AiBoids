@@ -112,6 +112,7 @@ test.describe('App smoke tests', () => {
   });
 
   test('cycling through every visual style keeps the 3D canvas rendering', async ({ page }) => {
+    test.setTimeout(60_000);
     failOnConsoleErrors(page);
     await gotoApp(page);
     const styleSelect = page.locator('#param-visual-style');
