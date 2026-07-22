@@ -93,8 +93,11 @@ export function createRealisticBirdGeometries(length: number, width: number): Cr
  * a proportionally slimmer, more streamlined torso than that. Radii below
  * are trimmed roughly 25-30% through the torso and head while keeping the
  * neck pinch (still clearly narrower than both chest and head) that fixed
- * the earlier "no head at all, just a blob" bug. A pair of near-black eye
- * dots (see buildEyeDotsGeometry) are baked onto the head via
+ * the earlier "no head at all, just a blob" bug, and the full lathed body
+ * then gets one more 25% width reduction via BODY_NARROW_SCALE so every
+ * small songbird reads more slender overall without changing its
+ * wingspan/length silhouette. A pair of near-black eye dots (see
+ * buildEyeDotsGeometry) are baked onto the head via
  * mergeGeometriesWithColor — safe under any per-species body tint
  * multiply (near-black stays near-black regardless of what it's
  * multiplied against), giving every small-bird species actual facial
@@ -114,9 +117,12 @@ const HEAD_NARROW_SCALE = 0.75; // 25% narrower
 const HEAD_LENGTHEN_SCALE = 1.1; // 10% longer
 const HEAD_START_FRAC = 0.42; // neck pinch — head-lengthening pivot, stays fixed
 const HEAD_END_FRAC = HEAD_START_FRAC + (0.8 - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE; // face point
+const BODY_NARROW_SCALE = 0.75; // 25% narrower overall
+const BEAK_LENGTH_SCALE = 0.75; // 25% shorter
 
 function buildTaperedBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
+  const scaledWidth = width * BODY_NARROW_SCALE;
   // Head-region radii/positions below are all reduced/stretched relative
   // to the un-narrowed/un-lengthened pass via HEAD_NARROW_SCALE and
   // HEAD_LENGTHEN_SCALE (see their doc comment above) rather than
@@ -124,22 +130,22 @@ function buildTaperedBodyGeometry(length: number, width: number): THREE.BufferGe
   // easy to re-tune independently later.
   const headFrac = (frac: number) => HEAD_START_FRAC + (frac - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE;
   const profile = [
-    new THREE.Vector2(width * 0.03, -halfLen * 1.0), // tail tip
-    new THREE.Vector2(width * 0.16, -halfLen * 0.7),
-    new THREE.Vector2(width * 0.3, -halfLen * 0.25), // belly bulge — slimmer than before
-    new THREE.Vector2(width * 0.28, halfLen * 0.15), // chest
-    new THREE.Vector2(width * 0.12, halfLen * HEAD_START_FRAC), // neck pinch — clearly narrower than chest/head
-    new THREE.Vector2(width * 0.21 * HEAD_NARROW_SCALE, halfLen * headFrac(0.58)), // head base bulge — clearly wider than the neck pinch
-    new THREE.Vector2(width * 0.22 * HEAD_NARROW_SCALE, halfLen * headFrac(0.66)), // crown, the widest point of the head
-    new THREE.Vector2(width * 0.15 * HEAD_NARROW_SCALE, halfLen * headFrac(0.74)), // forehead, narrowing toward the face
-    new THREE.Vector2(width * 0.075 * HEAD_NARROW_SCALE, halfLen * HEAD_END_FRAC), // face point, where the beak attaches
+    new THREE.Vector2(scaledWidth * 0.03, -halfLen * 1.0), // tail tip
+    new THREE.Vector2(scaledWidth * 0.16, -halfLen * 0.7),
+    new THREE.Vector2(scaledWidth * 0.3, -halfLen * 0.25), // belly bulge — slimmer than before
+    new THREE.Vector2(scaledWidth * 0.28, halfLen * 0.15), // chest
+    new THREE.Vector2(scaledWidth * 0.12, halfLen * HEAD_START_FRAC), // neck pinch — clearly narrower than chest/head
+    new THREE.Vector2(scaledWidth * 0.21 * HEAD_NARROW_SCALE, halfLen * headFrac(0.58)), // head base bulge — clearly wider than the neck pinch
+    new THREE.Vector2(scaledWidth * 0.22 * HEAD_NARROW_SCALE, halfLen * headFrac(0.66)), // crown, the widest point of the head
+    new THREE.Vector2(scaledWidth * 0.15 * HEAD_NARROW_SCALE, halfLen * headFrac(0.74)), // forehead, narrowing toward the face
+    new THREE.Vector2(scaledWidth * 0.075 * HEAD_NARROW_SCALE, halfLen * HEAD_END_FRAC), // face point, where the beak attaches
   ];
   const body = new THREE.LatheGeometry(profile, 14);
 
   const eyeY = halfLen * headFrac(0.68);
-  const eyeX = width * 0.16 * HEAD_NARROW_SCALE;
-  const eyeZ = width * 0.05 * HEAD_NARROW_SCALE;
-  const eyeRadius = width * 0.04 * HEAD_NARROW_SCALE;
+  const eyeX = scaledWidth * 0.16 * HEAD_NARROW_SCALE;
+  const eyeZ = scaledWidth * 0.05 * HEAD_NARROW_SCALE;
+  const eyeRadius = scaledWidth * 0.04 * HEAD_NARROW_SCALE;
   const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
   return mergeGeometriesWithColor([
@@ -163,16 +169,17 @@ const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
  */
 function buildSmallBirdBeakGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const faceY = halfLen * 0.8;
-  const faceRadius = width * 0.075;
-  const beakLen = length * 0.2;
-  const geometry = new THREE.ConeGeometry(faceRadius * 0.9, beakLen, 8);
+  const faceY = halfLen * HEAD_END_FRAC;
+  const faceRadius = width * BODY_NARROW_SCALE * 0.075 * HEAD_NARROW_SCALE;
+  const beakLen = length * 0.2 * BEAK_LENGTH_SCALE;
+  const beakHeight = beakLen * 0.792;
+  const geometry = new THREE.ConeGeometry(faceRadius * 1.3068, beakHeight, 8);
   geometry.scale(1, 1, 0.75); // slightly flattened, taller than wide
   // ConeGeometry's axis already runs along +Y (apex at +height/2, base at
   // -height/2), matching the body's own forward axis — no rotation
   // needed, just slide it forward so the base sits at the body's face
   // point and the apex protrudes further ahead of it.
-  geometry.translate(0, faceY + beakLen * 0.5, 0);
+  geometry.translate(0, faceY + beakHeight * 0.5, 0);
   return geometry;
 }
 
@@ -258,4 +265,3 @@ export function buildTailGeometry(length: number, width: number): THREE.BufferGe
 
   return extrudeRingGeometry([root, leftTip, backCenter, rightTip], thickness);
 }
-

@@ -66,6 +66,36 @@ const BLUE_GOLD_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailTip: new THREE.Color(0xe6ac4d),
 };
 
+const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
+  beak: new THREE.Color(0x161616),
+  facePatch: new THREE.Color(0xf3e8d9),
+  eyeOuter: new THREE.Color(0xffffff),
+  back: new THREE.Color(0xe12832),
+  backLight: new THREE.Color(0xf13a45),
+  belly: new THREE.Color(0x2f61c9),
+  wingTopFront: new THREE.Color(0xe43a44),
+  wingTopRear: new THREE.Color(0x2a5fbf),
+  wingUndersideFront: new THREE.Color(0xd7c56c),
+  wingUndersideRear: new THREE.Color(0x36549a),
+  tailRoot: new THREE.Color(0xe0c45d),
+  tailTip: new THREE.Color(0x2b57b0),
+};
+
+const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
+  beak: new THREE.Color(0x161616),
+  facePatch: new THREE.Color(0xcab7ff),
+  eyeOuter: new THREE.Color(0x39ff14),
+  back: new THREE.Color(0x6b4bb3),
+  backLight: new THREE.Color(0x9a7fe0),
+  belly: new THREE.Color(0xc8b4ff),
+  wingTopFront: new THREE.Color(0xb49af3),
+  wingTopRear: new THREE.Color(0x7a5dc7),
+  wingUndersideFront: new THREE.Color(0xd8c9ff),
+  wingUndersideRear: new THREE.Color(0xa99ec4),
+  tailRoot: new THREE.Color(0x7b60c8),
+  tailTip: new THREE.Color(0xd1c2ff),
+};
+
 const NEUTRAL_PARROT_PALETTE: ParrotPalette = {
   beak: new THREE.Color(0x161616),
   facePatch: new THREE.Color(0xffffff),
@@ -98,14 +128,18 @@ const PARROT_BEAK_DOWN_PITCH_RAD = THREE.MathUtils.degToRad(-8);
 export function createParrotGeometries(
   length: number,
   width: number,
-  paletteProfile: 'green-focus' | 'blue-gold-focus' | 'neutral' = 'green-focus',
+  paletteProfile: 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus' | 'neutral' = 'green-focus',
 ): CreatureGeometries {
   const previousPalette = ACTIVE_PARROT_PALETTE;
   ACTIVE_PARROT_PALETTE = paletteProfile === 'neutral'
     ? NEUTRAL_PARROT_PALETTE
     : paletteProfile === 'blue-gold-focus'
       ? BLUE_GOLD_FOCUS_PARROT_PALETTE
-      : GREEN_FOCUS_PARROT_PALETTE;
+      : paletteProfile === 'scarlet-focus'
+        ? SCARLET_FOCUS_PARROT_PALETTE
+      : paletteProfile === 'purple-lavender-focus'
+        ? PURPLE_LAVENDER_FOCUS_PARROT_PALETTE
+        : GREEN_FOCUS_PARROT_PALETTE;
   try {
     const body = buildParrotBodyGeometry(length, width);
 
@@ -641,9 +675,19 @@ function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number)
       b = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.b, ACTIVE_PARROT_PALETTE.backLight.b, lightMix);
     } else {
       const strength = Math.min(0.92, bellyWeight * 1.05);
-      r = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.r, ACTIVE_PARROT_PALETTE.belly.r, strength);
-      g = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.g, ACTIVE_PARROT_PALETTE.belly.g, strength);
-      b = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.b, ACTIVE_PARROT_PALETTE.belly.b, strength);
+      if (ACTIVE_PARROT_PALETTE === SCARLET_FOCUS_PARROT_PALETTE) {
+        const backToFrontT = 1 - bodyForwardT;
+        const bellyGradientR = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.r, ACTIVE_PARROT_PALETTE.belly.r, backToFrontT);
+        const bellyGradientG = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.g, ACTIVE_PARROT_PALETTE.belly.g, backToFrontT);
+        const bellyGradientB = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.b, ACTIVE_PARROT_PALETTE.belly.b, backToFrontT);
+        r = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.r, bellyGradientR, strength);
+        g = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.g, bellyGradientG, strength);
+        b = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.b, bellyGradientB, strength);
+      } else {
+        r = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.r, ACTIVE_PARROT_PALETTE.belly.r, strength);
+        g = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.g, ACTIVE_PARROT_PALETTE.belly.g, strength);
+        b = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.b, ACTIVE_PARROT_PALETTE.belly.b, strength);
+      }
     }
     colors[i * 3] = r;
     colors[i * 3 + 1] = g;

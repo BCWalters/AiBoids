@@ -83,7 +83,7 @@ const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing:
 // rather than a uniform species, the way small songbirds do (goldfinch/
 // cardinal/bluejay are each their own distinct color already; a single-
 // hue parrot stood out as flatter/less varied than those by comparison).
-type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus';
+type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus';
 interface NatureParrotVariant {
   colors: SpeciesColorSet;
   geometryProfile: ParrotGeometryProfile;
@@ -91,14 +91,10 @@ interface NatureParrotVariant {
 const PARROT_NATURE_VARIANTS: NatureParrotVariant[] = [
   // Blue-and-gold macaw
   { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'blue-gold-focus' },
-  // Scarlet macaw
-  { colors: { body: new THREE.Color(0xc93a34), wing: new THREE.Color(0x1f5ea8), tail: new THREE.Color(0xd6ab46) }, geometryProfile: 'neutral' },
-  // Green-wing (military) macaw
-  { colors: { body: new THREE.Color(0xae3c36), wing: new THREE.Color(0x2d7853), tail: new THREE.Color(0x2b5b9e) }, geometryProfile: 'neutral' },
-  // Sun conure
-  { colors: { body: new THREE.Color(0xe7c83b), wing: new THREE.Color(0xcc7a2c), tail: new THREE.Color(0xc9463b) }, geometryProfile: 'neutral' },
-  // Purple parrot variant with sky-blue accents
-  { colors: { body: new THREE.Color(0x7f61cc), wing: new THREE.Color(0x8cc9e4), tail: new THREE.Color(0x6fb6da) }, geometryProfile: 'neutral' },
+  // Scarlet-style red parrot with dedicated red/blue body gradient and blue/yellow wing gradient.
+  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'scarlet-focus' },
+  // Purple parrot variant with purple/lavender gradients and lavender accents.
+  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'purple-lavender-focus' },
   // Focus pattern slot: pure green body/wing regions are driven by
   // parrotGeometry vertex tints; this stays near-white so those region
   // tints read as-authored. Tail keeps its own medium-bright green tint.
@@ -107,7 +103,7 @@ const PARROT_NATURE_VARIANTS: NatureParrotVariant[] = [
     geometryProfile: 'green-focus',
   },
 ];
-const NON_NEUTRAL_PARROT_PROFILES: ParrotGeometryProfile[] = ['green-focus', 'blue-gold-focus'];
+const NON_NEUTRAL_PARROT_PROFILES: ParrotGeometryProfile[] = ['green-focus', 'blue-gold-focus', 'scarlet-focus', 'purple-lavender-focus'];
 // Keep null in normal operation so parrots rotate through all configured
 // nature variants. Set to an index temporarily only during palette tuning.
 const PARROT_FOCUS_PATTERN_INDEX: number | null = null;
@@ -710,6 +706,8 @@ export class Renderer3D {
   private natureSparrowGeometries: CreatureGeometries;
   private natureParrotGeometries: CreatureGeometries;
   private natureParrotBlueGoldGeometries: CreatureGeometries;
+  private natureParrotScarletGeometries: CreatureGeometries;
+  private natureParrotPurpleLavenderGeometries: CreatureGeometries;
   private natureParrotNeutralGeometries: CreatureGeometries;
   private naturePredatorGeometries: CreatureGeometries;
   private dragonPredatorGeometries: CreatureGeometries;
@@ -892,6 +890,8 @@ export class Renderer3D {
     // (arcade's whole aesthetic is bloom-glow blobs, not anatomical detail).
     this.natureParrotGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'green-focus');
     this.natureParrotBlueGoldGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'blue-gold-focus');
+    this.natureParrotScarletGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'scarlet-focus');
+    this.natureParrotPurpleLavenderGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'purple-lavender-focus');
     this.natureParrotNeutralGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'neutral');
     this.naturePredatorGeometries = createHawkGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 1.7);
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
@@ -1166,6 +1166,8 @@ export class Renderer3D {
         const geometryForProfile = (profile: ParrotGeometryProfile): CreatureGeometries => {
           if (profile === 'green-focus') return this.natureParrotGeometries;
           if (profile === 'blue-gold-focus') return this.natureParrotBlueGoldGeometries;
+          if (profile === 'scarlet-focus') return this.natureParrotScarletGeometries;
+          if (profile === 'purple-lavender-focus') return this.natureParrotPurpleLavenderGeometries;
           return this.natureParrotNeutralGeometries;
         };
         for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
@@ -2737,6 +2739,8 @@ export class Renderer3D {
       this.natureSparrowGeometries,
       this.natureParrotGeometries,
       this.natureParrotBlueGoldGeometries,
+      this.natureParrotScarletGeometries,
+      this.natureParrotPurpleLavenderGeometries,
       this.natureParrotNeutralGeometries,
       this.naturePredatorGeometries,
       this.dragonPredatorGeometries,
