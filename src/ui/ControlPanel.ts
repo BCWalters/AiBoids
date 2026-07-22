@@ -203,6 +203,7 @@ export class ControlPanel {
       visualSettingsChildren.push(this.buildTimeOfDayToggle());
       visualSettingsChildren.push(this.buildSoftShadowsToggle());
       visualSettingsChildren.push(this.buildDragonPredatorsToggle());
+      if (params.visualStyle === 'nature') visualSettingsChildren.push(this.buildParrotReviewHoverToggle());
       visualSettingsChildren.push(this.buildLightShaftsToggle());
       visualSettingsChildren.push(this.buildFogToggle());
       visualSettingsChildren.push(this.buildSlider(animationBlendSliderSpec));
@@ -418,6 +419,28 @@ export class ControlPanel {
     input.checked = params.dragonPredators;
     input.addEventListener('change', () => {
       params.dragonPredators = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildParrotReviewHoverToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t('parrotReviewHoverLabel');
+    label.htmlFor = 'param-parrot-review-hover';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'param-parrot-review-hover';
+    input.checked = params.galleryCreature === 'parrot';
+    input.addEventListener('change', () => {
+      if (input.checked) params.galleryCreature = 'parrot';
+      else if (params.galleryCreature === 'parrot') params.galleryCreature = null;
     });
 
     wrapper.appendChild(input);

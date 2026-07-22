@@ -78,27 +78,39 @@ const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing:
 // identical bloom-glow color regardless of per-instance diffuse tint).
 //
 // Rather than one flat parrot palette, pick from a handful of real-world
-// macaw/parrot color patterns per-individual (see PARROT_COLOR_PATTERNS'
+// macaw/parrot color patterns per-individual (see PARROT_NATURE_VARIANTS'
 // use in getParrotColors below) so the flock reads as visually diverse
 // rather than a uniform species, the way small songbirds do (goldfinch/
 // cardinal/bluejay are each their own distinct color already; a single-
 // hue parrot stood out as flatter/less varied than those by comparison).
-const PARROT_COLOR_PATTERNS: SpeciesColorSet[] = [
+type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus';
+interface NatureParrotVariant {
+  colors: SpeciesColorSet;
+  geometryProfile: ParrotGeometryProfile;
+}
+const PARROT_NATURE_VARIANTS: NatureParrotVariant[] = [
   // Blue-and-gold macaw
-  { body: new THREE.Color(0xe0b247), wing: new THREE.Color(0x2f5fa8), tail: new THREE.Color(0x244b8f) },
+  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'blue-gold-focus' },
   // Scarlet macaw
-  { body: new THREE.Color(0xc93a34), wing: new THREE.Color(0x1f5ea8), tail: new THREE.Color(0xd6ab46) },
+  { colors: { body: new THREE.Color(0xc93a34), wing: new THREE.Color(0x1f5ea8), tail: new THREE.Color(0xd6ab46) }, geometryProfile: 'neutral' },
   // Green-wing (military) macaw
-  { body: new THREE.Color(0xae3c36), wing: new THREE.Color(0x2d7853), tail: new THREE.Color(0x2b5b9e) },
+  { colors: { body: new THREE.Color(0xae3c36), wing: new THREE.Color(0x2d7853), tail: new THREE.Color(0x2b5b9e) }, geometryProfile: 'neutral' },
   // Sun conure
-  { body: new THREE.Color(0xe7c83b), wing: new THREE.Color(0xcc7a2c), tail: new THREE.Color(0xc9463b) },
+  { colors: { body: new THREE.Color(0xe7c83b), wing: new THREE.Color(0xcc7a2c), tail: new THREE.Color(0xc9463b) }, geometryProfile: 'neutral' },
   // Purple parrot variant with sky-blue accents
-  { body: new THREE.Color(0x7f61cc), wing: new THREE.Color(0x8cc9e4), tail: new THREE.Color(0x6fb6da) },
-  // Blue-back / yellow-belly macaw-style split (driven by parrotGeometry's region tints)
-  { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0x2f5ea8) },
-  // Variant of the same split with a deeper cobalt tail
-  { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0x214986) },
+  { colors: { body: new THREE.Color(0x7f61cc), wing: new THREE.Color(0x8cc9e4), tail: new THREE.Color(0x6fb6da) }, geometryProfile: 'neutral' },
+  // Focus pattern slot: pure green body/wing regions are driven by
+  // parrotGeometry vertex tints; this stays near-white so those region
+  // tints read as-authored. Tail keeps its own medium-bright green tint.
+  {
+    colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0x44b749) },
+    geometryProfile: 'green-focus',
+  },
 ];
+const NON_NEUTRAL_PARROT_PROFILES: ParrotGeometryProfile[] = ['green-focus', 'blue-gold-focus'];
+// Keep null in normal operation so parrots rotate through all configured
+// nature variants. Set to an index temporarily only during palette tuning.
+const PARROT_FOCUS_PATTERN_INDEX: number | null = null;
 const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
 const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
 
@@ -495,6 +507,42 @@ interface SpeciesColorSet {
   tail: THREE.Color;
 }
 
+interface BirdMaterialTuning {
+  bodyTint?: THREE.Color;
+  wingTint?: THREE.Color;
+  tailTint?: THREE.Color;
+  bodyRoughness?: number;
+  wingRoughness?: number;
+  tailRoughness?: number;
+  bodyMetalness?: number;
+  wingMetalness?: number;
+  tailMetalness?: number;
+}
+
+const NATURE_PARROT_MATERIAL_TUNING: BirdMaterialTuning = {
+  bodyRoughness: 0.78,
+  wingRoughness: 0.74,
+  tailRoughness: 0.74,
+  bodyMetalness: 0.02,
+  wingMetalness: 0.01,
+  tailMetalness: 0.01,
+};
+
+const FISHTANK_PARROT_MATERIAL_TUNING: BirdMaterialTuning = {
+  bodyRoughness: 0.68,
+  wingRoughness: 0.62,
+  tailRoughness: 0.62,
+  bodyMetalness: 0.04,
+  wingMetalness: 0.03,
+  tailMetalness: 0.03,
+};
+
+const ARCADE_PARROT_MATERIAL_TUNING: BirdMaterialTuning = {
+  bodyRoughness: 0.42,
+  wingRoughness: 0.38,
+  tailRoughness: 0.38,
+};
+
 // Unicorns reuse the same body/wing/tail split (lavender body+tail, near-
 // white wings so the baked rainbow vertex gradient shows through) in nature
 // style — see NATURE_UNICORN_WING's doc comment above. The fishtank seahorse
@@ -507,24 +555,41 @@ const NATURE_UNICORN_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing
 const FISHTANK_SEAHORSE_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_BODY, tail: NATURE_UNICORN_BODY };
 const ARCADE_UNICORN_COLORS: SpeciesColorSet = { body: ARCADE_UNICORN_BASE, wing: ARCADE_UNICORN_BASE, tail: ARCADE_UNICORN_BASE };
 
-/**
- * Picks one of PARROT_COLOR_PATTERNS (nature style) or
- * BUTTERFLYFISH_COLOR_PATTERNS (fish tank style) per individual.
- *
- * Normal flock mode stays deterministic (keyed only on id) so each bird's
- * pattern remains stable across frames. In gallery mode for parrots, cycle
- * patterns over time so a single showcased parrot can display the full set
- * without changing URL/state repeatedly.
- */
-function getParrotColors(entity: Boid | Predator): SpeciesColorSet {
-  const patterns = params.visualStyle === 'fishtank' ? BUTTERFLYFISH_COLOR_PATTERNS : PARROT_COLOR_PATTERNS;
-  const baseIndex = Math.floor(idHash(entity.id, 42) * patterns.length) % patterns.length;
+function getNatureParrotVariants(): NatureParrotVariant[] {
+  if (PARROT_FOCUS_PATTERN_INDEX === null) return PARROT_NATURE_VARIANTS;
+  return [PARROT_NATURE_VARIANTS[THREE.MathUtils.clamp(PARROT_FOCUS_PATTERN_INDEX, 0, PARROT_NATURE_VARIANTS.length - 1)]];
+}
+
+function getNatureParrotVariant(entity: Boid | Predator): NatureParrotVariant {
+  const variants = getNatureParrotVariants();
+  const baseIndex = Math.floor(idHash(entity.id, 42) * variants.length) % variants.length;
   if (params.galleryCreature === 'parrot') {
     const cycleStep = Math.floor(performance.now() / 3200);
-    return patterns[(baseIndex + cycleStep) % patterns.length];
+    return variants[(baseIndex + cycleStep) % variants.length];
   }
-  const index = baseIndex;
-  return patterns[index];
+  return variants[baseIndex];
+}
+
+/**
+ * Picks one nature parrot variant (colors + geometry profile) or one fish
+ * tank butterflyfish pattern per individual.
+ */
+function getParrotColors(entity: Boid | Predator): SpeciesColorSet {
+  if (params.visualStyle === 'fishtank') {
+    const baseIndex = Math.floor(idHash(entity.id, 42) * BUTTERFLYFISH_COLOR_PATTERNS.length) % BUTTERFLYFISH_COLOR_PATTERNS.length;
+    if (params.galleryCreature === 'parrot') {
+      const cycleStep = Math.floor(performance.now() / 3200);
+      return BUTTERFLYFISH_COLOR_PATTERNS[(baseIndex + cycleStep) % BUTTERFLYFISH_COLOR_PATTERNS.length];
+    }
+    return BUTTERFLYFISH_COLOR_PATTERNS[baseIndex];
+  }
+  return getNatureParrotVariant(entity).colors;
+}
+
+function getParrotMaterialTuning(style: VisualStyle): BirdMaterialTuning | undefined {
+  if (style === 'nature') return NATURE_PARROT_MATERIAL_TUNING;
+  if (style === 'fishtank') return FISHTANK_PARROT_MATERIAL_TUNING;
+  return ARCADE_PARROT_MATERIAL_TUNING;
 }
 
 interface BirdInstanceSet {
@@ -561,6 +626,8 @@ interface BoidSpeciesConfig {
   beakColor?: THREE.Color;
   /** Nature-style local-Y tail joint pivot for tail sway compensation. */
   tailSwayPivotY?: number;
+  /** Optional per-style material tuning for this species' body/wing/tail meshes. */
+  getMaterialTuning?: (style: VisualStyle) => BirdMaterialTuning | undefined;
 }
 
 const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
@@ -578,11 +645,12 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     countParam: 'parrotCount',
     arcadeEmissive: ARCADE_PARROT_EMISSIVE,
     arcadeBase: ARCADE_PARROT_BASE,
-    natureBase: PARROT_COLOR_PATTERNS[0].body,
+    natureBase: PARROT_NATURE_VARIANTS[0].colors.body,
     getColors: getParrotColors,
     useSmallGeometry: false,
     useParrotGeometry: true,
     tailSwayPivotY: PARROT_TAIL_SWAY_PIVOT_Y,
+    getMaterialTuning: getParrotMaterialTuning,
   },
   {
     species: 'goldfinch',
@@ -641,6 +709,8 @@ export class Renderer3D {
   private natureBoidGeometries: CreatureGeometries;
   private natureSparrowGeometries: CreatureGeometries;
   private natureParrotGeometries: CreatureGeometries;
+  private natureParrotBlueGoldGeometries: CreatureGeometries;
+  private natureParrotNeutralGeometries: CreatureGeometries;
   private naturePredatorGeometries: CreatureGeometries;
   private dragonPredatorGeometries: CreatureGeometries;
   private unicornPredatorGeometries: CreatureGeometries;
@@ -653,6 +723,8 @@ export class Renderer3D {
 
   private speciesInstances = new Map<BoidSpecies, BirdInstanceSet | null>();
   private speciesInstanceKeys = new Map<BoidSpecies, string | null>();
+  private parrotProfileInstances = new Map<ParrotGeometryProfile, BirdInstanceSet | null>();
+  private parrotProfileKeys = new Map<ParrotGeometryProfile, string | null>();
   /**
    * Predator instances are split by kind (mirrors speciesInstances above)
    * so hawks/dragons and unicorns can coexist as independent populations
@@ -818,7 +890,9 @@ export class Renderer3D {
     // long tail streamers) — only used in nature style; arcade style still
     // shares the simple flat-diamond silhouette with every other species
     // (arcade's whole aesthetic is bloom-glow blobs, not anatomical detail).
-    this.natureParrotGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
+    this.natureParrotGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'green-focus');
+    this.natureParrotBlueGoldGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'blue-gold-focus');
+    this.natureParrotNeutralGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'neutral');
     this.naturePredatorGeometries = createHawkGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 1.7);
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
     this.unicornPredatorGeometries = createUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
@@ -899,11 +973,11 @@ export class Renderer3D {
       roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
       metalness: 0,
       side: THREE.DoubleSide,
-      // Unicorns only: the wing geometry itself carries a baked rainbow
-      // hue gradient (see creatureGeometry's addRainbowVertexColors) — this
-      // just tells the material to actually read and multiply by that
-      // per-vertex 'color' attribute rather than ignoring it.
-      vertexColors: rainbowWings,
+      // Enable wing vertex colors whenever that geometry actually carries
+      // a baked 'color' attribute (e.g. unicorn rainbow wings or parrot
+      // underside/front-back wing gradients). Keep it off otherwise, since
+      // enabling vertexColors on color-less geometry renders black.
+      vertexColors: rainbowWings || !!geometries.wingLeft.getAttribute('color'),
     });
 
     const body = new THREE.InstancedMesh(geometries.body, bodyMaterial, Math.max(count, 1));
@@ -1051,6 +1125,21 @@ export class Renderer3D {
     for (const boid of sim.boids) {
       countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
     }
+    const parrotProfileCounts = new Map<ParrotGeometryProfile, number>();
+    if (isNature) {
+      for (const boid of sim.boids) {
+        if (boid.species !== 'parrot') continue;
+        const profile = getNatureParrotVariant(boid).geometryProfile;
+        parrotProfileCounts.set(profile, (parrotProfileCounts.get(profile) ?? 0) + 1);
+      }
+    }
+    if (!isNature) {
+      for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
+        this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
+        this.parrotProfileInstances.set(profile, null);
+        this.parrotProfileKeys.set(profile, null);
+      }
+    }
 
     // Each species gets its own InstancedMesh set — separate materials so
     // arcade style can give each a distinct emissive bloom color (emissive
@@ -1061,6 +1150,46 @@ export class Renderer3D {
     // uses the shared "reference" small-bird size/shape.
     for (const config of BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
+      if (config.species === 'parrot' && isNature) {
+        const nonNeutralCount = NON_NEUTRAL_PARROT_PROFILES
+          .reduce((sum, profile) => sum + (parrotProfileCounts.get(profile) ?? 0), 0);
+        const neutralCount = Math.max(0, count - nonNeutralCount);
+        const neutralKey = `${neutralCount}:${style}:neutral`;
+        if (this.speciesInstanceKeys.get('parrot') !== neutralKey) {
+          this.disposeInstanceSet(this.speciesInstances.get('parrot') ?? null);
+          this.speciesInstances.set(
+            'parrot',
+            this.buildInstanceSet(this.natureParrotNeutralGeometries, style, config.arcadeEmissive, neutralCount, false, false, true),
+          );
+          this.speciesInstanceKeys.set('parrot', neutralKey);
+        }
+        const geometryForProfile = (profile: ParrotGeometryProfile): CreatureGeometries => {
+          if (profile === 'green-focus') return this.natureParrotGeometries;
+          if (profile === 'blue-gold-focus') return this.natureParrotBlueGoldGeometries;
+          return this.natureParrotNeutralGeometries;
+        };
+        for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
+          const profileCount = parrotProfileCounts.get(profile) ?? 0;
+          const profileKey = `${profileCount}:${style}:${profile}`;
+          if (this.parrotProfileKeys.get(profile) !== profileKey) {
+            this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
+            this.parrotProfileInstances.set(
+              profile,
+              this.buildInstanceSet(
+                geometryForProfile(profile),
+                style,
+                config.arcadeEmissive,
+                profileCount,
+                false,
+                false,
+                true,
+              ),
+            );
+            this.parrotProfileKeys.set(profile, profileKey);
+          }
+        }
+        continue;
+      }
       const key = `${count}:${style}`;
       if (this.speciesInstanceKeys.get(config.species) !== key) {
         this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
@@ -1427,6 +1556,7 @@ export class Renderer3D {
     // Keeps non-dragon/non-unicorn creatures right-side-up by deriving
     // roll from WORLD_UP instead of shortest-arc quaternion roll freedom.
     preferUpright: boolean = false,
+    preserveWingVertexPalette: boolean = false,
   ): void {
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -1751,7 +1881,6 @@ export class Renderer3D {
         }
         this.bodyQuat.copy(displayQuat);
       }
-
       // Body: just position + orientation, no flap. Caught boids shrink
       // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
       // worldScale !== 1 (fishtank only) grows the position outward from
@@ -1893,12 +2022,25 @@ export class Renderer3D {
       let effectiveTail: THREE.Color | null = null;
 
       if (speciesColors) {
-        this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
-        effectiveBase = this.variantColor;
-        effectiveWing = this.wingColor;
-        effectiveTail = this.tailColor;
+        const isGreenParrotVariant = getSpeciesColors === getParrotColors
+          && params.visualStyle === 'nature'
+          && speciesColors.body.getHex() === 0x44b749
+          && speciesColors.wing.getHex() === 0x44b749;
+        const lockParrotFocusPalette = getSpeciesColors === getParrotColors
+          && params.visualStyle === 'nature'
+          && PARROT_FOCUS_PATTERN_INDEX !== null;
+        if (lockParrotFocusPalette || isGreenParrotVariant) {
+          effectiveBase = speciesColors.body;
+          effectiveWing = speciesColors.wing;
+          effectiveTail = speciesColors.tail;
+        } else {
+          this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
+          this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
+          this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
+          effectiveBase = this.variantColor;
+          effectiveWing = this.wingColor;
+          effectiveTail = this.tailColor;
+        }
       } else if (individualVariation) {
         baseColor.getHSL(this.hsl);
         let { h, s, l } = this.hsl;
@@ -1924,14 +2066,28 @@ export class Renderer3D {
       this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
       set.body.setColorAt(i, this.stateColor);
       if (effectiveWing) {
+        const preserveParrotWingPalette = getSpeciesColors === getParrotColors
+          && params.visualStyle === 'nature'
+          && preserveWingVertexPalette
+          && !!set.wingLeft.geometry.getAttribute('color');
+        const preserveParrotTailPalette = preserveParrotWingPalette
+          && !!set.tail?.geometry.getAttribute('color');
         // Species with their own distinct wing/tail base colors keep those
         // hues rather than just darkening the body color.
-        this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
+        if (preserveParrotWingPalette) {
+          this.wingColor.setRGB(1, 1, 1);
+        } else {
+          this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
+        }
         set.wingLeft.setColorAt(i, this.wingColor);
         set.wingRight.setColorAt(i, this.wingColor);
         if (set.tail) {
           if (effectiveTail) {
-            this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
+            if (preserveParrotTailPalette) {
+              this.tailColor.setRGB(1, 1, 1);
+            } else {
+              this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
+            }
             set.tail.setColorAt(i, this.tailColor);
           } else {
             set.tail.setColorAt(i, this.wingColor);
@@ -2327,6 +2483,81 @@ export class Renderer3D {
         // safe to sway around the shared pivot with no detachment risk
         // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
         const isFishTail = isFishtank;
+        if (isNatureParrot) {
+          const profileEntities = new Map<ParrotGeometryProfile, Boid[]>();
+          const neutralEntities: Boid[] = [];
+          for (const entity of entities) {
+            const profile = getNatureParrotVariant(entity).geometryProfile;
+            if (profile === 'neutral') neutralEntities.push(entity);
+            else {
+              const bucket = profileEntities.get(profile);
+              if (bucket) bucket.push(entity);
+              else profileEntities.set(profile, [entity]);
+            }
+          }
+          this.updateInstances(
+            instances,
+            neutralEntities,
+            params.boidMaxSpeed,
+            elapsed,
+            dt,
+            config.natureBase,
+            NATURE_BOID_PANIC,
+            (entity) => (entity as Boid).panicLevel,
+            PARROT_FLAP_FREQUENCY,
+            PARROT_FLAP_IDLE_AMPLITUDE,
+            PARROT_FLAP_SPEED_AMPLITUDE,
+            (entity) => (entity as Boid).scale,
+            true,
+            getParrotColors,
+            false,
+            'dragon',
+            1,
+            config.beakColor,
+            0,
+            MODEL_RIGHT_AXIS,
+            PARROT_TAIL_SWAY_AMPLITUDE,
+            undefined,
+            config.tailSwayPivotY ?? 0,
+            1,
+            1,
+            true,
+          );
+          for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
+            const profileSet = this.parrotProfileInstances.get(profile);
+            if (!profileSet) continue;
+            this.updateInstances(
+              profileSet,
+              profileEntities.get(profile) ?? [],
+              params.boidMaxSpeed,
+              elapsed,
+              dt,
+              config.natureBase,
+              NATURE_BOID_PANIC,
+              (entity) => (entity as Boid).panicLevel,
+              PARROT_FLAP_FREQUENCY,
+              PARROT_FLAP_IDLE_AMPLITUDE,
+              PARROT_FLAP_SPEED_AMPLITUDE,
+              (entity) => (entity as Boid).scale,
+              true,
+              getParrotColors,
+              false,
+              'dragon',
+              1,
+              config.beakColor,
+              0,
+              MODEL_RIGHT_AXIS,
+              PARROT_TAIL_SWAY_AMPLITUDE,
+              undefined,
+              config.tailSwayPivotY ?? 0,
+              1,
+              1,
+              true,
+              true,
+            );
+          }
+          continue;
+        }
         this.updateInstances(
           instances,
           entities,
@@ -2489,6 +2720,11 @@ export class Renderer3D {
     for (const config of BOID_SPECIES_CONFIGS) {
       this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
     }
+    for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
+      this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
+      this.parrotProfileInstances.set(profile, null);
+      this.parrotProfileKeys.set(profile, null);
+    }
     for (const kind of this.predatorInstances.keys()) {
       this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
     }
@@ -2500,6 +2736,8 @@ export class Renderer3D {
       this.natureBoidGeometries,
       this.natureSparrowGeometries,
       this.natureParrotGeometries,
+      this.natureParrotBlueGoldGeometries,
+      this.natureParrotNeutralGeometries,
       this.naturePredatorGeometries,
       this.dragonPredatorGeometries,
       this.unicornPredatorGeometries,
