@@ -737,6 +737,17 @@ interface StyleFlags {
   isOrganic: boolean;
 }
 
+interface PredatorRenderFlags {
+  isDragon: boolean;
+  isShark: boolean;
+}
+
+interface PredatorUpdateContext {
+  hawks: Predator[];
+  unicorns: Predator[];
+  renderFlags: PredatorRenderFlags;
+}
+
 interface PredatorCounts {
   hawkCount: number;
   unicornCount: number;
@@ -3050,36 +3061,27 @@ export class Renderer3D {
   private getPredatorUpdateContext(
     sim: Simulation,
     flags: StyleFlags,
-  ): {
-    hawks: Predator[];
-    unicorns: Predator[];
-    isDragon: boolean;
-    isShark: boolean;
-  } {
+  ): PredatorUpdateContext {
     const { isOrganic, isFishtank } = flags;
-    const { isDragon, isShark } = this.getPredatorRenderFlags(isOrganic, isFishtank);
+    const renderFlags = this.getPredatorRenderFlags(isOrganic, isFishtank);
     const { hawks, unicorns } = this.partitionPredators(sim.predators);
-    return { hawks, unicorns, isDragon, isShark };
+    return { hawks, unicorns, renderFlags };
   }
 
   private updatePredatorInstanceSets(
-    context: { hawks: Predator[]; unicorns: Predator[]; isDragon: boolean; isShark: boolean },
+    context: PredatorUpdateContext,
     elapsed: number,
     dt: number,
     flags: StyleFlags,
   ): void {
-    const { isNature, isFishtank, isOrganic } = flags;
     this.updateHawkPredatorInstances(
       context.hawks,
       elapsed,
       dt,
-      isNature,
-      isFishtank,
-      isOrganic,
-      context.isDragon,
-      context.isShark,
+      flags,
+      context.renderFlags,
     );
-    this.updateUnicornPredatorInstances(context.unicorns, elapsed, dt, isFishtank, isOrganic);
+    this.updateUnicornPredatorInstances(context.unicorns, elapsed, dt, flags);
   }
 
   private updateNatureParrotInstances(
@@ -3201,14 +3203,13 @@ export class Renderer3D {
     hawks: Predator[],
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
-    isDragon: boolean,
-    isShark: boolean,
+    flags: StyleFlags,
+    renderFlags: PredatorRenderFlags,
   ): void {
     const hawkInstances = this.predatorInstances.get('hawk');
     if (!hawkInstances) return;
+    const { isNature, isFishtank, isOrganic } = flags;
+    const { isDragon, isShark } = renderFlags;
     this.updateInstances(
       hawkInstances,
       hawks,
@@ -3224,11 +3225,11 @@ export class Renderer3D {
     unicorns: Predator[],
     elapsed: number,
     dt: number,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
   ): void {
     const unicornInstances = this.predatorInstances.get('unicorn');
     if (!unicornInstances) return;
+    const { isFishtank, isOrganic } = flags;
     this.updateInstances(
       unicornInstances,
       unicorns,
