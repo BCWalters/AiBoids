@@ -3178,11 +3178,10 @@ export class Renderer3D {
     sim: Simulation,
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
   ): void {
     if (!this.hasAnyBoidSpeciesInstances()) return;
+    const { isNature, isFishtank, isOrganic } = flags;
 
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
@@ -3203,11 +3202,10 @@ export class Renderer3D {
     sim: Simulation,
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
   ): void {
     if (!this.hasAnyPredatorInstances()) return;
+    const { isNature, isFishtank, isOrganic } = flags;
     const context = this.getPredatorUpdateContext(sim, isOrganic, isFishtank);
     this.updatePredatorInstanceSets(context, elapsed, dt, isNature, isFishtank, isOrganic);
   }
@@ -3377,12 +3375,10 @@ export class Renderer3D {
     sim: Simulation,
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
   ): void {
-    this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
-    this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+    this.updateBoidSpeciesInstances(sim, elapsed, dt, flags);
+    this.updatePredatorInstances(sim, elapsed, dt, flags);
   }
 
   private getRenderTiming(): { elapsed: number; dt: number } {
@@ -3398,10 +3394,10 @@ export class Renderer3D {
     dt: number,
     flags: StyleFlags,
   ): void {
-    const { isNature, isFishtank, isOrganic } = flags;
+    const { isNature, isFishtank } = flags;
     this.updateFishtankCenter(sim, isFishtank);
     this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
-    this.updateCreatureInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+    this.updateCreatureInstances(sim, elapsed, dt, flags);
     this.updateFishtankDynamicCameraClamp(sim, isFishtank);
     this.renderOutput();
   }
