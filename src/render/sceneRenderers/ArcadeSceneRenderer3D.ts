@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
+import type { Predator } from '../../sim/Predator';
+import type { Boid } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { NatureEnvironment } from '../styles/nature/environment';
@@ -11,6 +13,9 @@ import type {
   SceneEnvironmentToggles,
   ScenePresentationSettings,
   SceneRendererHooks,
+  ColourStrategy,
+  MotionConfig,
+  PredatorRenderFlags,
 } from './createSceneRendererHooks';
 
 // --- Arcade style color constants: bright, saturated emissive colors for bloom effect
@@ -29,6 +34,15 @@ const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
 const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
 const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
+
+// Arcade motion constants (simplified, no exotic variants)
+const ARCADE_FLAP_FREQUENCY = 7.6;
+const ARCADE_FLAP_IDLE_AMPLITUDE = 0.25;
+const ARCADE_FLAP_SPEED_AMPLITUDE = 0.9;
+const ARCADE_UNICORN_FLAP_FREQUENCY = 3.2;
+const ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
+const ARCADE_UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
+const ARCADE_UNICORN_BANK_SCALE = 0.35;
 
 interface ArcadeSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
@@ -129,6 +143,32 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       wingEmissiveIntensity: 1.1,
       wingRoughness: (_isDragon: boolean) => 0.5,
       wingColor: (_isDragon: boolean, _isFishtank: boolean) => 0xffffff,
+    };
+  }
+
+  getPredatorColourStrategy(kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
+    // In arcade, no dragons/sharks, just simple hawks and unicorns
+    const isUnicorn = kind === 'unicorn';
+    return {
+      baseColor: isUnicorn ? ARCADE_UNICORN_BASE : ARCADE_PREDATOR_BASE,
+      highlightColor: isUnicorn ? ARCADE_UNICORN_HUNT : ARCADE_PREDATOR_HUNT,
+      getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+    };
+  }
+
+  getPredatorMotionConfig(kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
+    // In arcade, no dragons/sharks, just simple hawks and unicorns
+    const isUnicorn = kind === 'unicorn';
+    return {
+      flapFrequency: isUnicorn ? ARCADE_UNICORN_FLAP_FREQUENCY : ARCADE_FLAP_FREQUENCY,
+      flapIdleAmplitude: isUnicorn ? ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE : ARCADE_FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: isUnicorn ? ARCADE_UNICORN_FLAP_SPEED_AMPLITUDE : ARCADE_FLAP_SPEED_AMPLITUDE,
+      keepUpright: isUnicorn,
+      uprightStyle: isUnicorn ? 'unicorn' : undefined,
+      bankScale: isUnicorn ? ARCADE_UNICORN_BANK_SCALE : undefined,
+      tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
+      worldScale: 1,
+      meshScaleBoost: 1,
     };
   }
 

@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
+import type { Predator } from '../../sim/Predator';
+import type { Boid } from '../../sim/Boid';
 import { computeFishtankRoomBounds, placeFishtankEnvironment, TANK_VISUAL_SCALE } from '../styles/fishtank/environment';
+import { getSharkTailPivotY } from '../styles/fishtank/geometry/sharkGeometry';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type {
@@ -11,6 +14,9 @@ import type {
   SceneEnvironmentToggles,
   ScenePresentationSettings,
   SceneRendererHooks,
+  ColourStrategy,
+  MotionConfig,
+  PredatorRenderFlags,
 } from './createSceneRendererHooks';
 
 // --- Fishtank style color constants
@@ -38,6 +44,17 @@ const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
 // Shark predator (fishtank dragon-geometry variant): medium gray hide
 const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
 const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
+
+// Shark-specific motion constants
+const SHARK_FLAP_FREQUENCY = 2.2;
+const SHARK_FLAP_IDLE_AMPLITUDE = 0.05;
+const SHARK_FLAP_SPEED_AMPLITUDE = 0.09;
+const SHARK_TAIL_SWAY_AMPLITUDE = 0.5; // radians; a visibly wide side-to-side beat
+const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — the main swimming motion
+const SHARK_FIN_REST_TILT_RAD = 0.4;
+const FISHTANK_FISH_MESH_BOOST = 2.2;
+const FISHTANK_SHARK_MESH_BOOST = 0.55;
+const SHARK_LENGTH = 4.0; // approximate length for tail pivot calculation
 
 interface FishtankSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
@@ -175,6 +192,62 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       wingEmissiveIntensity: 0,
       wingRoughness: (isDragon: boolean) => isDragon ? 0.65 : 0.9,
       wingColor: (isDragon: boolean, _isFishtank: boolean) => isDragon ? 0xb8bcc0 : 0xffffff,
+    };
+  }
+
+  getPredatorColourStrategy(_kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
+    const isUnicorn = _kind === 'unicorn';
+    
+    // In fishtank: seahorses (unicorns) get their own colors
+    if (isUnicorn) {
+      const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
+      return {
+        baseColor: new THREE.Color(0xf0d070),
+        highlightColor: new THREE.Color(0xfffacd),
+        getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+        getSpeciesColors: () => FISHTANK_SEAHORSE_COLORS,
+      };
+    }
+    
+    // Hawks (sharks when isDragon)
+    return {
+      baseColor: SHARK_PREDATOR_BASE,
+      highlightColor: SHARK_PREDATOR_HUNT,
+      getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+    };
+  }
+
+  getPredatorMotionConfig(_kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
+    const isUnicorn = _kind === 'unicorn';
+    
+    if (isUnicorn) {
+      // Seahorse motion
+      return {
+        flapFrequency: 3.2,
+        flapIdleAmplitude: 0.22,
+        flapSpeedAmplitude: 0.5,
+        keepUpright: true,
+        uprightStyle: 'unicorn',
+        tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
+        worldScale: TANK_VISUAL_SCALE,
+        meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
+      };
+    }
+    
+    // Sharks use distinct tail/fin motion
+    return {
+      flapFrequency: SHARK_FLAP_FREQUENCY,
+      flapIdleAmplitude: SHARK_FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: SHARK_FLAP_SPEED_AMPLITUDE,
+      keepUpright: true,
+      uprightStyle: 'shark',
+      finRestBiasRad: SHARK_FIN_REST_TILT_RAD,
+      tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
+      tailSwayAmplitude: SHARK_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency: SHARK_TAIL_SWAY_FREQUENCY,
+      tailSwayPivotY: getSharkTailPivotY(SHARK_LENGTH),
+      worldScale: TANK_VISUAL_SCALE,
+      meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
     };
   }
 

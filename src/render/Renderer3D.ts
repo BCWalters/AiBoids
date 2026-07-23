@@ -25,7 +25,7 @@ import {
 } from './styles/fishtank/environment';
 import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/smallFishGeometry';
 import { createButterflyfishGeometries } from './styles/fishtank/geometry/butterflyfishGeometry';
-import { createSharkGeometries as createFishtankSharkGeometries, getSharkTailPivotY } from './styles/fishtank/geometry/sharkGeometry';
+import { createSharkGeometries as createFishtankSharkGeometries } from './styles/fishtank/geometry/sharkGeometry';
 import { createSeaHorseGeometries as createFishtankSeaHorseGeometries } from './styles/fishtank/geometry/seaHorseGeometry';
 import { createDriftingClouds, type DriftingClouds } from './styles/nature/clouds';
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
@@ -40,9 +40,6 @@ import {
   NatureSceneRenderer3D,
   NATURE_BOID_BASE,
   NATURE_BOID_PANIC,
-  NATURE_PREDATOR_BASE,
-  NATURE_PREDATOR_HUNT,
-  NATURE_HAWK_COLORS,
   PARROT_NATURE_VARIANTS,
   NON_NEUTRAL_PARROT_PROFILES,
   PARROT_FOCUS_PATTERN_INDEX,
@@ -50,11 +47,6 @@ import {
   GOLDFINCH_NATURE_PALETTE,
   CARDINAL_NATURE_PALETTE,
   BLUEJAY_NATURE_PALETTE,
-  DRAGON_PREDATOR_BASE,
-  DRAGON_PREDATOR_HUNT,
-  NATURE_UNICORN_BODY,
-  NATURE_UNICORN_HUNT,
-  NATURE_UNICORN_WING,
   GOLDFINCH_BODY_BASE,
   GOLDFINCH_WING_BASE,
   GOLDFINCH_TAIL_BASE,
@@ -72,16 +64,12 @@ import {
 import {
   FishtankSceneRenderer3D,
   BUTTERFLYFISH_COLOR_PATTERNS,
-  SHARK_PREDATOR_BASE,
-  SHARK_PREDATOR_HUNT,
 } from './sceneRenderers/FishtankSceneRenderer3D';
 import {
   ArcadeSceneRenderer3D,
   ARCADE_BOID_EMISSIVE,
   ARCADE_BOID_BASE,
   ARCADE_BOID_PANIC,
-  ARCADE_PREDATOR_BASE,
-  ARCADE_PREDATOR_HUNT,
   ARCADE_PARROT_EMISSIVE,
   ARCADE_PARROT_BASE,
   ARCADE_GOLDFINCH_EMISSIVE,
@@ -90,8 +78,6 @@ import {
   ARCADE_CARDINAL_BASE,
   ARCADE_BLUEJAY_EMISSIVE,
   ARCADE_BLUEJAY_BASE,
-  ARCADE_UNICORN_BASE,
-  ARCADE_UNICORN_HUNT,
 } from './sceneRenderers/ArcadeSceneRenderer3D';
 import { UFO_BEAM_REACH } from '../sim/UFO';
 
@@ -159,76 +145,10 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // range farther apart / more sparse-looking inside the tank.
 const FISHTANK_FISH_MESH_BOOST = 2.2;
 
-// Sharks (predators using dragon geometry while fishtank is active — see
-// isShark below) get an extra size boost on top of FISHTANK_FISH_MESH_BOOST
-// — real sharks read as noticeably larger apex predators next to the
-// schooling fish, not just a same-scaled reskin of the dragon.
-const FISHTANK_SHARK_MESH_BOOST = 1.5;
-
 // Dragons are ~2.5-3x the size of the hawk predator, so flapping at the
 // same fast hummingbird-like frequency read as a tiny insect (dragonfly/
 // hummingbird) rather than a huge beast — big wings should beat slower
 // and sweep through a wider arc.
-const DRAGON_FLAP_FREQUENCY = 2.15;
-const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
-const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
-
-// Unicorns flap more gracefully/slowly than the hawk — now sized close to
-// the dragon, so a fast hummingbird-like flap would look just as wrong as
-// it would on a dragon. Amplitude eased down from an earlier pass (0.35
-// idle / 0.8 speed) — a large horse-scale wing swinging a full ~45-65deg
-// past horizontal on the downstroke read as an aggressive flap and, at
-// certain viewing angles, foreshortened into a thin edge-on "blade"
-// silhouette. A gentler swing suits a serene, floaty pegasus better and
-// keeps the wing panel closer to broadside-on to the camera throughout
-// the cycle.
-const UNICORN_FLAP_FREQUENCY = 3.2;
-const UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
-const UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
-
-// Dragon tail sway: on-screen references (movies/TV) almost always show a
-// dragon's tail undulating up and down as it flies, driven by the same
-// wingbeat that powers the body through the air, rather than trailing
-// perfectly rigid behind it like a glider's tailplane. Reuses the wing's
-// flap phase (so the whole silhouette reads as one coordinated wingbeat)
-// but at a smaller amplitude and a phase offset, so the tail lags/leads
-// the wings rather than moving in a way that looks mechanically identical
-// to them.
-const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
-const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
-const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
-const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
-
-// Fish tank sharks: unlike a dragon's flapping bat wings, a shark's
-// pectoral fins (which reuse the wingLeft/wingRight slots) are rigid
-// steering/lift planes that barely move — just a gentle up/down wobble,
-// not a real flap — and they're held tilted down from horizontal at
-// rest rather than level, the way a swimming shark's pectoral fins
-// naturally droop. The tail, meanwhile, is the shark's actual means of
-// propulsion and should swing side to side (a yaw, around the model's
-// local up axis) rather than up and down like the dragon's whip tail —
-// see the tailSwayAxis parameter on updateInstances.
-const SHARK_FLAP_FREQUENCY = 2.2;
-const SHARK_FLAP_IDLE_AMPLITUDE = 0.05;
-const SHARK_FLAP_SPEED_AMPLITUDE = 0.09;
-const SHARK_FIN_REST_TILT_RAD = 0.35; // ~20 degrees, tips angled down from horizontal
-const SHARK_TAIL_SWAY_AMPLITUDE = 0.5; // radians; a visibly wide side-to-side beat
-const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — the main swimming motion
-
-// Fish tank small fish (sparrow/goldfinch/cardinal/bluejay's fishtank
-// silhouette, and the plain fishtank predator): like the shark, a real
-// fish's tail beats side to side (a yaw around the model's local up
-// axis) rather than undulating up and down like the dragon's whip tail.
-// A small fish's tail beats noticeably faster than a shark's — quicker,
-// shorter strokes rather than the shark's slower, wider sweep — so this
-// uses a smaller amplitude but a distinctly higher frequency. Unlike the
-// shark's tail, this fish's caudal fin geometry is already rooted at the
-// model's own local origin (see fishGeometry.ts's buildCaudalFinGeometry),
-// so no separate tailSwayPivotY compensation is needed — the default 0
-// (rotate around the origin) already matches the fin's own attachment
-// point exactly.
-const FISH_TAIL_SWAY_AMPLITUDE = 0.4; // radians; a brisk but not exaggerated side-to-side flick
-const FISH_TAIL_SWAY_FREQUENCY = 5.2; // noticeably quicker than the shark's slower tail beat
 
 // Unicorns get their own dedicated "stay upright" orientation model in
 // updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
@@ -255,10 +175,6 @@ const UNICORN_DESCEND_PITCH_RADIANS = THREE.MathUtils.degToRad(10);
 // pitch/bank constants here are tuned to stay comfortably under it on
 // their own; this is the hard guarantee behind that tuning.
 const UNICORN_MAX_UP_TILT_RADIANS = THREE.MathUtils.degToRad(30);
-// Unicorns lean into turns much less than a dragon (see the shared
-// MAX_BANK_RADIANS / BANK_GAIN bank-into-turns code, used by every
-// entity) — a small, horse-like lean rather than a dramatic dragon roll.
-const UNICORN_BANK_SCALE = 0.35;
 // Unicorns smooth their heading direction before use, same idea as
 // DRAGON_HEADING_SMOOTHING_RATE (removes per-frame jitter at the
 // source) but with its own rate constant — kept separate rather than
@@ -278,6 +194,35 @@ const UNICORN_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(540);
 // climbing and down while sinking, independent of horizontal speed.
 const UNICORN_CLIMB_FLAP_BOOST = 0.9; // up to +90% frequency at full climb
 const UNICORN_DESCEND_FLAP_CUT = 0.55; // down to -55% frequency at full descent
+
+// Parrot tail sway: shared across all styles for boid creature rendering
+const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
+const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
+
+// Dragon tail sway: on-screen references (movies/TV) almost always show a
+// dragon's tail undulating up and down as it flies, driven by the same
+// wingbeat that powers the body through the air, rather than trailing
+// perfectly rigid behind it like a glider's tailplane. Reuses the wing's
+// flap phase (so the whole silhouette reads as one coordinated wingbeat)
+// but at a smaller amplitude and a phase offset, so the tail lags/leads
+// the wings rather than moving in a way that looks mechanically identical
+// to them.
+const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
+const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
+
+// Fish tail sway: like the shark, a real
+// fish's tail beats side to side (a yaw around the model's local up
+// axis) rather than undulating up and down like the dragon's whip tail.
+// A small fish's tail beats noticeably faster than a shark's — quicker,
+// shorter strokes rather than the shark's slower, wider sweep — so this
+// uses a smaller amplitude but a distinctly higher frequency. Unlike the
+// shark's tail, this fish's caudal fin geometry is already rooted at the
+// model's own local origin (see fishGeometry.ts's buildCaudalFinGeometry),
+// so no separate tailSwayPivotY compensation is needed — the default 0
+// (rotate around the origin) already matches the fin's own attachment
+// point exactly.
+const FISH_TAIL_SWAY_AMPLITUDE = 0.4; // radians; a brisk but not exaggerated side-to-side flick
+const FISH_TAIL_SWAY_FREQUENCY = 5.2; // noticeably quicker than the shark's slower tail beat
 
 // Dragons additionally low-pass filter their heading direction (not just
 // their bank angle) before it's used for orientation — see the
@@ -641,9 +586,6 @@ const ARCADE_PARROT_MATERIAL_TUNING: BirdMaterialTuning = {
 // so its wing/tail tint should match the body instead of the near-white
 // rainbow-reading tint, or the fins render as washed-out white flags that
 // look detached from the body.
-const NATURE_UNICORN_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_WING, tail: NATURE_UNICORN_BODY };
-const FISHTANK_SEAHORSE_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_BODY, tail: NATURE_UNICORN_BODY };
-const ARCADE_UNICORN_COLORS: SpeciesColorSet = { body: ARCADE_UNICORN_BASE, wing: ARCADE_UNICORN_BASE, tail: ARCADE_UNICORN_BASE };
 
 function getNatureParrotVariants(): NatureParrotVariant[] {
   if (PARROT_FOCUS_PATTERN_INDEX === null) return PARROT_NATURE_VARIANTS;
@@ -2799,74 +2741,6 @@ export class Renderer3D {
     return { hawks, unicorns };
   }
 
-  private getHawkColourStrategy(flags: StyleFlags, renderFlags: PredatorRenderFlags): ColourStrategy {
-    const { isNature, isFishtank, isOrganic } = flags;
-    const { isDragon } = renderFlags;
-    return {
-      baseColor: isDragon
-        ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE)
-        : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
-      highlightColor: isDragon
-        ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT)
-        : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
-      getIntensity: (entity) => (entity as Predator).huntIntensity,
-      // Plain nature hawks (not dragon/fishtank) get the bald-eagle
-      // body/wing/tail colour split. See NATURE_HAWK_COLORS' doc comment.
-      getSpeciesColors: !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
-    };
-  }
-
-  private getHawkMotionConfig(flags: StyleFlags, renderFlags: PredatorRenderFlags): MotionConfig {
-    const { isFishtank } = flags;
-    const { isDragon, isShark } = renderFlags;
-    return {
-      flapFrequency: isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
-      flapIdleAmplitude: isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude: isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
-      keepUpright: isDragon,
-      uprightStyle: isShark ? 'shark' : 'dragon',
-      // Sharks: fins droop at rest, tail yaws side-to-side (the actual
-      // swimming stroke) instead of pitching up/down like a dragon.
-      finRestBiasRad: isShark ? SHARK_FIN_REST_TILT_RAD : 0,
-      tailSwayAxis: isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-      tailSwayAmplitude: isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
-      tailSwayFrequency: isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
-      tailSwayPivotY: isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
-      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
-    };
-  }
-
-  private getUnicornColourStrategy(flags: StyleFlags): ColourStrategy {
-    const { isOrganic, isFishtank } = flags;
-    return {
-      baseColor: isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
-      highlightColor: isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
-      getIntensity: (entity) => (entity as Predator).huntIntensity,
-      getSpeciesColors: () => isFishtank
-        ? FISHTANK_SEAHORSE_COLORS
-        : isOrganic
-          ? NATURE_UNICORN_COLORS
-          : ARCADE_UNICORN_COLORS,
-    };
-  }
-
-  private getUnicornMotionConfig(flags: StyleFlags): MotionConfig {
-    const { isFishtank } = flags;
-    return {
-      flapFrequency: UNICORN_FLAP_FREQUENCY,
-      flapIdleAmplitude: UNICORN_FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude: UNICORN_FLAP_SPEED_AMPLITUDE,
-      // Unicorns always fly right-side-up in every style — it's a character
-      // trait, not a nature-only cosmetic. Their own 'unicorn' orientation
-      // model (hard pitch clamp + up-tilt safety) keeps them floaty/level.
-      keepUpright: true,
-      uprightStyle: 'unicorn',
-      bankScale: UNICORN_BANK_SCALE,
-      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-    };
-  }
 
   private getBoidMotionConfig(
     config: BoidSpeciesConfig,
@@ -3087,19 +2961,21 @@ export class Renderer3D {
     hawks: Predator[],
     elapsed: number,
     dt: number,
-    flags: StyleFlags,
+    _flags: StyleFlags,
     renderFlags: PredatorRenderFlags,
   ): void {
     const hawkInstances = this.predatorInstances.get('hawk');
     if (!hawkInstances) return;
+    if (hawks.length === 0) return;
+    const sceneRenderer = this.getSceneRenderer(params.visualStyle);
     this.updateInstances(
       hawkInstances,
       hawks,
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      this.getHawkColourStrategy(flags, renderFlags),
-      this.getHawkMotionConfig(flags, renderFlags),
+      sceneRenderer.getPredatorColourStrategy('hawk', renderFlags),
+      sceneRenderer.getPredatorMotionConfig('hawk', renderFlags),
     );
   }
 
@@ -3107,18 +2983,20 @@ export class Renderer3D {
     unicorns: Predator[],
     elapsed: number,
     dt: number,
-    flags: StyleFlags,
+    _flags: StyleFlags,
   ): void {
     const unicornInstances = this.predatorInstances.get('unicorn');
     if (!unicornInstances) return;
+    if (unicorns.length === 0) return;
+    const sceneRenderer = this.getSceneRenderer(params.visualStyle);
     this.updateInstances(
       unicornInstances,
       unicorns,
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      this.getUnicornColourStrategy(flags),
-      this.getUnicornMotionConfig(flags),
+      sceneRenderer.getPredatorColourStrategy('unicorn', { isDragon: false, isShark: false }),
+      sceneRenderer.getPredatorMotionConfig('unicorn', { isDragon: false, isShark: false }),
     );
   }
 

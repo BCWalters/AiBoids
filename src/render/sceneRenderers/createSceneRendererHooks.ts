@@ -1,9 +1,72 @@
 import type { TimeOfDayPreset, VisualStyle } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Vector3 } from 'three';
+import * as THREE from 'three';
 import type { computeFishtankRoomBounds } from '../styles/fishtank/environment';
+import type { Predator } from '../../sim/Predator';
+import type { Boid } from '../../sim/Boid';
 
 export type FishtankBounds = ReturnType<typeof computeFishtankRoomBounds>;
+
+export interface SpeciesColorSet {
+  body: THREE.Color;
+  wing: THREE.Color;
+  tail: THREE.Color;
+}
+
+/** All colour-related parameters for one `updateInstances` call.
+ * Bundled as a named-field object so call sites are self-documenting and
+ * immune to positional-parameter order bugs.
+ */
+export interface ColourStrategy {
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Predator | Boid) => number;
+  /** Each entity gets a small HSL jitter + occasional rare morph around
+   * baseColor (sparrow-style individual variation). Default false. */
+  individualVariation?: boolean;
+  /** Per-entity body/wing/tail hue function (parrot/hawk plumage).
+   * Overrides individualVariation when provided. */
+  getSpeciesColors?: (entity: Predator | Boid) => SpeciesColorSet | null;
+  /** True for parrot profile variants whose geometry has baked vertex colours
+   * on wings/tail/legs — passes white so the vertex palette shows through. */
+  bakedWingPalette?: boolean;
+  /** True for nature small songbirds with a SmallBirdPalette baked into body/
+   * wing/tail geometry — passes white so the gradient shows through. */
+  bakedBodyGradient?: boolean;
+  /** Enables nature-parrot-specific palette lock/passthrough behavior. */
+  useNatureParrotPalette?: boolean;
+  beakColor?: THREE.Color;
+}
+
+/** Per-species animation/motion parameters for one `updateInstances` call.
+ * All fields are optional; defaults match the original parameter defaults so
+ * call sites can omit anything they don't need to override.
+ */
+export interface MotionConfig {
+  flapFrequency?: number;
+  flapIdleAmplitude?: number;
+  flapSpeedAmplitude?: number;
+  getScale?: (entity: Predator | Boid) => number;
+  keepUpright?: boolean;
+  uprightStyle?: 'dragon' | 'unicorn' | 'shark';
+  bankScale?: number;
+  finRestBiasRad?: number;
+  tailSwayAxis?: THREE.Vector3;
+  tailSwayAmplitude?: number;
+  tailSwayFrequency?: number;
+  tailSwayPivotY?: number;
+  worldScale?: number;
+  meshScaleBoost?: number;
+  preferUpright?: boolean;
+}
+
+export type PredatorKind = 'hawk' | 'unicorn';
+
+export interface PredatorRenderFlags {
+  isDragon: boolean;
+  isShark: boolean;
+}
 
 export interface SceneEnvironmentToggles {
   fogEnabled: boolean;
@@ -55,6 +118,8 @@ export interface SceneRendererHooks {
   getWorldScale: () => number;
   mapPositionToRenderSpace: (x: number, y: number, z: number, target: Vector3) => void;
   getCreatureMaterialDefaults: () => SceneCreatureMaterialDefaults;
+  getPredatorColourStrategy: (kind: PredatorKind, renderFlags: PredatorRenderFlags) => ColourStrategy;
+  getPredatorMotionConfig: (kind: PredatorKind, renderFlags: PredatorRenderFlags) => MotionConfig;
   dispose: () => void;
 }
 
