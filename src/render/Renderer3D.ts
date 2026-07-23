@@ -3303,7 +3303,12 @@ export class Renderer3D {
     return exposureByTime[timeOfDay];
   }
 
-  private updatePostProcessingAndEnvironment(elapsed: number, dt: number, isNature: boolean, isFishtank: boolean): void {
+  private updatePostProcessingAndEnvironment(
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    const { isNature, isFishtank } = flags;
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
@@ -3313,7 +3318,13 @@ export class Renderer3D {
     this.driftingClouds.update(dt);
   }
 
-  private updateTransientSceneEffects(sim: Simulation, elapsed: number, dt: number, isFishtank: boolean): void {
+  private updateTransientSceneEffects(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    const { isFishtank } = flags;
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
     this.spawnFireFromDragons(sim, elapsed);
@@ -3325,11 +3336,10 @@ export class Renderer3D {
     sim: Simulation,
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
+    flags: StyleFlags,
   ): void {
-    this.updatePostProcessingAndEnvironment(elapsed, dt, isNature, isFishtank);
-    this.updateTransientSceneEffects(sim, elapsed, dt, isFishtank);
+    this.updatePostProcessingAndEnvironment(elapsed, dt, flags);
+    this.updateTransientSceneEffects(sim, elapsed, dt, flags);
   }
 
   private updateFishtankCenter(sim: Simulation, isFishtank: boolean): void {
@@ -3394,9 +3404,9 @@ export class Renderer3D {
     dt: number,
     flags: StyleFlags,
   ): void {
-    const { isNature, isFishtank } = flags;
+    const { isFishtank } = flags;
     this.updateFishtankCenter(sim, isFishtank);
-    this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
+    this.updateSceneEffects(sim, elapsed, dt, flags);
     this.updateCreatureInstances(sim, elapsed, dt, flags);
     this.updateFishtankDynamicCameraClamp(sim, isFishtank);
     this.renderOutput();
