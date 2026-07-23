@@ -594,6 +594,8 @@ interface ColourStrategy {
   /** True for nature small songbirds with a SmallBirdPalette baked into body/
    * wing/tail geometry — passes white so the gradient shows through. */
   bakedBodyGradient?: boolean;
+  /** Enables nature-parrot-specific palette lock/passthrough behavior. */
+  useNatureParrotPalette?: boolean;
   beakColor?: THREE.Color;
 }
 
@@ -661,6 +663,7 @@ interface EntityInstanceColorArgs {
   individualVariation: boolean;
   getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
   bakedWingPalette: boolean;
+  useNatureParrotPalette: boolean;
   beakColor: THREE.Color | undefined;
   isNatureSmallBirdBody: boolean;
   isNatureSmallBirdWing: boolean;
@@ -693,6 +696,7 @@ interface ResolvedColourStrategy {
   getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
   bakedWingPalette: boolean;
   bakedBodyGradient: boolean;
+  useNatureParrotPalette: boolean;
   beakColor: THREE.Color | undefined;
 }
 
@@ -709,6 +713,7 @@ interface UpdateEntityInstanceArgs {
   individualVariation: boolean;
   getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
   bakedWingPalette: boolean;
+  useNatureParrotPalette: boolean;
   beakColor: THREE.Color | undefined;
   isNatureSmallBirdBody: boolean;
   isNatureSmallBirdWing: boolean;
@@ -1941,6 +1946,7 @@ export class Renderer3D {
       individualVariation,
       getSpeciesColors,
       bakedWingPalette,
+      useNatureParrotPalette,
       beakColor,
       isNatureSmallBirdBody,
       isNatureSmallBirdWing,
@@ -1953,12 +1959,10 @@ export class Renderer3D {
     let preserveParrotLegPalette = false;
 
     if (speciesColors) {
-      const isGreenParrotVariant = getSpeciesColors === getParrotColors
-        && params.visualStyle === 'nature'
+      const isGreenParrotVariant = useNatureParrotPalette
         && speciesColors.body.getHex() === 0x44b749
         && speciesColors.wing.getHex() === 0x44b749;
-      const lockParrotFocusPalette = getSpeciesColors === getParrotColors
-        && params.visualStyle === 'nature'
+      const lockParrotFocusPalette = useNatureParrotPalette
         && PARROT_FOCUS_PATTERN_INDEX !== null;
       if (lockParrotFocusPalette || isGreenParrotVariant) {
         effectiveBase = speciesColors.body;
@@ -2015,8 +2019,7 @@ export class Renderer3D {
         set.tail.setColorAt(index, this.tailColor);
       }
     } else if (effectiveWing) {
-      const preserveParrotWingPalette = getSpeciesColors === getParrotColors
-        && params.visualStyle === 'nature'
+      const preserveParrotWingPalette = useNatureParrotPalette
         && bakedWingPalette
         && !!set.wingLeft.geometry.getAttribute('color');
       const preserveParrotTailPalette = preserveParrotWingPalette
@@ -2395,6 +2398,7 @@ export class Renderer3D {
       getSpeciesColors,
       bakedWingPalette = false,
       bakedBodyGradient = false,
+      useNatureParrotPalette = false,
       beakColor,
     } = colours;
 
@@ -2406,6 +2410,7 @@ export class Renderer3D {
       getSpeciesColors,
       bakedWingPalette,
       bakedBodyGradient,
+      useNatureParrotPalette,
       beakColor,
     };
   }
@@ -2424,6 +2429,7 @@ export class Renderer3D {
       individualVariation,
       getSpeciesColors,
       bakedWingPalette,
+      useNatureParrotPalette,
       beakColor,
       isNatureSmallBirdBody,
       isNatureSmallBirdWing,
@@ -2507,6 +2513,7 @@ export class Renderer3D {
       individualVariation,
       getSpeciesColors,
       bakedWingPalette,
+      useNatureParrotPalette,
       beakColor,
       isNatureSmallBirdBody,
       isNatureSmallBirdWing,
@@ -2544,6 +2551,7 @@ export class Renderer3D {
       getSpeciesColors,
       bakedWingPalette,
       bakedBodyGradient,
+      useNatureParrotPalette,
       beakColor,
     } = this.resolveColourStrategy(colours);
     const {
@@ -2587,6 +2595,7 @@ export class Renderer3D {
       individualVariation,
       getSpeciesColors,
       bakedWingPalette,
+      useNatureParrotPalette,
       beakColor,
       isNatureSmallBirdBody,
       isNatureSmallBirdWing,
@@ -3032,7 +3041,11 @@ export class Renderer3D {
     };
   }
 
-  private getParrotColourStrategy(config: BoidSpeciesConfig, bakedWingPalette: boolean): ColourStrategy {
+  private getParrotColourStrategy(
+    config: BoidSpeciesConfig,
+    flags: StyleFlags,
+    bakedWingPalette: boolean,
+  ): ColourStrategy {
     return {
       baseColor: config.natureBase,
       highlightColor: NATURE_BOID_PANIC,
@@ -3041,6 +3054,7 @@ export class Renderer3D {
       getSpeciesColors: getParrotColors,
       beakColor: config.beakColor,
       bakedWingPalette,
+      useNatureParrotPalette: flags.isNature,
     };
   }
 
@@ -3112,7 +3126,7 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      this.getParrotColourStrategy(config, false),
+      this.getParrotColourStrategy(config, flags, false),
       this.getBoidMotionConfig(config, flags, boidMotionFlags),
     );
     for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
@@ -3124,7 +3138,7 @@ export class Renderer3D {
         params.boidMaxSpeed,
         elapsed,
         dt,
-        this.getParrotColourStrategy(config, true),
+        this.getParrotColourStrategy(config, flags, true),
         this.getBoidMotionConfig(config, flags, boidMotionFlags),
       );
     }
