@@ -1999,23 +1999,7 @@ export class Renderer3D {
     meshScaleBoost: number,
     uprightStyle: UprightStyle,
   ): void {
-    // Body: just position + orientation, no flap.
-    if (worldScale !== 1) {
-      this.dummy.position.set(
-        this.fishtankCenter.x + (pos.x - this.fishtankCenter.x) * worldScale,
-        this.fishtankCenter.y + (pos.y - this.fishtankCenter.y) * worldScale,
-        this.fishtankCenter.z + (pos.z - this.fishtankCenter.z) * worldScale,
-      );
-    } else {
-      this.dummy.position.set(pos.x, pos.y, pos.z);
-    }
-    this.dummy.quaternion.copy(this.bodyQuat);
-    this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
-    this.dummy.updateMatrix();
-    set.body.setMatrixAt(i, this.dummy.matrix);
-    if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
-    if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
-    if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
+    this.applyEntityBodyMatrices(set, i, pos, entityScale, worldScale, meshScaleBoost, uprightStyle);
 
     // Wings: apply an extra local flap rotation around the forward axis.
     const flapAngle = this.computeWingFlapAngle(
@@ -2066,6 +2050,34 @@ export class Renderer3D {
       this.dummy.matrix.multiply(this.tailPivotMatrix);
     }
     set.tail.setMatrixAt(i, this.dummy.matrix);
+  }
+
+  private applyEntityBodyMatrices(
+    set: BirdInstanceSet,
+    i: number,
+    pos: { x: number; y: number; z: number },
+    entityScale: number,
+    worldScale: number,
+    meshScaleBoost: number,
+    uprightStyle: UprightStyle,
+  ): void {
+    // Body: just position + orientation, no flap.
+    if (worldScale !== 1) {
+      this.dummy.position.set(
+        this.fishtankCenter.x + (pos.x - this.fishtankCenter.x) * worldScale,
+        this.fishtankCenter.y + (pos.y - this.fishtankCenter.y) * worldScale,
+        this.fishtankCenter.z + (pos.z - this.fishtankCenter.z) * worldScale,
+      );
+    } else {
+      this.dummy.position.set(pos.x, pos.y, pos.z);
+    }
+    this.dummy.quaternion.copy(this.bodyQuat);
+    this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
+    this.dummy.updateMatrix();
+    set.body.setMatrixAt(i, this.dummy.matrix);
+    if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
+    if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
+    if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
   }
 
   private computeWingFlapAngle(
