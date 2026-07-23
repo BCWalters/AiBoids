@@ -1289,6 +1289,125 @@ export class Renderer3D {
     };
   }
 
+  private applyStyleTransitionOnStyleChange(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+    if (this.currentStyle === style) return;
+    const { isNature, isFishtank, isOrganic } = flags;
+    const wasFishtank = this.currentStyle === 'fishtank';
+    this.currentStyle = style;
+    this.bloomPass.enabled = !isOrganic;
+    // The screen-space afterimage/motion-trail effect persists whole
+    // previous frames — great for arcade neon trails, but when the
+    // camera pans in an organic (fog-using) style it drags a ghost
+    // trail of the bright sky/water (especially the sun disc in nature)
+    // across the frame, looking like a smeary lens flare and leaving
+    // "hovering circle" afterimages.
+    this.afterimagePass.enabled = !isOrganic;
+    this.natureEnv.setVisible(isNature);
+    this.fishtankEnv.setVisible(isFishtank);
+    this.driftingClouds.setVisible(isNature);
+    // Fishtank has its own dedicated glass-box wireframe (frameEdges,
+    // see styles/fishtank/environment.ts) so the generic debug
+    // boundsHelper stays hidden for both organic styles, same as before.
+    if (this.boundsHelper) this.boundsHelper.visible = !isOrganic;
+    this.ambientLight.intensity = isOrganic ? 0.55 : 0.35;
+    this.keyLight.visible = !isOrganic;
+
+    // Re-apply the zoom clamp for the new style: nature's distance fog
+    // needs a tight max zoom-out, while fishtank now has real geometry
+    // (a table + room) around the tank that's worth seeing when zoomed
+    // out further, so it gets a much looser clamp than nature.
+    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
+    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+    this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
+    this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltUpRad : 0;
+    this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltDownRad : Math.PI;
+
+    // Re-frame the camera when crossing into/out of fishtank specifically.
+    if (isFishtank !== wasFishtank) {
+      const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+      if (isFishtank) center.y = fishtankBounds.tankCenterY;
+      const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+      this.camera.position.set(
+        center.x + maxDim * 0.6 * cameraDistScale,
+        center.y + maxDim * 0.4 * cameraDistScale,
+        center.z + maxDim * 0.9 * cameraDistScale,
+      );
+      this.controls.target.copy(center);
+      this.controls.update();
+    }
+  }
+
+  private updateEnvironmentParameterToggles(): void {
+    if (this.appliedFogEnabled !== params.fogEnabled) {
+      this.natureEnv.setFogEnabled(params.fogEnabled);
+      this.fishtankEnv.setFogEnabled(params.fogEnabled);
+      this.appliedFogEnabled = params.fogEnabled;
+    }
+    if (this.appliedTimeOfDay !== params.timeOfDay) {
+      this.natureEnv.setTimeOfDay(params.timeOfDay);
+      this.fishtankEnv.setTimeOfDay(params.timeOfDay);
+      this.appliedTimeOfDay = params.timeOfDay;
+    }
+    if (this.appliedLightShaftsEnabled !== params.lightShaftsEnabled) {
+      this.natureEnv.setLightShaftsEnabled(params.lightShaftsEnabled);
+      this.appliedLightShaftsEnabled = params.lightShaftsEnabled;
+    }
+    if (this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled) {
+      this.fishtankEnv.setWaterEffectsEnabled(params.waterEffectsEnabled);
+      this.appliedWaterEffectsEnabled = params.waterEffectsEnabled;
+    }
+    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled;
+    if (this.appliedShadowsEnabled !== shadowsEnabled) {
+      this.renderer.shadowMap.enabled = shadowsEnabled;
+      this.keyLight.castShadow = shadowsEnabled;
+      this.natureEnv.sunLight.castShadow = shadowsEnabled;
+      this.fishtankEnv.keyLight.castShadow = shadowsEnabled;
+      this.appliedShadowsEnabled = shadowsEnabled;
+    }
+  }
+
+  private ensureBoundsHelperAndFraming(sim: Simulation, flags: StyleFlags): void {
+    const { isNature, isFishtank, isOrganic } = flags;
+    const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
+    if (this.boundsHelper?.userData.key === expectedKey) return;
+    if (this.boundsHelper) {
+      this.scene.remove(this.boundsHelper);
+      this.boundsHelper.geometry.dispose();
+      (this.boundsHelper.material as THREE.Material).dispose();
+    }
+    const box = new THREE.BoxGeometry(sim.width, sim.height, params.worldDepth);
+    const edges = new THREE.EdgesGeometry(box);
+    const material = new THREE.LineBasicMaterial({ color: 0x30363d });
+    this.boundsHelper = new THREE.LineSegments(edges, material);
+    this.boundsHelper.position.set(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    this.boundsHelper.userData.key = expectedKey;
+    this.boundsHelper.visible = !isOrganic;
+    this.scene.add(this.boundsHelper);
+    box.dispose();
+
+    const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
+    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+    const cameraTarget = center.clone();
+    if (isFishtank) cameraTarget.y = fishtankBounds.tankCenterY;
+    const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+    this.camera.position.set(
+      cameraTarget.x + maxDim * 0.6 * cameraDistScale,
+      cameraTarget.y + maxDim * 0.4 * cameraDistScale,
+      cameraTarget.z + maxDim * 0.9 * cameraDistScale,
+    );
+    this.controls.target.copy(cameraTarget);
+    this.controls.update();
+
+    placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
+    placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
+    this.driftingClouds.configure(center, maxDim);
+
+    const flockScale = maxDim;
+    this.controls.minDistance = maxDim * 0.05;
+    this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
+  }
+
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
   private ensureScene(sim: Simulation): void {
     const style = params.visualStyle;
@@ -1477,102 +1596,9 @@ export class Renderer3D {
       this.unicornDisplayQuats.clear();
     }
 
-    if (this.currentStyle !== style) {
-      const wasFishtank = this.currentStyle === 'fishtank';
-      this.currentStyle = style;
-      this.bloomPass.enabled = !isOrganic;
-      // The screen-space afterimage/motion-trail effect persists whole
-      // previous frames — great for arcade neon trails, but when the
-      // camera pans in an organic (fog-using) style it drags a ghost
-      // trail of the bright sky/water (especially the sun disc in nature)
-      // across the frame, looking like a smeary lens flare and leaving
-      // "hovering circle" afterimages.
-      this.afterimagePass.enabled = !isOrganic;
-      this.natureEnv.setVisible(isNature);
-      this.fishtankEnv.setVisible(isFishtank);
-      this.driftingClouds.setVisible(isNature);
-      // Fishtank has its own dedicated glass-box wireframe (frameEdges,
-      // see styles/fishtank/environment.ts) so the generic debug
-      // boundsHelper stays hidden for both organic styles, same as before.
-      if (this.boundsHelper) this.boundsHelper.visible = !isOrganic;
-      this.ambientLight.intensity = isOrganic ? 0.55 : 0.35;
-      this.keyLight.visible = !isOrganic;
+    this.applyStyleTransitionOnStyleChange(sim, style, { isNature, isFishtank, isOrganic });
 
-      // Re-apply the zoom clamp for the new style: nature's distance fog
-      // needs a tight max zoom-out, while fishtank now has real geometry
-      // (a table + room) around the tank that's worth seeing when zoomed
-      // out further, so it gets a much looser clamp than nature. Fishtank's
-      // clamp is derived from computeFishtankRoomBounds — the exact same
-      // wallMargin/roomHeight formulas placeFishtankEnvironment uses to
-      // build the room — so it stays in lockstep with the room's actual
-      // size (see that function's maxCameraDistance doc comment).
-      const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-      this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
-      // Fishtank's generous zoom-out range is only mathematically
-      // guaranteed to clear the floor/ceiling up to cameraTiltUpRad/
-      // cameraTiltDownRad of tilt away from horizontal (see
-      // maxCameraDistance's and cameraTiltUpRad/cameraTiltDownRad's doc
-      // comments in computeFishtankRoomBounds — all derived together so
-      // they always stay in sync here). Other styles have no such
-      // enclosing geometry to worry about, so they get OrbitControls'
-      // unrestricted default range back.
-      this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltUpRad : 0;
-      this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltDownRad : Math.PI;
-
-      // Re-frame the camera when crossing into/out of fishtank
-      // specifically (not just on world-dimension changes, handled
-      // separately below) — fishtank renders at TANK_VISUAL_SCALE, so a
-      // camera position/distance that was correct for arcade/nature
-      // would otherwise end up far too close (effectively "inside" the
-      // now much-bigger tank) the moment fishtank is selected, or too
-      // far out the moment it's left again.
-      if (isFishtank !== wasFishtank) {
-        const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-        // Fishtank looks at the tank's true (bottom-anchored) vertical
-        // center rather than the sim's raw center — see
-        // computeFishtankRoomBounds' tankCenterY doc comment.
-        if (isFishtank) center.y = fishtankBounds.tankCenterY;
-        const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-        this.camera.position.set(
-          center.x + maxDim * 0.6 * cameraDistScale,
-          center.y + maxDim * 0.4 * cameraDistScale,
-          center.z + maxDim * 0.9 * cameraDistScale,
-        );
-        this.controls.target.copy(center);
-        this.controls.update();
-      }
-    }
-
-    // Apply environment toggles when the underlying params actually change,
-    // so UI changes still take effect immediately without redundant work
-    // every render frame.
-    if (this.appliedFogEnabled !== params.fogEnabled) {
-      this.natureEnv.setFogEnabled(params.fogEnabled);
-      this.fishtankEnv.setFogEnabled(params.fogEnabled);
-      this.appliedFogEnabled = params.fogEnabled;
-    }
-    if (this.appliedTimeOfDay !== params.timeOfDay) {
-      this.natureEnv.setTimeOfDay(params.timeOfDay);
-      this.fishtankEnv.setTimeOfDay(params.timeOfDay);
-      this.appliedTimeOfDay = params.timeOfDay;
-    }
-    if (this.appliedLightShaftsEnabled !== params.lightShaftsEnabled) {
-      this.natureEnv.setLightShaftsEnabled(params.lightShaftsEnabled);
-      this.appliedLightShaftsEnabled = params.lightShaftsEnabled;
-    }
-    if (this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled) {
-      this.fishtankEnv.setWaterEffectsEnabled(params.waterEffectsEnabled);
-      this.appliedWaterEffectsEnabled = params.waterEffectsEnabled;
-    }
-    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled;
-    if (this.appliedShadowsEnabled !== shadowsEnabled) {
-      this.renderer.shadowMap.enabled = shadowsEnabled;
-      this.keyLight.castShadow = shadowsEnabled;
-      this.natureEnv.sunLight.castShadow = shadowsEnabled;
-      this.fishtankEnv.keyLight.castShadow = shadowsEnabled;
-      this.appliedShadowsEnabled = shadowsEnabled;
-    }
+    this.updateEnvironmentParameterToggles();
 
     // Model Gallery uses a close, creature-relative camera distance that
     // sits *inside* the tank/water volume (see main.ts's
@@ -1582,74 +1608,7 @@ export class Renderer3D {
     // doesn't show the room incongruously right behind the creature.
     this.fishtankEnv.setRoomVisible(params.galleryCreature === null);
 
-    const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
-    if (this.boundsHelper?.userData.key !== expectedKey) {
-      if (this.boundsHelper) {
-        this.scene.remove(this.boundsHelper);
-        this.boundsHelper.geometry.dispose();
-        (this.boundsHelper.material as THREE.Material).dispose();
-      }
-      const box = new THREE.BoxGeometry(sim.width, sim.height, params.worldDepth);
-      const edges = new THREE.EdgesGeometry(box);
-      const material = new THREE.LineBasicMaterial({ color: 0x30363d });
-      this.boundsHelper = new THREE.LineSegments(edges, material);
-      this.boundsHelper.position.set(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-      this.boundsHelper.userData.key = expectedKey;
-      this.boundsHelper.visible = !isOrganic;
-      this.scene.add(this.boundsHelper);
-      box.dispose();
-
-      // Frame the camera around the world box the first time we see it (or
-      // whenever its size changes), centered on the box with orbit target
-      // there. Fishtank's own visual scale (see TANK_VISUAL_SCALE) grows
-      // the tank around this same center point horizontally without
-      // moving it (see placeFishtankEnvironment's `center` doc comment),
-      // so the target stays correct across styles — only the initial
-      // camera *distance* needs to widen for fishtank so it doesn't start
-      // inside the bigger tank, and (for fishtank specifically) the
-      // target's vertical component needs to look at the tank's true
-      // (bottom-anchored) center rather than the sim's raw center — see
-      // computeFishtankRoomBounds' tankCenterY doc comment.
-      const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-      const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-      const cameraTarget = center.clone();
-      if (isFishtank) cameraTarget.y = fishtankBounds.tankCenterY;
-      const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-      this.camera.position.set(
-        cameraTarget.x + maxDim * 0.6 * cameraDistScale,
-        cameraTarget.y + maxDim * 0.4 * cameraDistScale,
-        cameraTarget.z + maxDim * 0.9 * cameraDistScale,
-      );
-      this.controls.target.copy(cameraTarget);
-      this.controls.update();
-
-      // Nature/clouds always use the sim's raw (unscaled) center — only
-      // fishtank's own target/framing (above) and glass box (below) use
-      // the inflated TANK_VISUAL_SCALE geometry.
-      placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
-      // Unlike nature's ground plane (an arbitrary-scale backdrop),
-      // fishtank's glass box must match the sim's actual world bounds
-      // exactly — it's a real container the fish swim inside, not just
-      // scenery — so this takes the raw dimensions rather than a single
-      // "groundSize" scalar. (placeFishtankEnvironment inflates its own
-      // rendered size internally — see TANK_VISUAL_SCALE's doc comment.)
-      placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
-      this.driftingClouds.configure(center, maxDim);
-
-      // Clamp orbit zoom to a sane range for this world's scale: never so
-      // close the camera can slide through the ground/boundary box, and
-      // never so far out that nature's distance fog reduces the whole
-      // view to a flat, blown-out wall of fog color (which reads as a
-      // rendering glitch rather than "zoomed out"). Fishtank gets a much
-      // further max distance since zooming out is supposed to reveal the
-      // tank sitting on its table in the room, not just hit a fog wall —
-      // derived from computeFishtankRoomBounds (the real room size), like
-      // the matching comment on the other maxDistance assignment above.
-      const flockScale = maxDim;
-      this.controls.minDistance = maxDim * 0.05;
-      this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
-    }
+    this.ensureBoundsHelperAndFraming(sim, { isNature, isFishtank, isOrganic });
 
     this.scheduleShaderWarmup(style);
   }
