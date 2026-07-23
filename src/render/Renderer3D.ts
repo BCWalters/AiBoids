@@ -3020,6 +3020,10 @@ export class Renderer3D {
     };
   }
 
+  private hasAnyBoidSpeciesInstances(): boolean {
+    return BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3028,8 +3032,7 @@ export class Renderer3D {
     isFishtank: boolean,
     isOrganic: boolean,
   ): void {
-    const anySpeciesInstances = BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
-    if (!anySpeciesInstances) return;
+    if (!this.hasAnyBoidSpeciesInstances()) return;
 
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
