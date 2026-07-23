@@ -2743,10 +2743,9 @@ export class Renderer3D {
           isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
           isFishtank ? TANK_VISUAL_SCALE : 1,
           isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-          true,
-          // Small songbird species with SmallBirdPalette baked into body/
-          // wing/tail geometry need white instance colour passthrough.
-          isNature && !!config.natureSmallBirdPalette,
+          true,  // preferUpright — keep boids right-side-up
+          true,  // preserveWingVertexPalette
+          isNature && !!config.natureSmallBirdPalette,  // useBakedBodyGradient
         );
       }
     }
