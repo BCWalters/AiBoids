@@ -80,7 +80,7 @@ const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing:
 //
 // Rather than one flat parrot palette, pick from a handful of real-world
 // macaw/parrot color patterns per-individual (see PARROT_NATURE_VARIANTS'
-// use in getParrotColors below) so the flock reads as visually diverse
+// use in getParrotColorsForFlags below) so the flock reads as visually diverse
 // rather than a uniform species, the way small songbirds do (goldfinch/
 // cardinal/bluejay are each their own distinct color already; a single-
 // hue parrot stood out as flatter/less varied than those by comparison).
@@ -115,7 +115,7 @@ const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
 // own distinct set of color patterns (real-world butterflyfish are
 // commonly yellow/white/orange/blue, often striped combinations of
 // those) rather than reusing the nature style's macaw palette above —
-// see getParrotColors' visualStyle branch below. `body` is the tinted,
+// see getParrotColorsForFlags' style-flag branch below. `body` is the tinted,
 // stripe-alternating hue (multiplied onto WHITE_VERTEX_COLOR in
 // butterflyfishGeometry.ts); `wing`/`tail` pick complementary accent
 // colors for the pectoral fins and caudal fin.
@@ -830,8 +830,8 @@ function getNatureParrotVariant(entity: Boid | Predator): NatureParrotVariant {
  * Picks one nature parrot variant (colors + geometry profile) or one fish
  * tank butterflyfish pattern per individual.
  */
-function getParrotColors(entity: Boid | Predator): SpeciesColorSet {
-  if (params.visualStyle === 'fishtank') {
+function getParrotColorsForFlags(entity: Boid | Predator, flags: StyleFlags): SpeciesColorSet {
+  if (flags.isFishtank) {
     const baseIndex = Math.floor(idHash(entity.id, 42) * BUTTERFLYFISH_COLOR_PATTERNS.length) % BUTTERFLYFISH_COLOR_PATTERNS.length;
     if (params.galleryCreature === 'parrot') {
       const cycleStep = Math.floor(performance.now() / 3200);
@@ -872,7 +872,7 @@ interface BoidSpeciesConfig {
   arcadeBase: THREE.Color;
   natureBase: THREE.Color;
   colors?: SpeciesColorSet;
-  getColors?: (entity: Boid | Predator) => SpeciesColorSet;
+  getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
   /** Small-bird species only (nature style): the beak's own instance
@@ -913,7 +913,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     arcadeEmissive: ARCADE_PARROT_EMISSIVE,
     arcadeBase: ARCADE_PARROT_BASE,
     natureBase: PARROT_NATURE_VARIANTS[0].colors.body,
-    getColors: getParrotColors,
+    getColors: getParrotColorsForFlags,
     useSmallGeometry: false,
     useParrotGeometry: true,
     tailSwayPivotY: PARROT_TAIL_SWAY_PIVOT_Y,
@@ -1232,7 +1232,7 @@ export class Renderer3D {
   ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
-    const isOrganic = style === 'nature' || style === 'fishtank';
+    const { isOrganic, isFishtank } = this.getStyleFlags(style);
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: isOrganic ? 0x000000 : emissive,
@@ -1267,7 +1267,7 @@ export class Renderer3D {
       // against the dragon's purple body, and multiplying it against the
       // shark's gray body would leak a visible purple/pink cast into the
       // fins/tail instead of the intended plain gray.
-      color: isDragon ? (style === 'fishtank' ? 0xb8bcc0 : 0x9c86ab) : 0xffffff,
+      color: isDragon ? (isFishtank ? 0xb8bcc0 : 0x9c86ab) : 0xffffff,
       emissive: isOrganic ? 0x000000 : emissive,
       emissiveIntensity: isOrganic ? 0 : 1.1,
       roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
@@ -3055,7 +3055,7 @@ export class Renderer3D {
       highlightColor: NATURE_BOID_PANIC,
       getIntensity: (entity) => (entity as Boid).panicLevel,
       individualVariation: true,
-      getSpeciesColors: getParrotColors,
+      getSpeciesColors: (entity) => getParrotColorsForFlags(entity, flags),
       beakColor: config.beakColor,
       bakedWingPalette,
       useNatureParrotPalette: flags.isNature,
@@ -3064,12 +3064,15 @@ export class Renderer3D {
 
   private getBoidColourStrategy(config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
     const { isOrganic, isNature } = flags;
+    const getColors = config.getColors;
     return {
       baseColor: isOrganic ? config.natureBase : config.arcadeBase,
       highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
       getIntensity: (entity) => (entity as Boid).panicLevel,
       individualVariation: config.colors || config.getColors ? true : isOrganic,
-      getSpeciesColors: config.getColors ?? (config.colors ? () => config.colors! : undefined),
+      getSpeciesColors: getColors
+        ? (entity) => getColors(entity, flags)
+        : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       // All nature boids with a baked wing vertex palette (currently only
       // parrots via getColors) pass white so the palette shows through.
