@@ -2887,6 +2887,13 @@ export class Renderer3D {
     return { neutralEntities, profileEntities };
   }
 
+  private getBoidEntitiesForSpecies(
+    boidsBySpecies: Map<BoidSpecies, Boid[]>,
+    species: BoidSpecies,
+  ): Boid[] {
+    return boidsBySpecies.get(species) ?? [];
+  }
+
   private getPredatorRenderFlags(isOrganic: boolean, isFishtank: boolean): { isDragon: boolean; isShark: boolean } {
     const isDragon = isOrganic && params.dragonPredators;
     const isShark = isDragon && isFishtank;
@@ -3044,7 +3051,7 @@ export class Renderer3D {
     for (const config of BOID_SPECIES_CONFIGS) {
       const instances = this.speciesInstances.get(config.species);
       if (!instances) continue;
-      const entities = boidsBySpecies.get(config.species) ?? [];
+      const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
       const isNatureParrot = config.species === 'parrot' && isNature;
       // Fish-tail wave (fishtank only): every fishtank species' caudal
       // fin is rooted at the model's own local origin (sparrow/
