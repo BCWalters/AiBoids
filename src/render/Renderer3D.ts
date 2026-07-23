@@ -2859,6 +2859,34 @@ export class Renderer3D {
     this.controls.update();
   }
 
+  private groupBoidsBySpecies(boids: Boid[]): Map<BoidSpecies, Boid[]> {
+    const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
+    for (const boid of boids) {
+      const bucket = boidsBySpecies.get(boid.species);
+      if (bucket) bucket.push(boid);
+      else boidsBySpecies.set(boid.species, [boid]);
+    }
+    return boidsBySpecies;
+  }
+
+  private partitionNatureParrotEntities(entities: Boid[]): {
+    neutralEntities: Boid[];
+    profileEntities: Map<ParrotGeometryProfile, Boid[]>;
+  } {
+    const profileEntities = new Map<ParrotGeometryProfile, Boid[]>();
+    const neutralEntities: Boid[] = [];
+    for (const entity of entities) {
+      const profile = getNatureParrotVariant(entity).geometryProfile;
+      if (profile === 'neutral') neutralEntities.push(entity);
+      else {
+        const bucket = profileEntities.get(profile);
+        if (bucket) bucket.push(entity);
+        else profileEntities.set(profile, [entity]);
+      }
+    }
+    return { neutralEntities, profileEntities };
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -2870,12 +2898,7 @@ export class Renderer3D {
     const anySpeciesInstances = BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
     if (!anySpeciesInstances) return;
 
-    const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
-    for (const boid of sim.boids) {
-      const bucket = boidsBySpecies.get(boid.species);
-      if (bucket) bucket.push(boid);
-      else boidsBySpecies.set(boid.species, [boid]);
-    }
+    const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
     for (const config of BOID_SPECIES_CONFIGS) {
       const instances = this.speciesInstances.get(config.species);
@@ -2890,17 +2913,7 @@ export class Renderer3D {
       // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
       const isFishTail = isFishtank;
       if (isNatureParrot) {
-        const profileEntities = new Map<ParrotGeometryProfile, Boid[]>();
-        const neutralEntities: Boid[] = [];
-        for (const entity of entities) {
-          const profile = getNatureParrotVariant(entity).geometryProfile;
-          if (profile === 'neutral') neutralEntities.push(entity);
-          else {
-            const bucket = profileEntities.get(profile);
-            if (bucket) bucket.push(entity);
-            else profileEntities.set(profile, [entity]);
-          }
-        }
+        const { neutralEntities, profileEntities } = this.partitionNatureParrotEntities(entities);
         this.updateInstances(
           instances,
           neutralEntities,
