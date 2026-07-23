@@ -737,6 +737,11 @@ interface StyleFlags {
   isOrganic: boolean;
 }
 
+interface PredatorCounts {
+  hawkCount: number;
+  unicornCount: number;
+}
+
 interface BirdMaterialTuning {
   bodyTint?: THREE.Color;
   wingTint?: THREE.Color;
@@ -1616,13 +1621,8 @@ export class Renderer3D {
 
   private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const { isNature, isFishtank, isOrganic } = flags;
-    let hawkCount = 0;
-    let unicornCount = 0;
-    for (const predator of sim.predators) {
-      if (predator.kind === 'unicorn') unicornCount++;
-      else hawkCount++;
-    }
-
+    const { hawkCount, unicornCount } = this.getPredatorCounts(sim.predators);
+ 
     const isDragon = isOrganic && params.dragonPredators;
     const hawkKey = `${hawkCount}:${style}:${isDragon}`;
     if (this.predatorInstanceKeys.get('hawk') !== hawkKey) {
@@ -1670,6 +1670,16 @@ export class Renderer3D {
       this.predatorInstanceKeys.set('unicorn', unicornKey);
       this.unicornDisplayQuats.clear();
     }
+  }
+
+  private getPredatorCounts(predators: Predator[]): PredatorCounts {
+    let hawkCount = 0;
+    let unicornCount = 0;
+    for (const predator of predators) {
+      if (predator.kind === 'unicorn') unicornCount++;
+      else hawkCount++;
+    }
+    return { hawkCount, unicornCount };
   }
 
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
