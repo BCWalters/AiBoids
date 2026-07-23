@@ -2813,47 +2813,7 @@ export class Renderer3D {
     );
   }
 
-  render(sim: Simulation): void {
-    this.ensureScene(sim);
-    const elapsed = (performance.now() - this.startTime) / 1000;
-    const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
-    this.lastElapsed = elapsed;
-    const isNature = params.visualStyle === 'nature';
-    const isFishtank = params.visualStyle === 'fishtank';
-    const isOrganic = isNature || isFishtank;
-    // Recomputed every frame (cheap) rather than cached, so it always
-    // reflects the current sim/world params without needing extra
-    // invalidation logic — used below to grow fishtank's boid positions
-    // around the tank's true center (see updateInstances' worldScale
-    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
-    // is the sim's raw center, matching placeFishtankEnvironment's
-    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
-    // resting on the table — NOT the sim's raw vertical center, matching
-    // placeFishtankEnvironment's bottom-anchored vertical growth (see
-    // its `center.y` doc comment) so fish grow in lockstep with the
-    // glass box instead of drifting out of sync with it.
-    if (isFishtank) {
-      this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
-    }
-
-    // AfterimagePass's damp uniform controls how strongly the previous
-    // frame persists — same trailAmount knob used by the 2D renderer.
-    this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
-    if (isNature) this.natureEnv.update(elapsed);
-    if (isFishtank) this.fishtankEnv.update(elapsed);
-    const exposureByTime = {
-      dawn: 0.62,
-      noon: 0.7,
-      sunset: 0.6,
-      night: 0.44,
-    } as const;
-    this.renderer.toneMappingExposure = exposureByTime[params.timeOfDay];
-    this.driftingClouds.update(dt);
-    this.spawnBloodFromCatches(sim);
-    this.bloodEffects.update(dt);
-    this.spawnFireFromDragons(sim, elapsed);
-    this.fireBreathEffects.update(dt);
-
+  private updateUfoVisuals(sim: Simulation, dt: number, isFishtank: boolean): void {
     // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
     // slots beyond the current active count are simply hidden.
     const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
@@ -2877,6 +2837,59 @@ export class Renderer3D {
       }
       visual.update(dt);
     }
+  }
+
+  private updateSceneEffects(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+  ): void {
+    // AfterimagePass's damp uniform controls how strongly the previous
+    // frame persists — same trailAmount knob used by the 2D renderer.
+    this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
+    if (isNature) this.natureEnv.update(elapsed);
+    if (isFishtank) this.fishtankEnv.update(elapsed);
+    const exposureByTime = {
+      dawn: 0.62,
+      noon: 0.7,
+      sunset: 0.6,
+      night: 0.44,
+    } as const;
+    this.renderer.toneMappingExposure = exposureByTime[params.timeOfDay];
+    this.driftingClouds.update(dt);
+    this.spawnBloodFromCatches(sim);
+    this.bloodEffects.update(dt);
+    this.spawnFireFromDragons(sim, elapsed);
+    this.fireBreathEffects.update(dt);
+    this.updateUfoVisuals(sim, dt, isFishtank);
+  }
+
+  render(sim: Simulation): void {
+    this.ensureScene(sim);
+    const elapsed = (performance.now() - this.startTime) / 1000;
+    const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
+    this.lastElapsed = elapsed;
+    const isNature = params.visualStyle === 'nature';
+    const isFishtank = params.visualStyle === 'fishtank';
+    const isOrganic = isNature || isFishtank;
+    // Recomputed every frame (cheap) rather than cached, so it always
+    // reflects the current sim/world params without needing extra
+    // invalidation logic — used below to grow fishtank's boid positions
+    // around the tank's true center (see updateInstances' worldScale
+    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
+    // is the sim's raw center, matching placeFishtankEnvironment's
+    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
+    // resting on the table — NOT the sim's raw vertical center, matching
+    // placeFishtankEnvironment's bottom-anchored vertical growth (see
+    // its `center.y` doc comment) so fish grow in lockstep with the
+    // glass box instead of drifting out of sync with it.
+    if (isFishtank) {
+      this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
+    }
+
+    this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
 
     this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
     this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
