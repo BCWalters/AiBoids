@@ -1425,6 +1425,10 @@ export class Renderer3D {
     };
   }
 
+  private getActiveStyleFlags(): StyleFlags {
+    return this.getStyleFlags(params.visualStyle);
+  }
+
   private applyStyleTransitionOnStyleChange(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     if (this.currentStyle === style) return;
     const { isNature, isFishtank, isOrganic } = flags;
@@ -2740,7 +2744,7 @@ export class Renderer3D {
    * space next to the creature instead of the creature itself.
    */
   toRenderedPosition(x: number, y: number, z: number): THREE.Vector3 {
-    const isFishtank = params.visualStyle === 'fishtank';
+    const { isFishtank } = this.getActiveStyleFlags();
     if (!isFishtank) return new THREE.Vector3(x, y, z);
     const scale = TANK_VISUAL_SCALE;
     const c = this.fishtankCenter;
@@ -2824,7 +2828,7 @@ export class Renderer3D {
     // param) — the geometry's own local bounding box doesn't reflect that,
     // so without this the fishtank creature would actually render larger
     // than this distance was solved for and clip out of frame.
-    const worldScale = params.visualStyle === 'fishtank' ? TANK_VISUAL_SCALE : 1;
+    const worldScale = this.getActiveStyleFlags().isFishtank ? TANK_VISUAL_SCALE : 1;
     const radius = sphere.radius * worldScale;
     if (!radius) return fallbackDistance;
 
@@ -3435,7 +3439,7 @@ export class Renderer3D {
   render(sim: Simulation): void {
     this.ensureScene(sim);
     const { elapsed, dt } = this.getRenderTiming();
-    const flags = this.getStyleFlags(params.visualStyle);
+    const flags = this.getActiveStyleFlags();
     this.renderFrame(sim, elapsed, dt, flags);
   }
 
