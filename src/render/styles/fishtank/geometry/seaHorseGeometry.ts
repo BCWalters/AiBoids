@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   buildEyeDotsGeometry,
   extrudeRingGeometry,
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
-} from '../../../geometry/creatureGeometry';
+} from '../../../geometry/sharedGeometry';
 
 /**
  * Fish-tank "unicorn" predator geometry: reskinned into a classic

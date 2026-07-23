@@ -1,12 +1,67 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
-  addRainbowVertexColors,
-  addRainbowVertexColorsByDistance,
-} from '../../../geometry/creatureGeometry';
-import { buildFingeredWingGeometry } from '../../../geometry/birdGeometry';
+} from '../../../geometry/sharedGeometry';
+import { buildFingeredWingGeometry } from './birdSharedGeometry';
+
+// Rainbow vertex-colour gradients used only by the unicorn's pegasus
+// wings and rainbow tail (violet at the root, red at the tip), read by a
+// vertexColors-enabled material — see Renderer3D's buildInstanceSet
+// rainbowWings handling. Kept local to this file since the unicorn is
+// their sole user.
+
+/**
+ * Bakes a rainbow hue gradient (violet at the wing root, red at the tip)
+ * into a per-vertex 'color' attribute, read by a vertexColors-enabled
+ * material — see Renderer3D's buildInstanceSet rainbowWings handling.
+ * The base geometry (position-only triangle soup) is otherwise
+ * untouched, so this can wrap any of the flat-shaded wing builders above.
+ */
+function addRainbowVertexColors(geometry: THREE.BufferGeometry, span: number): THREE.BufferGeometry {
+  const position = geometry.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  const color = new THREE.Color();
+  for (let i = 0; i < position.count; i++) {
+    const t = THREE.MathUtils.clamp(Math.abs(position.getX(i)) / span, 0, 1);
+    const hue = THREE.MathUtils.lerp(0.78, 0, t); // violet (root) -> red (tip)
+    color.setHSL(hue, 0.85, 0.62);
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
+}
+
+/**
+ * Same idea as addRainbowVertexColors, but the gradient follows straight-
+ * line distance from a given root point (e.g. where the tail meets the
+ * rump) rather than |x| — needed for parts like the tail whose "root to
+ * tip" axis isn't a simple left-right span.
+ */
+function addRainbowVertexColorsByDistance(
+  geometry: THREE.BufferGeometry,
+  root: THREE.Vector3,
+  maxDistance: number,
+): THREE.BufferGeometry {
+  const position = geometry.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  const color = new THREE.Color();
+  const vertex = new THREE.Vector3();
+  for (let i = 0; i < position.count; i++) {
+    vertex.set(position.getX(i), position.getY(i), position.getZ(i));
+    const t = THREE.MathUtils.clamp(vertex.distanceTo(root) / maxDistance, 0, 1);
+    const hue = THREE.MathUtils.lerp(0.78, 0, t); // violet (root) -> red (tip)
+    color.setHSL(hue, 0.85, 0.62);
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
+}
 
 /**
  * "Unicorn" predator geometry: a proper horse-like silhouette — a barrel-

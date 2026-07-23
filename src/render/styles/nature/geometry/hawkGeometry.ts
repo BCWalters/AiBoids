@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
-import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildHookedBeakGeometry, buildEyeDotsGeometry } from '../../../geometry/creatureGeometry';
-import { buildFingeredWingGeometry, buildTailGeometry } from '../../../geometry/birdGeometry';
+import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
+import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry } from '../../../geometry/sharedGeometry';
+import { buildFingeredWingGeometry, buildTailGeometry, buildHookedBeakGeometry } from './birdSharedGeometry';
 
 /**
  * Hawk predator geometry — split out from the shared "realistic bird"
@@ -51,7 +51,7 @@ export function createHawkGeometries(length: number, width: number): CreatureGeo
   // per-instance tail tint (see Renderer3D's NATURE_HAWK_COLORS), no
   // vertex-bake needed since the tail is already its own InstancedMesh
   // part.
-  const tail = buildTailGeometry(length * 1.1, width, undefined, width * 0.9);
+  const tail = buildTailGeometry(length * 1.1, width, { halfWidth: width * 0.9 });
   const legs = buildHawkLegsGeometry(length, width);
 
   return { body, wingLeft, wingRight, tail, legs };

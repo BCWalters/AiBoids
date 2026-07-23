@@ -1,13 +1,15 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometry,
-  extrudeRingGeometryAlongX,
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
+} from '../../../geometry/sharedGeometry';
+import {
+  extrudeRingGeometryAlongX,
   latheBodyRadiusAt,
-} from '../../../geometry/creatureGeometry';
+} from './fishSharedGeometry';
 
 // Fish tank style: this file originally started as a duplicate of
 // nature's dragonGeometry.ts (bat wings, whip tail, clawed legs, deep
