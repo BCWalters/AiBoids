@@ -667,6 +667,24 @@ interface EntityInstanceColorArgs {
   isNatureSmallBirdTail: boolean;
 }
 
+interface ResolvedMotionConfig {
+  flapFrequency: number;
+  flapIdleAmplitude: number;
+  flapSpeedAmplitude: number;
+  getScale: (entity: Boid | Predator) => number;
+  keepUpright: boolean;
+  uprightStyle: UprightStyle;
+  bankScale: number;
+  finRestBiasRad: number;
+  tailSwayAxis: THREE.Vector3;
+  tailSwayAmplitude: number;
+  tailSwayFrequency: number | undefined;
+  tailSwayPivotY: number;
+  worldScale: number;
+  meshScaleBoost: number;
+  preferUpright: boolean;
+}
+
 interface StyleFlags {
   isNature: boolean;
   isFishtank: boolean;
@@ -2258,6 +2276,44 @@ export class Renderer3D {
     return motionBlend;
   }
 
+  private resolveMotionConfig(motion: MotionConfig): ResolvedMotionConfig {
+    const {
+      flapFrequency = FLAP_FREQUENCY,
+      flapIdleAmplitude = FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude = FLAP_SPEED_AMPLITUDE,
+      getScale = () => 1,
+      keepUpright = false,
+      uprightStyle = 'dragon' as const,
+      bankScale = 1,
+      finRestBiasRad = 0,
+      tailSwayAxis = MODEL_RIGHT_AXIS,
+      tailSwayAmplitude = DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency,
+      tailSwayPivotY = 0,
+      worldScale = 1,
+      meshScaleBoost = 1,
+      preferUpright = false,
+    } = motion;
+
+    return {
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    };
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -2278,42 +2334,22 @@ export class Renderer3D {
       beakColor,
     } = colours;
     const {
-      flapFrequency = FLAP_FREQUENCY,
-      flapIdleAmplitude = FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude = FLAP_SPEED_AMPLITUDE,
-      getScale = () => 1,
-      // keepUpright: when true, use a world-up-anchored orientation basis
-      // instead of the free shortest-arc rotation. Required for dragon/
-      // unicorn/shark; see uprightStyle for which model to apply.
-      keepUpright = false,
-      // Which "stay upright" model to use when keepUpright is true:
-      //  'dragon'  — near-pole-safe basis + free pitch (swoops/dives/rolls)
-      //  'unicorn' — hard-clamped pitch + final up-tilt safety clamp (floaty)
-      //  'shark'   — same shape as unicorn but shallower symmetric pitch range
-      // These are deliberately separate code paths, not one parameterized by
-      // a bias knob — see the UNICORN_*/SHARK_* constants' doc comments.
-      uprightStyle = 'dragon' as const,
-      bankScale = 1,
-      // Shark-only: constant downward tilt bias on pectoral fins so they
-      // rest angled below horizontal at idle (see SHARK_FIN_REST_TILT_RAD).
-      finRestBiasRad = 0,
-      // Tail-sway axis: MODEL_RIGHT_AXIS pitches dragon tail up/down;
-      // MODEL_UP_AXIS yaws shark tail side-to-side (its actual swim stroke).
-      tailSwayAxis = MODEL_RIGHT_AXIS,
-      tailSwayAmplitude = DRAGON_TAIL_SWAY_AMPLITUDE,
-      // Defaults to flapFrequency when unset (original dragon behaviour).
-      // Pass an explicit value to decouple tail beat from fin/wing phase.
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
       tailSwayFrequency,
-      // Shark-only: local-Y of tail attachment point; 0 means rotate around
-      // the shared model origin (correct for every other species).
-      tailSwayPivotY = 0,
-      // Fishtank-only scale factors — both default to 1 (no-op) elsewhere.
-      worldScale = 1,
-      meshScaleBoost = 1,
-      // Non-dragon/unicorn upright anchor: derive roll from WORLD_UP instead
-      // of the free shortest-arc quaternion (regular boids in nature style).
-      preferUpright = false,
-    } = motion;
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    } = this.resolveMotionConfig(motion);
 
     // Small songbirds (nature style) bake a SmallBirdPalette gradient into
     // their geometry. When bakedBodyGradient is true, pass white as the
