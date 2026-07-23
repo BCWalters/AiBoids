@@ -508,8 +508,8 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   // Tail root sits at the body's rump (Y = -halfLen = -length*0.5) and
   // slightly below the body's belly axis (Z = -length*0.08), so it
   // projects rearward from the haunch rather than from the body's center.
-  const yOffset = -length * 0.50;
-  const zOffset = -length * 0.08;
+  const yOffset = -length * 0.25; // halfway between original (0) and previous (-0.5)
+  const zOffset = -length * 0.04; // subtle belly offset, halved to match
 
   // Walk from the body root (t=0) to the tip (t=1), each entry giving a
   // tapering half-width (used as the tube radius) and a curved (x, y, z)
@@ -563,8 +563,8 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   // fading to a deep dark purple at the tip. The renderer detects the
   // presence of this 'color' attribute and passes white as the instance
   // colour so the gradient shows through unchanged.
-  const rootColor = new THREE.Color(0x5a2880); // matches DRAGON_PREDATOR_BASE
-  const tipColor  = new THREE.Color(0x1a0830); // deep dark purple
+  const rootColor = new THREE.Color(0xa060e8); // bright/light purple at the rump
+  const tipColor  = new THREE.Color(0x080314); // near-black at the tip
   const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(posAttr.count * 3);
   const tailRootY = yOffset;
