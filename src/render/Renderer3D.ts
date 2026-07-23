@@ -2031,25 +2031,18 @@ export class Renderer3D {
     this.dummy.updateMatrix();
     set.wingRight.setMatrixAt(i, this.dummy.matrix);
 
-    // Tail sway (dragons/sharks only).
-    if (!set.tail) return;
-    if (!(uprightStyle === 'dragon' || uprightStyle === 'shark')) return;
-    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
-    const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
-    this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
-    this.dummy.updateMatrix();
-    if (tailSwayPivotY !== 0) {
-      this.dummy.quaternion.copy(this.bodyQuat);
-      this.dummy.updateMatrix();
-      this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
-      this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
-      this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
-      this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
-      this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
-      this.dummy.matrix.multiply(this.tailPivotMatrix);
-    }
-    set.tail.setMatrixAt(i, this.dummy.matrix);
+    this.applyEntityTailSwayMatrix(
+      set,
+      i,
+      entity,
+      elapsed,
+      flapFrequency,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      uprightStyle,
+    );
   }
 
   private applyEntityBodyMatrices(
@@ -2134,6 +2127,39 @@ export class Renderer3D {
     const phase = prevPhase + effectiveFrequency * dt;
     this.flapPhase.set(entity, phase);
     return amplitude * Math.sin(phase) + finRestBiasRad;
+  }
+
+  private applyEntityTailSwayMatrix(
+    set: BirdInstanceSet,
+    i: number,
+    entity: Boid | Predator,
+    elapsed: number,
+    flapFrequency: number,
+    tailSwayAxis: THREE.Vector3,
+    tailSwayAmplitude: number,
+    tailSwayFrequency: number | undefined,
+    tailSwayPivotY: number,
+    uprightStyle: UprightStyle,
+  ): void {
+    // Tail sway (dragons/sharks only).
+    if (!set.tail) return;
+    if (!(uprightStyle === 'dragon' || uprightStyle === 'shark')) return;
+    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
+    const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
+    this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
+    this.dummy.updateMatrix();
+    if (tailSwayPivotY !== 0) {
+      this.dummy.quaternion.copy(this.bodyQuat);
+      this.dummy.updateMatrix();
+      this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
+      this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
+      this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
+      this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
+      this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
+      this.dummy.matrix.multiply(this.tailPivotMatrix);
+    }
+    set.tail.setMatrixAt(i, this.dummy.matrix);
   }
 
   private updateInstances(
