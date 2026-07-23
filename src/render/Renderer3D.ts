@@ -3153,19 +3153,23 @@ export class Renderer3D {
     }
   }
 
-  private updatePostProcessingAndEnvironment(elapsed: number, dt: number, isNature: boolean, isFishtank: boolean): void {
-    // AfterimagePass's damp uniform controls how strongly the previous
-    // frame persists — same trailAmount knob used by the 2D renderer.
-    this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
-    if (isNature) this.natureEnv.update(elapsed);
-    if (isFishtank) this.fishtankEnv.update(elapsed);
+  private getToneMappingExposureForTimeOfDay(timeOfDay: typeof params.timeOfDay): number {
     const exposureByTime = {
       dawn: 0.62,
       noon: 0.7,
       sunset: 0.6,
       night: 0.44,
     } as const;
-    this.renderer.toneMappingExposure = exposureByTime[params.timeOfDay];
+    return exposureByTime[timeOfDay];
+  }
+
+  private updatePostProcessingAndEnvironment(elapsed: number, dt: number, isNature: boolean, isFishtank: boolean): void {
+    // AfterimagePass's damp uniform controls how strongly the previous
+    // frame persists — same trailAmount knob used by the 2D renderer.
+    this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
+    if (isNature) this.natureEnv.update(elapsed);
+    if (isFishtank) this.fishtankEnv.update(elapsed);
+    this.renderer.toneMappingExposure = this.getToneMappingExposureForTimeOfDay(params.timeOfDay);
     this.driftingClouds.update(dt);
   }
 
