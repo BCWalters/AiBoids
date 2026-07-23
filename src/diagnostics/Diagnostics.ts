@@ -1,8 +1,8 @@
 import { params, type SimMode, type SimParams } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
+import { DiagnosticsPanel } from '../ui/DiagnosticsPanel';
 
 const FRAME_STATS_WINDOW = 120;
-const OVERLAY_UPDATE_INTERVAL_MS = 200;
 const FRAME_STATS_WARMUP_MS = 4000;
 const DIAGNOSTIC_LOG_MAX_ENTRIES = 6000;
 const DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES = 2048;
@@ -92,7 +92,7 @@ interface PerformanceWithMemory extends Performance {
  */
 export class Diagnostics {
   private readonly sim: Simulation;
-  private readonly overlay: HTMLPreElement;
+  private readonly panel: DiagnosticsPanel;
 
   private readonly frameDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
   private readonly simDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
@@ -108,9 +108,7 @@ export class Diagnostics {
   private renderDurationsSum = 0;
   private postDurationsSum = 0;
   private unaccountedDurationsSum = 0;
-  private overlayLastUpdatedAt = 0;
   private statsCaptureStartedAt = performance.now();
-  private renderingStatsVisibleLastFrame = false;
 
   private readonly diagnosticRecords = new Array<DiagnosticRecord>(DIAGNOSTIC_LOG_MAX_ENTRIES);
   private readonly diagnosticRuntimeEvents = new Array<DiagnosticRuntimeEventRecord>(DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES);
@@ -130,11 +128,7 @@ export class Diagnostics {
 
   constructor(sim: Simulation, host: HTMLElement) {
     this.sim = sim;
-    this.overlay = document.createElement('pre');
-    this.overlay.id = 'rendering-stats-overlay';
-    this.overlay.className = 'rendering-stats-overlay';
-    this.overlay.style.display = 'none';
-    host.appendChild(this.overlay);
+    this.panel = new DiagnosticsPanel(host);
     this.setupRuntimeDiagnosticsObservers();
   }
 
@@ -548,27 +542,22 @@ export class Diagnostics {
   /** Shows/hides and refreshes the on-screen "Rendering stats" overlay. */
   syncOverlay(now: number): void {
     if (!params.showRenderingStats) {
-      this.renderingStatsVisibleLastFrame = false;
-      this.overlay.style.display = 'none';
+      this.panel.hide();
       return;
     }
-    if (!this.renderingStatsVisibleLastFrame) {
-      this.renderingStatsVisibleLastFrame = true;
-      this.resetFrameStats(now);
-    }
-    this.overlay.style.display = 'block';
-    if (now - this.overlayLastUpdatedAt < OVERLAY_UPDATE_INTERVAL_MS) return;
-    this.overlayLastUpdatedAt = now;
+    this.panel.show(now, () => this.resetFrameStats(now), () => this.buildOverlayText(now));
+  }
+
+  private buildOverlayText(now: number): string {
     const warmupRemainingMs = Math.max(0, FRAME_STATS_WARMUP_MS - (now - this.statsCaptureStartedAt));
     if (warmupRemainingMs > 0) {
-      this.overlay.textContent = [
+      return [
         'Rendering stats',
         `mode: ${params.mode}${params.mode === '3d' ? ` (${params.visualStyle})` : ''}`,
         `warming up: ${(warmupRemainingMs / 1000).toFixed(1)}s`,
         `trace active: ${this.formatTraceElapsed(now)}`,
         `diagnostics: ${params.enableDiagnosticsCapture ? 'on' : 'off'} (frames ${this.diagnosticCount}/${DIAGNOSTIC_LOG_MAX_ENTRIES}, runtime ${this.diagnosticRuntimeEventCount}/${DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES})`,
       ].join('\n');
-      return;
     }
 
     const averageFrameMs = this.frameDurationsCount > 0 ? this.frameDurationsSum / this.frameDurationsCount : 0;
@@ -589,7 +578,7 @@ export class Diagnostics {
     const runtimeWindow = this.getRuntimeWindowStats(now, DIAGNOSTIC_RUNTIME_WINDOW_MS);
     const focusState = document.hasFocus() ? 'focused' : 'blurred';
 
-    this.overlay.textContent = [
+    return [
       'Rendering stats',
       `mode: ${params.mode}${params.mode === '3d' ? ` (${params.visualStyle})` : ''}`,
       `frame ms: avg ${averageFrameMs.toFixed(2)} | p95 ${p95FrameMs.toFixed(2)} | peak ${rollingPeakFrameMs.toFixed(2)}`,
