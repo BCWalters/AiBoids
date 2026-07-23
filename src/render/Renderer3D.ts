@@ -2966,6 +2966,31 @@ export class Renderer3D {
     };
   }
 
+  private getBoidMotionConfig(
+    config: BoidSpeciesConfig,
+    isFishtank: boolean,
+    isFishTail: boolean,
+    isNatureParrot: boolean,
+  ): MotionConfig {
+    return {
+      flapFrequency: isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
+      flapIdleAmplitude: isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+      getScale: (entity) => (entity as Boid).scale,
+      tailSwayAxis: isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+      tailSwayAmplitude: isFishTail
+        ? FISH_TAIL_SWAY_AMPLITUDE
+        : isNatureParrot
+          ? PARROT_TAIL_SWAY_AMPLITUDE
+          : DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency: isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
+      tailSwayPivotY: isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
+      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+      preferUpright: true,
+    };
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3008,15 +3033,7 @@ export class Renderer3D {
             beakColor: config.beakColor,
             // Neutral parrots share geometry — no baked wing vertex palette.
           },
-          {
-            flapFrequency: PARROT_FLAP_FREQUENCY,
-            flapIdleAmplitude: PARROT_FLAP_IDLE_AMPLITUDE,
-            flapSpeedAmplitude: PARROT_FLAP_SPEED_AMPLITUDE,
-            getScale: (entity) => (entity as Boid).scale,
-            tailSwayAmplitude: PARROT_TAIL_SWAY_AMPLITUDE,
-            tailSwayPivotY: config.tailSwayPivotY ?? 0,
-            preferUpright: true,
-          },
+          this.getBoidMotionConfig(config, isFishtank, false, true),
         );
         for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
           const profileSet = this.parrotProfileInstances.get(profile);
@@ -3038,15 +3055,7 @@ export class Renderer3D {
               // pass white so the palette shows through unchanged.
               bakedWingPalette: true,
             },
-            {
-              flapFrequency: PARROT_FLAP_FREQUENCY,
-              flapIdleAmplitude: PARROT_FLAP_IDLE_AMPLITUDE,
-              flapSpeedAmplitude: PARROT_FLAP_SPEED_AMPLITUDE,
-              getScale: (entity) => (entity as Boid).scale,
-              tailSwayAmplitude: PARROT_TAIL_SWAY_AMPLITUDE,
-              tailSwayPivotY: config.tailSwayPivotY ?? 0,
-              preferUpright: true,
-            },
+            this.getBoidMotionConfig(config, isFishtank, false, true),
           );
         }
         continue;
@@ -3071,23 +3080,7 @@ export class Renderer3D {
           // species-specific gradient into body/wing/tail geometry.
           bakedBodyGradient: isNature && !!config.natureSmallBirdPalette,
         },
-        {
-          flapFrequency: isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
-          flapIdleAmplitude: isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
-          flapSpeedAmplitude: isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
-          getScale: (entity) => (entity as Boid).scale,
-          tailSwayAxis: isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-          tailSwayAmplitude: isFishTail
-            ? FISH_TAIL_SWAY_AMPLITUDE
-            : isNatureParrot
-              ? PARROT_TAIL_SWAY_AMPLITUDE
-              : DRAGON_TAIL_SWAY_AMPLITUDE,
-          tailSwayFrequency: isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
-          tailSwayPivotY: isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
-          worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-          meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-          preferUpright: true,
-        },
+        this.getBoidMotionConfig(config, isFishtank, isFishTail, isNatureParrot),
       );
     }
   }
