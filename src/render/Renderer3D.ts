@@ -3069,6 +3069,29 @@ export class Renderer3D {
     }
   }
 
+  private updateStandardBoidSpeciesInstances(
+    config: BoidSpeciesConfig,
+    instances: BirdInstanceSet,
+    entities: Boid[],
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+    isOrganic: boolean,
+    isNatureParrot: boolean,
+  ): void {
+    const isFishTail = isFishtank;
+    this.updateInstances(
+      instances,
+      entities,
+      params.boidMaxSpeed,
+      elapsed,
+      dt,
+      this.getBoidColourStrategy(config, isOrganic, isNature),
+      this.getBoidMotionConfig(config, isFishtank, isFishTail, isNatureParrot),
+    );
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3092,19 +3115,20 @@ export class Renderer3D {
       // now the parrot species' butterflyfish geometry too), so it's
       // safe to sway around the shared pivot with no detachment risk
       // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
-      const isFishTail = isFishtank;
       if (isNatureParrot) {
         this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, isFishtank);
         continue;
       }
-      this.updateInstances(
+      this.updateStandardBoidSpeciesInstances(
+        config,
         instances,
         entities,
-        params.boidMaxSpeed,
         elapsed,
         dt,
-        this.getBoidColourStrategy(config, isOrganic, isNature),
-        this.getBoidMotionConfig(config, isFishtank, isFishTail, isNatureParrot),
+        isNature,
+        isFishtank,
+        isOrganic,
+        isNatureParrot,
       );
     }
   }
