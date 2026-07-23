@@ -33,6 +33,7 @@ import { createDriftingClouds, type DriftingClouds } from './styles/nature/cloud
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
 import { createFireBreathEffects, type FireBreathEffects } from './styles/nature/fireBreath';
 import { createUFOVisual, type UFOVisual } from './ufoEffects';
+import { createSceneRendererHooks, type SceneRendererHooks } from './sceneRenderers/createSceneRendererHooks';
 import { UFO_BEAM_REACH } from '../sim/UFO';
 
 // --- "Arcade" style: bright, saturated emissive colors so the bloom pass
@@ -742,21 +743,6 @@ interface StyleFlags {
   isOrganic: boolean;
 }
 
-interface SceneRendererHooks {
-  setStyleVisibility: () => void;
-  applyStyleTransition: (
-    sim: Simulation,
-    maxDim: number,
-    fishtankBounds: ReturnType<typeof computeFishtankRoomBounds>,
-    wasFishtank: boolean,
-  ) => void;
-  updateEnvironment: (elapsed: number) => void;
-  updateTransientEffects: (sim: Simulation, elapsed: number) => void;
-  configureEnvironmentAnchors: (sim: Simulation, center: THREE.Vector3, maxDim: number) => void;
-  updateFrameAnchors: (sim: Simulation) => void;
-  updateCameraClamp: (sim: Simulation) => void;
-}
-
 interface PredatorRenderFlags {
   isDragon: boolean;
   isShark: boolean;
@@ -1236,11 +1222,11 @@ export class Renderer3D {
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
 
-    this.sceneRenderers = this.createSceneRenderers();
+    this.initializeSceneRenderers();
   }
 
-  private createSceneRenderers(): Record<VisualStyle, SceneRendererHooks> {
-    return {
+  private initializeSceneRenderers(): void {
+    this.sceneRenderers = createSceneRendererHooks({
       nature: {
         setStyleVisibility: () => this.setNatureStyleVisibility(),
         applyStyleTransition: (sim, maxDim, fishtankBounds, wasFishtank) =>
@@ -1271,7 +1257,7 @@ export class Renderer3D {
         updateFrameAnchors: (_sim) => {},
         updateCameraClamp: (_sim) => {},
       },
-    };
+    });
   }
 
   private getSceneRenderer(style: VisualStyle): SceneRendererHooks {
