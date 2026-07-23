@@ -3146,13 +3146,7 @@ export class Renderer3D {
     }
   }
 
-  private updateSceneEffects(
-    sim: Simulation,
-    elapsed: number,
-    dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-  ): void {
+  private updatePostProcessingAndEnvironment(elapsed: number, dt: number, isNature: boolean, isFishtank: boolean): void {
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
@@ -3166,11 +3160,25 @@ export class Renderer3D {
     } as const;
     this.renderer.toneMappingExposure = exposureByTime[params.timeOfDay];
     this.driftingClouds.update(dt);
+  }
+
+  private updateTransientSceneEffects(sim: Simulation, elapsed: number, dt: number, isFishtank: boolean): void {
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
     this.spawnFireFromDragons(sim, elapsed);
     this.fireBreathEffects.update(dt);
     this.updateUfoVisuals(sim, dt, isFishtank);
+  }
+
+  private updateSceneEffects(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+  ): void {
+    this.updatePostProcessingAndEnvironment(elapsed, dt, isNature, isFishtank);
+    this.updateTransientSceneEffects(sim, elapsed, dt, isFishtank);
   }
 
   private updateFishtankCenter(sim: Simulation, isFishtank: boolean): void {
