@@ -115,7 +115,7 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   // buildHookedBeakGeometry biases most of that curl toward the tip
   // already (angle grows with t^1.6), so a modest max angle reads as
   // "mostly straight, hooked tip" instead of the parrot's full hook.
-  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.147, 28, 0.8);
+  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.110, 28, 0.8);
 
   const eyeY = halfLen * headFrac(0.7);
   const eyeX = width * 0.24 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW;

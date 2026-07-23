@@ -1664,20 +1664,23 @@ export class Renderer3D {
     // roll from WORLD_UP instead of shortest-arc quaternion roll freedom.
     preferUpright: boolean = false,
     preserveWingVertexPalette: boolean = false,
+    // True only for small songbird species (sparrow/goldfinch/cardinal/
+    // bluejay) in nature style that have a SmallBirdPalette baked into
+    // their geometry. Kept as an explicit flag rather than inferring from
+    // set.body.geometry.getAttribute('color') because dragon/hawk geometry
+    // also has baked vertex colours (from mergeGeometriesWithColor) and
+    // would incorrectly trigger the white-passthrough branch.
+    useBakedBodyGradient: boolean = false,
   ): void {
     // Detect whether this species' geometry has baked vertex colours on
     // body/wing/tail (small songbirds in nature style) — when it does,
     // pass white (1,1,1) as the instance colour so the gradient shows
     // through unchanged, exactly like the parrot wing palette passthrough.
-    const isNatureStyle = params.visualStyle === 'nature';
-    const isNatureSmallBirdBody = isNatureStyle
-      && getSpeciesColors !== getParrotColors
+    const isNatureSmallBirdBody = useBakedBodyGradient
       && !!set.body.geometry.getAttribute('color');
-    const isNatureSmallBirdWing = isNatureStyle
-      && getSpeciesColors !== getParrotColors
+    const isNatureSmallBirdWing = useBakedBodyGradient
       && !!set.wingLeft.geometry.getAttribute('color');
-    const isNatureSmallBirdTail = isNatureStyle
-      && getSpeciesColors !== getParrotColors
+    const isNatureSmallBirdTail = useBakedBodyGradient
       && !!set.tail?.geometry.getAttribute('color');
 
     for (let i = 0; i < entities.length; i++) {
@@ -2741,6 +2744,9 @@ export class Renderer3D {
           isFishtank ? TANK_VISUAL_SCALE : 1,
           isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
           true,
+          // Small songbird species with SmallBirdPalette baked into body/
+          // wing/tail geometry need white instance colour passthrough.
+          isNature && !!config.natureSmallBirdPalette,
         );
       }
     }
