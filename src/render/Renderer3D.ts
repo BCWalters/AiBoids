@@ -3373,6 +3373,18 @@ export class Renderer3D {
     this.controls.maxDistance = this.computeFishtankMaxDistance(sim);
   }
 
+  private updateCreatureInstances(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+    isOrganic: boolean,
+  ): void {
+    this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+    this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+  }
+
   private getRenderTiming(): { elapsed: number; dt: number } {
     const elapsed = (performance.now() - this.startTime) / 1000;
     const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
@@ -3389,8 +3401,7 @@ export class Renderer3D {
     const { isNature, isFishtank, isOrganic } = flags;
     this.updateFishtankCenter(sim, isFishtank);
     this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
-    this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
-    this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+    this.updateCreatureInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
     this.updateFishtankDynamicCameraClamp(sim, isFishtank);
     this.renderOutput();
   }
