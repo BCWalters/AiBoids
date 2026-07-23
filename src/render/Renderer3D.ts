@@ -1711,6 +1711,182 @@ export class Renderer3D {
     this.bodyQuat.copy(displayQuat);
   }
 
+  private applyInstanceColorsForEntity(
+    set: BirdInstanceSet,
+    i: number,
+    entity: Boid | Predator,
+    baseColor: THREE.Color,
+    highlightColor: THREE.Color,
+    getIntensity: (entity: Boid | Predator) => number,
+    individualVariation: boolean,
+    getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined,
+    bakedWingPalette: boolean,
+    beakColor: THREE.Color | undefined,
+    isNatureSmallBirdBody: boolean,
+    isNatureSmallBirdWing: boolean,
+    isNatureSmallBirdTail: boolean,
+  ): void {
+    const speciesColors = getSpeciesColors?.(entity);
+    let effectiveBase = baseColor;
+    let effectiveWing: THREE.Color | null = null;
+    let effectiveTail: THREE.Color | null = null;
+    let preserveParrotLegPalette = false;
+
+    if (speciesColors) {
+      const isGreenParrotVariant = getSpeciesColors === getParrotColors
+        && params.visualStyle === 'nature'
+        && speciesColors.body.getHex() === 0x44b749
+        && speciesColors.wing.getHex() === 0x44b749;
+      const lockParrotFocusPalette = getSpeciesColors === getParrotColors
+        && params.visualStyle === 'nature'
+        && PARROT_FOCUS_PATTERN_INDEX !== null;
+      if (lockParrotFocusPalette || isGreenParrotVariant) {
+        effectiveBase = speciesColors.body;
+        effectiveWing = speciesColors.wing;
+        effectiveTail = speciesColors.tail;
+      } else {
+        this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
+        effectiveBase = this.variantColor;
+        effectiveWing = this.wingColor;
+        effectiveTail = this.tailColor;
+      }
+    } else if (individualVariation) {
+      baseColor.getHSL(this.hsl);
+      let { h, s, l } = this.hsl;
+      h = (h + (idHash(entity.id, 1) - 0.5) * 0.05 + 1) % 1;
+      s = Math.max(0, Math.min(1, s + (idHash(entity.id, 2) - 0.5) * 0.16));
+      l = Math.max(0, Math.min(1, l + (idHash(entity.id, 3) - 0.5) * 0.18));
+      const morphRoll = idHash(entity.id, 4);
+      if (morphRoll < 0.06) {
+        // Pale/leucistic-like morph: much lighter, slightly desaturated.
+        l = Math.max(0, Math.min(0.92, l + 0.28));
+        s *= 0.6;
+      } else if (morphRoll < 0.1) {
+        // Dark/melanistic-like morph: noticeably darker.
+        l = Math.max(0.05, l - 0.22);
+      } else if (morphRoll < 0.16) {
+        // Warmer, rustier-toned morph: shift hue toward red-orange.
+        h = (h + 0.03) % 1;
+        s = Math.min(1, s + 0.15);
+      }
+      this.variantColor.setHSL(h, s, l);
+      effectiveBase = this.variantColor;
+    }
+    if (isNatureSmallBirdBody) {
+      // Baked gradient body — pass white so the vertex colours show through.
+      this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+    } else {
+      this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
+    }
+    set.body.setColorAt(i, this.stateColor);
+    if (isNatureSmallBirdWing) {
+      // Baked gradient wings — white passthrough; same for tail if baked.
+      this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+      set.wingLeft.setColorAt(i, this.wingColor);
+      set.wingRight.setColorAt(i, this.wingColor);
+      if (set.tail) {
+        if (isNatureSmallBirdTail) {
+          this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+        } else {
+          this.tailColor.copy(this.wingColor);
+        }
+        set.tail.setColorAt(i, this.tailColor);
+      }
+    } else if (effectiveWing) {
+      const preserveParrotWingPalette = getSpeciesColors === getParrotColors
+        && params.visualStyle === 'nature'
+        && bakedWingPalette
+        && !!set.wingLeft.geometry.getAttribute('color');
+      const preserveParrotTailPalette = preserveParrotWingPalette
+        && !!set.tail?.geometry.getAttribute('color');
+      preserveParrotLegPalette = preserveParrotWingPalette
+        && !!set.legs?.geometry.getAttribute('color');
+      // Species with their own distinct wing/tail base colors keep those
+      // hues rather than just darkening the body color.
+      if (preserveParrotWingPalette) {
+        this.wingColor.setRGB(1, 1, 1);
+      } else {
+        this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
+      }
+      set.wingLeft.setColorAt(i, this.wingColor);
+      set.wingRight.setColorAt(i, this.wingColor);
+      if (set.tail) {
+        if (effectiveTail) {
+          if (preserveParrotTailPalette) {
+            this.tailColor.setRGB(1, 1, 1);
+          } else {
+            this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
+          }
+          set.tail.setColorAt(i, this.tailColor);
+        } else {
+          set.tail.setColorAt(i, this.wingColor);
+        }
+      }
+    } else if (individualVariation) {
+      // Wings/tail render a touch darker than the body — real bird wing
+      // feathers are almost always a shade or two darker than the breast/
+      // body plumage, and this reads clearly even at a distance.
+      this.wingColor.copy(this.stateColor).multiplyScalar(0.82);
+      set.wingLeft.setColorAt(i, this.wingColor);
+      set.wingRight.setColorAt(i, this.wingColor);
+      if (set.tail) set.tail.setColorAt(i, this.wingColor);
+    } else {
+      set.wingLeft.setColorAt(i, this.stateColor);
+      set.wingRight.setColorAt(i, this.stateColor);
+      if (set.tail) {
+        // Auto-detect baked vertex colours on the tail (e.g. dragon gradient
+        // tail). Pass white so the gradient shows through; otherwise use
+        // stateColor like the wings.
+        if (set.tail.geometry.getAttribute('color')) {
+          this.tailColor.setRGB(1, 1, 1);
+        } else {
+          this.tailColor.copy(this.stateColor);
+        }
+        set.tail.setColorAt(i, this.tailColor);
+      }
+    }
+    if (set.legs) {
+      if (preserveParrotLegPalette || set.legs.geometry.getAttribute('color')) {
+        // Parrot legs: baked palette feet color, pass through with white.
+        // Small-bird legs: baked species leg color, same white pass-through.
+        this.legsColor.setRGB(1, 1, 1);
+      } else {
+        this.legsColor.copy(this.stateColor);
+      }
+      set.legs.setColorAt(i, this.legsColor);
+    }
+    if (set.beak && beakColor) {
+      // Small per-individual jitter, same treatment as the other parts
+      // — keeps a flock of e.g. cardinals from looking like every
+      // single beak is the identical exact pixel color.
+      this.jitterHSL(this.beakInstanceColor, beakColor, entity.id, 5, 0.04, 0.1, 0.08);
+      set.beak.setColorAt(i, this.beakInstanceColor);
+    }
+  }
+
+  private markInstanceSetNeedsUpdate(set: BirdInstanceSet): void {
+    set.body.instanceMatrix.needsUpdate = true;
+    set.wingLeft.instanceMatrix.needsUpdate = true;
+    set.wingRight.instanceMatrix.needsUpdate = true;
+    if (set.body.instanceColor) set.body.instanceColor.needsUpdate = true;
+    if (set.wingLeft.instanceColor) set.wingLeft.instanceColor.needsUpdate = true;
+    if (set.wingRight.instanceColor) set.wingRight.instanceColor.needsUpdate = true;
+    if (set.tail) {
+      set.tail.instanceMatrix.needsUpdate = true;
+      if (set.tail.instanceColor) set.tail.instanceColor.needsUpdate = true;
+    }
+    if (set.legs) {
+      set.legs.instanceMatrix.needsUpdate = true;
+      if (set.legs.instanceColor) set.legs.instanceColor.needsUpdate = true;
+    }
+    if (set.beak) {
+      set.beak.instanceMatrix.needsUpdate = true;
+      if (set.beak.instanceColor) set.beak.instanceColor.needsUpdate = true;
+    }
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -2070,174 +2246,24 @@ export class Renderer3D {
         }
       }
 
-      // Color-by-state: lerp toward the highlight color as intensity rises.
-      // Three coloring modes, checked in priority order:
-      //  1. getSpeciesColors: a species with distinct, non-uniform plumage
-      //     (e.g. the parrot's macaw-style body/wing/tail colors) — each
-      //     part gets its own small id-derived jitter for individual
-      //     variety, but the three parts stay distinctly different hues
-      //     from each other (that contrast IS the "parrot" visual cue).
-      //  2. individualVariation: the sparrow-type "shades of brown" jitter
-      //     around one shared base color, with occasional distinct morphs.
-      //  3. Flat: every entity in this set renders identically.
-      const speciesColors = getSpeciesColors?.(entity);
-      let effectiveBase = baseColor;
-      let effectiveWing: THREE.Color | null = null;
-      let effectiveTail: THREE.Color | null = null;
-      let preserveParrotLegPalette = false;
-
-      if (speciesColors) {
-        const isGreenParrotVariant = getSpeciesColors === getParrotColors
-          && params.visualStyle === 'nature'
-          && speciesColors.body.getHex() === 0x44b749
-          && speciesColors.wing.getHex() === 0x44b749;
-        const lockParrotFocusPalette = getSpeciesColors === getParrotColors
-          && params.visualStyle === 'nature'
-          && PARROT_FOCUS_PATTERN_INDEX !== null;
-        if (lockParrotFocusPalette || isGreenParrotVariant) {
-          effectiveBase = speciesColors.body;
-          effectiveWing = speciesColors.wing;
-          effectiveTail = speciesColors.tail;
-        } else {
-          this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
-          this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
-          this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
-          effectiveBase = this.variantColor;
-          effectiveWing = this.wingColor;
-          effectiveTail = this.tailColor;
-        }
-      } else if (individualVariation) {
-        baseColor.getHSL(this.hsl);
-        let { h, s, l } = this.hsl;
-        h = (h + (idHash(entity.id, 1) - 0.5) * 0.05 + 1) % 1;
-        s = Math.max(0, Math.min(1, s + (idHash(entity.id, 2) - 0.5) * 0.16));
-        l = Math.max(0, Math.min(1, l + (idHash(entity.id, 3) - 0.5) * 0.18));
-        const morphRoll = idHash(entity.id, 4);
-        if (morphRoll < 0.06) {
-          // Pale/leucistic-like morph: much lighter, slightly desaturated.
-          l = Math.max(0, Math.min(0.92, l + 0.28));
-          s *= 0.6;
-        } else if (morphRoll < 0.1) {
-          // Dark/melanistic-like morph: noticeably darker.
-          l = Math.max(0.05, l - 0.22);
-        } else if (morphRoll < 0.16) {
-          // Warmer, rustier-toned morph: shift hue toward red-orange.
-          h = (h + 0.03) % 1;
-          s = Math.min(1, s + 0.15);
-        }
-        this.variantColor.setHSL(h, s, l);
-        effectiveBase = this.variantColor;
-      }
-      if (isNatureSmallBirdBody) {
-        // Baked gradient body — pass white so the vertex colours show through.
-        this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
-      } else {
-        this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
-      }
-      set.body.setColorAt(i, this.stateColor);
-      if (isNatureSmallBirdWing) {
-        // Baked gradient wings — white passthrough; same for tail if baked.
-        this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
-        set.wingLeft.setColorAt(i, this.wingColor);
-        set.wingRight.setColorAt(i, this.wingColor);
-        if (set.tail) {
-          if (isNatureSmallBirdTail) {
-            this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
-          } else {
-            this.tailColor.copy(this.wingColor);
-          }
-          set.tail.setColorAt(i, this.tailColor);
-        }
-      } else if (effectiveWing) {
-        const preserveParrotWingPalette = getSpeciesColors === getParrotColors
-          && params.visualStyle === 'nature'
-          && bakedWingPalette
-          && !!set.wingLeft.geometry.getAttribute('color');
-        const preserveParrotTailPalette = preserveParrotWingPalette
-          && !!set.tail?.geometry.getAttribute('color');
-        preserveParrotLegPalette = preserveParrotWingPalette
-          && !!set.legs?.geometry.getAttribute('color');
-        // Species with their own distinct wing/tail base colors keep those
-        // hues rather than just darkening the body color.
-        if (preserveParrotWingPalette) {
-          this.wingColor.setRGB(1, 1, 1);
-        } else {
-          this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
-        }
-        set.wingLeft.setColorAt(i, this.wingColor);
-        set.wingRight.setColorAt(i, this.wingColor);
-        if (set.tail) {
-          if (effectiveTail) {
-            if (preserveParrotTailPalette) {
-              this.tailColor.setRGB(1, 1, 1);
-            } else {
-              this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
-            }
-            set.tail.setColorAt(i, this.tailColor);
-          } else {
-            set.tail.setColorAt(i, this.wingColor);
-          }
-        }
-      } else if (individualVariation) {
-        // Wings/tail render a touch darker than the body — real bird wing
-        // feathers are almost always a shade or two darker than the breast/
-        // body plumage, and this reads clearly even at a distance.
-        this.wingColor.copy(this.stateColor).multiplyScalar(0.82);
-        set.wingLeft.setColorAt(i, this.wingColor);
-        set.wingRight.setColorAt(i, this.wingColor);
-        if (set.tail) set.tail.setColorAt(i, this.wingColor);
-      } else {
-        set.wingLeft.setColorAt(i, this.stateColor);
-        set.wingRight.setColorAt(i, this.stateColor);
-        if (set.tail) {
-          // Auto-detect baked vertex colours on the tail (e.g. dragon gradient
-          // tail). Pass white so the gradient shows through; otherwise use
-          // stateColor like the wings.
-          if (set.tail.geometry.getAttribute('color')) {
-            this.tailColor.setRGB(1, 1, 1);
-          } else {
-            this.tailColor.copy(this.stateColor);
-          }
-          set.tail.setColorAt(i, this.tailColor);
-        }
-      }
-      if (set.legs) {
-        if (preserveParrotLegPalette || set.legs.geometry.getAttribute('color')) {
-          // Parrot legs: baked palette feet color, pass through with white.
-          // Small-bird legs: baked species leg color, same white pass-through.
-          this.legsColor.setRGB(1, 1, 1);
-        } else {
-          this.legsColor.copy(this.stateColor);
-        }
-        set.legs.setColorAt(i, this.legsColor);
-      }
-      if (set.beak && beakColor) {
-        // Small per-individual jitter, same treatment as the other parts
-        // — keeps a flock of e.g. cardinals from looking like every
-        // single beak is the identical exact pixel color.
-        this.jitterHSL(this.beakInstanceColor, beakColor, entity.id, 5, 0.04, 0.1, 0.08);
-        set.beak.setColorAt(i, this.beakInstanceColor);
-      }
+      this.applyInstanceColorsForEntity(
+        set,
+        i,
+        entity,
+        baseColor,
+        highlightColor,
+        getIntensity,
+        individualVariation,
+        getSpeciesColors,
+        bakedWingPalette,
+        beakColor,
+        isNatureSmallBirdBody,
+        isNatureSmallBirdWing,
+        isNatureSmallBirdTail,
+      );
     }
 
-    set.body.instanceMatrix.needsUpdate = true;
-    set.wingLeft.instanceMatrix.needsUpdate = true;
-    set.wingRight.instanceMatrix.needsUpdate = true;
-    if (set.body.instanceColor) set.body.instanceColor.needsUpdate = true;
-    if (set.wingLeft.instanceColor) set.wingLeft.instanceColor.needsUpdate = true;
-    if (set.wingRight.instanceColor) set.wingRight.instanceColor.needsUpdate = true;
-    if (set.tail) {
-      set.tail.instanceMatrix.needsUpdate = true;
-      if (set.tail.instanceColor) set.tail.instanceColor.needsUpdate = true;
-    }
-    if (set.legs) {
-      set.legs.instanceMatrix.needsUpdate = true;
-      if (set.legs.instanceColor) set.legs.instanceColor.needsUpdate = true;
-    }
-    if (set.beak) {
-      set.beak.instanceMatrix.needsUpdate = true;
-      if (set.beak.instanceColor) set.beak.instanceColor.needsUpdate = true;
-    }
+    this.markInstanceSetNeedsUpdate(set);
   }
 
   /** Spawns a 3D blood-splatter burst for every not-yet-seen Simulation.catchEvent. */
