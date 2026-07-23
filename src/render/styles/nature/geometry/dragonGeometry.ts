@@ -505,6 +505,12 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
 function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeometry {
   const positions: number[] = [];
 
+  // Tail root sits at the body's rump (Y = -halfLen = -length*0.5) and
+  // slightly below the body's belly axis (Z = -length*0.08), so it
+  // projects rearward from the haunch rather than from the body's center.
+  const yOffset = -length * 0.50;
+  const zOffset = -length * 0.08;
+
   // Walk from the body root (t=0) to the tip (t=1), each entry giving a
   // tapering half-width (used as the tube radius) and a curved (x, y, z)
   // offset — droops downward (-z) and sways gently sideways (x) the
@@ -515,7 +521,7 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   const radii: number[] = [];
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
-    const y = -tailLen * t;
+    const y = yOffset + (-tailLen * t);
     // A gentle upward arc near the body (the sine term) composed with an
     // accelerating downward sweep toward the tip (t^1.6) — together these
     // give the tail a genuine up-then-down S-bend along its length,
@@ -526,7 +532,7 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
     // back upward after the main downward sweep, instead of the curve
     // just bottoming out and staying down — the classic "flick" silhouette
     // real dragon tails are drawn with, rather than a limp noodle.
-    const droop = length * 0.2 * Math.sin(t * Math.PI * 2.2) - length * 0.46 * Math.pow(t, 1.35);
+    const droop = zOffset + length * 0.2 * Math.sin(t * Math.PI * 2.2) - length * 0.46 * Math.pow(t, 1.35);
     const sway = length * 0.16 * Math.sin(t * Math.PI * 0.85);
     path.push(new THREE.Vector3(sway, y, droop));
     radii.push(width * 0.34 * (1 - t) + width * 0.02 * t * (1 - t)); // tapers smoothly to ~0
@@ -552,6 +558,26 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+
+  // Bake a root→tip colour gradient: body purple at the rump attachment
+  // fading to a deep dark purple at the tip. The renderer detects the
+  // presence of this 'color' attribute and passes white as the instance
+  // colour so the gradient shows through unchanged.
+  const rootColor = new THREE.Color(0x5a2880); // matches DRAGON_PREDATOR_BASE
+  const tipColor  = new THREE.Color(0x1a0830); // deep dark purple
+  const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const colors = new Float32Array(posAttr.count * 3);
+  const tailRootY = yOffset;
+  const tailTipY  = yOffset - tailLen;
+  for (let vi = 0; vi < posAttr.count; vi++) {
+    const vy = posAttr.getY(vi);
+    const t = THREE.MathUtils.clamp((vy - tailRootY) / (tailTipY - tailRootY), 0, 1);
+    colors[vi * 3]     = THREE.MathUtils.lerp(rootColor.r, tipColor.r, t);
+    colors[vi * 3 + 1] = THREE.MathUtils.lerp(rootColor.g, tipColor.g, t);
+    colors[vi * 3 + 2] = THREE.MathUtils.lerp(rootColor.b, tipColor.b, t);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
   geometry.computeVertexNormals();
   return geometry;
 }

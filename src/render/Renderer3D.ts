@@ -179,8 +179,8 @@ const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
   // Belly: yellow at beak → lighter yellow toward tail
   headBelly: new THREE.Color(0xf5d327), // yellow near the breast
   tailBelly: new THREE.Color(0xf8ec80), // lighter/paler yellow toward lower belly
-  wing:    new THREE.Color(0x1c1c1c), // black wing root
-  wingTip: new THREE.Color(0x101010), // near-black wing tip
+  wing:    new THREE.Color(0xf5d327), // gold at wing root (matches back/belly colour)
+  wingTip: new THREE.Color(0x151505), // near-black at wing tip
   // Tail: dark gray base → black tip
   tail:    new THREE.Color(0x3a3a3a), // dark gray tail base (not pure black)
   tailTip: new THREE.Color(0x0d0d0d), // near-black tail tip
@@ -226,7 +226,7 @@ const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
 // scallop/bone-tube surface detail added to the wing geometry. These stay
 // deep and saturated (a "black dragon" should still read dark) but leave
 // enough headroom for facet-by-facet lighting variation to show through.
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x6a3399); // deep violet-purple scale
+const DRAGON_PREDATOR_BASE = new THREE.Color(0x5a2880); // deep violet-purple scale (slightly darker)
 const DRAGON_PREDATOR_HUNT = new THREE.Color(0xb355d6); // brighter magenta-purple when locked on
 // Fish tank sharks reuse the dragon's geometry-selection path (isDragon)
 // but must not inherit its purple scale coloring — real sharks read as
@@ -257,6 +257,11 @@ const BOID_WIDTH = 2.6;
 // "reference" boid size, sparrows are scaled down from it (see
 // arcadeSparrowGeometries/natureSparrowGeometries below).
 const SPARROW_SIZE_SCALE = 0.7;
+// Nature small songbirds (sparrow/goldfinch/cardinal/bluejay) are 25% smaller
+// than the base nature boid scale — they should read as noticeably smaller than
+// parrots in the same scene without shrinking so far they lose their silhouette.
+const NATURE_SMALL_BIRD_SIZE = 0.975; // 1.3 * 0.75
+const NATURE_SMALL_BIRD_WIDTH = 1.8;  // 2.4 * 0.75
 const PREDATOR_LENGTH = 12;
 const PREDATOR_WIDTH = 4.4;
 // Dragons should read as dramatically larger than boids, not just a
@@ -1016,8 +1021,8 @@ export class Renderer3D {
     // scale them up to read clearly at the same viewing distance.
     this.natureBoidGeometries = createRealisticBirdGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
     this.natureSparrowGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
-      BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
+      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE * SPARROW_SIZE_SCALE,
+      BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH * SPARROW_SIZE_SCALE,
       new THREE.Color(0x7a6450),
       SPARROW_NATURE_PALETTE,
     );
@@ -1025,13 +1030,13 @@ export class Renderer3D {
     // own gradient palette into the vertex colours so the flock doesn't need
     // a flat per-instance tint (and gains the body/wing/tail gradient look).
     this.natureGoldfinchGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, new THREE.Color(0x8a7060), GOLDFINCH_NATURE_PALETTE,
+      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x8a7060), GOLDFINCH_NATURE_PALETTE,
     );
     this.natureCardinalGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, new THREE.Color(0x8a6a5a), CARDINAL_NATURE_PALETTE,
+      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x8a6a5a), CARDINAL_NATURE_PALETTE,
     );
     this.natureBluejayGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, new THREE.Color(0x7a7060), BLUEJAY_NATURE_PALETTE,
+      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x7a7060), BLUEJAY_NATURE_PALETTE,
     );
     this.natureSmallSpeciesGeometries.set('goldfinch', this.natureGoldfinchGeometries);
     this.natureSmallSpeciesGeometries.set('cardinal',  this.natureCardinalGeometries);
@@ -1056,8 +1061,8 @@ export class Renderer3D {
     // without touching nature's geometry at all.
     this.fishtankBoidGeometries = createFishtankFishGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
     this.fishtankSparrowGeometries = createFishtankFishGeometries(
-      BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
-      BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
+      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE * SPARROW_SIZE_SCALE,
+      BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH * SPARROW_SIZE_SCALE,
     );
     this.fishtankButterflyfishGeometries = createButterflyfishGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
     this.fishtankPredatorGeometries = createFishtankFishGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
@@ -2269,7 +2274,17 @@ export class Renderer3D {
       } else {
         set.wingLeft.setColorAt(i, this.stateColor);
         set.wingRight.setColorAt(i, this.stateColor);
-        if (set.tail) set.tail.setColorAt(i, this.stateColor);
+        if (set.tail) {
+          // Auto-detect baked vertex colours on the tail (e.g. dragon gradient
+          // tail). Pass white so the gradient shows through; otherwise use
+          // stateColor like the wings.
+          if (set.tail.geometry.getAttribute('color')) {
+            this.tailColor.setRGB(1, 1, 1);
+          } else {
+            this.tailColor.copy(this.stateColor);
+          }
+          set.tail.setColorAt(i, this.tailColor);
+        }
       }
       if (set.legs) {
         if (preserveParrotLegPalette || set.legs.geometry.getAttribute('color')) {
