@@ -1887,6 +1887,122 @@ export class Renderer3D {
     }
   }
 
+  private applyEntityInstanceMatrices(
+    set: BirdInstanceSet,
+    i: number,
+    entity: Boid | Predator,
+    pos: { x: number; y: number; z: number },
+    vel: { x: number; y: number; z: number },
+    speed: number,
+    maxSpeed: number,
+    elapsed: number,
+    dt: number,
+    entityScale: number,
+    blendStrength: number,
+    climbWeight: number,
+    diveWeight: number,
+    turnWeight: number,
+    panicWeight: number,
+    cruiseWeight: number,
+    flapFrequency: number,
+    flapIdleAmplitude: number,
+    flapSpeedAmplitude: number,
+    finRestBiasRad: number,
+    tailSwayAxis: THREE.Vector3,
+    tailSwayAmplitude: number,
+    tailSwayFrequency: number | undefined,
+    tailSwayPivotY: number,
+    worldScale: number,
+    meshScaleBoost: number,
+    uprightStyle: UprightStyle,
+  ): void {
+    // Body: just position + orientation, no flap.
+    if (worldScale !== 1) {
+      this.dummy.position.set(
+        this.fishtankCenter.x + (pos.x - this.fishtankCenter.x) * worldScale,
+        this.fishtankCenter.y + (pos.y - this.fishtankCenter.y) * worldScale,
+        this.fishtankCenter.z + (pos.z - this.fishtankCenter.z) * worldScale,
+      );
+    } else {
+      this.dummy.position.set(pos.x, pos.y, pos.z);
+    }
+    this.dummy.quaternion.copy(this.bodyQuat);
+    this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
+    this.dummy.updateMatrix();
+    set.body.setMatrixAt(i, this.dummy.matrix);
+    if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
+    if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
+    if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
+
+    // Wings: apply an extra local flap rotation around the forward axis.
+    const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
+    const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
+    const stateResponse = (uprightStyle === 'dragon' || uprightStyle === 'unicorn' || uprightStyle === 'shark') ? 0.55 : 0.75;
+    const stateFrequencyMultRaw =
+      1
+      + blendStrength * stateResponse * (
+        climbWeight * CLIMB_FLAP_FREQ_BOOST
+        - diveWeight * DIVE_FLAP_FREQ_CUT
+        + turnWeight * TURN_FLAP_FREQ_BOOST
+        + panicWeight * PANIC_FLAP_FREQ_BOOST
+        - cruiseWeight * 0.04
+      );
+    const stateAmplitudeMultRaw =
+      1
+      + blendStrength * stateResponse * (
+        climbWeight * CLIMB_FLAP_AMP_BOOST
+        + diveWeight * DIVE_FLAP_AMP_BOOST
+        + turnWeight * TURN_FLAP_AMP_BOOST
+        + panicWeight * PANIC_FLAP_AMP_BOOST
+        - cruiseWeight * 0.06
+      );
+    const stateFrequencyMult = THREE.MathUtils.clamp(stateFrequencyMultRaw, 0.8, 1.18);
+    const stateAmplitudeMult = THREE.MathUtils.clamp(stateAmplitudeMultRaw, 0.82, 1.24);
+    const amplitude = amplitudeBase * stateAmplitudeMult;
+    let effectiveFrequency = flapFrequency * stateFrequencyMult;
+    if (uprightStyle === 'unicorn') {
+      const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
+      const freqMultiplier = climbFrac >= 0
+        ? 1 + UNICORN_CLIMB_FLAP_BOOST * climbFrac
+        : 1 - UNICORN_DESCEND_FLAP_CUT * -climbFrac;
+      effectiveFrequency = flapFrequency * freqMultiplier * stateFrequencyMult;
+    }
+    const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
+    const phase = prevPhase + effectiveFrequency * dt;
+    this.flapPhase.set(entity, phase);
+    const flapAngle = amplitude * Math.sin(phase) + finRestBiasRad;
+
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingLeft.setMatrixAt(i, this.dummy.matrix);
+
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingRight.setMatrixAt(i, this.dummy.matrix);
+
+    // Tail sway (dragons/sharks only).
+    if (!set.tail) return;
+    if (!(uprightStyle === 'dragon' || uprightStyle === 'shark')) return;
+    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
+    const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
+    this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
+    this.dummy.updateMatrix();
+    if (tailSwayPivotY !== 0) {
+      this.dummy.quaternion.copy(this.bodyQuat);
+      this.dummy.updateMatrix();
+      this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
+      this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
+      this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
+      this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
+      this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
+      this.dummy.matrix.multiply(this.tailPivotMatrix);
+    }
+    set.tail.setMatrixAt(i, this.dummy.matrix);
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -2121,130 +2237,35 @@ export class Renderer3D {
       }
 
       if (keepUpright) this.applyUprightDisplaySmoothing(entity, dt, uprightStyle);
-      // Body: just position + orientation, no flap. Caught boids shrink
-      // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
-      // worldScale !== 1 (fishtank only) grows the position outward from
-      // fishtankCenter rather than the coordinate origin, so the whole
-      // flock spreads to fill the visually-bigger tank symmetrically
-      // instead of shifting toward one corner of it.
-      if (worldScale !== 1) {
-        this.dummy.position.set(
-          this.fishtankCenter.x + (pos.x - this.fishtankCenter.x) * worldScale,
-          this.fishtankCenter.y + (pos.y - this.fishtankCenter.y) * worldScale,
-          this.fishtankCenter.z + (pos.z - this.fishtankCenter.z) * worldScale,
-        );
-      } else {
-        this.dummy.position.set(pos.x, pos.y, pos.z);
-      }
-      this.dummy.quaternion.copy(this.bodyQuat);
-      this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
-      this.dummy.updateMatrix();
-      set.body.setMatrixAt(i, this.dummy.matrix);
-      if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
-      if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
-      // Dragon/shark tails get an extra sway (see DRAGON_TAIL_SWAY_
-      // AMPLITUDE / SHARK_TAIL_SWAY_AMPLITUDE) computed below once the
-      // wingbeat phase is known; every other creature's tail just
-      // follows the body rigidly, as before.
-      if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
-
-      // Wings: apply an extra local flap rotation around the forward axis
-      // before combining with the shared body orientation, so both wings
-      // swing up/down in sync regardless of which way the bird is heading.
-      const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
-      const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
-      const stateResponse = (uprightStyle === 'dragon' || uprightStyle === 'unicorn' || uprightStyle === 'shark') ? 0.55 : 0.75;
-      const stateFrequencyMultRaw =
-        1
-        + blendStrength * stateResponse * (
-          climbWeight * CLIMB_FLAP_FREQ_BOOST
-          - diveWeight * DIVE_FLAP_FREQ_CUT
-          + turnWeight * TURN_FLAP_FREQ_BOOST
-          + panicWeight * PANIC_FLAP_FREQ_BOOST
-          - cruiseWeight * 0.04
-        );
-      const stateAmplitudeMultRaw =
-        1
-        + blendStrength * stateResponse * (
-          climbWeight * CLIMB_FLAP_AMP_BOOST
-          + diveWeight * DIVE_FLAP_AMP_BOOST
-          + turnWeight * TURN_FLAP_AMP_BOOST
-          + panicWeight * PANIC_FLAP_AMP_BOOST
-          - cruiseWeight * 0.06
-        );
-      const stateFrequencyMult = THREE.MathUtils.clamp(stateFrequencyMultRaw, 0.8, 1.18);
-      const stateAmplitudeMult = THREE.MathUtils.clamp(stateAmplitudeMultRaw, 0.82, 1.24);
-      const amplitude = amplitudeBase * stateAmplitudeMult;
-      let phase: number;
-      let effectiveFrequency = flapFrequency * stateFrequencyMult;
-      if (uprightStyle === 'unicorn') {
-        // Flap frequency scales with vertical velocity instead of the
-        // constant-frequency formula everyone else uses — "flap faster
-        // as they go up, slower as they descend" — so the phase has to
-        // be integrated frame-by-frame.
-        const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
-        const freqMultiplier = climbFrac >= 0
-          ? 1 + UNICORN_CLIMB_FLAP_BOOST * climbFrac
-          : 1 - UNICORN_DESCEND_FLAP_CUT * -climbFrac;
-        effectiveFrequency = flapFrequency * freqMultiplier * stateFrequencyMult;
-      }
-      const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
-      phase = prevPhase + effectiveFrequency * dt;
-      this.flapPhase.set(entity, phase);
-      const flapAngle = amplitude * Math.sin(phase) + finRestBiasRad;
-
-      this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
-      this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-      this.dummy.updateMatrix();
-      set.wingLeft.setMatrixAt(i, this.dummy.matrix);
-
-      this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
-      this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-      this.dummy.updateMatrix();
-      set.wingRight.setMatrixAt(i, this.dummy.matrix);
-
-      // Tail sway (dragons/sharks only): swing the tail around
-      // tailSwayAxis — pitch (up/down) for a dragon's whip tail, yaw
-      // (side to side) for a shark's swimming tail beat — using its own
-      // phase (independent frequency, but still offset from the fin/
-      // wing motion) so the tail reads as part of the same continuous
-      // motion rather than an unrelated animation, without necessarily
-      // moving in lockstep with it.
-      if (set.tail) {
-        if (uprightStyle === 'dragon' || uprightStyle === 'shark') {
-          const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
-          const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
-          this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
-          this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
-          this.dummy.updateMatrix();
-          if (tailSwayPivotY !== 0) {
-            // The tail geometry's own root vertex sits at local
-            // (0, tailSwayPivotY, 0) — the body's actual (static) tail
-            // attachment point — not at the shared local origin. Simply
-            // rotating around the origin (as above) would swing that
-            // root vertex through an arc away from the body, since it's
-            // some distance from the pivot, making the tail look
-            // detached/loose rather than hinged at a fixed joint. So
-            // instead of baking tailSwayQuat directly into dummy's own
-            // quaternion, compose translate(+pivot) * rotate(tailSwayQuat)
-            // * translate(-pivot) as an *extra* matrix applied in the
-            // tail's own local space (before dummy's position/bodyQuat),
-            // so the root vertex — which lands exactly on the pivot
-            // point after that first translate — stays fixed under the
-            // rotation, and only the fin's own outward geometry visibly
-            // swings, matching how a real tail flexes at its base.
-            this.dummy.quaternion.copy(this.bodyQuat);
-            this.dummy.updateMatrix();
-            this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
-            this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
-            this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
-            this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
-            this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
-            this.dummy.matrix.multiply(this.tailPivotMatrix);
-          }
-          set.tail.setMatrixAt(i, this.dummy.matrix);
-        }
-      }
+      this.applyEntityInstanceMatrices(
+        set,
+        i,
+        entity,
+        pos,
+        vel,
+        speed,
+        maxSpeed,
+        elapsed,
+        dt,
+        entityScale,
+        blendStrength,
+        climbWeight,
+        diveWeight,
+        turnWeight,
+        panicWeight,
+        cruiseWeight,
+        flapFrequency,
+        flapIdleAmplitude,
+        flapSpeedAmplitude,
+        finRestBiasRad,
+        tailSwayAxis,
+        tailSwayAmplitude,
+        tailSwayFrequency,
+        tailSwayPivotY,
+        worldScale,
+        meshScaleBoost,
+        uprightStyle,
+      );
 
       this.applyInstanceColorsForEntity(
         set,
