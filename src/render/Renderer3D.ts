@@ -3200,16 +3200,7 @@ export class Renderer3D {
     this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
   }
 
-  private updateFishtankDynamicCameraClamp(sim: Simulation, isFishtank: boolean): void {
-    if (!isFishtank) return;
-    // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
-    // maxCameraDistance (set once, in ensureScene) has to satisfy the
-    // *worst-case* permitted tilt at all times, which is overly
-    // conservative at/near a level (untitled) view — there's no
-    // floor/ceiling to clip through at all when looking straight
-    // across the room. Recomputed every frame from the camera's current
-    // polar angle so level view can zoom farther while steep tilts keep
-    // safe clearance to walls/floor/ceiling.
+  private computeFishtankMaxDistance(sim: Simulation): number {
     const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
     const polarAngle = this.controls.getPolarAngle();
     const elevation = Math.abs(polarAngle - Math.PI / 2);
@@ -3220,7 +3211,20 @@ export class Renderer3D {
     const cosE = Math.cos(elevation);
     const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
     const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
-    this.controls.maxDistance = Math.min(vertCap, horizCap);
+    return Math.min(vertCap, horizCap);
+  }
+
+  private updateFishtankDynamicCameraClamp(sim: Simulation, isFishtank: boolean): void {
+    if (!isFishtank) return;
+    // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
+    // maxCameraDistance (set once, in ensureScene) has to satisfy the
+    // *worst-case* permitted tilt at all times, which is overly
+    // conservative at/near a level (untitled) view — there's no
+    // floor/ceiling to clip through at all when looking straight
+    // across the room. Recomputed every frame from the camera's current
+    // polar angle so level view can zoom farther while steep tilts keep
+    // safe clearance to walls/floor/ceiling.
+    this.controls.maxDistance = this.computeFishtankMaxDistance(sim);
   }
 
   render(sim: Simulation): void {
