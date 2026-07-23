@@ -3144,18 +3144,40 @@ export class Renderer3D {
     if (!this.hasAnyPredatorInstances()) return;
     const { isDragon, isShark } = this.getPredatorRenderFlags(isOrganic, isFishtank);
     const { hawks, unicorns } = this.partitionPredators(sim.predators);
+    this.updateHawkPredatorInstances(hawks, elapsed, dt, isNature, isFishtank, isOrganic, isDragon, isShark);
+    this.updateUnicornPredatorInstances(unicorns, elapsed, dt, isFishtank, isOrganic);
+  }
+
+  private updateHawkPredatorInstances(
+    hawks: Predator[],
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+    isOrganic: boolean,
+    isDragon: boolean,
+    isShark: boolean,
+  ): void {
     const hawkInstances = this.predatorInstances.get('hawk');
-    if (hawkInstances) {
-      this.updateInstances(
-        hawkInstances,
-        hawks,
-        params.predatorMaxSpeed,
-        elapsed,
-        dt,
-        this.getHawkColourStrategy(isDragon, isFishtank, isOrganic, isNature),
-        this.getHawkMotionConfig(isDragon, isShark, isFishtank),
-      );
-    }
+    if (!hawkInstances) return;
+    this.updateInstances(
+      hawkInstances,
+      hawks,
+      params.predatorMaxSpeed,
+      elapsed,
+      dt,
+      this.getHawkColourStrategy(isDragon, isFishtank, isOrganic, isNature),
+      this.getHawkMotionConfig(isDragon, isShark, isFishtank),
+    );
+  }
+
+  private updateUnicornPredatorInstances(
+    unicorns: Predator[],
+    elapsed: number,
+    dt: number,
+    isFishtank: boolean,
+    isOrganic: boolean,
+  ): void {
     const unicornInstances = this.predatorInstances.get('unicorn');
     if (!unicornInstances) return;
     this.updateInstances(
