@@ -2915,7 +2915,8 @@ export class Renderer3D {
     return boidsBySpecies.get(species) ?? [];
   }
 
-  private getPredatorRenderFlags(isOrganic: boolean, isFishtank: boolean): { isDragon: boolean; isShark: boolean } {
+  private getPredatorRenderFlags(flags: StyleFlags): PredatorRenderFlags {
+    const { isOrganic, isFishtank } = flags;
     const isDragon = isOrganic && params.dragonPredators;
     const isShark = isDragon && isFishtank;
     return { isDragon, isShark };
@@ -2931,7 +2932,9 @@ export class Renderer3D {
     return { hawks, unicorns };
   }
 
-  private getHawkColourStrategy(isDragon: boolean, isFishtank: boolean, isOrganic: boolean, isNature: boolean): ColourStrategy {
+  private getHawkColourStrategy(flags: StyleFlags, renderFlags: PredatorRenderFlags): ColourStrategy {
+    const { isNature, isFishtank, isOrganic } = flags;
+    const { isDragon } = renderFlags;
     return {
       baseColor: isDragon
         ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE)
@@ -2946,7 +2949,9 @@ export class Renderer3D {
     };
   }
 
-  private getHawkMotionConfig(isDragon: boolean, isShark: boolean, isFishtank: boolean): MotionConfig {
+  private getHawkMotionConfig(flags: StyleFlags, renderFlags: PredatorRenderFlags): MotionConfig {
+    const { isFishtank } = flags;
+    const { isDragon, isShark } = renderFlags;
     return {
       flapFrequency: isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
       flapIdleAmplitude: isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
@@ -2965,7 +2970,8 @@ export class Renderer3D {
     };
   }
 
-  private getUnicornColourStrategy(isOrganic: boolean, isFishtank: boolean): ColourStrategy {
+  private getUnicornColourStrategy(flags: StyleFlags): ColourStrategy {
+    const { isOrganic, isFishtank } = flags;
     return {
       baseColor: isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
       highlightColor: isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
@@ -2978,7 +2984,8 @@ export class Renderer3D {
     };
   }
 
-  private getUnicornMotionConfig(isFishtank: boolean): MotionConfig {
+  private getUnicornMotionConfig(flags: StyleFlags): MotionConfig {
+    const { isFishtank } = flags;
     return {
       flapFrequency: UNICORN_FLAP_FREQUENCY,
       flapIdleAmplitude: UNICORN_FLAP_IDLE_AMPLITUDE,
@@ -3062,8 +3069,7 @@ export class Renderer3D {
     sim: Simulation,
     flags: StyleFlags,
   ): PredatorUpdateContext {
-    const { isOrganic, isFishtank } = flags;
-    const renderFlags = this.getPredatorRenderFlags(isOrganic, isFishtank);
+    const renderFlags = this.getPredatorRenderFlags(flags);
     const { hawks, unicorns } = this.partitionPredators(sim.predators);
     return { hawks, unicorns, renderFlags };
   }
@@ -3208,16 +3214,14 @@ export class Renderer3D {
   ): void {
     const hawkInstances = this.predatorInstances.get('hawk');
     if (!hawkInstances) return;
-    const { isNature, isFishtank, isOrganic } = flags;
-    const { isDragon, isShark } = renderFlags;
     this.updateInstances(
       hawkInstances,
       hawks,
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      this.getHawkColourStrategy(isDragon, isFishtank, isOrganic, isNature),
-      this.getHawkMotionConfig(isDragon, isShark, isFishtank),
+      this.getHawkColourStrategy(flags, renderFlags),
+      this.getHawkMotionConfig(flags, renderFlags),
     );
   }
 
@@ -3229,15 +3233,14 @@ export class Renderer3D {
   ): void {
     const unicornInstances = this.predatorInstances.get('unicorn');
     if (!unicornInstances) return;
-    const { isFishtank, isOrganic } = flags;
     this.updateInstances(
       unicornInstances,
       unicorns,
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      this.getUnicornColourStrategy(isOrganic, isFishtank),
-      this.getUnicornMotionConfig(isFishtank),
+      this.getUnicornColourStrategy(flags),
+      this.getUnicornMotionConfig(flags),
     );
   }
 
