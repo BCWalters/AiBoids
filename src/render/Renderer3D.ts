@@ -3036,6 +3036,39 @@ export class Renderer3D {
       || this.predatorInstances.get('unicorn') !== undefined;
   }
 
+  private updateNatureParrotInstances(
+    config: BoidSpeciesConfig,
+    instances: BirdInstanceSet,
+    entities: Boid[],
+    elapsed: number,
+    dt: number,
+    isFishtank: boolean,
+  ): void {
+    const { neutralEntities, profileEntities } = this.partitionNatureParrotEntities(entities);
+    this.updateInstances(
+      instances,
+      neutralEntities,
+      params.boidMaxSpeed,
+      elapsed,
+      dt,
+      this.getParrotColourStrategy(config, false),
+      this.getBoidMotionConfig(config, isFishtank, false, true),
+    );
+    for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
+      const profileSet = this.parrotProfileInstances.get(profile);
+      if (!profileSet) continue;
+      this.updateInstances(
+        profileSet,
+        profileEntities.get(profile) ?? [],
+        params.boidMaxSpeed,
+        elapsed,
+        dt,
+        this.getParrotColourStrategy(config, true),
+        this.getBoidMotionConfig(config, isFishtank, false, true),
+      );
+    }
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3061,29 +3094,7 @@ export class Renderer3D {
       // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
       const isFishTail = isFishtank;
       if (isNatureParrot) {
-        const { neutralEntities, profileEntities } = this.partitionNatureParrotEntities(entities);
-        this.updateInstances(
-          instances,
-          neutralEntities,
-          params.boidMaxSpeed,
-          elapsed,
-          dt,
-          this.getParrotColourStrategy(config, false),
-          this.getBoidMotionConfig(config, isFishtank, false, true),
-        );
-        for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
-          const profileSet = this.parrotProfileInstances.get(profile);
-          if (!profileSet) continue;
-          this.updateInstances(
-            profileSet,
-            profileEntities.get(profile) ?? [],
-            params.boidMaxSpeed,
-            elapsed,
-            dt,
-            this.getParrotColourStrategy(config, true),
-            this.getBoidMotionConfig(config, isFishtank, false, true),
-          );
-        }
+        this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, isFishtank);
         continue;
       }
       this.updateInstances(
