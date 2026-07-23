@@ -509,7 +509,7 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   // slightly below the body's belly axis (Z = -length*0.08), so it
   // projects rearward from the haunch rather than from the body's center.
   const yOffset = -length * 0.25;
-  const zOffset = length * 0.06; // lifted slightly above center (positive Z = dorsal/up)
+  const zOffset = length * 0.02; // slight lift, pulled back down from 0.06
 
   // Walk from the body root (t=0) to the tip (t=1), each entry giving a
   // tapering half-width (used as the tube radius) and a curved (x, y, z)
