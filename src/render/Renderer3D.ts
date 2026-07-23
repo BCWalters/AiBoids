@@ -2887,6 +2887,22 @@ export class Renderer3D {
     return { neutralEntities, profileEntities };
   }
 
+  private getPredatorRenderFlags(isOrganic: boolean, isFishtank: boolean): { isDragon: boolean; isShark: boolean } {
+    const isDragon = isOrganic && params.dragonPredators;
+    const isShark = isDragon && isFishtank;
+    return { isDragon, isShark };
+  }
+
+  private partitionPredators(predators: Predator[]): { hawks: Predator[]; unicorns: Predator[] } {
+    const hawks: Predator[] = [];
+    const unicorns: Predator[] = [];
+    for (const predator of predators) {
+      if (predator.kind === 'unicorn') unicorns.push(predator);
+      else hawks.push(predator);
+    }
+    return { hawks, unicorns };
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3021,11 +3037,10 @@ export class Renderer3D {
     isFishtank: boolean,
     isOrganic: boolean,
   ): void {
+    const { isDragon, isShark } = this.getPredatorRenderFlags(isOrganic, isFishtank);
+    const { hawks, unicorns } = this.partitionPredators(sim.predators);
     const hawkInstances = this.predatorInstances.get('hawk');
     if (hawkInstances) {
-      const isDragon = isOrganic && params.dragonPredators;
-      const isShark = isDragon && isFishtank;
-      const hawks = sim.predators.filter((predator) => predator.kind !== 'unicorn');
       this.updateInstances(
         hawkInstances,
         hawks,
@@ -3062,10 +3077,9 @@ export class Renderer3D {
         },
       );
     }
-
     const unicornInstances = this.predatorInstances.get('unicorn');
     if (!unicornInstances) return;
-    const unicorns = sim.predators.filter((predator) => predator.kind === 'unicorn');
+    if (!unicornInstances) return;
     this.updateInstances(
       unicornInstances,
       unicorns,
