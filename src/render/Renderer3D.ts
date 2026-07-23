@@ -685,6 +685,17 @@ interface ResolvedMotionConfig {
   preferUpright: boolean;
 }
 
+interface ResolvedColourStrategy {
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Boid | Predator) => number;
+  individualVariation: boolean;
+  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  bakedWingPalette: boolean;
+  bakedBodyGradient: boolean;
+  beakColor: THREE.Color | undefined;
+}
+
 interface StyleFlags {
   isNature: boolean;
   isFishtank: boolean;
@@ -2314,6 +2325,30 @@ export class Renderer3D {
     };
   }
 
+  private resolveColourStrategy(colours: ColourStrategy): ResolvedColourStrategy {
+    const {
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation = false,
+      getSpeciesColors,
+      bakedWingPalette = false,
+      bakedBodyGradient = false,
+      beakColor,
+    } = colours;
+
+    return {
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      bakedBodyGradient,
+      beakColor,
+    };
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -2327,12 +2362,12 @@ export class Renderer3D {
       baseColor,
       highlightColor,
       getIntensity,
-      individualVariation = false,
+      individualVariation,
       getSpeciesColors,
-      bakedWingPalette = false,
-      bakedBodyGradient = false,
+      bakedWingPalette,
+      bakedBodyGradient,
       beakColor,
-    } = colours;
+    } = this.resolveColourStrategy(colours);
     const {
       flapFrequency,
       flapIdleAmplitude,
