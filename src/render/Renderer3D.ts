@@ -3118,28 +3118,37 @@ export class Renderer3D {
     );
   }
 
+  private applyUfoVisualState(
+    visual: UFOVisual,
+    ufo: Simulation['ufos'][number] | undefined,
+    isFishtank: boolean,
+    ufoWorldScale: number,
+    ufoBeamLength: number,
+  ): void {
+    if (ufo) {
+      if (isFishtank) {
+        this.tmpVec3.set(
+          this.fishtankCenter.x + (ufo.position.x - this.fishtankCenter.x) * ufoWorldScale,
+          this.fishtankCenter.y + (ufo.position.y - this.fishtankCenter.y) * ufoWorldScale,
+          this.fishtankCenter.z + (ufo.position.z - this.fishtankCenter.z) * ufoWorldScale,
+        );
+      } else {
+        this.tmpVec3.set(ufo.position.x, ufo.position.y, ufo.position.z);
+      }
+      visual.setState(true, this.tmpVec3, ufo.beamStrength, ufoBeamLength, ufoWorldScale);
+      return;
+    }
+    visual.setState(false, this.tmpVec3, 0, 0);
+  }
+
   private updateUfoVisuals(sim: Simulation, dt: number, isFishtank: boolean): void {
     // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
     // slots beyond the current active count are simply hidden.
     const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
     const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
     for (let i = 0; i < this.ufoVisuals.length; i++) {
-      const ufo = sim.ufos[i];
       const visual = this.ufoVisuals[i];
-      if (ufo) {
-        if (isFishtank) {
-          this.tmpVec3.set(
-            this.fishtankCenter.x + (ufo.position.x - this.fishtankCenter.x) * ufoWorldScale,
-            this.fishtankCenter.y + (ufo.position.y - this.fishtankCenter.y) * ufoWorldScale,
-            this.fishtankCenter.z + (ufo.position.z - this.fishtankCenter.z) * ufoWorldScale,
-          );
-        } else {
-          this.tmpVec3.set(ufo.position.x, ufo.position.y, ufo.position.z);
-        }
-        visual.setState(true, this.tmpVec3, ufo.beamStrength, ufoBeamLength, ufoWorldScale);
-      } else {
-        visual.setState(false, this.tmpVec3, 0, 0);
-      }
+      this.applyUfoVisualState(visual, sim.ufos[i], isFishtank, ufoWorldScale, ufoBeamLength);
       visual.update(dt);
     }
   }
