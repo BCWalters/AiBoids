@@ -80,7 +80,7 @@ const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing:
 //
 // Rather than one flat parrot palette, pick from a handful of real-world
 // macaw/parrot color patterns per-individual (see PARROT_NATURE_VARIANTS'
-// use in getParrotColors below) so the flock reads as visually diverse
+// use in getParrotColorsForFlags below) so the flock reads as visually diverse
 // rather than a uniform species, the way small songbirds do (goldfinch/
 // cardinal/bluejay are each their own distinct color already; a single-
 // hue parrot stood out as flatter/less varied than those by comparison).
@@ -115,7 +115,7 @@ const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
 // own distinct set of color patterns (real-world butterflyfish are
 // commonly yellow/white/orange/blue, often striped combinations of
 // those) rather than reusing the nature style's macaw palette above —
-// see getParrotColors' visualStyle branch below. `body` is the tinted,
+// see getParrotColorsForFlags' style-flag branch below. `body` is the tinted,
 // stripe-alternating hue (multiplied onto WHITE_VERTEX_COLOR in
 // butterflyfishGeometry.ts); `wing`/`tail` pick complementary accent
 // colors for the pectoral fins and caudal fin.
@@ -226,8 +226,8 @@ const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
 // scallop/bone-tube surface detail added to the wing geometry. These stay
 // deep and saturated (a "black dragon" should still read dark) but leave
 // enough headroom for facet-by-facet lighting variation to show through.
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x220e42); // very dark deep purple body
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0x6a28a8); // deeper purple when locked on (was bright magenta)
+const DRAGON_PREDATOR_BASE = new THREE.Color(0x61339b); // matched to the visible root tone at the tail base
+const DRAGON_PREDATOR_HUNT = new THREE.Color(0x7b4fc2); // brighter chase tint while staying in the same palette
 // Fish tank sharks reuse the dragon's geometry-selection path (isDragon)
 // but must not inherit its purple scale coloring — real sharks read as
 // medium gray, not violet. Kept as separate constants (rather than
@@ -594,6 +594,8 @@ interface ColourStrategy {
   /** True for nature small songbirds with a SmallBirdPalette baked into body/
    * wing/tail geometry — passes white so the gradient shows through. */
   bakedBodyGradient?: boolean;
+  /** Enables nature-parrot-specific palette lock/passthrough behavior. */
+  useNatureParrotPalette?: boolean;
   beakColor?: THREE.Color;
 }
 
@@ -618,6 +620,147 @@ interface MotionConfig {
   worldScale?: number;
   meshScaleBoost?: number;
   preferUpright?: boolean;
+}
+type UprightStyle = NonNullable<MotionConfig['uprightStyle']>;
+
+interface EntityInstanceMatrixArgs {
+  set: BirdInstanceSet;
+  index: number;
+  entity: Boid | Predator;
+  position: { x: number; y: number; z: number };
+  velocity: { x: number; y: number; z: number };
+  speed: number;
+  maxSpeed: number;
+  elapsed: number;
+  dt: number;
+  entityScale: number;
+  blendStrength: number;
+  climbWeight: number;
+  diveWeight: number;
+  turnWeight: number;
+  panicWeight: number;
+  cruiseWeight: number;
+  flapFrequency: number;
+  flapIdleAmplitude: number;
+  flapSpeedAmplitude: number;
+  finRestBiasRad: number;
+  tailSwayAxis: THREE.Vector3;
+  tailSwayAmplitude: number;
+  tailSwayFrequency: number | undefined;
+  tailSwayPivotY: number;
+  worldScale: number;
+  meshScaleBoost: number;
+  uprightStyle: UprightStyle;
+}
+
+interface EntityInstanceColorArgs {
+  set: BirdInstanceSet;
+  index: number;
+  entity: Boid | Predator;
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Boid | Predator) => number;
+  individualVariation: boolean;
+  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  bakedWingPalette: boolean;
+  useNatureParrotPalette: boolean;
+  beakColor: THREE.Color | undefined;
+  isNatureSmallBirdBody: boolean;
+  isNatureSmallBirdWing: boolean;
+  isNatureSmallBirdTail: boolean;
+}
+
+interface ResolvedMotionConfig {
+  flapFrequency: number;
+  flapIdleAmplitude: number;
+  flapSpeedAmplitude: number;
+  getScale: (entity: Boid | Predator) => number;
+  keepUpright: boolean;
+  uprightStyle: UprightStyle;
+  bankScale: number;
+  finRestBiasRad: number;
+  tailSwayAxis: THREE.Vector3;
+  tailSwayAmplitude: number;
+  tailSwayFrequency: number | undefined;
+  tailSwayPivotY: number;
+  worldScale: number;
+  meshScaleBoost: number;
+  preferUpright: boolean;
+}
+
+interface ResolvedColourStrategy {
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Boid | Predator) => number;
+  individualVariation: boolean;
+  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  bakedWingPalette: boolean;
+  bakedBodyGradient: boolean;
+  useNatureParrotPalette: boolean;
+  beakColor: THREE.Color | undefined;
+}
+
+interface UpdateEntityInstanceArgs {
+  set: BirdInstanceSet;
+  index: number;
+  entity: Boid | Predator;
+  maxSpeed: number;
+  elapsed: number;
+  dt: number;
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Boid | Predator) => number;
+  individualVariation: boolean;
+  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  bakedWingPalette: boolean;
+  useNatureParrotPalette: boolean;
+  beakColor: THREE.Color | undefined;
+  isNatureSmallBirdBody: boolean;
+  isNatureSmallBirdWing: boolean;
+  isNatureSmallBirdTail: boolean;
+  flapFrequency: number;
+  flapIdleAmplitude: number;
+  flapSpeedAmplitude: number;
+  getScale: (entity: Boid | Predator) => number;
+  keepUpright: boolean;
+  uprightStyle: UprightStyle;
+  bankScale: number;
+  finRestBiasRad: number;
+  tailSwayAxis: THREE.Vector3;
+  tailSwayAmplitude: number;
+  tailSwayFrequency: number | undefined;
+  tailSwayPivotY: number;
+  worldScale: number;
+  meshScaleBoost: number;
+  preferUpright: boolean;
+}
+type UpdateEntitySharedArgs = Omit<UpdateEntityInstanceArgs, 'index' | 'entity'>;
+
+interface StyleFlags {
+  isNature: boolean;
+  isFishtank: boolean;
+  isOrganic: boolean;
+}
+
+interface PredatorRenderFlags {
+  isDragon: boolean;
+  isShark: boolean;
+}
+
+interface PredatorUpdateContext {
+  hawks: Predator[];
+  unicorns: Predator[];
+  renderFlags: PredatorRenderFlags;
+}
+
+interface BoidMotionStyleFlags {
+  isFishTail: boolean;
+  isNatureParrot: boolean;
+}
+
+interface PredatorCounts {
+  hawkCount: number;
+  unicornCount: number;
 }
 
 interface BirdMaterialTuning {
@@ -687,8 +830,8 @@ function getNatureParrotVariant(entity: Boid | Predator): NatureParrotVariant {
  * Picks one nature parrot variant (colors + geometry profile) or one fish
  * tank butterflyfish pattern per individual.
  */
-function getParrotColors(entity: Boid | Predator): SpeciesColorSet {
-  if (params.visualStyle === 'fishtank') {
+function getParrotColorsForFlags(entity: Boid | Predator, flags: StyleFlags): SpeciesColorSet {
+  if (flags.isFishtank) {
     const baseIndex = Math.floor(idHash(entity.id, 42) * BUTTERFLYFISH_COLOR_PATTERNS.length) % BUTTERFLYFISH_COLOR_PATTERNS.length;
     if (params.galleryCreature === 'parrot') {
       const cycleStep = Math.floor(performance.now() / 3200);
@@ -729,7 +872,7 @@ interface BoidSpeciesConfig {
   arcadeBase: THREE.Color;
   natureBase: THREE.Color;
   colors?: SpeciesColorSet;
-  getColors?: (entity: Boid | Predator) => SpeciesColorSet;
+  getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
   /** Small-bird species only (nature style): the beak's own instance
@@ -770,7 +913,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     arcadeEmissive: ARCADE_PARROT_EMISSIVE,
     arcadeBase: ARCADE_PARROT_BASE,
     natureBase: PARROT_NATURE_VARIANTS[0].colors.body,
-    getColors: getParrotColors,
+    getColors: getParrotColorsForFlags,
     useSmallGeometry: false,
     useParrotGeometry: true,
     tailSwayPivotY: PARROT_TAIL_SWAY_PIVOT_Y,
@@ -1089,7 +1232,7 @@ export class Renderer3D {
   ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
-    const isOrganic = style === 'nature' || style === 'fishtank';
+    const { isOrganic, isFishtank } = this.getStyleFlags(style);
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: isOrganic ? 0x000000 : emissive,
@@ -1124,7 +1267,7 @@ export class Renderer3D {
       // against the dragon's purple body, and multiplying it against the
       // shark's gray body would leak a visible purple/pink cast into the
       // fins/tail instead of the intended plain gray.
-      color: isDragon ? (style === 'fishtank' ? 0xb8bcc0 : 0x9c86ab) : 0xffffff,
+      color: isDragon ? (isFishtank ? 0xb8bcc0 : 0x9c86ab) : 0xffffff,
       emissive: isOrganic ? 0x000000 : emissive,
       emissiveIntensity: isOrganic ? 0 : 1.1,
       roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
@@ -1269,15 +1412,144 @@ export class Renderer3D {
     }, 0);
   }
 
-  /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
-  private ensureScene(sim: Simulation): void {
-    const style = params.visualStyle;
+  private getStyleFlags(style: VisualStyle): StyleFlags {
     const isNature = style === 'nature';
     const isFishtank = style === 'fishtank';
-    // Both "organic" styles (nature/fishtank) use the same instancing
-    // pattern (realistic/lathed geometry, vertex-colored variants, etc.)
-    // — only which concrete geometry set/environment is picked differs.
-    const isOrganic = isNature || isFishtank;
+    return {
+      isNature,
+      isFishtank,
+      // Both "organic" styles (nature/fishtank) use the same instancing
+      // pattern (realistic/lathed geometry, vertex-colored variants, etc.)
+      // — only which concrete geometry set/environment is picked differs.
+      isOrganic: isNature || isFishtank,
+    };
+  }
+
+  private getActiveStyleFlags(): StyleFlags {
+    return this.getStyleFlags(params.visualStyle);
+  }
+
+  private applyStyleTransitionOnStyleChange(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+    if (this.currentStyle === style) return;
+    const { isNature, isFishtank, isOrganic } = flags;
+    const wasFishtank = this.currentStyle === 'fishtank';
+    this.currentStyle = style;
+    this.bloomPass.enabled = !isOrganic;
+    // The screen-space afterimage/motion-trail effect persists whole
+    // previous frames — great for arcade neon trails, but when the
+    // camera pans in an organic (fog-using) style it drags a ghost
+    // trail of the bright sky/water (especially the sun disc in nature)
+    // across the frame, looking like a smeary lens flare and leaving
+    // "hovering circle" afterimages.
+    this.afterimagePass.enabled = !isOrganic;
+    this.natureEnv.setVisible(isNature);
+    this.fishtankEnv.setVisible(isFishtank);
+    this.driftingClouds.setVisible(isNature);
+    // Fishtank has its own dedicated glass-box wireframe (frameEdges,
+    // see styles/fishtank/environment.ts) so the generic debug
+    // boundsHelper stays hidden for both organic styles, same as before.
+    if (this.boundsHelper) this.boundsHelper.visible = !isOrganic;
+    this.ambientLight.intensity = isOrganic ? 0.55 : 0.35;
+    this.keyLight.visible = !isOrganic;
+
+    // Re-apply the zoom clamp for the new style: nature's distance fog
+    // needs a tight max zoom-out, while fishtank now has real geometry
+    // (a table + room) around the tank that's worth seeing when zoomed
+    // out further, so it gets a much looser clamp than nature.
+    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
+    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+    this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
+    this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltUpRad : 0;
+    this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltDownRad : Math.PI;
+
+    // Re-frame the camera when crossing into/out of fishtank specifically.
+    if (isFishtank !== wasFishtank) {
+      const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+      if (isFishtank) center.y = fishtankBounds.tankCenterY;
+      const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+      this.camera.position.set(
+        center.x + maxDim * 0.6 * cameraDistScale,
+        center.y + maxDim * 0.4 * cameraDistScale,
+        center.z + maxDim * 0.9 * cameraDistScale,
+      );
+      this.controls.target.copy(center);
+      this.controls.update();
+    }
+  }
+
+  private updateEnvironmentParameterToggles(): void {
+    if (this.appliedFogEnabled !== params.fogEnabled) {
+      this.natureEnv.setFogEnabled(params.fogEnabled);
+      this.fishtankEnv.setFogEnabled(params.fogEnabled);
+      this.appliedFogEnabled = params.fogEnabled;
+    }
+    if (this.appliedTimeOfDay !== params.timeOfDay) {
+      this.natureEnv.setTimeOfDay(params.timeOfDay);
+      this.fishtankEnv.setTimeOfDay(params.timeOfDay);
+      this.appliedTimeOfDay = params.timeOfDay;
+    }
+    if (this.appliedLightShaftsEnabled !== params.lightShaftsEnabled) {
+      this.natureEnv.setLightShaftsEnabled(params.lightShaftsEnabled);
+      this.appliedLightShaftsEnabled = params.lightShaftsEnabled;
+    }
+    if (this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled) {
+      this.fishtankEnv.setWaterEffectsEnabled(params.waterEffectsEnabled);
+      this.appliedWaterEffectsEnabled = params.waterEffectsEnabled;
+    }
+    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled;
+    if (this.appliedShadowsEnabled !== shadowsEnabled) {
+      this.renderer.shadowMap.enabled = shadowsEnabled;
+      this.keyLight.castShadow = shadowsEnabled;
+      this.natureEnv.sunLight.castShadow = shadowsEnabled;
+      this.fishtankEnv.keyLight.castShadow = shadowsEnabled;
+      this.appliedShadowsEnabled = shadowsEnabled;
+    }
+  }
+
+  private ensureBoundsHelperAndFraming(sim: Simulation, flags: StyleFlags): void {
+    const { isNature, isFishtank, isOrganic } = flags;
+    const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
+    if (this.boundsHelper?.userData.key === expectedKey) return;
+    if (this.boundsHelper) {
+      this.scene.remove(this.boundsHelper);
+      this.boundsHelper.geometry.dispose();
+      (this.boundsHelper.material as THREE.Material).dispose();
+    }
+    const box = new THREE.BoxGeometry(sim.width, sim.height, params.worldDepth);
+    const edges = new THREE.EdgesGeometry(box);
+    const material = new THREE.LineBasicMaterial({ color: 0x30363d });
+    this.boundsHelper = new THREE.LineSegments(edges, material);
+    this.boundsHelper.position.set(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    this.boundsHelper.userData.key = expectedKey;
+    this.boundsHelper.visible = !isOrganic;
+    this.scene.add(this.boundsHelper);
+    box.dispose();
+
+    const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
+    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+    const cameraTarget = center.clone();
+    if (isFishtank) cameraTarget.y = fishtankBounds.tankCenterY;
+    const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+    this.camera.position.set(
+      cameraTarget.x + maxDim * 0.6 * cameraDistScale,
+      cameraTarget.y + maxDim * 0.4 * cameraDistScale,
+      cameraTarget.z + maxDim * 0.9 * cameraDistScale,
+    );
+    this.controls.target.copy(cameraTarget);
+    this.controls.update();
+
+    placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
+    placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
+    this.driftingClouds.configure(center, maxDim);
+
+    const flockScale = maxDim;
+    this.controls.minDistance = maxDim * 0.05;
+    this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
+  }
+
+  private reconcileBoidInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+    const { isNature, isFishtank, isOrganic } = flags;
     const countsBySpecies = new Map<BoidSpecies, number>();
     for (const boid of sim.boids) {
       countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
@@ -1298,13 +1570,6 @@ export class Renderer3D {
       }
     }
 
-    // Each species gets its own InstancedMesh set — separate materials so
-    // arcade style can give each a distinct emissive bloom color (emissive
-    // is a material-level property; shared instances would force identical
-    // bloom-glow color regardless of per-instance diffuse tint). Sparrows
-    // use the shrunken geometry, parrots use their own dedicated macaw-
-    // style geometry (nature/fishtank styles only), and everything else
-    // uses the shared "reference" small-bird size/shape.
     for (const config of BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
       if (config.species === 'parrot' && isNature) {
@@ -1369,12 +1634,6 @@ export class Renderer3D {
               : isFishtank
                 ? this.fishtankBoidGeometries
                 : this.arcadeBoidGeometries;
-        // Parrot geometry (nature + fishtank) bakes vertex colors for its
-        // beak/eyes; small-bird geometry (sparrow/goldfinch/cardinal/
-        // bluejay) now does too in both the nature-style file and the
-        // fishtank small-fish reskin (fishGeometry.ts bakes its own eye
-        // dots the same way), so vertex colors are safe to enable for
-        // any organic (nature or fishtank) style, not just nature.
         const bodyVertexColors = isOrganic;
         this.speciesInstances.set(
           config.species,
@@ -1383,23 +1642,12 @@ export class Renderer3D {
         this.speciesInstanceKeys.set(config.species, key);
       }
     }
+  }
 
-    // Predators are split by kind (see Predator.kind / predatorInstances'
-    // doc comment) — hawks/dragons and unicorns are independent
-    // populations, each with their own InstancedMesh set, so both can be
-    // present in the scene at once.
-    let hawkCount = 0;
-    let unicornCount = 0;
-    for (const predator of sim.predators) {
-      if (predator.kind === 'unicorn') unicornCount++;
-      else hawkCount++;
-    }
-
-    // dragonPredators is a generic "give the flying/swimming predator a
-    // bigger bespoke silhouette" toggle: in nature it swaps hawks for
-    // dragons, and in fishtank (reusing the same checkbox until a
-    // dedicated tank-specific UI exists) it swaps the small fish-shaped
-    // predator for the shark.
+  private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+    const { isNature, isFishtank, isOrganic } = flags;
+    const { hawkCount, unicornCount } = this.getPredatorCounts(sim.predators);
+ 
     const isDragon = isOrganic && params.dragonPredators;
     const hawkKey = `${hawkCount}:${style}:${isDragon}`;
     if (this.predatorInstanceKeys.get('hawk') !== hawkKey) {
@@ -1422,12 +1670,6 @@ export class Renderer3D {
       this.sharkDisplayQuats.clear();
     }
 
-    // Unicorns get the full pegasus-with-rainbow-wings geometry in nature
-    // style, and its fishtank-duplicate stand-in in fishtank style; arcade
-    // style reuses the plain hawk silhouette (just tinted lavender via
-    // updateInstances' color params) rather than a second bespoke
-    // geometry, since arcade's glowing-instanced look doesn't call for the
-    // same level of cosmetic detail.
     const unicornKey = `${unicornCount}:${style}`;
     if (this.predatorInstanceKeys.get('unicorn') !== unicornKey) {
       this.disposeInstanceSet(this.predatorInstances.get('unicorn') ?? null);
@@ -1436,15 +1678,7 @@ export class Renderer3D {
         : isFishtank
           ? this.fishtankUnicornPredatorGeometries
           : this.arcadePredatorGeometries;
-      // The fishtank seahorse's "wing" slot is solid-colored pectoral fins
-      // (no baked rainbow gradient), unlike the nature unicorn's wings —
-      // only enable the rainbow-wing vertex-color path for nature style.
       const rainbowWings = isNature;
-      // The gold-horn vertex colors are only baked into the organic-style
-      // horse geometry (unicornPredatorGeometries/fishtankUnicornPredator
-      // Geometries) — arcade style reuses the plain hawk geometry, which
-      // has no 'color' attribute at all, so enabling vertexColors there
-      // would have nothing to read.
       const bodyVertexColors = isOrganic;
       this.predatorInstances.set(
         'unicorn',
@@ -1461,103 +1695,29 @@ export class Renderer3D {
       this.predatorInstanceKeys.set('unicorn', unicornKey);
       this.unicornDisplayQuats.clear();
     }
+  }
 
-    if (this.currentStyle !== style) {
-      const wasFishtank = this.currentStyle === 'fishtank';
-      this.currentStyle = style;
-      this.bloomPass.enabled = !isOrganic;
-      // The screen-space afterimage/motion-trail effect persists whole
-      // previous frames — great for arcade neon trails, but when the
-      // camera pans in an organic (fog-using) style it drags a ghost
-      // trail of the bright sky/water (especially the sun disc in nature)
-      // across the frame, looking like a smeary lens flare and leaving
-      // "hovering circle" afterimages.
-      this.afterimagePass.enabled = !isOrganic;
-      this.natureEnv.setVisible(isNature);
-      this.fishtankEnv.setVisible(isFishtank);
-      this.driftingClouds.setVisible(isNature);
-      // Fishtank has its own dedicated glass-box wireframe (frameEdges,
-      // see styles/fishtank/environment.ts) so the generic debug
-      // boundsHelper stays hidden for both organic styles, same as before.
-      if (this.boundsHelper) this.boundsHelper.visible = !isOrganic;
-      this.ambientLight.intensity = isOrganic ? 0.55 : 0.35;
-      this.keyLight.visible = !isOrganic;
+  private getPredatorCounts(predators: Predator[]): PredatorCounts {
+    let hawkCount = 0;
+    let unicornCount = 0;
+    for (const predator of predators) {
+      if (predator.kind === 'unicorn') unicornCount++;
+      else hawkCount++;
+    }
+    return { hawkCount, unicornCount };
+  }
 
-      // Re-apply the zoom clamp for the new style: nature's distance fog
-      // needs a tight max zoom-out, while fishtank now has real geometry
-      // (a table + room) around the tank that's worth seeing when zoomed
-      // out further, so it gets a much looser clamp than nature. Fishtank's
-      // clamp is derived from computeFishtankRoomBounds — the exact same
-      // wallMargin/roomHeight formulas placeFishtankEnvironment uses to
-      // build the room — so it stays in lockstep with the room's actual
-      // size (see that function's maxCameraDistance doc comment).
-      const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-      this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
-      // Fishtank's generous zoom-out range is only mathematically
-      // guaranteed to clear the floor/ceiling up to cameraTiltUpRad/
-      // cameraTiltDownRad of tilt away from horizontal (see
-      // maxCameraDistance's and cameraTiltUpRad/cameraTiltDownRad's doc
-      // comments in computeFishtankRoomBounds — all derived together so
-      // they always stay in sync here). Other styles have no such
-      // enclosing geometry to worry about, so they get OrbitControls'
-      // unrestricted default range back.
-      this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltUpRad : 0;
-      this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltDownRad : Math.PI;
+  /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
+  private ensureScene(sim: Simulation): void {
+    const style = params.visualStyle;
+    const flags = this.getStyleFlags(style);
+    this.reconcileBoidInstanceSets(sim, style, flags);
 
-      // Re-frame the camera when crossing into/out of fishtank
-      // specifically (not just on world-dimension changes, handled
-      // separately below) — fishtank renders at TANK_VISUAL_SCALE, so a
-      // camera position/distance that was correct for arcade/nature
-      // would otherwise end up far too close (effectively "inside" the
-      // now much-bigger tank) the moment fishtank is selected, or too
-      // far out the moment it's left again.
-      if (isFishtank !== wasFishtank) {
-        const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-        // Fishtank looks at the tank's true (bottom-anchored) vertical
-        // center rather than the sim's raw center — see
-        // computeFishtankRoomBounds' tankCenterY doc comment.
-        if (isFishtank) center.y = fishtankBounds.tankCenterY;
-        const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-        this.camera.position.set(
-          center.x + maxDim * 0.6 * cameraDistScale,
-          center.y + maxDim * 0.4 * cameraDistScale,
-          center.z + maxDim * 0.9 * cameraDistScale,
-        );
-        this.controls.target.copy(center);
-        this.controls.update();
-      }
-    }
+    this.reconcilePredatorInstanceSets(sim, style, flags);
 
-    // Apply environment toggles when the underlying params actually change,
-    // so UI changes still take effect immediately without redundant work
-    // every render frame.
-    if (this.appliedFogEnabled !== params.fogEnabled) {
-      this.natureEnv.setFogEnabled(params.fogEnabled);
-      this.fishtankEnv.setFogEnabled(params.fogEnabled);
-      this.appliedFogEnabled = params.fogEnabled;
-    }
-    if (this.appliedTimeOfDay !== params.timeOfDay) {
-      this.natureEnv.setTimeOfDay(params.timeOfDay);
-      this.fishtankEnv.setTimeOfDay(params.timeOfDay);
-      this.appliedTimeOfDay = params.timeOfDay;
-    }
-    if (this.appliedLightShaftsEnabled !== params.lightShaftsEnabled) {
-      this.natureEnv.setLightShaftsEnabled(params.lightShaftsEnabled);
-      this.appliedLightShaftsEnabled = params.lightShaftsEnabled;
-    }
-    if (this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled) {
-      this.fishtankEnv.setWaterEffectsEnabled(params.waterEffectsEnabled);
-      this.appliedWaterEffectsEnabled = params.waterEffectsEnabled;
-    }
-    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled;
-    if (this.appliedShadowsEnabled !== shadowsEnabled) {
-      this.renderer.shadowMap.enabled = shadowsEnabled;
-      this.keyLight.castShadow = shadowsEnabled;
-      this.natureEnv.sunLight.castShadow = shadowsEnabled;
-      this.fishtankEnv.keyLight.castShadow = shadowsEnabled;
-      this.appliedShadowsEnabled = shadowsEnabled;
-    }
+    this.applyStyleTransitionOnStyleChange(sim, style, flags);
+
+    this.updateEnvironmentParameterToggles();
 
     // Model Gallery uses a close, creature-relative camera distance that
     // sits *inside* the tank/water volume (see main.ts's
@@ -1567,744 +1727,373 @@ export class Renderer3D {
     // doesn't show the room incongruously right behind the creature.
     this.fishtankEnv.setRoomVisible(params.galleryCreature === null);
 
-    const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
-    if (this.boundsHelper?.userData.key !== expectedKey) {
-      if (this.boundsHelper) {
-        this.scene.remove(this.boundsHelper);
-        this.boundsHelper.geometry.dispose();
-        (this.boundsHelper.material as THREE.Material).dispose();
-      }
-      const box = new THREE.BoxGeometry(sim.width, sim.height, params.worldDepth);
-      const edges = new THREE.EdgesGeometry(box);
-      const material = new THREE.LineBasicMaterial({ color: 0x30363d });
-      this.boundsHelper = new THREE.LineSegments(edges, material);
-      this.boundsHelper.position.set(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-      this.boundsHelper.userData.key = expectedKey;
-      this.boundsHelper.visible = !isOrganic;
-      this.scene.add(this.boundsHelper);
-      box.dispose();
-
-      // Frame the camera around the world box the first time we see it (or
-      // whenever its size changes), centered on the box with orbit target
-      // there. Fishtank's own visual scale (see TANK_VISUAL_SCALE) grows
-      // the tank around this same center point horizontally without
-      // moving it (see placeFishtankEnvironment's `center` doc comment),
-      // so the target stays correct across styles — only the initial
-      // camera *distance* needs to widen for fishtank so it doesn't start
-      // inside the bigger tank, and (for fishtank specifically) the
-      // target's vertical component needs to look at the tank's true
-      // (bottom-anchored) center rather than the sim's raw center — see
-      // computeFishtankRoomBounds' tankCenterY doc comment.
-      const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-      const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-      const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-      const cameraTarget = center.clone();
-      if (isFishtank) cameraTarget.y = fishtankBounds.tankCenterY;
-      const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-      this.camera.position.set(
-        cameraTarget.x + maxDim * 0.6 * cameraDistScale,
-        cameraTarget.y + maxDim * 0.4 * cameraDistScale,
-        cameraTarget.z + maxDim * 0.9 * cameraDistScale,
-      );
-      this.controls.target.copy(cameraTarget);
-      this.controls.update();
-
-      // Nature/clouds always use the sim's raw (unscaled) center — only
-      // fishtank's own target/framing (above) and glass box (below) use
-      // the inflated TANK_VISUAL_SCALE geometry.
-      placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
-      // Unlike nature's ground plane (an arbitrary-scale backdrop),
-      // fishtank's glass box must match the sim's actual world bounds
-      // exactly — it's a real container the fish swim inside, not just
-      // scenery — so this takes the raw dimensions rather than a single
-      // "groundSize" scalar. (placeFishtankEnvironment inflates its own
-      // rendered size internally — see TANK_VISUAL_SCALE's doc comment.)
-      placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
-      this.driftingClouds.configure(center, maxDim);
-
-      // Clamp orbit zoom to a sane range for this world's scale: never so
-      // close the camera can slide through the ground/boundary box, and
-      // never so far out that nature's distance fog reduces the whole
-      // view to a flat, blown-out wall of fog color (which reads as a
-      // rendering glitch rather than "zoomed out"). Fishtank gets a much
-      // further max distance since zooming out is supposed to reveal the
-      // tank sitting on its table in the room, not just hit a fog wall —
-      // derived from computeFishtankRoomBounds (the real room size), like
-      // the matching comment on the other maxDistance assignment above.
-      const flockScale = maxDim;
-      this.controls.minDistance = maxDim * 0.05;
-      this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
-    }
+    this.ensureBoundsHelperAndFraming(sim, flags);
 
     this.scheduleShaderWarmup(style);
   }
 
-  private updateInstances(
-    set: BirdInstanceSet,
-    entities: (Boid | Predator)[],
-    maxSpeed: number,
-    elapsed: number,
+  private getUprightHeadingSmoothingRate(style: UprightStyle): number {
+    if (style === 'unicorn') return UNICORN_HEADING_SMOOTHING_RATE;
+    if (style === 'shark') return SHARK_HEADING_SMOOTHING_RATE;
+    return DRAGON_HEADING_SMOOTHING_RATE;
+  }
+
+  private updateEntityRenderHeading(
+    entity: Boid | Predator,
+    speed: number,
     dt: number,
-    colours: ColourStrategy,
-    motion: MotionConfig = {},
+    keepUpright: boolean,
+    uprightStyle: UprightStyle,
   ): void {
+    if (speed <= 1e-6) return;
+    const invSpeed = 1 / speed;
+    const targetX = entity.velocity.x * invSpeed;
+    const targetY = entity.velocity.y * invSpeed;
+    const targetZ = entity.velocity.z * invSpeed;
+    if (keepUpright) {
+      const rate = 1 - Math.exp(-dt * this.getUprightHeadingSmoothingRate(uprightStyle));
+      let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
+      let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
+      let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
+      const len = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
+      entity.renderHeading.x = hx / len;
+      entity.renderHeading.y = hy / len;
+      entity.renderHeading.z = hz / len;
+      return;
+    }
+    entity.renderHeading.x = targetX;
+    entity.renderHeading.y = targetY;
+    entity.renderHeading.z = targetZ;
+  }
+
+  private clampForwardPitchForUprightStyle(uprightStyle: UprightStyle): void {
+    this.tmpUnicornHorizontal.set(this.tmpForward.x, 0, this.tmpForward.z);
+    const horizontalLen = this.tmpUnicornHorizontal.length();
+    if (horizontalLen <= 1e-6) return;
+    this.tmpUnicornHorizontal.divideScalar(horizontalLen);
+    const rawPitch = Math.atan2(this.tmpForward.y, horizontalLen);
+    const ascendLimit = uprightStyle === 'shark' ? SHARK_ASCEND_PITCH_RADIANS : UNICORN_ASCEND_PITCH_RADIANS;
+    const descendLimit = uprightStyle === 'shark' ? SHARK_DESCEND_PITCH_RADIANS : UNICORN_DESCEND_PITCH_RADIANS;
+    const clampedPitch = THREE.MathUtils.clamp(rawPitch, -descendLimit, ascendLimit);
+    this.tmpForward.copy(this.tmpUnicornHorizontal).multiplyScalar(Math.cos(clampedPitch));
+    this.tmpForward.y = Math.sin(clampedPitch);
+  }
+
+  private setPersistedUprightBasis(entity: Boid | Predator): void {
+    this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
+    if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
+      this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
+      this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
+      if (this.tmpPersistedRight.lengthSq() < 1e-10) {
+        this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
+      }
+      this.tmpRight.copy(this.tmpPersistedRight);
+    }
+    this.tmpRight.normalize();
+    entity.renderRight.x = this.tmpRight.x;
+    entity.renderRight.y = this.tmpRight.y;
+    entity.renderRight.z = this.tmpRight.z;
+    this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
+    this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+    this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+  }
+
+  private setSimpleUprightBasis(entity: Boid | Predator): void {
+    this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
+    entity.renderRight.x = this.tmpRight.x;
+    entity.renderRight.y = this.tmpRight.y;
+    entity.renderRight.z = this.tmpRight.z;
+    this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
+    this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+    this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+  }
+
+  private clampDisplayUpTilt(displayQuat: THREE.Quaternion, maxUpTiltRadians: number): void {
+    this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
+    const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
+    if (upTilt <= maxUpTiltRadians) return;
+    this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
+    if (this.tmpUnicornTiltAxis.lengthSq() <= 1e-10) return;
+    this.tmpUnicornTiltAxis.normalize();
+    this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - maxUpTiltRadians);
+    displayQuat.premultiply(this.unicornTiltCorrection);
+  }
+
+  private applyUprightDisplaySmoothing(entity: Boid | Predator, dt: number, uprightStyle: UprightStyle): void {
+    if (uprightStyle === 'dragon') {
+      let displayQuat = this.dragonDisplayQuats.get(entity.id);
+      if (!displayQuat) {
+        displayQuat = this.bodyQuat.clone();
+        this.dragonDisplayQuats.set(entity.id, displayQuat);
+      } else {
+        displayQuat.rotateTowards(this.bodyQuat, DRAGON_MAX_TURN_RADIANS_PER_SEC * dt);
+      }
+      this.bodyQuat.copy(displayQuat);
+      return;
+    }
+
+    if (uprightStyle === 'unicorn') {
+      let displayQuat = this.unicornDisplayQuats.get(entity.id);
+      if (!displayQuat) {
+        displayQuat = this.bodyQuat.clone();
+        this.unicornDisplayQuats.set(entity.id, displayQuat);
+      } else {
+        displayQuat.rotateTowards(this.bodyQuat, UNICORN_MAX_TURN_RADIANS_PER_SEC * dt);
+      }
+      this.clampDisplayUpTilt(displayQuat, UNICORN_MAX_UP_TILT_RADIANS);
+      this.bodyQuat.copy(displayQuat);
+      return;
+    }
+
+    let displayQuat = this.sharkDisplayQuats.get(entity.id);
+    if (!displayQuat) {
+      displayQuat = this.bodyQuat.clone();
+      this.sharkDisplayQuats.set(entity.id, displayQuat);
+    } else {
+      displayQuat.rotateTowards(this.bodyQuat, SHARK_MAX_TURN_RADIANS_PER_SEC * dt);
+    }
+    this.clampDisplayUpTilt(displayQuat, SHARK_MAX_UP_TILT_RADIANS);
+    this.bodyQuat.copy(displayQuat);
+  }
+
+  private applyBodyOrientationBasis(
+    entity: Boid | Predator,
+    keepUpright: boolean,
+    uprightStyle: UprightStyle,
+    preferUpright: boolean,
+  ): void {
+    if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
+      this.clampForwardPitchForUprightStyle(uprightStyle);
+    }
+
+    if (keepUpright && uprightStyle === 'dragon') {
+      this.setPersistedUprightBasis(entity);
+    } else if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
+      this.setSimpleUprightBasis(entity);
+    } else if (preferUpright) {
+      this.setPersistedUprightBasis(entity);
+    } else {
+      this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpForward);
+    }
+  }
+
+  private applyTurnBankAndPitch(
+    entity: Boid | Predator,
+    vel: { x: number; y: number; z: number },
+    maxSpeed: number,
+    dt: number,
+    bankScale: number,
+    keepUpright: boolean,
+    getIntensity: (entity: Boid | Predator) => number,
+  ): {
+    blendStrength: number;
+    climbWeight: number;
+    diveWeight: number;
+    turnWeight: number;
+    panicWeight: number;
+    cruiseWeight: number;
+  } {
+    const turnSignal = this.tmpPrevDir.cross(this.tmpForward).y;
+    const turnWeight = THREE.MathUtils.clamp(Math.abs(turnSignal) * 16, 0, 1);
+    const climbWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, 0, 1) : 0;
+    const diveWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(-vel.y / maxSpeed, 0, 1) : 0;
+    const panicWeight = THREE.MathUtils.clamp(getIntensity(entity), 0, 1);
+    const cruiseWeight = Math.max(0, 1 - Math.max(climbWeight, diveWeight, turnWeight, panicWeight * 0.75));
+    const blendStrength = THREE.MathUtils.clamp(params.animationBlendStrength, 0, 1);
+    const targetBank = THREE.MathUtils.clamp(
+      -turnSignal * BANK_GAIN * bankScale * (1 + turnWeight * 0.3 + panicWeight * 0.2),
+      -MAX_BANK_RADIANS * bankScale,
+      MAX_BANK_RADIANS * bankScale,
+    );
+    const bankSmoothing = 1 - Math.exp(-dt * BANK_SMOOTHING_RATE);
+    entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
+    this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
+    this.bodyQuat.multiply(this.rollQuat);
+    if (!keepUpright) {
+      const blendedPitch = (diveWeight - climbWeight) * STATE_PITCH_SCALE * blendStrength;
+      this.pitchQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, blendedPitch);
+      this.bodyQuat.multiply(this.pitchQuat);
+    }
+    return {
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+    };
+  }
+
+  private getSmallBirdBakedColorFlags(
+    set: BirdInstanceSet,
+    bakedBodyGradient: boolean,
+  ): {
+    isNatureSmallBirdBody: boolean;
+    isNatureSmallBirdWing: boolean;
+    isNatureSmallBirdTail: boolean;
+  } {
+    return {
+      isNatureSmallBirdBody: bakedBodyGradient && !!set.body.geometry.getAttribute('color'),
+      isNatureSmallBirdWing: bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color'),
+      isNatureSmallBirdTail: bakedBodyGradient && !!set.tail?.geometry.getAttribute('color'),
+    };
+  }
+
+  private applyInstanceColorsForEntity(args: EntityInstanceColorArgs): void {
     const {
+      set,
+      index,
+      entity,
       baseColor,
       highlightColor,
       getIntensity,
-      individualVariation = false,
+      individualVariation,
       getSpeciesColors,
-      bakedWingPalette = false,
-      bakedBodyGradient = false,
+      bakedWingPalette,
+      useNatureParrotPalette,
       beakColor,
-    } = colours;
-    const {
-      flapFrequency = FLAP_FREQUENCY,
-      flapIdleAmplitude = FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude = FLAP_SPEED_AMPLITUDE,
-      getScale = () => 1,
-      // keepUpright: when true, use a world-up-anchored orientation basis
-      // instead of the free shortest-arc rotation. Required for dragon/
-      // unicorn/shark; see uprightStyle for which model to apply.
-      keepUpright = false,
-      // Which "stay upright" model to use when keepUpright is true:
-      //  'dragon'  — near-pole-safe basis + free pitch (swoops/dives/rolls)
-      //  'unicorn' — hard-clamped pitch + final up-tilt safety clamp (floaty)
-      //  'shark'   — same shape as unicorn but shallower symmetric pitch range
-      // These are deliberately separate code paths, not one parameterized by
-      // a bias knob — see the UNICORN_*/SHARK_* constants' doc comments.
-      uprightStyle = 'dragon' as const,
-      bankScale = 1,
-      // Shark-only: constant downward tilt bias on pectoral fins so they
-      // rest angled below horizontal at idle (see SHARK_FIN_REST_TILT_RAD).
-      finRestBiasRad = 0,
-      // Tail-sway axis: MODEL_RIGHT_AXIS pitches dragon tail up/down;
-      // MODEL_UP_AXIS yaws shark tail side-to-side (its actual swim stroke).
-      tailSwayAxis = MODEL_RIGHT_AXIS,
-      tailSwayAmplitude = DRAGON_TAIL_SWAY_AMPLITUDE,
-      // Defaults to flapFrequency when unset (original dragon behaviour).
-      // Pass an explicit value to decouple tail beat from fin/wing phase.
-      tailSwayFrequency,
-      // Shark-only: local-Y of tail attachment point; 0 means rotate around
-      // the shared model origin (correct for every other species).
-      tailSwayPivotY = 0,
-      // Fishtank-only scale factors — both default to 1 (no-op) elsewhere.
-      worldScale = 1,
-      meshScaleBoost = 1,
-      // Non-dragon/unicorn upright anchor: derive roll from WORLD_UP instead
-      // of the free shortest-arc quaternion (regular boids in nature style).
-      preferUpright = false,
-    } = motion;
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+    } = args;
+    const speciesColors = getSpeciesColors?.(entity);
+    let effectiveBase = baseColor;
+    let effectiveWing: THREE.Color | null = null;
+    let effectiveTail: THREE.Color | null = null;
+    let preserveParrotLegPalette = false;
 
-    // Small songbirds (nature style) bake a SmallBirdPalette gradient into
-    // their geometry. When bakedBodyGradient is true, pass white as the
-    // instance colour so the vertex colours show through unchanged —
-    // identical to the parrot wing-palette passthrough logic.
-    // Note: we can't infer this from geometry.getAttribute('color') alone
-    // because dragon/hawk geometry also carries vertex colours and would
-    // incorrectly trigger the white-passthrough branch.
-    const isNatureSmallBirdBody = bakedBodyGradient && !!set.body.geometry.getAttribute('color');
-    const isNatureSmallBirdWing = bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color');
-    const isNatureSmallBirdTail = bakedBodyGradient && !!set.tail?.geometry.getAttribute('color');
-
-    for (let i = 0; i < entities.length; i++) {
-      const entity = entities[i];
-      const pos = entity.position;
-      const vel = entity.velocity;
-      const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
-      const entityScale = getScale(entity);
-
-      // Each entity keeps its own last-known heading (renderHeading)
-      // rather than relying on this.bodyQuat carrying over between loop
-      // iterations — otherwise an entity whose speed drops near zero
-      // (e.g. a predator gliding to a stop / digesting) would silently
-      // inherit whichever heading the *previous* entity in the array had
-      // that frame, causing it to visually snap to an unrelated
-      // direction instead of holding its own last heading.
-      this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
-      if (speed > 1e-6) {
-        const invSpeed = 1 / speed;
-        const targetX = vel.x * invSpeed;
-        const targetY = vel.y * invSpeed;
-        const targetZ = vel.z * invSpeed;
-        if (keepUpright) {
-          // Low-pass filter the heading itself — see
-          // DRAGON_HEADING_SMOOTHING_RATE / UNICORN_HEADING_SMOOTHING_RATE
-          // above for why this is needed in addition to whatever
-          // per-style basis-building stabilization follows below. Each
-          // style uses its own rate constant rather than sharing one.
-          const rate = 1 - Math.exp(-dt * (uprightStyle === 'unicorn' ? UNICORN_HEADING_SMOOTHING_RATE : uprightStyle === 'shark' ? SHARK_HEADING_SMOOTHING_RATE : DRAGON_HEADING_SMOOTHING_RATE));
-          let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
-          let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
-          let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
-          const len = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
-          entity.renderHeading.x = hx / len;
-          entity.renderHeading.y = hy / len;
-          entity.renderHeading.z = hz / len;
-        } else {
-          entity.renderHeading.x = targetX;
-          entity.renderHeading.y = targetY;
-          entity.renderHeading.z = targetZ;
-        }
-      }
-      const dir = entity.renderHeading;
-      this.tmpForward.set(dir.x, dir.y, dir.z);
-
-      if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
-        // Hard pitch clamp (not a proportional flatten) — see
-        // UNICORN_ASCEND_PITCH_RADIANS / UNICORN_DESCEND_PITCH_RADIANS
-        // (or SHARK_ASCEND_PITCH_RADIANS / SHARK_DESCEND_PITCH_RADIANS for
-        // sharks) doc comments: unicorns clamp ascending to exactly flat
-        // with a small allowed nose-down droop while descending; sharks
-        // instead get a small *symmetric* range on both sides, since a
-        // shark gently angling up as well as down still reads as natural.
-        // Only the orientation basis is touched here, not
-        // entity.renderHeading/velocity, so the actual flight path
-        // (where the flock logic takes the entity) is unaffected — just
-        // how level the model looks while following it.
-        this.tmpUnicornHorizontal.set(this.tmpForward.x, 0, this.tmpForward.z);
-        const horizontalLen = this.tmpUnicornHorizontal.length();
-        if (horizontalLen > 1e-6) {
-          this.tmpUnicornHorizontal.divideScalar(horizontalLen);
-          const rawPitch = Math.atan2(this.tmpForward.y, horizontalLen);
-          // Ceiling is UNICORN_ASCEND_PITCH_RADIANS (0 — never nose-up),
-          // floor is -UNICORN_DESCEND_PITCH_RADIANS (a small allowed
-          // nose-down droop while sinking). Sharks use their own shallow
-          // symmetric ceiling/floor instead.
-          const ascendLimit = uprightStyle === 'shark' ? SHARK_ASCEND_PITCH_RADIANS : UNICORN_ASCEND_PITCH_RADIANS;
-          const descendLimit = uprightStyle === 'shark' ? SHARK_DESCEND_PITCH_RADIANS : UNICORN_DESCEND_PITCH_RADIANS;
-          const clampedPitch = THREE.MathUtils.clamp(rawPitch, -descendLimit, ascendLimit);
-          this.tmpForward.copy(this.tmpUnicornHorizontal).multiplyScalar(Math.cos(clampedPitch));
-          this.tmpForward.y = Math.sin(clampedPitch);
-        }
-        // else: heading is already (near-)vertical with essentially no
-        // horizontal component to anchor a clamped pitch to — vanishingly
-        // rare given flock steering, and the final up-tilt safety clamp
-        // below still bounds the result either way.
-      }
-
-      if (keepUpright && uprightStyle === 'dragon') {
-
-        // Dragons only: build an orientation that keeps the model
-        // right-side-up by construction, instead of the shortest-arc
-        // rotation used below for everything else
-        // (Quaternion.setFromUnitVectors(FORWARD_AXIS, dir)) — that
-        // approach has an entire free degree of roll around `dir` that it
-        // resolves arbitrarily, which reads as flying upside-down for long
-        // stretches rather than just transiently while banking. Ordinary
-        // boids/predators are fine flying upside-down sometimes (their
-        // geometry doesn't make it obvious), but dragons are large and
-        // wing-heavy enough that it looks very wrong, and the "hover-y,
-        // always-upright" look is closer to how TV/movie dragons read
-        // anyway — so this is applied to dragons only.
-        //
-        // Roll is always anchored to WORLD_UP_AXIS so dragons settle back
-        // to level rather than free-drifting/precessing over time — an
-        // earlier attempt derived right/up from each entity's own previous
-        // frame instead of a fixed world reference, which avoided a hard
-        // snap but had no anchor to correct back to level, so roll could
-        // wander until an entity's heading happened to pass near its own
-        // current up vector, hitting the exact same singularity at an
-        // unpredictable, arbitrary orientation (reported as random jumpy
-        // flips and entities going edge-on/"2D").
-        //
-        // A later attempt tried to soften the near-vertical singularity
-        // (forward parallel to WORLD_UP_AXIS) by blending WORLD_UP_AXIS
-        // with a fallback axis across a dot-product *range*. That backfired:
-        // the blend factor only depends on |forward.y|, so the blended
-        // reference can itself land parallel to forward for various
-        // headings anywhere inside that range, collapsing the cross
-        // product to ~zero and flattening the model.
-        //
-        // A third attempt only special-cased the *exact* zero-length cross
-        // product (a literal single-point singularity real headings
-        // essentially never hit) and otherwise always normalized whatever
-        // tiny cross product resulted. That still flickered/flattened,
-        // because normalizing an already-tiny vector amplifies ordinary
-        // per-frame floating-point noise into a visibly different
-        // direction each frame — a real problem for a several-degree cone
-        // around the pole, not just the exact point.
-        //
-        // Fixed by keeping a per-entity persisted "right" vector
-        // (entity.renderRight): outside the near-pole cone, it's discarded
-        // and freshly recomputed straight from WORLD_UP_AXIS every frame
-        // (no blending, no drift). Only inside the cone do we reuse last
-        // frame's right vector, re-orthogonalized against the *current*
-        // forward via Gram-Schmidt — smooth and numerically stable, and
-        // safe against long-term drift since it's discarded the instant
-        // the heading exits the cone.
-        //
-        // Restricting this whole approach to dragons also sidesteps the
-        // original motivation for the wider rollout: since regular boids
-        // are allowed to fly upside-down again, they no longer need (or
-        // hit the singularity of) a world-up-anchored basis at all.
-        // Right/up must be built so that Right x Forward = Up (matching
-        // MODEL_RIGHT_AXIS x FORWARD_AXIS = MODEL_UP_AXIS, i.e. local
-        // (1,0,0) x (0,1,0) = (0,0,1)) — otherwise the resulting basis
-        // matrix is left-handed (determinant -1), which is not a valid
-        // rotation. Quaternion.setFromRotationMatrix silently produces a
-        // garbage orientation for such a matrix instead of erroring, so
-        // this previously read `crossVectors(WORLD_UP_AXIS, tmpForward)`
-        // (giving Right x Forward = -Up, det -1) and models ended up
-        // facing a direction unrelated to their actual heading — most
-        // visible as the fishtank seahorse (a unicorn reskin) appearing
-        // to swim backwards, since its asymmetric head/tail shape makes
-        // a wrong-facing orientation obvious in a way a roughly-
-        // symmetric dragon/pegasus silhouette does not.
-        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
-        if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
-          this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
-          // Re-orthogonalize: remove any component along the *current*
-          // forward so the persisted vector stays a valid "right" even as
-          // forward keeps moving through the cone.
-          this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
-          if (this.tmpPersistedRight.lengthSq() < 1e-10) {
-            // Last-ditch fallback: the persisted vector itself has
-            // collapsed (forward jumped drastically frame to frame) —
-            // vanishingly rare, but keep the math well-defined.
-            this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
-          }
-          this.tmpRight.copy(this.tmpPersistedRight);
-        }
-        this.tmpRight.normalize();
-        entity.renderRight.x = this.tmpRight.x;
-        entity.renderRight.y = this.tmpRight.y;
-        entity.renderRight.z = this.tmpRight.z;
-        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
-        // Columns are where each local axis (X, Y, Z) maps to in world
-        // space: local X -> right, local Y -> forward (matches
-        // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
-        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
-        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
-      } else if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
-        // Unicorns/sharks: a much simpler basis than the dragon path
-        // above, and deliberately so — since pitch was already
-        // hard-clamped to a small angle further up, tmpForward here is
-        // never anywhere near parallel to WORLD_UP_AXIS, so the near-pole
-        // "right" vector instability the dragon path works around simply
-        // doesn't arise for either of these styles. No persisted-right
-        // fallback, no re-orthogonalization, just a direct cross product
-        // every frame.
-        // See the dragon branch above for why the operand order here
-        // (Forward x WorldUp, then Right x Forward) matters — the
-        // reversed order previously used produced a left-handed
-        // (determinant -1) basis, which is what caused seahorses (the
-        // fishtank reskin of unicorns) to visibly swim backwards.
-        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
-        entity.renderRight.x = this.tmpRight.x;
-        entity.renderRight.y = this.tmpRight.y;
-        entity.renderRight.z = this.tmpRight.z;
-        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
-        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
-        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
-      } else if (preferUpright) {
-        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
-        if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
-          this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
-          this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
-          if (this.tmpPersistedRight.lengthSq() < 1e-10) {
-            this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
-          }
-          this.tmpRight.copy(this.tmpPersistedRight);
-        }
-        this.tmpRight.normalize();
-        entity.renderRight.x = this.tmpRight.x;
-        entity.renderRight.y = this.tmpRight.y;
-        entity.renderRight.z = this.tmpRight.z;
-        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
-        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
-        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+    if (speciesColors) {
+      const isGreenParrotVariant = useNatureParrotPalette
+        && speciesColors.body.getHex() === 0x44b749
+        && speciesColors.wing.getHex() === 0x44b749;
+      const lockParrotFocusPalette = useNatureParrotPalette
+        && PARROT_FOCUS_PATTERN_INDEX !== null;
+      if (lockParrotFocusPalette || isGreenParrotVariant) {
+        effectiveBase = speciesColors.body;
+        effectiveWing = speciesColors.wing;
+        effectiveTail = speciesColors.tail;
       } else {
-        // Everyone else: simple shortest-arc rotation from the model's
-        // rest forward axis to the current heading. This has a free
-        // degree of roll around `dir` (so these entities can end up
-        // flying upside-down sometimes), but it has no near-pole
-        // singularity to speak of, so it never flickers/flattens —
-        // acceptable here since non-dragon/unicorn geometry doesn't read
-        // as obviously "wrong side up" the way a large dragon or a
-        // horse-legged unicorn does.
-        this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpForward);
-      }
-
-
-      // Cosmetic bank/roll: lean into turns rather than always flying
-      // perfectly level. Estimated from how much the heading direction
-      // rotated around the world-up axis since last frame (a simple
-      // yaw-rate proxy), then smoothed and clamped well short of a full
-      // flip — "it's fine if they bank hard, but they should prefer to
-      // be right-side up" the rest of the time.
-      const turnSignal = this.tmpPrevDir.cross(this.tmpForward).y;
-      const turnWeight = THREE.MathUtils.clamp(Math.abs(turnSignal) * 16, 0, 1);
-      const climbWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, 0, 1) : 0;
-      const diveWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(-vel.y / maxSpeed, 0, 1) : 0;
-      const panicWeight = THREE.MathUtils.clamp(getIntensity(entity), 0, 1);
-      const cruiseWeight = Math.max(0, 1 - Math.max(climbWeight, diveWeight, turnWeight, panicWeight * 0.75));
-      const blendStrength = THREE.MathUtils.clamp(params.animationBlendStrength, 0, 1);
-      const targetBank = THREE.MathUtils.clamp(
-        -turnSignal * BANK_GAIN * bankScale * (1 + turnWeight * 0.3 + panicWeight * 0.2),
-        -MAX_BANK_RADIANS * bankScale,
-        MAX_BANK_RADIANS * bankScale,
-      );
-      const bankSmoothing = 1 - Math.exp(-dt * BANK_SMOOTHING_RATE);
-      entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
-      this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
-      this.bodyQuat.multiply(this.rollQuat);
-      if (!keepUpright) {
-        const blendedPitch = (diveWeight - climbWeight) * STATE_PITCH_SCALE * blendStrength;
-        this.pitchQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, blendedPitch);
-        this.bodyQuat.multiply(this.pitchQuat);
-      }
-
-      if (keepUpright && uprightStyle === 'dragon') {
-        // Final safety net (see dragonDisplayQuats doc comment): never
-        // let the *displayed* orientation jump straight to this frame's
-        // target — only rotate toward it at a bounded rate. This can't
-        // eliminate a bad target computation, but it guarantees any such
-        // glitch is never visible as an instant flip/flatten, only ever
-        // as a smooth (if momentarily oddly-directed) turn.
-        let displayQuat = this.dragonDisplayQuats.get(entity.id);
-        if (!displayQuat) {
-          displayQuat = this.bodyQuat.clone();
-          this.dragonDisplayQuats.set(entity.id, displayQuat);
-        } else {
-          displayQuat.rotateTowards(this.bodyQuat, DRAGON_MAX_TURN_RADIANS_PER_SEC * dt);
-        }
-        this.bodyQuat.copy(displayQuat);
-      } else if (keepUpright && uprightStyle === 'unicorn') {
-        // Same turn-rate-limiting idea as the dragon branch above, but
-        // its own map/constant (see unicornDisplayQuats' doc comment).
-        let displayQuat = this.unicornDisplayQuats.get(entity.id);
-        if (!displayQuat) {
-          displayQuat = this.bodyQuat.clone();
-          this.unicornDisplayQuats.set(entity.id, displayQuat);
-        } else {
-          displayQuat.rotateTowards(this.bodyQuat, UNICORN_MAX_TURN_RADIANS_PER_SEC * dt);
-        }
-
-        // Hard ceiling on how far the model's up/legs axis can end up
-        // tilted from true vertical, applied last (after pitch clamp,
-        // basis construction, bank, and the turn-rate smoothing above
-        // have all already been baked in) — see
-        // UNICORN_MAX_UP_TILT_RADIANS' doc comment for why this is a
-        // belt-and-suspenders guarantee rather than just relying on the
-        // upstream constants being tuned correctly. Applied directly to
-        // the persisted displayQuat (not a local copy) so next frame's
-        // rotateTowards target already reflects the clamp, rather than
-        // fighting it back open every frame.
-        this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
-        const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
-        if (upTilt > UNICORN_MAX_UP_TILT_RADIANS) {
-          this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
-          if (this.tmpUnicornTiltAxis.lengthSq() > 1e-10) {
-            this.tmpUnicornTiltAxis.normalize();
-            this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - UNICORN_MAX_UP_TILT_RADIANS);
-            displayQuat.premultiply(this.unicornTiltCorrection);
-          }
-        }
-        this.bodyQuat.copy(displayQuat);
-      } else if (keepUpright && uprightStyle === 'shark') {
-        // Same turn-rate-limiting + final up-tilt safety clamp as the
-        // unicorn branch above, reusing its own map/constants (see
-        // sharkDisplayQuats' / SHARK_MAX_TURN_RADIANS_PER_SEC' /
-        // SHARK_MAX_UP_TILT_RADIANS' doc comments) rather than sharing the
-        // unicorn's, since sharks/unicorns are otherwise-unrelated
-        // entities that just happen to use the same shape of orientation
-        // model.
-        let displayQuat = this.sharkDisplayQuats.get(entity.id);
-        if (!displayQuat) {
-          displayQuat = this.bodyQuat.clone();
-          this.sharkDisplayQuats.set(entity.id, displayQuat);
-        } else {
-          displayQuat.rotateTowards(this.bodyQuat, SHARK_MAX_TURN_RADIANS_PER_SEC * dt);
-        }
-
-        this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
-        const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
-        if (upTilt > SHARK_MAX_UP_TILT_RADIANS) {
-          this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
-          if (this.tmpUnicornTiltAxis.lengthSq() > 1e-10) {
-            this.tmpUnicornTiltAxis.normalize();
-            this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - SHARK_MAX_UP_TILT_RADIANS);
-            displayQuat.premultiply(this.unicornTiltCorrection);
-          }
-        }
-        this.bodyQuat.copy(displayQuat);
-      }
-      // Body: just position + orientation, no flap. Caught boids shrink
-      // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
-      // worldScale !== 1 (fishtank only) grows the position outward from
-      // fishtankCenter rather than the coordinate origin, so the whole
-      // flock spreads to fill the visually-bigger tank symmetrically
-      // instead of shifting toward one corner of it.
-      if (worldScale !== 1) {
-        this.dummy.position.set(
-          this.fishtankCenter.x + (pos.x - this.fishtankCenter.x) * worldScale,
-          this.fishtankCenter.y + (pos.y - this.fishtankCenter.y) * worldScale,
-          this.fishtankCenter.z + (pos.z - this.fishtankCenter.z) * worldScale,
-        );
-      } else {
-        this.dummy.position.set(pos.x, pos.y, pos.z);
-      }
-      this.dummy.quaternion.copy(this.bodyQuat);
-      this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
-      this.dummy.updateMatrix();
-      set.body.setMatrixAt(i, this.dummy.matrix);
-      if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
-      if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
-      // Dragon/shark tails get an extra sway (see DRAGON_TAIL_SWAY_
-      // AMPLITUDE / SHARK_TAIL_SWAY_AMPLITUDE) computed below once the
-      // wingbeat phase is known; every other creature's tail just
-      // follows the body rigidly, as before.
-      if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
-
-      // Wings: apply an extra local flap rotation around the forward axis
-      // before combining with the shared body orientation, so both wings
-      // swing up/down in sync regardless of which way the bird is heading.
-      const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
-      const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
-      const stateResponse = (uprightStyle === 'dragon' || uprightStyle === 'unicorn' || uprightStyle === 'shark') ? 0.55 : 0.75;
-      const stateFrequencyMultRaw =
-        1
-        + blendStrength * stateResponse * (
-          climbWeight * CLIMB_FLAP_FREQ_BOOST
-          - diveWeight * DIVE_FLAP_FREQ_CUT
-          + turnWeight * TURN_FLAP_FREQ_BOOST
-          + panicWeight * PANIC_FLAP_FREQ_BOOST
-          - cruiseWeight * 0.04
-        );
-      const stateAmplitudeMultRaw =
-        1
-        + blendStrength * stateResponse * (
-          climbWeight * CLIMB_FLAP_AMP_BOOST
-          + diveWeight * DIVE_FLAP_AMP_BOOST
-          + turnWeight * TURN_FLAP_AMP_BOOST
-          + panicWeight * PANIC_FLAP_AMP_BOOST
-          - cruiseWeight * 0.06
-        );
-      const stateFrequencyMult = THREE.MathUtils.clamp(stateFrequencyMultRaw, 0.8, 1.18);
-      const stateAmplitudeMult = THREE.MathUtils.clamp(stateAmplitudeMultRaw, 0.82, 1.24);
-      const amplitude = amplitudeBase * stateAmplitudeMult;
-      let phase: number;
-      let effectiveFrequency = flapFrequency * stateFrequencyMult;
-      if (uprightStyle === 'unicorn') {
-        // Flap frequency scales with vertical velocity instead of the
-        // constant-frequency formula everyone else uses — "flap faster
-        // as they go up, slower as they descend" — so the phase has to
-        // be integrated frame-by-frame.
-        const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
-        const freqMultiplier = climbFrac >= 0
-          ? 1 + UNICORN_CLIMB_FLAP_BOOST * climbFrac
-          : 1 - UNICORN_DESCEND_FLAP_CUT * -climbFrac;
-        effectiveFrequency = flapFrequency * freqMultiplier * stateFrequencyMult;
-      }
-      const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
-      phase = prevPhase + effectiveFrequency * dt;
-      this.flapPhase.set(entity, phase);
-      const flapAngle = amplitude * Math.sin(phase) + finRestBiasRad;
-
-      this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
-      this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-      this.dummy.updateMatrix();
-      set.wingLeft.setMatrixAt(i, this.dummy.matrix);
-
-      this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
-      this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-      this.dummy.updateMatrix();
-      set.wingRight.setMatrixAt(i, this.dummy.matrix);
-
-      // Tail sway (dragons/sharks only): swing the tail around
-      // tailSwayAxis — pitch (up/down) for a dragon's whip tail, yaw
-      // (side to side) for a shark's swimming tail beat — using its own
-      // phase (independent frequency, but still offset from the fin/
-      // wing motion) so the tail reads as part of the same continuous
-      // motion rather than an unrelated animation, without necessarily
-      // moving in lockstep with it.
-      if (set.tail) {
-        if (uprightStyle === 'dragon' || uprightStyle === 'shark') {
-          const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
-          const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
-          this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
-          this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
-          this.dummy.updateMatrix();
-          if (tailSwayPivotY !== 0) {
-            // The tail geometry's own root vertex sits at local
-            // (0, tailSwayPivotY, 0) — the body's actual (static) tail
-            // attachment point — not at the shared local origin. Simply
-            // rotating around the origin (as above) would swing that
-            // root vertex through an arc away from the body, since it's
-            // some distance from the pivot, making the tail look
-            // detached/loose rather than hinged at a fixed joint. So
-            // instead of baking tailSwayQuat directly into dummy's own
-            // quaternion, compose translate(+pivot) * rotate(tailSwayQuat)
-            // * translate(-pivot) as an *extra* matrix applied in the
-            // tail's own local space (before dummy's position/bodyQuat),
-            // so the root vertex — which lands exactly on the pivot
-            // point after that first translate — stays fixed under the
-            // rotation, and only the fin's own outward geometry visibly
-            // swings, matching how a real tail flexes at its base.
-            this.dummy.quaternion.copy(this.bodyQuat);
-            this.dummy.updateMatrix();
-            this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
-            this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
-            this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
-            this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
-            this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
-            this.dummy.matrix.multiply(this.tailPivotMatrix);
-          }
-          set.tail.setMatrixAt(i, this.dummy.matrix);
-        }
-      }
-
-      // Color-by-state: lerp toward the highlight color as intensity rises.
-      // Three coloring modes, checked in priority order:
-      //  1. getSpeciesColors: a species with distinct, non-uniform plumage
-      //     (e.g. the parrot's macaw-style body/wing/tail colors) — each
-      //     part gets its own small id-derived jitter for individual
-      //     variety, but the three parts stay distinctly different hues
-      //     from each other (that contrast IS the "parrot" visual cue).
-      //  2. individualVariation: the sparrow-type "shades of brown" jitter
-      //     around one shared base color, with occasional distinct morphs.
-      //  3. Flat: every entity in this set renders identically.
-      const speciesColors = getSpeciesColors?.(entity);
-      let effectiveBase = baseColor;
-      let effectiveWing: THREE.Color | null = null;
-      let effectiveTail: THREE.Color | null = null;
-      let preserveParrotLegPalette = false;
-
-      if (speciesColors) {
-        const isGreenParrotVariant = getSpeciesColors === getParrotColors
-          && params.visualStyle === 'nature'
-          && speciesColors.body.getHex() === 0x44b749
-          && speciesColors.wing.getHex() === 0x44b749;
-        const lockParrotFocusPalette = getSpeciesColors === getParrotColors
-          && params.visualStyle === 'nature'
-          && PARROT_FOCUS_PATTERN_INDEX !== null;
-        if (lockParrotFocusPalette || isGreenParrotVariant) {
-          effectiveBase = speciesColors.body;
-          effectiveWing = speciesColors.wing;
-          effectiveTail = speciesColors.tail;
-        } else {
-          this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
-          this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
-          this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
-          effectiveBase = this.variantColor;
-          effectiveWing = this.wingColor;
-          effectiveTail = this.tailColor;
-        }
-      } else if (individualVariation) {
-        baseColor.getHSL(this.hsl);
-        let { h, s, l } = this.hsl;
-        h = (h + (idHash(entity.id, 1) - 0.5) * 0.05 + 1) % 1;
-        s = Math.max(0, Math.min(1, s + (idHash(entity.id, 2) - 0.5) * 0.16));
-        l = Math.max(0, Math.min(1, l + (idHash(entity.id, 3) - 0.5) * 0.18));
-        const morphRoll = idHash(entity.id, 4);
-        if (morphRoll < 0.06) {
-          // Pale/leucistic-like morph: much lighter, slightly desaturated.
-          l = Math.max(0, Math.min(0.92, l + 0.28));
-          s *= 0.6;
-        } else if (morphRoll < 0.1) {
-          // Dark/melanistic-like morph: noticeably darker.
-          l = Math.max(0.05, l - 0.22);
-        } else if (morphRoll < 0.16) {
-          // Warmer, rustier-toned morph: shift hue toward red-orange.
-          h = (h + 0.03) % 1;
-          s = Math.min(1, s + 0.15);
-        }
-        this.variantColor.setHSL(h, s, l);
+        this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
         effectiveBase = this.variantColor;
+        effectiveWing = this.wingColor;
+        effectiveTail = this.tailColor;
       }
-      if (isNatureSmallBirdBody) {
-        // Baked gradient body — pass white so the vertex colours show through.
-        this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
-      } else {
-        this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
+    } else if (individualVariation) {
+      baseColor.getHSL(this.hsl);
+      let { h, s, l } = this.hsl;
+      h = (h + (idHash(entity.id, 1) - 0.5) * 0.05 + 1) % 1;
+      s = Math.max(0, Math.min(1, s + (idHash(entity.id, 2) - 0.5) * 0.16));
+      l = Math.max(0, Math.min(1, l + (idHash(entity.id, 3) - 0.5) * 0.18));
+      const morphRoll = idHash(entity.id, 4);
+      if (morphRoll < 0.06) {
+        // Pale/leucistic-like morph: much lighter, slightly desaturated.
+        l = Math.max(0, Math.min(0.92, l + 0.28));
+        s *= 0.6;
+      } else if (morphRoll < 0.1) {
+        // Dark/melanistic-like morph: noticeably darker.
+        l = Math.max(0.05, l - 0.22);
+      } else if (morphRoll < 0.16) {
+        // Warmer, rustier-toned morph: shift hue toward red-orange.
+        h = (h + 0.03) % 1;
+        s = Math.min(1, s + 0.15);
       }
-      set.body.setColorAt(i, this.stateColor);
-      if (isNatureSmallBirdWing) {
-        // Baked gradient wings — white passthrough; same for tail if baked.
-        this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
-        set.wingLeft.setColorAt(i, this.wingColor);
-        set.wingRight.setColorAt(i, this.wingColor);
-        if (set.tail) {
-          if (isNatureSmallBirdTail) {
-            this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
-          } else {
-            this.tailColor.copy(this.wingColor);
-          }
-          set.tail.setColorAt(i, this.tailColor);
-        }
-      } else if (effectiveWing) {
-        const preserveParrotWingPalette = getSpeciesColors === getParrotColors
-          && params.visualStyle === 'nature'
-          && bakedWingPalette
-          && !!set.wingLeft.geometry.getAttribute('color');
-        const preserveParrotTailPalette = preserveParrotWingPalette
-          && !!set.tail?.geometry.getAttribute('color');
-        preserveParrotLegPalette = preserveParrotWingPalette
-          && !!set.legs?.geometry.getAttribute('color');
-        // Species with their own distinct wing/tail base colors keep those
-        // hues rather than just darkening the body color.
-        if (preserveParrotWingPalette) {
-          this.wingColor.setRGB(1, 1, 1);
+      this.variantColor.setHSL(h, s, l);
+      effectiveBase = this.variantColor;
+    }
+    if (isNatureSmallBirdBody) {
+      // Baked gradient body — pass white so the vertex colours show through.
+      this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+    } else {
+      this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
+    }
+    set.body.setColorAt(index, this.stateColor);
+    if (isNatureSmallBirdWing) {
+      // Baked gradient wings — white passthrough; same for tail if baked.
+      this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+      set.wingLeft.setColorAt(index, this.wingColor);
+      set.wingRight.setColorAt(index, this.wingColor);
+      if (set.tail) {
+        if (isNatureSmallBirdTail) {
+          this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
         } else {
-          this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
+          this.tailColor.copy(this.wingColor);
         }
-        set.wingLeft.setColorAt(i, this.wingColor);
-        set.wingRight.setColorAt(i, this.wingColor);
-        if (set.tail) {
-          if (effectiveTail) {
-            if (preserveParrotTailPalette) {
-              this.tailColor.setRGB(1, 1, 1);
-            } else {
-              this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
-            }
-            set.tail.setColorAt(i, this.tailColor);
-          } else {
-            set.tail.setColorAt(i, this.wingColor);
-          }
-        }
-      } else if (individualVariation) {
-        // Wings/tail render a touch darker than the body — real bird wing
-        // feathers are almost always a shade or two darker than the breast/
-        // body plumage, and this reads clearly even at a distance.
-        this.wingColor.copy(this.stateColor).multiplyScalar(0.82);
-        set.wingLeft.setColorAt(i, this.wingColor);
-        set.wingRight.setColorAt(i, this.wingColor);
-        if (set.tail) set.tail.setColorAt(i, this.wingColor);
+        set.tail.setColorAt(index, this.tailColor);
+      }
+    } else if (effectiveWing) {
+      const preserveParrotWingPalette = useNatureParrotPalette
+        && bakedWingPalette
+        && !!set.wingLeft.geometry.getAttribute('color');
+      const preserveParrotTailPalette = preserveParrotWingPalette
+        && !!set.tail?.geometry.getAttribute('color');
+      preserveParrotLegPalette = preserveParrotWingPalette
+        && !!set.legs?.geometry.getAttribute('color');
+      // Species with their own distinct wing/tail base colors keep those
+      // hues rather than just darkening the body color.
+      if (preserveParrotWingPalette) {
+        this.wingColor.setRGB(1, 1, 1);
       } else {
-        set.wingLeft.setColorAt(i, this.stateColor);
-        set.wingRight.setColorAt(i, this.stateColor);
-        if (set.tail) {
-          // Auto-detect baked vertex colours on the tail (e.g. dragon gradient
-          // tail). Pass white so the gradient shows through; otherwise use
-          // stateColor like the wings.
-          if (set.tail.geometry.getAttribute('color')) {
+        this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
+      }
+      set.wingLeft.setColorAt(index, this.wingColor);
+      set.wingRight.setColorAt(index, this.wingColor);
+      if (set.tail) {
+        if (effectiveTail) {
+          if (preserveParrotTailPalette) {
             this.tailColor.setRGB(1, 1, 1);
           } else {
-            this.tailColor.copy(this.stateColor);
+            this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
           }
-          set.tail.setColorAt(i, this.tailColor);
-        }
-      }
-      if (set.legs) {
-        if (preserveParrotLegPalette || set.legs.geometry.getAttribute('color')) {
-          // Parrot legs: baked palette feet color, pass through with white.
-          // Small-bird legs: baked species leg color, same white pass-through.
-          this.legsColor.setRGB(1, 1, 1);
+          set.tail.setColorAt(index, this.tailColor);
         } else {
-          this.legsColor.copy(this.stateColor);
+          set.tail.setColorAt(index, this.wingColor);
         }
-        set.legs.setColorAt(i, this.legsColor);
       }
-      if (set.beak && beakColor) {
-        // Small per-individual jitter, same treatment as the other parts
-        // — keeps a flock of e.g. cardinals from looking like every
-        // single beak is the identical exact pixel color.
-        this.jitterHSL(this.beakInstanceColor, beakColor, entity.id, 5, 0.04, 0.1, 0.08);
-        set.beak.setColorAt(i, this.beakInstanceColor);
+    } else if (individualVariation) {
+      // Wings/tail render a touch darker than the body — real bird wing
+      // feathers are almost always a shade or two darker than the breast/
+      // body plumage, and this reads clearly even at a distance.
+      this.wingColor.copy(this.stateColor).multiplyScalar(0.82);
+      set.wingLeft.setColorAt(index, this.wingColor);
+      set.wingRight.setColorAt(index, this.wingColor);
+      if (set.tail) set.tail.setColorAt(index, this.wingColor);
+    } else {
+      set.wingLeft.setColorAt(index, this.stateColor);
+      set.wingRight.setColorAt(index, this.stateColor);
+      if (set.tail) {
+        // Auto-detect baked vertex colours on the tail (e.g. dragon gradient
+        // tail). Pass white so the gradient shows through; otherwise use
+        // stateColor like the wings.
+        if (set.tail.geometry.getAttribute('color')) {
+          this.tailColor.setRGB(1, 1, 1);
+        } else {
+          this.tailColor.copy(this.stateColor);
+        }
+        set.tail.setColorAt(index, this.tailColor);
       }
     }
+    if (set.legs) {
+      if (preserveParrotLegPalette || set.legs.geometry.getAttribute('color')) {
+        // Parrot legs: baked palette feet color, pass through with white.
+        // Small-bird legs: baked species leg color, same white pass-through.
+        this.legsColor.setRGB(1, 1, 1);
+      } else {
+        this.legsColor.copy(this.stateColor);
+      }
+      set.legs.setColorAt(index, this.legsColor);
+    }
+    if (set.beak && beakColor) {
+      // Small per-individual jitter, same treatment as the other parts
+      // — keeps a flock of e.g. cardinals from looking like every
+      // single beak is the identical exact pixel color.
+      this.jitterHSL(this.beakInstanceColor, beakColor, entity.id, 5, 0.04, 0.1, 0.08);
+      set.beak.setColorAt(index, this.beakInstanceColor);
+    }
+  }
 
+  private markInstanceSetNeedsUpdate(set: BirdInstanceSet): void {
     set.body.instanceMatrix.needsUpdate = true;
     set.wingLeft.instanceMatrix.needsUpdate = true;
     set.wingRight.instanceMatrix.needsUpdate = true;
@@ -2325,6 +2114,516 @@ export class Renderer3D {
     }
   }
 
+  private applyEntityInstanceMatrices(args: EntityInstanceMatrixArgs): void {
+    const {
+      set,
+      index,
+      entity,
+      position,
+      velocity,
+      speed,
+      maxSpeed,
+      elapsed,
+      dt,
+      entityScale,
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      uprightStyle,
+    } = args;
+    this.applyEntityBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle);
+
+    // Wings: apply an extra local flap rotation around the forward axis.
+    const flapAngle = this.computeWingFlapAngle(
+      entity,
+      velocity,
+      speed,
+      maxSpeed,
+      dt,
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      finRestBiasRad,
+      uprightStyle,
+    );
+    this.applyWingFlapMatrices(set, index, flapAngle);
+
+    this.applyEntityTailSwayMatrix(
+      set,
+      index,
+      entity,
+      elapsed,
+      flapFrequency,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      uprightStyle,
+    );
+  }
+
+  private applyEntityBodyMatrices(
+    set: BirdInstanceSet,
+    i: number,
+    pos: { x: number; y: number; z: number },
+    entityScale: number,
+    worldScale: number,
+    meshScaleBoost: number,
+    uprightStyle: UprightStyle,
+  ): void {
+    // Body: just position + orientation, no flap.
+    if (worldScale !== 1) {
+      this.dummy.position.set(
+        this.fishtankCenter.x + (pos.x - this.fishtankCenter.x) * worldScale,
+        this.fishtankCenter.y + (pos.y - this.fishtankCenter.y) * worldScale,
+        this.fishtankCenter.z + (pos.z - this.fishtankCenter.z) * worldScale,
+      );
+    } else {
+      this.dummy.position.set(pos.x, pos.y, pos.z);
+    }
+    this.dummy.quaternion.copy(this.bodyQuat);
+    this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
+    this.dummy.updateMatrix();
+    set.body.setMatrixAt(i, this.dummy.matrix);
+    if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
+    if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
+    if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
+  }
+
+  private computeWingFlapAngle(
+    entity: Boid | Predator,
+    vel: { x: number; y: number; z: number },
+    speed: number,
+    maxSpeed: number,
+    dt: number,
+    blendStrength: number,
+    climbWeight: number,
+    diveWeight: number,
+    turnWeight: number,
+    panicWeight: number,
+    cruiseWeight: number,
+    flapFrequency: number,
+    flapIdleAmplitude: number,
+    flapSpeedAmplitude: number,
+    finRestBiasRad: number,
+    uprightStyle: UprightStyle,
+  ): number {
+    const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
+    const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
+    const stateResponse = (uprightStyle === 'dragon' || uprightStyle === 'unicorn' || uprightStyle === 'shark') ? 0.55 : 0.75;
+    const stateFrequencyMultRaw =
+      1
+      + blendStrength * stateResponse * (
+        climbWeight * CLIMB_FLAP_FREQ_BOOST
+        - diveWeight * DIVE_FLAP_FREQ_CUT
+        + turnWeight * TURN_FLAP_FREQ_BOOST
+        + panicWeight * PANIC_FLAP_FREQ_BOOST
+        - cruiseWeight * 0.04
+      );
+    const stateAmplitudeMultRaw =
+      1
+      + blendStrength * stateResponse * (
+        climbWeight * CLIMB_FLAP_AMP_BOOST
+        + diveWeight * DIVE_FLAP_AMP_BOOST
+        + turnWeight * TURN_FLAP_AMP_BOOST
+        + panicWeight * PANIC_FLAP_AMP_BOOST
+        - cruiseWeight * 0.06
+      );
+    const stateFrequencyMult = THREE.MathUtils.clamp(stateFrequencyMultRaw, 0.8, 1.18);
+    const stateAmplitudeMult = THREE.MathUtils.clamp(stateAmplitudeMultRaw, 0.82, 1.24);
+    const amplitude = amplitudeBase * stateAmplitudeMult;
+    let effectiveFrequency = flapFrequency * stateFrequencyMult;
+    if (uprightStyle === 'unicorn') {
+      const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
+      const freqMultiplier = climbFrac >= 0
+        ? 1 + UNICORN_CLIMB_FLAP_BOOST * climbFrac
+        : 1 - UNICORN_DESCEND_FLAP_CUT * -climbFrac;
+      effectiveFrequency = flapFrequency * freqMultiplier * stateFrequencyMult;
+    }
+    const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
+    const phase = prevPhase + effectiveFrequency * dt;
+    this.flapPhase.set(entity, phase);
+    return amplitude * Math.sin(phase) + finRestBiasRad;
+  }
+
+  private applyWingFlapMatrices(set: BirdInstanceSet, i: number, flapAngle: number): void {
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingLeft.setMatrixAt(i, this.dummy.matrix);
+
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingRight.setMatrixAt(i, this.dummy.matrix);
+  }
+
+  private applyEntityTailSwayMatrix(
+    set: BirdInstanceSet,
+    i: number,
+    entity: Boid | Predator,
+    elapsed: number,
+    flapFrequency: number,
+    tailSwayAxis: THREE.Vector3,
+    tailSwayAmplitude: number,
+    tailSwayFrequency: number | undefined,
+    tailSwayPivotY: number,
+    uprightStyle: UprightStyle,
+  ): void {
+    // Tail sway (dragons/sharks only).
+    if (!set.tail) return;
+    if (!(uprightStyle === 'dragon' || uprightStyle === 'shark')) return;
+    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
+    const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
+    this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
+    this.dummy.updateMatrix();
+    if (tailSwayPivotY !== 0) {
+      this.dummy.quaternion.copy(this.bodyQuat);
+      this.dummy.updateMatrix();
+      this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
+      this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
+      this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
+      this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
+      this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
+      this.dummy.matrix.multiply(this.tailPivotMatrix);
+    }
+    set.tail.setMatrixAt(i, this.dummy.matrix);
+  }
+
+  private applyEntityOrientationAndMotion(
+    entity: Boid | Predator,
+    speed: number,
+    vel: { x: number; y: number; z: number },
+    maxSpeed: number,
+    dt: number,
+    keepUpright: boolean,
+    uprightStyle: UprightStyle,
+    preferUpright: boolean,
+    bankScale: number,
+    getIntensity: (entity: Boid | Predator) => number,
+  ): {
+    blendStrength: number;
+    climbWeight: number;
+    diveWeight: number;
+    turnWeight: number;
+    panicWeight: number;
+    cruiseWeight: number;
+  } {
+    // Each entity keeps its own last-known heading (renderHeading)
+    // rather than relying on this.bodyQuat carrying over between loop
+    // iterations — otherwise an entity whose speed drops near zero
+    // (e.g. a predator gliding to a stop / digesting) would silently
+    // inherit whichever heading the *previous* entity in the array had
+    // that frame, causing it to visually snap to an unrelated
+    // direction instead of holding its own last heading.
+    this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
+    this.updateEntityRenderHeading(entity, speed, dt, keepUpright, uprightStyle);
+    const dir = entity.renderHeading;
+    this.tmpForward.set(dir.x, dir.y, dir.z);
+    this.applyBodyOrientationBasis(entity, keepUpright, uprightStyle, preferUpright);
+
+    const motionBlend = this.applyTurnBankAndPitch(
+      entity,
+      vel,
+      maxSpeed,
+      dt,
+      bankScale,
+      keepUpright,
+      getIntensity,
+    );
+    if (keepUpright) this.applyUprightDisplaySmoothing(entity, dt, uprightStyle);
+    return motionBlend;
+  }
+
+  private resolveMotionConfig(motion: MotionConfig): ResolvedMotionConfig {
+    const {
+      flapFrequency = FLAP_FREQUENCY,
+      flapIdleAmplitude = FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude = FLAP_SPEED_AMPLITUDE,
+      getScale = () => 1,
+      keepUpright = false,
+      uprightStyle = 'dragon' as const,
+      bankScale = 1,
+      finRestBiasRad = 0,
+      tailSwayAxis = MODEL_RIGHT_AXIS,
+      tailSwayAmplitude = DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency,
+      tailSwayPivotY = 0,
+      worldScale = 1,
+      meshScaleBoost = 1,
+      preferUpright = false,
+    } = motion;
+
+    return {
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    };
+  }
+
+  private resolveColourStrategy(colours: ColourStrategy): ResolvedColourStrategy {
+    const {
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation = false,
+      getSpeciesColors,
+      bakedWingPalette = false,
+      bakedBodyGradient = false,
+      useNatureParrotPalette = false,
+      beakColor,
+    } = colours;
+
+    return {
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      bakedBodyGradient,
+      useNatureParrotPalette,
+      beakColor,
+    };
+  }
+
+  private updateEntityInstance(args: UpdateEntityInstanceArgs): void {
+    const {
+      set,
+      index,
+      entity,
+      maxSpeed,
+      elapsed,
+      dt,
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      useNatureParrotPalette,
+      beakColor,
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    } = args;
+    const pos = entity.position;
+    const vel = entity.velocity;
+    const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+    const entityScale = getScale(entity);
+    const {
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+    } = this.applyEntityOrientationAndMotion(
+      entity,
+      speed,
+      vel,
+      maxSpeed,
+      dt,
+      keepUpright,
+      uprightStyle,
+      preferUpright,
+      bankScale,
+      getIntensity,
+    );
+    this.applyEntityInstanceMatrices({
+      set,
+      index,
+      entity,
+      position: pos,
+      velocity: vel,
+      speed,
+      maxSpeed,
+      elapsed,
+      dt,
+      entityScale,
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      uprightStyle,
+    });
+
+    this.applyInstanceColorsForEntity({
+      set,
+      index,
+      entity,
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      useNatureParrotPalette,
+      beakColor,
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+    });
+  }
+
+  private updateEntityInstancesLoop(
+    entities: (Boid | Predator)[],
+    sharedArgs: UpdateEntitySharedArgs,
+  ): void {
+    for (let i = 0; i < entities.length; i++) {
+      this.updateEntityInstance({
+        ...sharedArgs,
+        index: i,
+        entity: entities[i],
+      });
+    }
+  }
+
+  private updateInstances(
+    set: BirdInstanceSet,
+    entities: (Boid | Predator)[],
+    maxSpeed: number,
+    elapsed: number,
+    dt: number,
+    colours: ColourStrategy,
+    motion: MotionConfig = {},
+  ): void {
+    const {
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      bakedBodyGradient,
+      useNatureParrotPalette,
+      beakColor,
+    } = this.resolveColourStrategy(colours);
+    const {
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    } = this.resolveMotionConfig(motion);
+
+    // Small songbirds (nature style) bake a SmallBirdPalette gradient into
+    // their geometry. When bakedBodyGradient is true, pass white as the
+    // instance colour so the vertex colours show through unchanged —
+    // identical to the parrot wing-palette passthrough logic.
+    // Note: we can't infer this from geometry.getAttribute('color') alone
+    // because dragon/hawk geometry also carries vertex colours and would
+    // incorrectly trigger the white-passthrough branch.
+    const {
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+    } = this.getSmallBirdBakedColorFlags(set, bakedBodyGradient);
+    this.updateEntityInstancesLoop(entities, {
+      set,
+      maxSpeed,
+      elapsed,
+      dt,
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      useNatureParrotPalette,
+      beakColor,
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    });
+
+    this.markInstanceSetNeedsUpdate(set);
+  }
+
   /** Spawns a 3D blood-splatter burst for every not-yet-seen Simulation.catchEvent. */
   private spawnBloodFromCatches(sim: Simulation): void {
     for (const catchEvent of sim.catchEvents) {
@@ -2336,6 +2635,64 @@ export class Renderer3D {
     }
   }
 
+  private getOrSeedNextFireBreathTime(predator: Predator, elapsed: number): number {
+    let nextTime = this.nextFireBreathTime.get(predator);
+    if (nextTime === undefined) {
+      nextTime = elapsed + 1 + Math.random() * 2.5;
+      this.nextFireBreathTime.set(predator, nextTime);
+    }
+    return nextTime;
+  }
+
+  private computeDragonFirePose(predator: Predator): void {
+    // Anchor the flame to the dragon's actual *displayed* orientation
+    // (dragonDisplayQuats — the same turn-rate-limited quaternion used
+    // to draw the body mesh this frame) rather than the raw, unsmoothed
+    // predator.renderHeading. During a hard turn mid-hunt (exactly when
+    // fire is most likely to trigger), the raw target heading can point
+    // well away from where the model is actually currently drawn facing
+    // — using it made the flame appear to erupt from the dragon's back
+    // and shoot off in an unrelated direction (reported as "shooting
+    // upward like a whale spouting water") instead of out of the mouth
+    // in the direction the visible snout is pointing. Falling back to
+    // the raw heading only matters for a single early frame before any
+    // display quaternion has been computed yet.
+    const displayQuat = this.dragonDisplayQuats.get(predator.id);
+    if (displayQuat) {
+      this.tmpFireDirection.set(0, DRAGON_MOUTH.dirForward, DRAGON_MOUTH.dirUp).applyQuaternion(displayQuat).normalize();
+      this.tmpFireOffset.set(0, DRAGON_MOUTH.offsetForward, DRAGON_MOUTH.offsetUp).applyQuaternion(displayQuat);
+      this.tmpFireOrigin.set(predator.position.x, predator.position.y, predator.position.z).add(this.tmpFireOffset);
+      return;
+    }
+    const dir = predator.renderHeading;
+    this.tmpFireDirection.set(dir.x, dir.y, dir.z);
+    this.tmpFireOrigin.set(
+      predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
+      predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
+      predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
+    );
+  }
+
+  private spawnDragonFireBreath(predator: Predator): void {
+    // Scale the flame's reach by how fast the dragon is actually
+    // flying right now — a hovering/slow dragon gets a short puff close
+    // to its mouth, while one at full speed gets a stream that stretches
+    // well out ahead of it (see fireBreath.spawn's reach/emitterVelocity
+    // doc comment) so it doesn't visually fly through its own fire.
+    const vel = predator.velocity;
+    const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+    const speedFraction = THREE.MathUtils.clamp(speed / Math.max(params.predatorMaxSpeed, 1e-6), 0, 1);
+    this.tmpFireEmitterVelocity.set(vel.x, vel.y, vel.z);
+
+    this.fireBreathEffects.spawn(
+      this.tmpFireOrigin,
+      this.tmpFireDirection,
+      DRAGON_LENGTH * 0.5,
+      this.tmpFireEmitterVelocity,
+      speedFraction,
+    );
+  }
+
   /**
    * Periodically breathes fire from each actively-hunting dragon. Each
    * dragon keeps its own randomized next-trigger time (desynced so a pack
@@ -2343,18 +2700,14 @@ export class Renderer3D {
    * actually pursuing prey (huntIntensity above a threshold) and never
    * while digesting/resting.
    */
-  private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
-    if (!(params.visualStyle === 'nature' && params.dragonPredators)) return;
+  private spawnFireFromDragons(sim: Simulation, elapsed: number, flags: StyleFlags): void {
+    if (!(flags.isNature && params.dragonPredators)) return;
     for (const predator of sim.predators) {
       // Unicorns are never rendered as dragons (they have their own
       // geometry) and shouldn't breathe fire regardless.
       if (predator.kind === 'unicorn') continue;
       if (predator.digesting) continue;
-      let nextTime = this.nextFireBreathTime.get(predator);
-      if (nextTime === undefined) {
-        nextTime = elapsed + 1 + Math.random() * 2.5;
-        this.nextFireBreathTime.set(predator, nextTime);
-      }
+      const nextTime = this.getOrSeedNextFireBreathTime(predator, elapsed);
       if (elapsed < nextTime) continue;
       if (predator.huntIntensity < 0.45) {
         // Not excited enough to breathe fire right now — check again soon
@@ -2363,50 +2716,8 @@ export class Renderer3D {
         continue;
       }
 
-      // Anchor the flame to the dragon's actual *displayed* orientation
-      // (dragonDisplayQuats — the same turn-rate-limited quaternion used
-      // to draw the body mesh this frame) rather than the raw, unsmoothed
-      // predator.renderHeading. During a hard turn mid-hunt (exactly when
-      // fire is most likely to trigger), the raw target heading can point
-      // well away from where the model is actually currently drawn facing
-      // — using it made the flame appear to erupt from the dragon's back
-      // and shoot off in an unrelated direction (reported as "shooting
-      // upward like a whale spouting water") instead of out of the mouth
-      // in the direction the visible snout is pointing. Falling back to
-      // the raw heading only matters for a single early frame before any
-      // display quaternion has been computed yet.
-      const displayQuat = this.dragonDisplayQuats.get(predator.id);
-      if (displayQuat) {
-        this.tmpFireDirection.set(0, DRAGON_MOUTH.dirForward, DRAGON_MOUTH.dirUp).applyQuaternion(displayQuat).normalize();
-        this.tmpFireOffset.set(0, DRAGON_MOUTH.offsetForward, DRAGON_MOUTH.offsetUp).applyQuaternion(displayQuat);
-        this.tmpFireOrigin.set(predator.position.x, predator.position.y, predator.position.z).add(this.tmpFireOffset);
-      } else {
-        const dir = predator.renderHeading;
-        this.tmpFireDirection.set(dir.x, dir.y, dir.z);
-        this.tmpFireOrigin.set(
-          predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
-          predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
-          predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
-        );
-      }
-
-      // Scale the flame's reach by how fast the dragon is actually
-      // flying right now — a hovering/slow dragon gets a short puff close
-      // to its mouth, while one at full speed gets a stream that stretches
-      // well out ahead of it (see fireBreath.spawn's reach/emitterVelocity
-      // doc comment) so it doesn't visually fly through its own fire.
-      const vel = predator.velocity;
-      const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
-      const speedFraction = THREE.MathUtils.clamp(speed / Math.max(params.predatorMaxSpeed, 1e-6), 0, 1);
-      this.tmpFireEmitterVelocity.set(vel.x, vel.y, vel.z);
-
-      this.fireBreathEffects.spawn(
-        this.tmpFireOrigin,
-        this.tmpFireDirection,
-        DRAGON_LENGTH * 0.5,
-        this.tmpFireEmitterVelocity,
-        speedFraction,
-      );
+      this.computeDragonFirePose(predator);
+      this.spawnDragonFireBreath(predator);
       this.nextFireBreathTime.set(predator, elapsed + 2 + Math.random() * 2.5);
     }
   }
@@ -2433,7 +2744,7 @@ export class Renderer3D {
    * space next to the creature instead of the creature itself.
    */
   toRenderedPosition(x: number, y: number, z: number): THREE.Vector3 {
-    const isFishtank = params.visualStyle === 'fishtank';
+    const { isFishtank } = this.getActiveStyleFlags();
     if (!isFishtank) return new THREE.Vector3(x, y, z);
     const scale = TANK_VISUAL_SCALE;
     const c = this.fishtankCenter;
@@ -2517,7 +2828,7 @@ export class Renderer3D {
     // param) — the geometry's own local bounding box doesn't reflect that,
     // so without this the fishtank creature would actually render larger
     // than this distance was solved for and clip out of frame.
-    const worldScale = params.visualStyle === 'fishtank' ? TANK_VISUAL_SCALE : 1;
+    const worldScale = this.getActiveStyleFlags().isFishtank ? TANK_VISUAL_SCALE : 1;
     const radius = sphere.radius * worldScale;
     if (!radius) return fallbackDistance;
 
@@ -2587,330 +2898,583 @@ export class Renderer3D {
     this.controls.update();
   }
 
-  render(sim: Simulation): void {
-    this.ensureScene(sim);
-    const elapsed = (performance.now() - this.startTime) / 1000;
-    const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
-    this.lastElapsed = elapsed;
-    const isNature = params.visualStyle === 'nature';
-    const isFishtank = params.visualStyle === 'fishtank';
-    const isOrganic = isNature || isFishtank;
-    // Recomputed every frame (cheap) rather than cached, so it always
-    // reflects the current sim/world params without needing extra
-    // invalidation logic — used below to grow fishtank's boid positions
-    // around the tank's true center (see updateInstances' worldScale
-    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
-    // is the sim's raw center, matching placeFishtankEnvironment's
-    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
-    // resting on the table — NOT the sim's raw vertical center, matching
-    // placeFishtankEnvironment's bottom-anchored vertical growth (see
-    // its `center.y` doc comment) so fish grow in lockstep with the
-    // glass box instead of drifting out of sync with it.
-    if (isFishtank) {
-      this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
+  private groupBoidsBySpecies(boids: Boid[]): Map<BoidSpecies, Boid[]> {
+    const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
+    for (const boid of boids) {
+      const bucket = boidsBySpecies.get(boid.species);
+      if (bucket) bucket.push(boid);
+      else boidsBySpecies.set(boid.species, [boid]);
     }
+    return boidsBySpecies;
+  }
 
-    // AfterimagePass's damp uniform controls how strongly the previous
-    // frame persists — same trailAmount knob used by the 2D renderer.
-    this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
-    if (isNature) this.natureEnv.update(elapsed);
-    if (isFishtank) this.fishtankEnv.update(elapsed);
+  private partitionNatureParrotEntities(entities: Boid[]): {
+    neutralEntities: Boid[];
+    profileEntities: Map<ParrotGeometryProfile, Boid[]>;
+  } {
+    const profileEntities = new Map<ParrotGeometryProfile, Boid[]>();
+    const neutralEntities: Boid[] = [];
+    for (const entity of entities) {
+      const profile = getNatureParrotVariant(entity).geometryProfile;
+      if (profile === 'neutral') neutralEntities.push(entity);
+      else {
+        const bucket = profileEntities.get(profile);
+        if (bucket) bucket.push(entity);
+        else profileEntities.set(profile, [entity]);
+      }
+    }
+    return { neutralEntities, profileEntities };
+  }
+
+  private getBoidEntitiesForSpecies(
+    boidsBySpecies: Map<BoidSpecies, Boid[]>,
+    species: BoidSpecies,
+  ): Boid[] {
+    return boidsBySpecies.get(species) ?? [];
+  }
+
+  private getPredatorRenderFlags(flags: StyleFlags): PredatorRenderFlags {
+    const { isOrganic, isFishtank } = flags;
+    const isDragon = isOrganic && params.dragonPredators;
+    const isShark = isDragon && isFishtank;
+    return { isDragon, isShark };
+  }
+
+  private partitionPredators(predators: Predator[]): { hawks: Predator[]; unicorns: Predator[] } {
+    const hawks: Predator[] = [];
+    const unicorns: Predator[] = [];
+    for (const predator of predators) {
+      if (predator.kind === 'unicorn') unicorns.push(predator);
+      else hawks.push(predator);
+    }
+    return { hawks, unicorns };
+  }
+
+  private getHawkColourStrategy(flags: StyleFlags, renderFlags: PredatorRenderFlags): ColourStrategy {
+    const { isNature, isFishtank, isOrganic } = flags;
+    const { isDragon } = renderFlags;
+    return {
+      baseColor: isDragon
+        ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE)
+        : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
+      highlightColor: isDragon
+        ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT)
+        : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
+      getIntensity: (entity) => (entity as Predator).huntIntensity,
+      // Plain nature hawks (not dragon/fishtank) get the bald-eagle
+      // body/wing/tail colour split. See NATURE_HAWK_COLORS' doc comment.
+      getSpeciesColors: !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
+    };
+  }
+
+  private getHawkMotionConfig(flags: StyleFlags, renderFlags: PredatorRenderFlags): MotionConfig {
+    const { isFishtank } = flags;
+    const { isDragon, isShark } = renderFlags;
+    return {
+      flapFrequency: isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
+      flapIdleAmplitude: isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
+      keepUpright: isDragon,
+      uprightStyle: isShark ? 'shark' : 'dragon',
+      // Sharks: fins droop at rest, tail yaws side-to-side (the actual
+      // swimming stroke) instead of pitching up/down like a dragon.
+      finRestBiasRad: isShark ? SHARK_FIN_REST_TILT_RAD : 0,
+      tailSwayAxis: isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+      tailSwayAmplitude: isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency: isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
+      tailSwayPivotY: isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
+      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
+    };
+  }
+
+  private getUnicornColourStrategy(flags: StyleFlags): ColourStrategy {
+    const { isOrganic, isFishtank } = flags;
+    return {
+      baseColor: isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
+      highlightColor: isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
+      getIntensity: (entity) => (entity as Predator).huntIntensity,
+      getSpeciesColors: () => isFishtank
+        ? FISHTANK_SEAHORSE_COLORS
+        : isOrganic
+          ? NATURE_UNICORN_COLORS
+          : ARCADE_UNICORN_COLORS,
+    };
+  }
+
+  private getUnicornMotionConfig(flags: StyleFlags): MotionConfig {
+    const { isFishtank } = flags;
+    return {
+      flapFrequency: UNICORN_FLAP_FREQUENCY,
+      flapIdleAmplitude: UNICORN_FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: UNICORN_FLAP_SPEED_AMPLITUDE,
+      // Unicorns always fly right-side-up in every style — it's a character
+      // trait, not a nature-only cosmetic. Their own 'unicorn' orientation
+      // model (hard pitch clamp + up-tilt safety) keeps them floaty/level.
+      keepUpright: true,
+      uprightStyle: 'unicorn',
+      bankScale: UNICORN_BANK_SCALE,
+      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+    };
+  }
+
+  private getBoidMotionConfig(
+    config: BoidSpeciesConfig,
+    flags: StyleFlags,
+    boidMotionFlags: BoidMotionStyleFlags,
+  ): MotionConfig {
+    const { isFishtank } = flags;
+    const { isFishTail, isNatureParrot } = boidMotionFlags;
+    return {
+      flapFrequency: isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
+      flapIdleAmplitude: isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+      getScale: (entity) => (entity as Boid).scale,
+      tailSwayAxis: isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+      tailSwayAmplitude: isFishTail
+        ? FISH_TAIL_SWAY_AMPLITUDE
+        : isNatureParrot
+          ? PARROT_TAIL_SWAY_AMPLITUDE
+          : DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency: isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
+      tailSwayPivotY: isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
+      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+      preferUpright: true,
+    };
+  }
+
+  private getParrotColourStrategy(
+    config: BoidSpeciesConfig,
+    flags: StyleFlags,
+    bakedWingPalette: boolean,
+  ): ColourStrategy {
+    return {
+      baseColor: config.natureBase,
+      highlightColor: NATURE_BOID_PANIC,
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: true,
+      getSpeciesColors: (entity) => getParrotColorsForFlags(entity, flags),
+      beakColor: config.beakColor,
+      bakedWingPalette,
+      useNatureParrotPalette: flags.isNature,
+    };
+  }
+
+  private getBoidColourStrategy(config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
+    const { isOrganic, isNature } = flags;
+    const getColors = config.getColors;
+    return {
+      baseColor: isOrganic ? config.natureBase : config.arcadeBase,
+      highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: config.colors || config.getColors ? true : isOrganic,
+      getSpeciesColors: getColors
+        ? (entity) => getColors(entity, flags)
+        : (config.colors ? () => config.colors! : undefined),
+      beakColor: config.beakColor,
+      // All nature boids with a baked wing vertex palette (currently only
+      // parrots via getColors) pass white so the palette shows through.
+      bakedWingPalette: true,
+      // Small songbirds (sparrow/goldfinch/cardinal/bluejay) bake a
+      // species-specific gradient into body/wing/tail geometry.
+      bakedBodyGradient: isNature && !!config.natureSmallBirdPalette,
+    };
+  }
+
+  private hasAnyBoidSpeciesInstances(): boolean {
+    return BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
+  }
+
+  private hasAnyPredatorInstances(): boolean {
+    return this.predatorInstances.get('hawk') !== undefined
+      || this.predatorInstances.get('unicorn') !== undefined;
+  }
+
+  private getPredatorUpdateContext(
+    sim: Simulation,
+    flags: StyleFlags,
+  ): PredatorUpdateContext {
+    const renderFlags = this.getPredatorRenderFlags(flags);
+    const { hawks, unicorns } = this.partitionPredators(sim.predators);
+    return { hawks, unicorns, renderFlags };
+  }
+
+  private updatePredatorInstanceSets(
+    context: PredatorUpdateContext,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    this.updateHawkPredatorInstances(
+      context.hawks,
+      elapsed,
+      dt,
+      flags,
+      context.renderFlags,
+    );
+    this.updateUnicornPredatorInstances(context.unicorns, elapsed, dt, flags);
+  }
+
+  private updateNatureParrotInstances(
+    config: BoidSpeciesConfig,
+    instances: BirdInstanceSet,
+    entities: Boid[],
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    const { neutralEntities, profileEntities } = this.partitionNatureParrotEntities(entities);
+    const boidMotionFlags: BoidMotionStyleFlags = { isFishTail: false, isNatureParrot: true };
+    this.updateInstances(
+      instances,
+      neutralEntities,
+      params.boidMaxSpeed,
+      elapsed,
+      dt,
+      this.getParrotColourStrategy(config, flags, false),
+      this.getBoidMotionConfig(config, flags, boidMotionFlags),
+    );
+    for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
+      const profileSet = this.parrotProfileInstances.get(profile);
+      if (!profileSet) continue;
+      this.updateInstances(
+        profileSet,
+        profileEntities.get(profile) ?? [],
+        params.boidMaxSpeed,
+        elapsed,
+        dt,
+        this.getParrotColourStrategy(config, flags, true),
+        this.getBoidMotionConfig(config, flags, boidMotionFlags),
+      );
+    }
+  }
+
+  private updateStandardBoidSpeciesInstances(
+    config: BoidSpeciesConfig,
+    instances: BirdInstanceSet,
+    entities: Boid[],
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+    isNatureParrot: boolean,
+  ): void {
+    const boidMotionFlags: BoidMotionStyleFlags = {
+      isFishTail: flags.isFishtank,
+      isNatureParrot,
+    };
+    this.updateInstances(
+      instances,
+      entities,
+      params.boidMaxSpeed,
+      elapsed,
+      dt,
+      this.getBoidColourStrategy(config, flags),
+      this.getBoidMotionConfig(config, flags, boidMotionFlags),
+    );
+  }
+
+  private updateBoidSpeciesConfig(
+    config: BoidSpeciesConfig,
+    boidsBySpecies: Map<BoidSpecies, Boid[]>,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    const { isNature } = flags;
+    const instances = this.speciesInstances.get(config.species);
+    if (!instances) return;
+    const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
+    const isNatureParrot = config.species === 'parrot' && isNature;
+    // Fish-tail wave (fishtank only): every fishtank species' caudal
+    // fin is rooted at the model's own local origin (sparrow/
+    // goldfinch/cardinal/bluejay's plain small-fish geometry, and
+    // now the parrot species' butterflyfish geometry too), so it's
+    // safe to sway around the shared pivot with no detachment risk
+    // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
+    if (isNatureParrot) {
+      this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, flags);
+      return;
+    }
+    this.updateStandardBoidSpeciesInstances(
+      config,
+      instances,
+      entities,
+      elapsed,
+      dt,
+      flags,
+      isNatureParrot,
+    );
+  }
+
+  private updateBoidSpeciesInstances(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    if (!this.hasAnyBoidSpeciesInstances()) return;
+
+    const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
+
+    for (const config of BOID_SPECIES_CONFIGS) {
+      this.updateBoidSpeciesConfig(config, boidsBySpecies, elapsed, dt, flags);
+    }
+  }
+
+  private updatePredatorInstances(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    if (!this.hasAnyPredatorInstances()) return;
+    const context = this.getPredatorUpdateContext(sim, flags);
+    this.updatePredatorInstanceSets(context, elapsed, dt, flags);
+  }
+
+  private updateHawkPredatorInstances(
+    hawks: Predator[],
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+    renderFlags: PredatorRenderFlags,
+  ): void {
+    const hawkInstances = this.predatorInstances.get('hawk');
+    if (!hawkInstances) return;
+    this.updateInstances(
+      hawkInstances,
+      hawks,
+      params.predatorMaxSpeed,
+      elapsed,
+      dt,
+      this.getHawkColourStrategy(flags, renderFlags),
+      this.getHawkMotionConfig(flags, renderFlags),
+    );
+  }
+
+  private updateUnicornPredatorInstances(
+    unicorns: Predator[],
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    const unicornInstances = this.predatorInstances.get('unicorn');
+    if (!unicornInstances) return;
+    this.updateInstances(
+      unicornInstances,
+      unicorns,
+      params.predatorMaxSpeed,
+      elapsed,
+      dt,
+      this.getUnicornColourStrategy(flags),
+      this.getUnicornMotionConfig(flags),
+    );
+  }
+
+  private applyUfoVisualState(
+    visual: UFOVisual,
+    ufo: Simulation['ufos'][number] | undefined,
+    flags: StyleFlags,
+    ufoWorldScale: number,
+    ufoBeamLength: number,
+  ): void {
+    const { isFishtank } = flags;
+    if (ufo) {
+      if (isFishtank) {
+        this.tmpVec3.set(
+          this.fishtankCenter.x + (ufo.position.x - this.fishtankCenter.x) * ufoWorldScale,
+          this.fishtankCenter.y + (ufo.position.y - this.fishtankCenter.y) * ufoWorldScale,
+          this.fishtankCenter.z + (ufo.position.z - this.fishtankCenter.z) * ufoWorldScale,
+        );
+      } else {
+        this.tmpVec3.set(ufo.position.x, ufo.position.y, ufo.position.z);
+      }
+      visual.setState(true, this.tmpVec3, ufo.beamStrength, ufoBeamLength, ufoWorldScale);
+      return;
+    }
+    visual.setState(false, this.tmpVec3, 0, 0);
+  }
+
+  private getUfoRenderScaleParams(flags: StyleFlags): { ufoWorldScale: number; ufoBeamLength: number } {
+    const { isFishtank } = flags;
+    const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+    const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
+    return { ufoWorldScale, ufoBeamLength };
+  }
+
+  private updateUfoVisuals(sim: Simulation, dt: number, flags: StyleFlags): void {
+    // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
+    // slots beyond the current active count are simply hidden.
+    const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(flags);
+    for (let i = 0; i < this.ufoVisuals.length; i++) {
+      const visual = this.ufoVisuals[i];
+      this.applyUfoVisualState(visual, sim.ufos[i], flags, ufoWorldScale, ufoBeamLength);
+      visual.update(dt);
+    }
+  }
+
+  private getToneMappingExposureForTimeOfDay(timeOfDay: typeof params.timeOfDay): number {
     const exposureByTime = {
       dawn: 0.62,
       noon: 0.7,
       sunset: 0.6,
       night: 0.44,
     } as const;
-    this.renderer.toneMappingExposure = exposureByTime[params.timeOfDay];
+    return exposureByTime[timeOfDay];
+  }
+
+  private updatePostProcessingAndEnvironment(
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    const { isNature, isFishtank } = flags;
+    // AfterimagePass's damp uniform controls how strongly the previous
+    // frame persists — same trailAmount knob used by the 2D renderer.
+    this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
+    if (isNature) this.natureEnv.update(elapsed);
+    if (isFishtank) this.fishtankEnv.update(elapsed);
+    this.renderer.toneMappingExposure = this.getToneMappingExposureForTimeOfDay(params.timeOfDay);
     this.driftingClouds.update(dt);
+  }
+
+  private updateTransientSceneEffects(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
-    this.spawnFireFromDragons(sim, elapsed);
+    this.spawnFireFromDragons(sim, elapsed, flags);
     this.fireBreathEffects.update(dt);
+    this.updateUfoVisuals(sim, dt, flags);
+  }
 
-    // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
-    // slots beyond the current active count are simply hidden.
-    const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-    const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
-    for (let i = 0; i < this.ufoVisuals.length; i++) {
-      const ufo = sim.ufos[i];
-      const visual = this.ufoVisuals[i];
-      if (ufo) {
-        if (isFishtank) {
-          this.tmpVec3.set(
-            this.fishtankCenter.x + (ufo.position.x - this.fishtankCenter.x) * ufoWorldScale,
-            this.fishtankCenter.y + (ufo.position.y - this.fishtankCenter.y) * ufoWorldScale,
-            this.fishtankCenter.z + (ufo.position.z - this.fishtankCenter.z) * ufoWorldScale,
-          );
-        } else {
-          this.tmpVec3.set(ufo.position.x, ufo.position.y, ufo.position.z);
-        }
-        visual.setState(true, this.tmpVec3, ufo.beamStrength, ufoBeamLength, ufoWorldScale);
-      } else {
-        visual.setState(false, this.tmpVec3, 0, 0);
-      }
-      visual.update(dt);
-    }
+  private updateSceneEffects(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    this.updatePostProcessingAndEnvironment(elapsed, dt, flags);
+    this.updateTransientSceneEffects(sim, elapsed, dt, flags);
+  }
 
-    const anySpeciesInstances = BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
-    if (anySpeciesInstances) {
-      const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
-      for (const boid of sim.boids) {
-        const bucket = boidsBySpecies.get(boid.species);
-        if (bucket) bucket.push(boid);
-        else boidsBySpecies.set(boid.species, [boid]);
-      }
-      for (const config of BOID_SPECIES_CONFIGS) {
-        const instances = this.speciesInstances.get(config.species);
-        if (!instances) continue;
-        const entities = boidsBySpecies.get(config.species) ?? [];
-        const isNatureParrot = config.species === 'parrot' && isNature;
-        // Fish-tail wave (fishtank only): every fishtank species' caudal
-        // fin is rooted at the model's own local origin (sparrow/
-        // goldfinch/cardinal/bluejay's plain small-fish geometry, and
-        // now the parrot species' butterflyfish geometry too), so it's
-        // safe to sway around the shared pivot with no detachment risk
-        // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
-        const isFishTail = isFishtank;
-        if (isNatureParrot) {
-          const profileEntities = new Map<ParrotGeometryProfile, Boid[]>();
-          const neutralEntities: Boid[] = [];
-          for (const entity of entities) {
-            const profile = getNatureParrotVariant(entity).geometryProfile;
-            if (profile === 'neutral') neutralEntities.push(entity);
-            else {
-              const bucket = profileEntities.get(profile);
-              if (bucket) bucket.push(entity);
-              else profileEntities.set(profile, [entity]);
-            }
-          }
-          this.updateInstances(
-            instances,
-            neutralEntities,
-            params.boidMaxSpeed,
-            elapsed,
-            dt,
-            {
-              baseColor: config.natureBase,
-              highlightColor: NATURE_BOID_PANIC,
-              getIntensity: (entity) => (entity as Boid).panicLevel,
-              individualVariation: true,
-              getSpeciesColors: getParrotColors,
-              beakColor: config.beakColor,
-              // Neutral parrots share geometry — no baked wing vertex palette.
-            },
-            {
-              flapFrequency: PARROT_FLAP_FREQUENCY,
-              flapIdleAmplitude: PARROT_FLAP_IDLE_AMPLITUDE,
-              flapSpeedAmplitude: PARROT_FLAP_SPEED_AMPLITUDE,
-              getScale: (entity) => (entity as Boid).scale,
-              tailSwayAmplitude: PARROT_TAIL_SWAY_AMPLITUDE,
-              tailSwayPivotY: config.tailSwayPivotY ?? 0,
-              preferUpright: true,
-            },
-          );
-          for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
-            const profileSet = this.parrotProfileInstances.get(profile);
-            if (!profileSet) continue;
-            this.updateInstances(
-              profileSet,
-              profileEntities.get(profile) ?? [],
-              params.boidMaxSpeed,
-              elapsed,
-              dt,
-              {
-                baseColor: config.natureBase,
-                highlightColor: NATURE_BOID_PANIC,
-                getIntensity: (entity) => (entity as Boid).panicLevel,
-                individualVariation: true,
-                getSpeciesColors: getParrotColors,
-                beakColor: config.beakColor,
-                // Profile parrots have baked vertex colours on wings/tail/legs;
-                // pass white so the palette shows through unchanged.
-                bakedWingPalette: true,
-              },
-              {
-                flapFrequency: PARROT_FLAP_FREQUENCY,
-                flapIdleAmplitude: PARROT_FLAP_IDLE_AMPLITUDE,
-                flapSpeedAmplitude: PARROT_FLAP_SPEED_AMPLITUDE,
-                getScale: (entity) => (entity as Boid).scale,
-                tailSwayAmplitude: PARROT_TAIL_SWAY_AMPLITUDE,
-                tailSwayPivotY: config.tailSwayPivotY ?? 0,
-                preferUpright: true,
-              },
-            );
-          }
-          continue;
-        }
-        this.updateInstances(
-          instances,
-          entities,
-          params.boidMaxSpeed,
-          elapsed,
-          dt,
-          {
-            baseColor: isOrganic ? config.natureBase : config.arcadeBase,
-            highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
-            getIntensity: (entity) => (entity as Boid).panicLevel,
-            individualVariation: config.colors || config.getColors ? true : isOrganic,
-            getSpeciesColors: config.getColors ?? (config.colors ? () => config.colors! : undefined),
-            beakColor: config.beakColor,
-            // All nature boids with a baked wing vertex palette (currently only
-            // parrots via getColors) pass white so the palette shows through.
-            bakedWingPalette: true,
-            // Small songbirds (sparrow/goldfinch/cardinal/bluejay) bake a
-            // species-specific gradient into body/wing/tail geometry.
-            bakedBodyGradient: isNature && !!config.natureSmallBirdPalette,
-          },
-          {
-            flapFrequency: isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
-            flapIdleAmplitude: isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
-            flapSpeedAmplitude: isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
-            getScale: (entity) => (entity as Boid).scale,
-            tailSwayAxis: isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-            tailSwayAmplitude: isFishTail
-              ? FISH_TAIL_SWAY_AMPLITUDE
-              : isNatureParrot
-                ? PARROT_TAIL_SWAY_AMPLITUDE
-                : DRAGON_TAIL_SWAY_AMPLITUDE,
-            tailSwayFrequency: isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
-            tailSwayPivotY: isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
-            worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-            meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-            preferUpright: true,
-          },
-        );
-      }
-    }
-    const hawkInstances = this.predatorInstances.get('hawk');
-    if (hawkInstances) {
-      const isDragon = isOrganic && params.dragonPredators;
-      const isShark = isDragon && isFishtank;
-      const hawks = sim.predators.filter((predator) => predator.kind !== 'unicorn');
-      this.updateInstances(
-        hawkInstances,
-        hawks,
-        params.predatorMaxSpeed,
-        elapsed,
-        dt,
-        {
-          baseColor: isDragon
-            ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE)
-            : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
-          highlightColor: isDragon
-            ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT)
-            : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
-          getIntensity: (entity) => (entity as Predator).huntIntensity,
-          // Plain nature hawks (not dragon/fishtank) get the bald-eagle
-          // body/wing/tail colour split. See NATURE_HAWK_COLORS' doc comment.
-          getSpeciesColors: !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
-        },
-        {
-          flapFrequency: isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
-          flapIdleAmplitude: isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
-          flapSpeedAmplitude: isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
-          keepUpright: isDragon,
-          uprightStyle: isShark ? 'shark' : 'dragon',
-          // Sharks: fins droop at rest, tail yaws side-to-side (the actual
-          // swimming stroke) instead of pitching up/down like a dragon.
-          finRestBiasRad: isShark ? SHARK_FIN_REST_TILT_RAD : 0,
-          tailSwayAxis: isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-          tailSwayAmplitude: isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
-          tailSwayFrequency: isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
-          tailSwayPivotY: isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
-          worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-          meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
-        },
-      );
-    }
+  private updateFishtankCenter(sim: Simulation, flags: StyleFlags): void {
+    const { isFishtank } = flags;
+    if (!isFishtank) return;
+    // Around the tank's true center (see updateInstances' worldScale
+    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
+    // is the sim's raw center, matching placeFishtankEnvironment's
+    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
+    // resting on the table — NOT the sim's raw vertical center, matching
+    // placeFishtankEnvironment's bottom-anchored vertical growth so fish
+    // grow in lockstep with the glass box instead of drifting out of sync.
+    this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
+  }
 
-    const unicornInstances = this.predatorInstances.get('unicorn');
-    if (unicornInstances) {
-      const unicorns = sim.predators.filter((predator) => predator.kind === 'unicorn');
-      this.updateInstances(
-        unicornInstances,
-        unicorns,
-        params.predatorMaxSpeed,
-        elapsed,
-        dt,
-        {
-          baseColor: isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
-          highlightColor: isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
-          getIntensity: (entity) => (entity as Predator).huntIntensity,
-          getSpeciesColors: () => isFishtank
-            ? FISHTANK_SEAHORSE_COLORS
-            : isOrganic
-              ? NATURE_UNICORN_COLORS
-              : ARCADE_UNICORN_COLORS,
-        },
-        {
-          flapFrequency: UNICORN_FLAP_FREQUENCY,
-          flapIdleAmplitude: UNICORN_FLAP_IDLE_AMPLITUDE,
-          flapSpeedAmplitude: UNICORN_FLAP_SPEED_AMPLITUDE,
-          // Unicorns always fly right-side-up in every style — it's a character
-          // trait, not a nature-only cosmetic. Their own 'unicorn' orientation
-          // model (hard pitch clamp + up-tilt safety) keeps them floaty/level.
-          keepUpright: true,
-          uprightStyle: 'unicorn',
-          bankScale: UNICORN_BANK_SCALE,
-          worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-          meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-        },
-      );
-    }
+  private computeFishtankMaxDistance(sim: Simulation): number {
+    const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+    const polarAngle = this.controls.getPolarAngle();
+    const elevation = Math.abs(polarAngle - Math.PI / 2);
+    const distToCeiling = bounds.roomFloorY + bounds.roomHeight - bounds.tankCenterY;
+    const distToFloor = bounds.tankCenterY - bounds.roomFloorY;
+    const vertClearance = polarAngle < Math.PI / 2 ? distToCeiling : distToFloor;
+    const sinE = Math.sin(elevation);
+    const cosE = Math.cos(elevation);
+    const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
+    const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
+    return Math.min(vertCap, horizCap);
+  }
 
-    if (isFishtank) {
-      // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
-      // maxCameraDistance (set once, in ensureScene) has to satisfy the
-      // *worst-case* permitted tilt at all times, which is overly
-      // conservative at/near a level (untitled) view — there's no
-      // floor/ceiling to clip through at all when looking straight
-      // across the room. Recomputed every frame (cheap pure math, no
-      // allocations worth caching) from the camera's *current* polar
-      // angle via OrbitControls' own getPolarAngle(), so at level view
-      // the camera can pull back much farther, right up near the far
-      // wall (per an explicit ask to "zoom out farther... virtually
-      // close to the wall behind"), while steeper tilts still clamp
-      // down toward the same safe distance computed by
-      // computeFishtankRoomBounds.
-      const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-      const polarAngle = this.controls.getPolarAngle();
-      // 0 at a level/horizontal view, growing toward cameraTiltUpRad
-      // (looking down) or cameraTiltDownRad (looking up) at the tilt
-      // extremes — see FishtankRoomBounds' cameraTiltUpRad/DownRad.
-      const elevation = Math.abs(polarAngle - Math.PI / 2);
-      const distToCeiling = bounds.roomFloorY + bounds.roomHeight - bounds.tankCenterY;
-      const distToFloor = bounds.tankCenterY - bounds.roomFloorY;
-      // Looking down (polarAngle < PI/2) rises toward the ceiling as
-      // distance grows; looking up (polarAngle > PI/2) drops toward the
-      // floor — each direction is clamped by its own clearance.
-      const vertClearance = polarAngle < Math.PI / 2 ? distToCeiling : distToFloor;
-      const sinE = Math.sin(elevation);
-      const cosE = Math.cos(elevation);
-      // Safety factor (0.92) matches computeFishtankRoomBounds' own 0.9,
-      // just shy of 1 so the camera never grazes the actual floor/
-      // ceiling/wall plane.
-      const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
-      const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
-      this.controls.maxDistance = Math.min(vertCap, horizCap);
-    }
+  private updateFishtankDynamicCameraClamp(sim: Simulation, flags: StyleFlags): void {
+    const { isFishtank } = flags;
+    if (!isFishtank) return;
+    // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
+    // maxCameraDistance (set once, in ensureScene) has to satisfy the
+    // *worst-case* permitted tilt at all times, which is overly
+    // conservative at/near a level (untitled) view — there's no
+    // floor/ceiling to clip through at all when looking straight
+    // across the room. Recomputed every frame from the camera's current
+    // polar angle so level view can zoom farther while steep tilts keep
+    // safe clearance to walls/floor/ceiling.
+    this.controls.maxDistance = this.computeFishtankMaxDistance(sim);
+  }
 
+  private updateCreatureInstances(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    this.updateBoidSpeciesInstances(sim, elapsed, dt, flags);
+    this.updatePredatorInstances(sim, elapsed, dt, flags);
+  }
+
+  private getRenderTiming(): { elapsed: number; dt: number } {
+    const elapsed = (performance.now() - this.startTime) / 1000;
+    const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
+    this.lastElapsed = elapsed;
+    return { elapsed, dt };
+  }
+
+  private renderFrame(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    flags: StyleFlags,
+  ): void {
+    this.updateFishtankCenter(sim, flags);
+    this.updateSceneEffects(sim, elapsed, dt, flags);
+    this.updateCreatureInstances(sim, elapsed, dt, flags);
+    this.updateFishtankDynamicCameraClamp(sim, flags);
+    this.renderOutput();
+  }
+
+  private renderOutput(): void {
     this.controls.update();
     this.composer.render();
   }
 
-  dispose(): void {
+  render(sim: Simulation): void {
+    this.ensureScene(sim);
+    const { elapsed, dt } = this.getRenderTiming();
+    const flags = this.getActiveStyleFlags();
+    this.renderFrame(sim, elapsed, dt, flags);
+  }
+
+  private disposeBoidInstanceSets(): void {
     for (const config of BOID_SPECIES_CONFIGS) {
       this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
     }
+  }
+
+  private disposeParrotProfileInstanceSets(): void {
     for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
       this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
       this.parrotProfileInstances.set(profile, null);
       this.parrotProfileKeys.set(profile, null);
     }
+  }
+
+  private disposePredatorInstanceSets(): void {
     for (const kind of this.predatorInstances.keys()) {
       this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
     }
+  }
+
+  private disposeCreatureGeometries(geometries: CreatureGeometries): void {
+    geometries.body.dispose();
+    geometries.wingLeft.dispose();
+    geometries.wingRight.dispose();
+    geometries.tail?.dispose();
+    geometries.legs?.dispose();
+  }
+
+  private disposeAllCreatureGeometrySets(): void {
     for (const geometries of [
       this.arcadeBoidGeometries,
       this.arcadeSparrowGeometries,
@@ -2930,12 +3494,15 @@ export class Renderer3D {
       this.dragonPredatorGeometries,
       this.unicornPredatorGeometries,
     ]) {
-      geometries.body.dispose();
-      geometries.wingLeft.dispose();
-      geometries.wingRight.dispose();
-      geometries.tail?.dispose();
-      geometries.legs?.dispose();
+      this.disposeCreatureGeometries(geometries);
     }
+  }
+
+  dispose(): void {
+    this.disposeBoidInstanceSets();
+    this.disposeParrotProfileInstanceSets();
+    this.disposePredatorInstanceSets();
+    this.disposeAllCreatureGeometrySets();
     this.natureEnv.dispose();
     this.fishtankEnv.dispose();
     this.driftingClouds.dispose();
