@@ -1732,6 +1732,53 @@ export class Renderer3D {
     }
   }
 
+  private applyTurnBankAndPitch(
+    entity: Boid | Predator,
+    vel: { x: number; y: number; z: number },
+    maxSpeed: number,
+    dt: number,
+    bankScale: number,
+    keepUpright: boolean,
+    getIntensity: (entity: Boid | Predator) => number,
+  ): {
+    blendStrength: number;
+    climbWeight: number;
+    diveWeight: number;
+    turnWeight: number;
+    panicWeight: number;
+    cruiseWeight: number;
+  } {
+    const turnSignal = this.tmpPrevDir.cross(this.tmpForward).y;
+    const turnWeight = THREE.MathUtils.clamp(Math.abs(turnSignal) * 16, 0, 1);
+    const climbWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, 0, 1) : 0;
+    const diveWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(-vel.y / maxSpeed, 0, 1) : 0;
+    const panicWeight = THREE.MathUtils.clamp(getIntensity(entity), 0, 1);
+    const cruiseWeight = Math.max(0, 1 - Math.max(climbWeight, diveWeight, turnWeight, panicWeight * 0.75));
+    const blendStrength = THREE.MathUtils.clamp(params.animationBlendStrength, 0, 1);
+    const targetBank = THREE.MathUtils.clamp(
+      -turnSignal * BANK_GAIN * bankScale * (1 + turnWeight * 0.3 + panicWeight * 0.2),
+      -MAX_BANK_RADIANS * bankScale,
+      MAX_BANK_RADIANS * bankScale,
+    );
+    const bankSmoothing = 1 - Math.exp(-dt * BANK_SMOOTHING_RATE);
+    entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
+    this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
+    this.bodyQuat.multiply(this.rollQuat);
+    if (!keepUpright) {
+      const blendedPitch = (diveWeight - climbWeight) * STATE_PITCH_SCALE * blendStrength;
+      this.pitchQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, blendedPitch);
+      this.bodyQuat.multiply(this.pitchQuat);
+    }
+    return {
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+    };
+  }
+
   private applyInstanceColorsForEntity(
     set: BirdInstanceSet,
     i: number,
@@ -2114,33 +2161,14 @@ export class Renderer3D {
       this.applyBodyOrientationBasis(entity, keepUpright, uprightStyle, preferUpright);
 
 
-      // Cosmetic bank/roll: lean into turns rather than always flying
-      // perfectly level. Estimated from how much the heading direction
-      // rotated around the world-up axis since last frame (a simple
-      // yaw-rate proxy), then smoothed and clamped well short of a full
-      // flip — "it's fine if they bank hard, but they should prefer to
-      // be right-side up" the rest of the time.
-      const turnSignal = this.tmpPrevDir.cross(this.tmpForward).y;
-      const turnWeight = THREE.MathUtils.clamp(Math.abs(turnSignal) * 16, 0, 1);
-      const climbWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, 0, 1) : 0;
-      const diveWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(-vel.y / maxSpeed, 0, 1) : 0;
-      const panicWeight = THREE.MathUtils.clamp(getIntensity(entity), 0, 1);
-      const cruiseWeight = Math.max(0, 1 - Math.max(climbWeight, diveWeight, turnWeight, panicWeight * 0.75));
-      const blendStrength = THREE.MathUtils.clamp(params.animationBlendStrength, 0, 1);
-      const targetBank = THREE.MathUtils.clamp(
-        -turnSignal * BANK_GAIN * bankScale * (1 + turnWeight * 0.3 + panicWeight * 0.2),
-        -MAX_BANK_RADIANS * bankScale,
-        MAX_BANK_RADIANS * bankScale,
-      );
-      const bankSmoothing = 1 - Math.exp(-dt * BANK_SMOOTHING_RATE);
-      entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
-      this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
-      this.bodyQuat.multiply(this.rollQuat);
-      if (!keepUpright) {
-        const blendedPitch = (diveWeight - climbWeight) * STATE_PITCH_SCALE * blendStrength;
-        this.pitchQuat.setFromAxisAngle(MODEL_RIGHT_AXIS, blendedPitch);
-        this.bodyQuat.multiply(this.pitchQuat);
-      }
+      const {
+        blendStrength,
+        climbWeight,
+        diveWeight,
+        turnWeight,
+        panicWeight,
+        cruiseWeight,
+      } = this.applyTurnBankAndPitch(entity, vel, maxSpeed, dt, bankScale, keepUpright, getIntensity);
 
       if (keepUpright) this.applyUprightDisplaySmoothing(entity, dt, uprightStyle);
       this.applyEntityInstanceMatrices(
