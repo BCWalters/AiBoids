@@ -2020,16 +2020,7 @@ export class Renderer3D {
       finRestBiasRad,
       uprightStyle,
     );
-
-    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-    this.dummy.updateMatrix();
-    set.wingLeft.setMatrixAt(i, this.dummy.matrix);
-
-    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-    this.dummy.updateMatrix();
-    set.wingRight.setMatrixAt(i, this.dummy.matrix);
+    this.applyWingFlapMatrices(set, i, flapAngle);
 
     this.applyEntityTailSwayMatrix(
       set,
@@ -2127,6 +2118,18 @@ export class Renderer3D {
     const phase = prevPhase + effectiveFrequency * dt;
     this.flapPhase.set(entity, phase);
     return amplitude * Math.sin(phase) + finRestBiasRad;
+  }
+
+  private applyWingFlapMatrices(set: BirdInstanceSet, i: number, flapAngle: number): void {
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingLeft.setMatrixAt(i, this.dummy.matrix);
+
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingRight.setMatrixAt(i, this.dummy.matrix);
   }
 
   private applyEntityTailSwayMatrix(
