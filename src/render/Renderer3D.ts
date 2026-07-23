@@ -3051,6 +3051,27 @@ export class Renderer3D {
     return { hawks, unicorns, isDragon, isShark };
   }
 
+  private updatePredatorInstanceSets(
+    context: { hawks: Predator[]; unicorns: Predator[]; isDragon: boolean; isShark: boolean },
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+    isOrganic: boolean,
+  ): void {
+    this.updateHawkPredatorInstances(
+      context.hawks,
+      elapsed,
+      dt,
+      isNature,
+      isFishtank,
+      isOrganic,
+      context.isDragon,
+      context.isShark,
+    );
+    this.updateUnicornPredatorInstances(context.unicorns, elapsed, dt, isFishtank, isOrganic);
+  }
+
   private updateNatureParrotInstances(
     config: BoidSpeciesConfig,
     instances: BirdInstanceSet,
@@ -3177,9 +3198,8 @@ export class Renderer3D {
     isOrganic: boolean,
   ): void {
     if (!this.hasAnyPredatorInstances()) return;
-    const { hawks, unicorns, isDragon, isShark } = this.getPredatorUpdateContext(sim, isOrganic, isFishtank);
-    this.updateHawkPredatorInstances(hawks, elapsed, dt, isNature, isFishtank, isOrganic, isDragon, isShark);
-    this.updateUnicornPredatorInstances(unicorns, elapsed, dt, isFishtank, isOrganic);
+    const context = this.getPredatorUpdateContext(sim, isOrganic, isFishtank);
+    this.updatePredatorInstanceSets(context, elapsed, dt, isNature, isFishtank, isOrganic);
   }
 
   private updateHawkPredatorInstances(
