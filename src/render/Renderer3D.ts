@@ -568,6 +568,53 @@ interface SpeciesColorSet {
   tail: THREE.Color;
 }
 
+/**
+ * All colour-related parameters for one `updateInstances` call.
+ * Bundled as a named-field object so call sites are self-documenting and
+ * immune to positional-parameter order bugs.
+ */
+interface ColourStrategy {
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Boid | Predator) => number;
+  /** Each entity gets a small HSL jitter + occasional rare morph around
+   * baseColor (sparrow-style individual variation). Default false. */
+  individualVariation?: boolean;
+  /** Per-entity body/wing/tail hue function (parrot/hawk plumage).
+   * Overrides individualVariation when provided. */
+  getSpeciesColors?: (entity: Boid | Predator) => SpeciesColorSet | null;
+  /** True for parrot profile variants whose geometry has baked vertex colours
+   * on wings/tail/legs — passes white so the vertex palette shows through. */
+  bakedWingPalette?: boolean;
+  /** True for nature small songbirds with a SmallBirdPalette baked into body/
+   * wing/tail geometry — passes white so the gradient shows through. */
+  bakedBodyGradient?: boolean;
+  beakColor?: THREE.Color;
+}
+
+/**
+ * Per-species animation/motion parameters for one `updateInstances` call.
+ * All fields are optional; defaults match the original parameter defaults so
+ * call sites can omit anything they don't need to override.
+ */
+interface MotionConfig {
+  flapFrequency?: number;
+  flapIdleAmplitude?: number;
+  flapSpeedAmplitude?: number;
+  getScale?: (entity: Boid | Predator) => number;
+  keepUpright?: boolean;
+  uprightStyle?: 'dragon' | 'unicorn' | 'shark';
+  bankScale?: number;
+  finRestBiasRad?: number;
+  tailSwayAxis?: THREE.Vector3;
+  tailSwayAmplitude?: number;
+  tailSwayFrequency?: number;
+  tailSwayPivotY?: number;
+  worldScale?: number;
+  meshScaleBoost?: number;
+  preferUpright?: boolean;
+}
+
 interface BirdMaterialTuning {
   bodyTint?: THREE.Color;
   wingTint?: THREE.Color;
@@ -1593,95 +1640,67 @@ export class Renderer3D {
     maxSpeed: number,
     elapsed: number,
     dt: number,
-    baseColor: THREE.Color,
-    highlightColor: THREE.Color,
-    getIntensity: (entity: Boid | Predator) => number,
-    flapFrequency: number = FLAP_FREQUENCY,
-    flapIdleAmplitude: number = FLAP_IDLE_AMPLITUDE,
-    flapSpeedAmplitude: number = FLAP_SPEED_AMPLITUDE,
-    getScale: (entity: Boid | Predator) => number = () => 1,
-    individualVariation: boolean = false,
-    getSpeciesColors?: (entity: Boid | Predator) => SpeciesColorSet | null,
-    keepUpright: boolean = false,
-    // Which "stay upright" orientation model to use when keepUpright is
-    // true — 'dragon' (near-pole-safe basis + free pitch, for full
-    // swoop/dive/roll acrobatics), 'unicorn' (hard-clamped pitch + final
-    // up-tilt safety clamp, for a flat, floaty pegasus-style flight), or
-    // 'shark' (same hard-clamped-pitch shape as 'unicorn', but its own
-    // shallower symmetric pitch range/constants — see SHARK_ASCEND_PITCH_
-    // RADIANS' doc comment — for a shark that stays mostly horizontal
-    // instead of pointing steeply up/down like a dragon). These are
-    // deliberately separate code paths below, not a shared one
-    // parameterized by a bias knob — see the UNICORN_*/SHARK_* tuning
-    // constants' doc comments.
-    uprightStyle: 'dragon' | 'unicorn' | 'shark' = 'dragon',
-    bankScale: number = 1,
-    // Small-bird-only: a flat, distinct instance color for the separate
-    // `beak` InstancedMesh part (see BoidSpeciesConfig.beakColor's doc
-    // comment on why this is a separate part rather than a body vertex
-    // bake for these particular species).
-    beakColor?: THREE.Color,
-    // Fish tank shark-only: a constant downward tilt bias applied to both
-    // pectoral fins (see SHARK_FIN_REST_TILT_RAD's doc comment) so they
-    // rest angled below horizontal instead of dead level, on top of
-    // whatever small oscillation flapIdleAmplitude/flapSpeedAmplitude add.
-    finRestBiasRad: number = 0,
-    // Which local axis the tail sway (dragon/shark only, uprightStyle ===
-    // 'dragon') rotates around: MODEL_RIGHT_AXIS pitches it up/down (the
-    // dragon's whip-tail undulation), MODEL_UP_AXIS yaws it side to side
-    // (a shark's swimming tail beat).
-    tailSwayAxis: THREE.Vector3 = MODEL_RIGHT_AXIS,
-    tailSwayAmplitude: number = DRAGON_TAIL_SWAY_AMPLITUDE,
-    // Defaults to flapFrequency (matching the dragon's original "reuse the
-    // wingbeat phase" behavior) when left unset — pass an explicit value
-    // (e.g. SHARK_TAIL_SWAY_FREQUENCY) to decouple the tail beat from the
-    // fin wobble's own, much slower frequency.
-    tailSwayFrequency?: number,
-    // Fish tank shark-only: local-Y position of the tail's own
-    // attachment point (see getSharkTailPivotY), used so the tail-sway
-    // rotation below pivots around *that* point instead of the model's
-    // shared local origin — see the pivot-matrix comment near
-    // tailSwayQuat for why this matters. 0 (the origin itself) for every
-    // other species, which keeps their existing behavior unchanged since
-    // rotating "around the origin" and "around a pivot at the origin"
-    // are the same thing.
-    tailSwayPivotY: number = 0,
-    // Fishtank-only: grows both position (around this.fishtankCenter,
-    // set once per frame in render()) and mesh scale by this factor —
-    // see TANK_VISUAL_SCALE's doc comment for why the tank/fish are
-    // inflated independently of the sim's actual coordinate space.
-    // Always 1 (no-op) for arcade/nature.
-    worldScale: number = 1,
-    // Fishtank-only: an *extra* mesh-only scale multiplier (does NOT
-    // affect position spreading, unlike worldScale above) — see
-    // FISHTANK_FISH_MESH_BOOST's doc comment for why fish need their own
-    // size bump on top of worldScale to read as real aquarium fish
-    // rather than tiny specks lost in a room-sized tank. Always 1
-    // (no-op) for arcade/nature and for fishtank predators/species that
-    // don't opt into the boost.
-    meshScaleBoost: number = 1,
-    // Keeps non-dragon/non-unicorn creatures right-side-up by deriving
-    // roll from WORLD_UP instead of shortest-arc quaternion roll freedom.
-    preferUpright: boolean = false,
-    preserveWingVertexPalette: boolean = false,
-    // True only for small songbird species (sparrow/goldfinch/cardinal/
-    // bluejay) in nature style that have a SmallBirdPalette baked into
-    // their geometry. Kept as an explicit flag rather than inferring from
-    // set.body.geometry.getAttribute('color') because dragon/hawk geometry
-    // also has baked vertex colours (from mergeGeometriesWithColor) and
-    // would incorrectly trigger the white-passthrough branch.
-    useBakedBodyGradient: boolean = false,
+    colours: ColourStrategy,
+    motion: MotionConfig = {},
   ): void {
-    // Detect whether this species' geometry has baked vertex colours on
-    // body/wing/tail (small songbirds in nature style) — when it does,
-    // pass white (1,1,1) as the instance colour so the gradient shows
-    // through unchanged, exactly like the parrot wing palette passthrough.
-    const isNatureSmallBirdBody = useBakedBodyGradient
-      && !!set.body.geometry.getAttribute('color');
-    const isNatureSmallBirdWing = useBakedBodyGradient
-      && !!set.wingLeft.geometry.getAttribute('color');
-    const isNatureSmallBirdTail = useBakedBodyGradient
-      && !!set.tail?.geometry.getAttribute('color');
+    const {
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation = false,
+      getSpeciesColors,
+      bakedWingPalette = false,
+      bakedBodyGradient = false,
+      beakColor,
+    } = colours;
+    const {
+      flapFrequency = FLAP_FREQUENCY,
+      flapIdleAmplitude = FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude = FLAP_SPEED_AMPLITUDE,
+      getScale = () => 1,
+      // keepUpright: when true, use a world-up-anchored orientation basis
+      // instead of the free shortest-arc rotation. Required for dragon/
+      // unicorn/shark; see uprightStyle for which model to apply.
+      keepUpright = false,
+      // Which "stay upright" model to use when keepUpright is true:
+      //  'dragon'  — near-pole-safe basis + free pitch (swoops/dives/rolls)
+      //  'unicorn' — hard-clamped pitch + final up-tilt safety clamp (floaty)
+      //  'shark'   — same shape as unicorn but shallower symmetric pitch range
+      // These are deliberately separate code paths, not one parameterized by
+      // a bias knob — see the UNICORN_*/SHARK_* constants' doc comments.
+      uprightStyle = 'dragon' as const,
+      bankScale = 1,
+      // Shark-only: constant downward tilt bias on pectoral fins so they
+      // rest angled below horizontal at idle (see SHARK_FIN_REST_TILT_RAD).
+      finRestBiasRad = 0,
+      // Tail-sway axis: MODEL_RIGHT_AXIS pitches dragon tail up/down;
+      // MODEL_UP_AXIS yaws shark tail side-to-side (its actual swim stroke).
+      tailSwayAxis = MODEL_RIGHT_AXIS,
+      tailSwayAmplitude = DRAGON_TAIL_SWAY_AMPLITUDE,
+      // Defaults to flapFrequency when unset (original dragon behaviour).
+      // Pass an explicit value to decouple tail beat from fin/wing phase.
+      tailSwayFrequency,
+      // Shark-only: local-Y of tail attachment point; 0 means rotate around
+      // the shared model origin (correct for every other species).
+      tailSwayPivotY = 0,
+      // Fishtank-only scale factors — both default to 1 (no-op) elsewhere.
+      worldScale = 1,
+      meshScaleBoost = 1,
+      // Non-dragon/unicorn upright anchor: derive roll from WORLD_UP instead
+      // of the free shortest-arc quaternion (regular boids in nature style).
+      preferUpright = false,
+    } = motion;
+
+    // Small songbirds (nature style) bake a SmallBirdPalette gradient into
+    // their geometry. When bakedBodyGradient is true, pass white as the
+    // instance colour so the vertex colours show through unchanged —
+    // identical to the parrot wing-palette passthrough logic.
+    // Note: we can't infer this from geometry.getAttribute('color') alone
+    // because dragon/hawk geometry also carries vertex colours and would
+    // incorrectly trigger the white-passthrough branch.
+    const isNatureSmallBirdBody = bakedBodyGradient && !!set.body.geometry.getAttribute('color');
+    const isNatureSmallBirdWing = bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color');
+    const isNatureSmallBirdTail = bakedBodyGradient && !!set.tail?.geometry.getAttribute('color');
 
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
@@ -2212,7 +2231,7 @@ export class Renderer3D {
       } else if (effectiveWing) {
         const preserveParrotWingPalette = getSpeciesColors === getParrotColors
           && params.visualStyle === 'nature'
-          && preserveWingVertexPalette
+          && bakedWingPalette
           && !!set.wingLeft.geometry.getAttribute('color');
         const preserveParrotTailPalette = preserveParrotWingPalette
           && !!set.tail?.geometry.getAttribute('color');
@@ -2656,27 +2675,24 @@ export class Renderer3D {
             params.boidMaxSpeed,
             elapsed,
             dt,
-            config.natureBase,
-            NATURE_BOID_PANIC,
-            (entity) => (entity as Boid).panicLevel,
-            PARROT_FLAP_FREQUENCY,
-            PARROT_FLAP_IDLE_AMPLITUDE,
-            PARROT_FLAP_SPEED_AMPLITUDE,
-            (entity) => (entity as Boid).scale,
-            true,
-            getParrotColors,
-            false,
-            'dragon',
-            1,
-            config.beakColor,
-            0,
-            MODEL_RIGHT_AXIS,
-            PARROT_TAIL_SWAY_AMPLITUDE,
-            undefined,
-            config.tailSwayPivotY ?? 0,
-            1,
-            1,
-            true,
+            {
+              baseColor: config.natureBase,
+              highlightColor: NATURE_BOID_PANIC,
+              getIntensity: (entity) => (entity as Boid).panicLevel,
+              individualVariation: true,
+              getSpeciesColors: getParrotColors,
+              beakColor: config.beakColor,
+              // Neutral parrots share geometry — no baked wing vertex palette.
+            },
+            {
+              flapFrequency: PARROT_FLAP_FREQUENCY,
+              flapIdleAmplitude: PARROT_FLAP_IDLE_AMPLITUDE,
+              flapSpeedAmplitude: PARROT_FLAP_SPEED_AMPLITUDE,
+              getScale: (entity) => (entity as Boid).scale,
+              tailSwayAmplitude: PARROT_TAIL_SWAY_AMPLITUDE,
+              tailSwayPivotY: config.tailSwayPivotY ?? 0,
+              preferUpright: true,
+            },
           );
           for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
             const profileSet = this.parrotProfileInstances.get(profile);
@@ -2687,28 +2703,26 @@ export class Renderer3D {
               params.boidMaxSpeed,
               elapsed,
               dt,
-              config.natureBase,
-              NATURE_BOID_PANIC,
-              (entity) => (entity as Boid).panicLevel,
-              PARROT_FLAP_FREQUENCY,
-              PARROT_FLAP_IDLE_AMPLITUDE,
-              PARROT_FLAP_SPEED_AMPLITUDE,
-              (entity) => (entity as Boid).scale,
-              true,
-              getParrotColors,
-              false,
-              'dragon',
-              1,
-              config.beakColor,
-              0,
-              MODEL_RIGHT_AXIS,
-              PARROT_TAIL_SWAY_AMPLITUDE,
-              undefined,
-              config.tailSwayPivotY ?? 0,
-              1,
-              1,
-              true,
-              true,
+              {
+                baseColor: config.natureBase,
+                highlightColor: NATURE_BOID_PANIC,
+                getIntensity: (entity) => (entity as Boid).panicLevel,
+                individualVariation: true,
+                getSpeciesColors: getParrotColors,
+                beakColor: config.beakColor,
+                // Profile parrots have baked vertex colours on wings/tail/legs;
+                // pass white so the palette shows through unchanged.
+                bakedWingPalette: true,
+              },
+              {
+                flapFrequency: PARROT_FLAP_FREQUENCY,
+                flapIdleAmplitude: PARROT_FLAP_IDLE_AMPLITUDE,
+                flapSpeedAmplitude: PARROT_FLAP_SPEED_AMPLITUDE,
+                getScale: (entity) => (entity as Boid).scale,
+                tailSwayAmplitude: PARROT_TAIL_SWAY_AMPLITUDE,
+                tailSwayPivotY: config.tailSwayPivotY ?? 0,
+                preferUpright: true,
+              },
             );
           }
           continue;
@@ -2719,33 +2733,37 @@ export class Renderer3D {
           params.boidMaxSpeed,
           elapsed,
           dt,
-          isOrganic ? config.natureBase : config.arcadeBase,
-          isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
-          (entity) => (entity as Boid).panicLevel,
-          isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
-          isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
-          isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
-          (entity) => (entity as Boid).scale,
-          config.colors || config.getColors ? true : isOrganic,
-          config.getColors ?? (config.colors ? () => config.colors! : undefined),
-          false,
-          'dragon',
-          1,
-          config.beakColor,
-          0,
-          isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-          isFishTail
-            ? FISH_TAIL_SWAY_AMPLITUDE
-            : isNatureParrot
-              ? PARROT_TAIL_SWAY_AMPLITUDE
-              : DRAGON_TAIL_SWAY_AMPLITUDE,
-          isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
-          isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
-          isFishtank ? TANK_VISUAL_SCALE : 1,
-          isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-          true,  // preferUpright — keep boids right-side-up
-          true,  // preserveWingVertexPalette
-          isNature && !!config.natureSmallBirdPalette,  // useBakedBodyGradient
+          {
+            baseColor: isOrganic ? config.natureBase : config.arcadeBase,
+            highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
+            getIntensity: (entity) => (entity as Boid).panicLevel,
+            individualVariation: config.colors || config.getColors ? true : isOrganic,
+            getSpeciesColors: config.getColors ?? (config.colors ? () => config.colors! : undefined),
+            beakColor: config.beakColor,
+            // All nature boids with a baked wing vertex palette (currently only
+            // parrots via getColors) pass white so the palette shows through.
+            bakedWingPalette: true,
+            // Small songbirds (sparrow/goldfinch/cardinal/bluejay) bake a
+            // species-specific gradient into body/wing/tail geometry.
+            bakedBodyGradient: isNature && !!config.natureSmallBirdPalette,
+          },
+          {
+            flapFrequency: isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
+            flapIdleAmplitude: isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+            flapSpeedAmplitude: isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+            getScale: (entity) => (entity as Boid).scale,
+            tailSwayAxis: isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+            tailSwayAmplitude: isFishTail
+              ? FISH_TAIL_SWAY_AMPLITUDE
+              : isNatureParrot
+                ? PARROT_TAIL_SWAY_AMPLITUDE
+                : DRAGON_TAIL_SWAY_AMPLITUDE,
+            tailSwayFrequency: isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
+            tailSwayPivotY: isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
+            worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+            meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+            preferUpright: true,
+          },
         );
       }
     }
@@ -2760,36 +2778,34 @@ export class Renderer3D {
         params.predatorMaxSpeed,
         elapsed,
         dt,
-        isDragon ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE) : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
-        isDragon ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT) : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
-        (entity) => (entity as Predator).huntIntensity,
-        isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
-        isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
-        isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
-        undefined,
-        undefined,
-        // Plain nature-style hawks (not dragon, not arcade/fishtank) get
-        // the dedicated bald-eagle body/wing/tail color split — see
-        // NATURE_HAWK_COLORS' doc comment. Must match the same isNature-
-        // only gating used for bodyVertexColors above (fishtank's hawk
-        // geometry has no baked vertex colors to read yet).
-        !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
-        isDragon,
-        isShark ? 'shark' : 'dragon',
-        1,
-        undefined,
-        // Sharks: fins droop down at rest and barely flap; the tail
-        // yaws side to side (its actual swimming stroke) instead of
-        // pitching up/down like the dragon's whip tail — see the
-        // SHARK_* tuning constants' doc comment.
-        isShark ? SHARK_FIN_REST_TILT_RAD : 0,
-        isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-        isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
-        isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
-        isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
-        isFishtank ? TANK_VISUAL_SCALE : 1,
-        isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
-        true,
+        {
+          baseColor: isDragon
+            ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE)
+            : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
+          highlightColor: isDragon
+            ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT)
+            : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
+          getIntensity: (entity) => (entity as Predator).huntIntensity,
+          // Plain nature hawks (not dragon/fishtank) get the bald-eagle
+          // body/wing/tail colour split. See NATURE_HAWK_COLORS' doc comment.
+          getSpeciesColors: !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
+        },
+        {
+          flapFrequency: isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
+          flapIdleAmplitude: isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
+          keepUpright: isDragon,
+          uprightStyle: isShark ? 'shark' : 'dragon',
+          // Sharks: fins droop at rest, tail yaws side-to-side (the actual
+          // swimming stroke) instead of pitching up/down like a dragon.
+          finRestBiasRad: isShark ? SHARK_FIN_REST_TILT_RAD : 0,
+          tailSwayAxis: isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+          tailSwayAmplitude: isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
+          tailSwayFrequency: isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
+          tailSwayPivotY: isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
+          worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+          meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
+        },
       );
     }
 
@@ -2802,34 +2818,29 @@ export class Renderer3D {
         params.predatorMaxSpeed,
         elapsed,
         dt,
-        isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
-        isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
-        (entity) => (entity as Predator).huntIntensity,
-        UNICORN_FLAP_FREQUENCY,
-        UNICORN_FLAP_IDLE_AMPLITUDE,
-        UNICORN_FLAP_SPEED_AMPLITUDE,
-        undefined,
-        undefined,
-        () => (isFishtank ? FISHTANK_SEAHORSE_COLORS : isOrganic ? NATURE_UNICORN_COLORS : ARCADE_UNICORN_COLORS),
-        // Unicorns always fly right-side-up, like dragons — see keepUpright's
-        // doc comment. Unlike the dragon toggle, this applies in every 3D
-        // style, not just nature, since it's a behavioral trait of the
-        // character rather than a nature-style-only cosmetic flourish.
-        true,
-        // Unicorns get their own dedicated orientation model — see
-        // updateInstances' uprightStyle === 'unicorn' branch and the
-        // UNICORN_* constants near the top of this file — rather than
-        // reusing the dragon path with different bias numbers.
-        'unicorn',
-        UNICORN_BANK_SCALE,
-        undefined,
-        0,
-        MODEL_RIGHT_AXIS,
-        DRAGON_TAIL_SWAY_AMPLITUDE,
-        undefined,
-        0,
-        isFishtank ? TANK_VISUAL_SCALE : 1,
-        isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+        {
+          baseColor: isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
+          highlightColor: isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
+          getIntensity: (entity) => (entity as Predator).huntIntensity,
+          getSpeciesColors: () => isFishtank
+            ? FISHTANK_SEAHORSE_COLORS
+            : isOrganic
+              ? NATURE_UNICORN_COLORS
+              : ARCADE_UNICORN_COLORS,
+        },
+        {
+          flapFrequency: UNICORN_FLAP_FREQUENCY,
+          flapIdleAmplitude: UNICORN_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: UNICORN_FLAP_SPEED_AMPLITUDE,
+          // Unicorns always fly right-side-up in every style — it's a character
+          // trait, not a nature-only cosmetic. Their own 'unicorn' orientation
+          // model (hard pitch clamp + up-tilt safety) keeps them floaty/level.
+          keepUpright: true,
+          uprightStyle: 'unicorn',
+          bankScale: UNICORN_BANK_SCALE,
+          worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+          meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+        },
       );
     }
 
