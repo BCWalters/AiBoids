@@ -621,6 +621,36 @@ interface MotionConfig {
 }
 type UprightStyle = NonNullable<MotionConfig['uprightStyle']>;
 
+interface EntityInstanceMatrixArgs {
+  set: BirdInstanceSet;
+  index: number;
+  entity: Boid | Predator;
+  position: { x: number; y: number; z: number };
+  velocity: { x: number; y: number; z: number };
+  speed: number;
+  maxSpeed: number;
+  elapsed: number;
+  dt: number;
+  entityScale: number;
+  blendStrength: number;
+  climbWeight: number;
+  diveWeight: number;
+  turnWeight: number;
+  panicWeight: number;
+  cruiseWeight: number;
+  flapFrequency: number;
+  flapIdleAmplitude: number;
+  flapSpeedAmplitude: number;
+  finRestBiasRad: number;
+  tailSwayAxis: THREE.Vector3;
+  tailSwayAmplitude: number;
+  tailSwayFrequency: number | undefined;
+  tailSwayPivotY: number;
+  worldScale: number;
+  meshScaleBoost: number;
+  uprightStyle: UprightStyle;
+}
+
 interface StyleFlags {
   isNature: boolean;
   isFishtank: boolean;
@@ -1970,41 +2000,42 @@ export class Renderer3D {
     }
   }
 
-  private applyEntityInstanceMatrices(
-    set: BirdInstanceSet,
-    i: number,
-    entity: Boid | Predator,
-    pos: { x: number; y: number; z: number },
-    vel: { x: number; y: number; z: number },
-    speed: number,
-    maxSpeed: number,
-    elapsed: number,
-    dt: number,
-    entityScale: number,
-    blendStrength: number,
-    climbWeight: number,
-    diveWeight: number,
-    turnWeight: number,
-    panicWeight: number,
-    cruiseWeight: number,
-    flapFrequency: number,
-    flapIdleAmplitude: number,
-    flapSpeedAmplitude: number,
-    finRestBiasRad: number,
-    tailSwayAxis: THREE.Vector3,
-    tailSwayAmplitude: number,
-    tailSwayFrequency: number | undefined,
-    tailSwayPivotY: number,
-    worldScale: number,
-    meshScaleBoost: number,
-    uprightStyle: UprightStyle,
-  ): void {
-    this.applyEntityBodyMatrices(set, i, pos, entityScale, worldScale, meshScaleBoost, uprightStyle);
+  private applyEntityInstanceMatrices(args: EntityInstanceMatrixArgs): void {
+    const {
+      set,
+      index,
+      entity,
+      position,
+      velocity,
+      speed,
+      maxSpeed,
+      elapsed,
+      dt,
+      entityScale,
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      uprightStyle,
+    } = args;
+    this.applyEntityBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle);
 
     // Wings: apply an extra local flap rotation around the forward axis.
     const flapAngle = this.computeWingFlapAngle(
       entity,
-      vel,
+      velocity,
       speed,
       maxSpeed,
       dt,
@@ -2020,11 +2051,11 @@ export class Renderer3D {
       finRestBiasRad,
       uprightStyle,
     );
-    this.applyWingFlapMatrices(set, i, flapAngle);
+    this.applyWingFlapMatrices(set, index, flapAngle);
 
     this.applyEntityTailSwayMatrix(
       set,
-      i,
+      index,
       entity,
       elapsed,
       flapFrequency,
@@ -2305,12 +2336,12 @@ export class Renderer3D {
         bankScale,
         getIntensity,
       );
-      this.applyEntityInstanceMatrices(
+      this.applyEntityInstanceMatrices({
         set,
-        i,
+        index: i,
         entity,
-        pos,
-        vel,
+        position: pos,
+        velocity: vel,
         speed,
         maxSpeed,
         elapsed,
@@ -2333,7 +2364,7 @@ export class Renderer3D {
         worldScale,
         meshScaleBoost,
         uprightStyle,
-      );
+      });
 
       this.applyInstanceColorsForEntity(
         set,
