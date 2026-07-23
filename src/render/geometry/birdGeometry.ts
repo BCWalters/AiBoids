@@ -3,8 +3,38 @@ import type { CreatureGeometries } from './creatureGeometry';
 import {
   extrudeRingGeometry,
   mergeGeometriesWithColor,
+  mergePositionOnlyGeometries,
   buildEyeDotsGeometry,
 } from './creatureGeometry';
+
+/**
+ * Per-species palette for baked vertex colour gradients on small-bird
+ * geometry. Pass to createRealisticBirdGeometries so each species gets its
+ * own geometry instance with colours baked in.
+ *
+ * Body uses a **bilinear 4-corner gradient** blending both axes:
+ *  - Y axis: headBack/headBelly (near the face) → tailBack/tailBelly (near the tail)
+ *  - Z axis: belly (ventral, -Z) → back (dorsal, +Z)
+ *  This lets each species have independent head-vs-tail AND back-vs-belly variation.
+ *
+ * - wing / wingTip: root-to-tip X-axis gradient on the wing panel.
+ * - tail / tailTip: root-to-tip Y-axis gradient on the tail fan (-Y = tip).
+ *
+ * Set the corresponding `*Gradient` flag to false to skip that gradient.
+ */
+export interface SmallBirdPalette {
+  headBack:  THREE.Color;  // dorsal (back) surface near the head/face
+  headBelly: THREE.Color;  // ventral (belly) surface near the head/face
+  tailBack:  THREE.Color;  // dorsal surface near the tail end
+  tailBelly: THREE.Color;  // ventral surface near the tail end
+  wing: THREE.Color;
+  wingTip: THREE.Color;
+  tail: THREE.Color;
+  tailTip: THREE.Color;
+  dorsalGradient: boolean;
+  wingGradient: boolean;
+  tailGradient: boolean;
+}
 
 /**
  * Builds a simple low-poly bird silhouette: an elongated diamond body
@@ -67,18 +97,24 @@ function buildWingGeometry(span: number, chord: number, side: 1 | -1): THREE.Buf
  * (see Renderer3D's BOID_SPECIES_CONFIGS `beakColor` field) without the
  * shared body geometry having to pick just one baked-in hue.
  */
-export function createRealisticBirdGeometries(length: number, width: number): CreatureGeometries {
-  const body = buildTaperedBodyGeometry(length, width);
+export function createRealisticBirdGeometries(
+  length: number,
+  width: number,
+  legsColor: THREE.Color = SMALL_BIRD_DEFAULT_LEGS_COLOR,
+  palette?: SmallBirdPalette,
+): CreatureGeometries {
+  const body = buildTaperedBodyGeometry(length, width, palette);
   const beak = buildSmallBirdBeakGeometry(length, width);
 
   const wingSpan = length * 1.3;
   const wingChord = length * 0.6;
-  const wingLeft = buildFingeredWingGeometry(wingSpan, wingChord, 1);
-  const wingRight = buildFingeredWingGeometry(wingSpan, wingChord, -1);
+  const wingLeft = buildSmallBirdWingGeometry(wingSpan, wingChord, 1, palette);
+  const wingRight = buildSmallBirdWingGeometry(wingSpan, wingChord, -1, palette);
 
-  const tail = buildTailGeometry(length, width);
+  const tail = buildTailGeometry(length, width, palette);
+  const legs = buildSmallBirdLegsGeometry(length, width, legsColor);
 
-  return { body, wingLeft, wingRight, tail, beak };
+  return { body, wingLeft, wingRight, tail, beak, legs };
 }
 
 
@@ -120,7 +156,7 @@ const HEAD_END_FRAC = HEAD_START_FRAC + (0.8 - HEAD_START_FRAC) * HEAD_LENGTHEN_
 const BODY_NARROW_SCALE = 0.75; // 25% narrower overall
 const BEAK_LENGTH_SCALE = 0.75; // 25% shorter
 
-function buildTaperedBodyGeometry(length: number, width: number): THREE.BufferGeometry {
+function buildTaperedBodyGeometry(length: number, width: number, palette?: SmallBirdPalette): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const scaledWidth = width * BODY_NARROW_SCALE;
   // Head-region radii/positions below are all reduced/stretched relative
@@ -141,6 +177,54 @@ function buildTaperedBodyGeometry(length: number, width: number): THREE.BufferGe
     new THREE.Vector2(scaledWidth * 0.075 * HEAD_NARROW_SCALE, halfLen * HEAD_END_FRAC), // face point, where the beak attaches
   ];
   const body = new THREE.LatheGeometry(profile, 14);
+
+  if (palette?.dorsalGradient) {
+    // Bilinear body gradient:
+    //   Y axis: maxY = head, minY = tail  →  tY: 0=head, 1=tail
+    //   Z axis: minZ = belly, maxZ = back  →  tZ: 0=belly, 1=back
+    // Blend: lerp( lerp(headBelly, headBack, tZ), lerp(tailBelly, tailBack, tZ), tY )
+    body.computeBoundingBox();
+    const minY = body.boundingBox!.min.y;
+    const maxY = body.boundingBox!.max.y;
+    const minZ = body.boundingBox!.min.z;
+    const maxZ = body.boundingBox!.max.z;
+    const ySpan = Math.max(1e-5, maxY - minY);
+    const zSpan = Math.max(1e-5, maxZ - minZ);
+    const posAttr = body.getAttribute('position') as THREE.BufferAttribute;
+    const gradColors = new Float32Array(posAttr.count * 3);
+    for (let vi = 0; vi < posAttr.count; vi++) {
+      // tY = 0 → head (high +Y), tY = 1 → tail (low -Y)
+      const tY = THREE.MathUtils.smoothstep(
+        THREE.MathUtils.clamp((maxY - posAttr.getY(vi)) / ySpan, 0, 1),
+        0.05, 0.95,
+      );
+      // tZ = 0 → belly (-Z), tZ = 1 → back (+Z)
+      const tZ = THREE.MathUtils.smoothstep(
+        THREE.MathUtils.clamp((posAttr.getZ(vi) - minZ) / zSpan, 0, 1),
+        0.15, 0.85,
+      );
+      // Bilinear blend across the four corners
+      const r = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(palette.headBelly.r, palette.headBack.r, tZ),
+        THREE.MathUtils.lerp(palette.tailBelly.r, palette.tailBack.r, tZ),
+        tY,
+      );
+      const g = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(palette.headBelly.g, palette.headBack.g, tZ),
+        THREE.MathUtils.lerp(palette.tailBelly.g, palette.tailBack.g, tZ),
+        tY,
+      );
+      const b = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(palette.headBelly.b, palette.headBack.b, tZ),
+        THREE.MathUtils.lerp(palette.tailBelly.b, palette.tailBack.b, tZ),
+        tY,
+      );
+      gradColors[vi * 3]     = r;
+      gradColors[vi * 3 + 1] = g;
+      gradColors[vi * 3 + 2] = b;
+    }
+    body.setAttribute('color', new THREE.BufferAttribute(gradColors, 3));
+  }
 
   const eyeY = halfLen * headFrac(0.68);
   const eyeX = scaledWidth * 0.16 * HEAD_NARROW_SCALE;
@@ -184,8 +268,149 @@ function buildSmallBirdBeakGeometry(length: number, width: number): THREE.Buffer
 }
 
 
+/** Default brownish-gray leg color for small perching birds. */
+export const SMALL_BIRD_DEFAULT_LEGS_COLOR = new THREE.Color(0x7a6450);
+
 /**
- * A wing with a solid inner panel plus a fan of thin, separated triangular
+ * Two thin legs each with three forward-pointing toes and one hind toe,
+ * scaled to fit a small perching songbird. The legs are positioned back
+ * toward the tail (where a real bird's ankle sits) and hang downward from
+ * the belly. Vertex colors are white so the per-instance leg color set by
+ * the renderer (BoidSpeciesConfig.legsColor) multiplies through unchanged.
+ */
+function buildSmallBirdLegsGeometry(length: number, width: number, legsColor: THREE.Color): THREE.BufferGeometry {
+  const scaledWidth = width * BODY_NARROW_SCALE;
+  const legRadius = scaledWidth * 0.048;
+  // Short tucked legs — feet sit just below the belly surface.
+  const legLength = length * 0.042;
+  const toeLength = length * 0.055;
+  const footY = -length * 0.22;
+  // Hip flush against the belly: at footY the body radius ≈ 0.241*sw;
+  // with x = 0.025*sw the surface Z ≈ 0.240*sw.
+  const hipZ = -scaledWidth * 0.240;
+  const footZ = hipZ - legLength * 0.9;
+
+  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
+    const x = side * scaledWidth * 0.001;
+    const leg = new THREE.CylinderGeometry(legRadius * 0.85, legRadius, legLength, 6);
+    leg.rotateX(Math.PI / 2);
+    leg.translate(x, footY, hipZ - legLength * 0.5);
+
+    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
+      const toe = new THREE.ConeGeometry(legRadius * 0.38, toeLength, 5);
+      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
+      return toe;
+    };
+    // Three forward toes spread slightly around the tip.
+    const toes = [
+      makeToe(side * legRadius * 0.5, toeLength * 0.04),
+      makeToe(0, toeLength * 0.1),
+      makeToe(-side * legRadius * 0.5, toeLength * 0.04),
+    ];
+    // One hind toe pointing backward (rotated 180° along X).
+    const hindToe = new THREE.ConeGeometry(legRadius * 0.28, toeLength * 0.6, 5);
+    hindToe.rotateX(Math.PI);
+    hindToe.translate(x, footY - toeLength * 0.26, footZ + toeLength * 0.02);
+    return mergePositionOnlyGeometries([leg, ...toes, hindToe]);
+  };
+
+  const both = mergePositionOnlyGeometries([buildLeg(1), buildLeg(-1)]);
+  // Bake the species leg color as vertex color; renderer sets instance color
+  // to (1,1,1) so the baked color passes through unchanged.
+  return mergeGeometriesWithColor([{ geometry: both, color: legsColor }]);
+}
+
+
+/**
+ * Broad, rounded wing for small perching songbirds — far less swept-back
+ * and with a blunt rounded tip (not the pointed V of the hawk/raptor shape
+ * in buildFingeredWingGeometry). A sparrow or goldfinch wing is short,
+ * broad, and rounded — typical of birds that manoeuvre through dense
+ * vegetation rather than glide on thermals.
+ *
+ * The main panel is a five-vertex fan (root → shoulder → tipFront →
+ * tipRear → midTrail), giving a rounded wingtip rather than a sharp apex.
+ * Four compact primary feathers extend from the outer tip region.
+ * Optional per-palette wing gradient bakes root→tip X-axis colours.
+ */
+function buildSmallBirdWingGeometry(
+  span: number,
+  chord: number,
+  side: 1 | -1,
+  palette?: SmallBirdPalette,
+): THREE.BufferGeometry {
+  const s = side;
+  const positions: number[] = [];
+  const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
+  const lerp3 = (a: number[], b: number[], t: number): number[] => [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+  ];
+
+  // Main panel: broad, slightly rounded shape — 3 triangles fan from root.
+  const panelSpan = span * 0.66;
+  const root      = [0, 0, 0];
+  const shoulder  = [panelSpan * 0.38 * s, chord * 0.30, 0]; // forward leading edge
+  const tipFront  = [panelSpan * s, chord * 0.06, 0];         // outer leading — barely swept back
+  const tipRear   = [panelSpan * 0.80 * s, -chord * 0.25, 0]; // outer trailing — blunt rounded corner
+  const midTrail  = [panelSpan * 0.30 * s, -chord * 0.28, 0]; // inner trailing edge
+
+  pushTri(root, shoulder, tipFront);
+  pushTri(root, tipFront, tipRear);
+  pushTri(root, tipRear, midTrail);
+
+  // 4 compact primary feathers at the outer tip — shorter & tighter than
+  // the hawk's 6 long spread fingers.
+  const fingerCount = 4;
+  const innerAnchor = [panelSpan * 0.72 * s, -chord * 0.04, 0];
+  const outerAnchor = tipFront;
+  const halfWidth = 0.09;
+  for (let fi = 0; fi < fingerCount; fi++) {
+    const t = fi / (fingerCount - 1);
+    const rootPt  = lerp3(innerAnchor, outerAnchor, Math.max(0, t - halfWidth));
+    const rootPt2 = lerp3(innerAnchor, outerAnchor, Math.min(1, t + halfWidth));
+    const fingerLen = span * (0.08 + 0.09 * t); // compact fingers — don't spike past the wing tip
+    const spreadRad = ((-6 + 22 * t) * Math.PI) / 180;
+    const baseDirX = s;
+    const baseDirY = -0.48;
+    const mag = Math.hypot(baseDirX, baseDirY);
+    const dx = baseDirX / mag;
+    const dy = baseDirY / mag;
+    const rot = spreadRad * s;
+    const rdx = dx * Math.cos(rot) - dy * Math.sin(rot);
+    const rdy = dx * Math.sin(rot) + dy * Math.cos(rot);
+    const tipPt = [rootPt[0] + rdx * fingerLen, rootPt[1] + rdy * fingerLen, 0];
+    pushTri(rootPt, rootPt2, tipPt);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+
+  if (palette?.wingGradient) {
+    // X-axis root→tip gradient; total extent = panel + longest finger.
+    const maxAbsX = panelSpan + span * 0.17;
+    const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const colors = new Float32Array(posAttr.count * 3);
+    for (let vi = 0; vi < posAttr.count; vi++) {
+      const t = THREE.MathUtils.smoothstep(
+        THREE.MathUtils.clamp(Math.abs(posAttr.getX(vi)) / Math.max(1e-5, maxAbsX), 0, 1),
+        0.05,
+        0.95,
+      );
+      colors[vi * 3]     = THREE.MathUtils.lerp(palette.wing.r, palette.wingTip.r, t);
+      colors[vi * 3 + 1] = THREE.MathUtils.lerp(palette.wing.g, palette.wingTip.g, t);
+      colors[vi * 3 + 2] = THREE.MathUtils.lerp(palette.wing.b, palette.wingTip.b, t);
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+
+/**
  * "finger" feathers at the tip (rooted along the outer trailing edge, each
  * angled slightly differently) — the visual cue that reads as "wingtip
  * primary feathers" on a soaring bird of prey.
@@ -255,13 +480,46 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
  * spread tail fan from a distance, but (unlike a flat zero-thickness
  * plane) doesn't disappear when viewed edge-on from directly the side.
  * Static (does not flap).
+ *
+ * `halfWidth` overrides the default narrow songbird tail half-width
+ * (scaledWidth * 0.36) — pass `width * 0.9` from hawkGeometry.ts to
+ * keep the predator's wide spread-eagle tail shape unchanged.
  */
-export function buildTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  const root = new THREE.Vector3(0, 0, 0);
-  const leftTip = new THREE.Vector3(-width * 0.9, -length * 0.55, 0);
-  const rightTip = new THREE.Vector3(width * 0.9, -length * 0.55, 0);
+export function buildTailGeometry(
+  length: number,
+  width: number,
+  palette?: SmallBirdPalette,
+  halfWidth?: number,
+): THREE.BufferGeometry {
+  const scaledWidth = width * BODY_NARROW_SCALE;
+  const tw = halfWidth ?? scaledWidth * 0.36; // narrow songbird tail; hawk overrides to width*0.9
+  const root       = new THREE.Vector3(0, 0, 0);
+  const leftTip    = new THREE.Vector3(-tw, -length * 0.55, 0);
+  const rightTip   = new THREE.Vector3(tw, -length * 0.55, 0);
   const backCenter = new THREE.Vector3(0, -length * 0.85, 0);
-  const thickness = width * 0.05;
+  const thickness  = width * 0.05;
 
-  return extrudeRingGeometry([root, leftTip, backCenter, rightTip], thickness);
+  const geo = extrudeRingGeometry([root, leftTip, backCenter, rightTip], thickness);
+
+  if (palette?.tailGradient) {
+    // Y-axis root→tip gradient: root is at Y=0, tip at the lowest Y value.
+    geo.computeBoundingBox();
+    const minY = geo.boundingBox!.min.y;
+    const ySpan = Math.max(1e-5, Math.abs(minY));
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    for (let vi = 0; vi < pos.count; vi++) {
+      const t = THREE.MathUtils.smoothstep(
+        THREE.MathUtils.clamp((-pos.getY(vi)) / ySpan, 0, 1),
+        0.05,
+        0.95,
+      );
+      colors[vi * 3]     = THREE.MathUtils.lerp(palette.tail.r, palette.tailTip.r, t);
+      colors[vi * 3 + 1] = THREE.MathUtils.lerp(palette.tail.g, palette.tailTip.g, t);
+      colors[vi * 3 + 2] = THREE.MathUtils.lerp(palette.tail.b, palette.tailTip.b, t);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+
+  return geo;
 }

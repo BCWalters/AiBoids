@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
-import { mergeGeometriesWithColor, buildHookedBeakGeometry, buildEyeDotsGeometry } from '../../../geometry/creatureGeometry';
+import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildHookedBeakGeometry, buildEyeDotsGeometry } from '../../../geometry/creatureGeometry';
 import { buildFingeredWingGeometry, buildTailGeometry } from '../../../geometry/birdGeometry';
 
 /**
@@ -32,6 +32,8 @@ const HEAD_COLOR = new THREE.Color(0xf2efe6);
 // Bright yellow-orange hooked beak/cere.
 const BEAK_COLOR = new THREE.Color(0xf2b100);
 const EYE_COLOR = new THREE.Color(0x0d0b08);
+// Yellow-orange talons matching the beak — classic raptor cere/talon color.
+const TALONS_COLOR = new THREE.Color(0xe8a800);
 
 export function createHawkGeometries(length: number, width: number): CreatureGeometries {
   const body = buildHawkBodyGeometry(length, width);
@@ -49,9 +51,10 @@ export function createHawkGeometries(length: number, width: number): CreatureGeo
   // per-instance tail tint (see Renderer3D's NATURE_HAWK_COLORS), no
   // vertex-bake needed since the tail is already its own InstancedMesh
   // part.
-  const tail = buildTailGeometry(length * 1.1, width);
+  const tail = buildTailGeometry(length * 1.1, width, undefined, width * 0.9);
+  const legs = buildHawkLegsGeometry(length, width);
 
-  return { body, wingLeft, wingRight, tail };
+  return { body, wingLeft, wingRight, tail, legs };
 }
 
 /**
@@ -112,7 +115,7 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   // buildHookedBeakGeometry biases most of that curl toward the tip
   // already (angle grows with t^1.6), so a modest max angle reads as
   // "mostly straight, hooked tip" instead of the parrot's full hook.
-  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.22, 28, 0.8);
+  const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.147, 28, 0.8);
 
   const eyeY = halfLen * headFrac(0.7);
   const eyeX = width * 0.24 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW;
@@ -126,4 +129,47 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
     { geometry: beak, color: BEAK_COLOR },
     { geometry: eyes, color: EYE_COLOR },
   ]);
+}
+
+/**
+ * Short tucked legs with three forward-facing talons and one rear hallux,
+ * baked in yellow-orange (matching the beak/cere). Positioned near the
+ * tail end of the belly, close to the centerline — a raptor in flight
+ * holds its feet tucked up under the body.
+ */
+function buildHawkLegsGeometry(length: number, width: number): THREE.BufferGeometry {
+  const legRadius = width * 0.052;
+  const legLength = length * 0.048;
+  const toeLength = length * 0.082;
+  // Back toward tail, matching where a real raptor's ankle sits.
+  const footY = -length * 0.28;
+  // Body surface radius at footY ≈ 0.242*width (interpolated from the
+  // lathe profile between the two nearest control points at that Y).
+  const hipZ = -width * 0.242;
+  const footZ = hipZ - legLength * 0.9;
+
+  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
+    const x = side * width * 0.001;
+    const leg = new THREE.CylinderGeometry(legRadius * 0.82, legRadius, legLength, 6);
+    leg.rotateX(Math.PI / 2);
+    leg.translate(x, footY, hipZ - legLength * 0.5);
+
+    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
+      const toe = new THREE.ConeGeometry(legRadius * 0.40, toeLength, 5);
+      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
+      return toe;
+    };
+    const toes = [
+      makeToe(side * legRadius * 0.6, toeLength * 0.04),
+      makeToe(0, toeLength * 0.1),
+      makeToe(-side * legRadius * 0.6, toeLength * 0.04),
+    ];
+    const hallux = new THREE.ConeGeometry(legRadius * 0.32, toeLength * 0.65, 5);
+    hallux.rotateX(Math.PI);
+    hallux.translate(x, footY - toeLength * 0.28, footZ + toeLength * 0.02);
+    return mergePositionOnlyGeometries([leg, ...toes, hallux]);
+  };
+
+  const both = mergePositionOnlyGeometries([buildLeg(1), buildLeg(-1)]);
+  return mergeGeometriesWithColor([{ geometry: both, color: TALONS_COLOR }]);
 }
