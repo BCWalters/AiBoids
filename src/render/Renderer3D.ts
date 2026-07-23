@@ -3227,11 +3227,16 @@ export class Renderer3D {
     this.controls.maxDistance = this.computeFishtankMaxDistance(sim);
   }
 
-  render(sim: Simulation): void {
-    this.ensureScene(sim);
+  private getRenderTiming(): { elapsed: number; dt: number } {
     const elapsed = (performance.now() - this.startTime) / 1000;
     const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
     this.lastElapsed = elapsed;
+    return { elapsed, dt };
+  }
+
+  render(sim: Simulation): void {
+    this.ensureScene(sim);
+    const { elapsed, dt } = this.getRenderTiming();
     const { isNature, isFishtank, isOrganic } = this.getStyleFlags(params.visualStyle);
     this.updateFishtankCenter(sim, isFishtank);
 
