@@ -3,6 +3,7 @@ import type { CreatureGeometries } from './creatureGeometry';
 import {
   extrudeRingGeometry,
   mergeGeometriesWithColor,
+  mergePositionOnlyGeometries,
   buildEyeDotsGeometry,
 } from './creatureGeometry';
 
@@ -67,7 +68,7 @@ function buildWingGeometry(span: number, chord: number, side: 1 | -1): THREE.Buf
  * (see Renderer3D's BOID_SPECIES_CONFIGS `beakColor` field) without the
  * shared body geometry having to pick just one baked-in hue.
  */
-export function createRealisticBirdGeometries(length: number, width: number): CreatureGeometries {
+export function createRealisticBirdGeometries(length: number, width: number, legsColor: THREE.Color = SMALL_BIRD_DEFAULT_LEGS_COLOR): CreatureGeometries {
   const body = buildTaperedBodyGeometry(length, width);
   const beak = buildSmallBirdBeakGeometry(length, width);
 
@@ -77,8 +78,9 @@ export function createRealisticBirdGeometries(length: number, width: number): Cr
   const wingRight = buildFingeredWingGeometry(wingSpan, wingChord, -1);
 
   const tail = buildTailGeometry(length, width);
+  const legs = buildSmallBirdLegsGeometry(length, width, legsColor);
 
-  return { body, wingLeft, wingRight, tail, beak };
+  return { body, wingLeft, wingRight, tail, beak, legs };
 }
 
 
@@ -184,8 +186,60 @@ function buildSmallBirdBeakGeometry(length: number, width: number): THREE.Buffer
 }
 
 
+/** Default brownish-gray leg color for small perching birds. */
+export const SMALL_BIRD_DEFAULT_LEGS_COLOR = new THREE.Color(0x7a6450);
+
 /**
- * A wing with a solid inner panel plus a fan of thin, separated triangular
+ * Two thin legs each with three forward-pointing toes and one hind toe,
+ * scaled to fit a small perching songbird. The legs are positioned back
+ * toward the tail (where a real bird's ankle sits) and hang downward from
+ * the belly. Vertex colors are white so the per-instance leg color set by
+ * the renderer (BoidSpeciesConfig.legsColor) multiplies through unchanged.
+ */
+function buildSmallBirdLegsGeometry(length: number, width: number, legsColor: THREE.Color): THREE.BufferGeometry {
+  const scaledWidth = width * BODY_NARROW_SCALE;
+  const legRadius = scaledWidth * 0.048;
+  // Short tucked legs — feet sit just below the belly surface.
+  const legLength = length * 0.042;
+  const toeLength = length * 0.055;
+  const footY = -length * 0.22;
+  // Hip flush against the belly: at footY the body radius ≈ 0.241*sw;
+  // with x = 0.025*sw the surface Z ≈ 0.240*sw.
+  const hipZ = -scaledWidth * 0.240;
+  const footZ = hipZ - legLength * 0.9;
+
+  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
+    const x = side * scaledWidth * 0.001;
+    const leg = new THREE.CylinderGeometry(legRadius * 0.85, legRadius, legLength, 6);
+    leg.rotateX(Math.PI / 2);
+    leg.translate(x, footY, hipZ - legLength * 0.5);
+
+    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
+      const toe = new THREE.ConeGeometry(legRadius * 0.38, toeLength, 5);
+      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
+      return toe;
+    };
+    // Three forward toes spread slightly around the tip.
+    const toes = [
+      makeToe(side * legRadius * 0.5, toeLength * 0.04),
+      makeToe(0, toeLength * 0.1),
+      makeToe(-side * legRadius * 0.5, toeLength * 0.04),
+    ];
+    // One hind toe pointing backward (rotated 180° along X).
+    const hindToe = new THREE.ConeGeometry(legRadius * 0.28, toeLength * 0.6, 5);
+    hindToe.rotateX(Math.PI);
+    hindToe.translate(x, footY - toeLength * 0.26, footZ + toeLength * 0.02);
+    return mergePositionOnlyGeometries([leg, ...toes, hindToe]);
+  };
+
+  const both = mergePositionOnlyGeometries([buildLeg(1), buildLeg(-1)]);
+  // Bake the species leg color as vertex color; renderer sets instance color
+  // to (1,1,1) so the baked color passes through unchanged.
+  return mergeGeometriesWithColor([{ geometry: both, color: legsColor }]);
+}
+
+
+/**
  * "finger" feathers at the tip (rooted along the outer trailing edge, each
  * angled slightly differently) — the visual cue that reads as "wingtip
  * primary feathers" on a soaring bird of prey.

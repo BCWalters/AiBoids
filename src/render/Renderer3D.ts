@@ -620,6 +620,10 @@ interface BoidSpeciesConfig {
    * comment on why this can't just be baked into the shared body
    * geometry's vertex colors the way parrot/hawk beaks are. */
   beakColor?: THREE.Color;
+  /** Small-bird species only (nature style): fixed leg/foot color baked into
+   * the shared legs geometry. Defaults to SMALL_BIRD_DEFAULT_LEGS_COLOR when
+   * not set. Override per-species to give e.g. a cardinal its orange-red legs. */
+  legsColor?: THREE.Color;
   /** Nature-style local-Y tail joint pivot for tail sway compensation. */
   tailSwayPivotY?: number;
   /** Optional per-style material tuning for this species' body/wing/tail meshes. */
@@ -634,7 +638,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     arcadeBase: ARCADE_BOID_BASE,
     natureBase: NATURE_BOID_BASE,
     useSmallGeometry: true,
-    beakColor: new THREE.Color(0x3a332b), // dark grayish-brown, typical sparrow beak
+    beakColor: new THREE.Color(0x6b5a4a), // dark brownish-gray, typical sparrow beak
+    legsColor: new THREE.Color(0x7a6450), // brownish-gray, typical sparrow leg
   },
   {
     species: 'parrot',
@@ -656,7 +661,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureBase: GOLDFINCH_BODY_BASE,
     colors: { body: GOLDFINCH_BODY_BASE, wing: GOLDFINCH_WING_BASE, tail: GOLDFINCH_TAIL_BASE },
     useSmallGeometry: false,
-    beakColor: new THREE.Color(0xf0b96a), // pale orange-pink, a real goldfinch's distinctive beak color
+    beakColor: new THREE.Color(0xf07820), // vivid orange, goldfinch's distinctive beak
+    legsColor: new THREE.Color(0x8a7060), // warm brownish-gray
   },
   {
     species: 'cardinal',
@@ -666,7 +672,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureBase: CARDINAL_BODY_BASE,
     colors: { body: CARDINAL_BODY_BASE, wing: CARDINAL_WING_BASE, tail: CARDINAL_TAIL_BASE },
     useSmallGeometry: false,
-    beakColor: new THREE.Color(0xe8672a), // bright orange-red, a real cardinal's signature thick beak color
+    beakColor: new THREE.Color(0xe84040), // lighter red, cardinal's signature beak
+    legsColor: new THREE.Color(0x8a6a5a), // brownish-gray with slight warm tint
   },
   {
     species: 'bluejay',
@@ -676,7 +683,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureBase: BLUEJAY_BODY_BASE,
     colors: { body: BLUEJAY_BODY_BASE, wing: BLUEJAY_WING_BASE, tail: BLUEJAY_TAIL_BASE },
     useSmallGeometry: false,
-    beakColor: new THREE.Color(0x1c1c1c), // near-black, matches a real blue jay's beak
+    beakColor: new THREE.Color(0x8c8c8c), // medium-light gray, blue jay beak
+    legsColor: new THREE.Color(0x7a7060), // neutral brownish-gray
   },
 ];
 
@@ -820,6 +828,7 @@ export class Renderer3D {
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
   private tailColor = new THREE.Color();
+  private legsColor = new THREE.Color();
   private beakInstanceColor = new THREE.Color();
   private hsl = { h: 0, s: 0, l: 0 };
   private startTime = performance.now();
@@ -2022,6 +2031,7 @@ export class Renderer3D {
       let effectiveBase = baseColor;
       let effectiveWing: THREE.Color | null = null;
       let effectiveTail: THREE.Color | null = null;
+      let preserveParrotLegPalette = false;
 
       if (speciesColors) {
         const isGreenParrotVariant = getSpeciesColors === getParrotColors
@@ -2074,6 +2084,8 @@ export class Renderer3D {
           && !!set.wingLeft.geometry.getAttribute('color');
         const preserveParrotTailPalette = preserveParrotWingPalette
           && !!set.tail?.geometry.getAttribute('color');
+        preserveParrotLegPalette = preserveParrotWingPalette
+          && !!set.legs?.geometry.getAttribute('color');
         // Species with their own distinct wing/tail base colors keep those
         // hues rather than just darkening the body color.
         if (preserveParrotWingPalette) {
@@ -2108,7 +2120,16 @@ export class Renderer3D {
         set.wingRight.setColorAt(i, this.stateColor);
         if (set.tail) set.tail.setColorAt(i, this.stateColor);
       }
-      if (set.legs) set.legs.setColorAt(i, this.stateColor);
+      if (set.legs) {
+        if (preserveParrotLegPalette || set.legs.geometry.getAttribute('color')) {
+          // Parrot legs: baked palette feet color, pass through with white.
+          // Small-bird legs: baked species leg color, same white pass-through.
+          this.legsColor.setRGB(1, 1, 1);
+        } else {
+          this.legsColor.copy(this.stateColor);
+        }
+        set.legs.setColorAt(i, this.legsColor);
+      }
       if (set.beak && beakColor) {
         // Small per-individual jitter, same treatment as the other parts
         // — keeps a flock of e.g. cardinals from looking like every

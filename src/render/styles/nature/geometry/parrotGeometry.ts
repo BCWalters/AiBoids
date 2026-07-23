@@ -23,6 +23,7 @@ import {
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
 interface ParrotPalette {
   beak: THREE.Color;
+  feet: THREE.Color;
   facePatch: THREE.Color;
   eyeOuter: THREE.Color;
   back: THREE.Color;
@@ -34,10 +35,15 @@ interface ParrotPalette {
   wingUndersideRear: THREE.Color;
   tailRoot: THREE.Color;
   tailTip: THREE.Color;
+  /** When true, the torso uses a smooth dorsal→ventral Z-axis gradient
+   * (back color at crown/dorsal surface, belly color at ventral surface)
+   * instead of the default dominant-weight back/belly region split. */
+  dorsalGradient: boolean;
 }
 
 const GREEN_FOCUS_PARROT_PALETTE: ParrotPalette = {
   beak: new THREE.Color(0xe35d2b),
+  feet: new THREE.Color(0x707070),
   facePatch: new THREE.Color(0x44b749),
   eyeOuter: new THREE.Color(0x44b749),
   back: new THREE.Color(0x44b749),
@@ -49,26 +55,30 @@ const GREEN_FOCUS_PARROT_PALETTE: ParrotPalette = {
   wingUndersideRear: new THREE.Color(0x9da3a9),
   tailRoot: new THREE.Color(0x44b749),
   tailTip: new THREE.Color(0xc8e455),
+  dorsalGradient: true,
 };
 
 const BLUE_GOLD_FOCUS_PARROT_PALETTE: ParrotPalette = {
   beak: new THREE.Color(0x161616),
-  facePatch: new THREE.Color(0x3a8fbe),
+  feet: new THREE.Color(0x5a5a5a),
+  facePatch: new THREE.Color(0x2f75ff),
   eyeOuter: new THREE.Color(0xffffff),
-  back: new THREE.Color(0x3a8fbe),
-  backLight: new THREE.Color(0x4da2cc),
-  belly: new THREE.Color(0xe6ac4d),
-  wingTopFront: new THREE.Color(0x469ec6),
-  wingTopRear: new THREE.Color(0x377fb0),
-  wingUndersideFront: new THREE.Color(0xe6ac4d),
-  wingUndersideRear: new THREE.Color(0x9da3a9),
-  tailRoot: new THREE.Color(0x3a8fbe),
-  tailTip: new THREE.Color(0xe6ac4d),
+  back: new THREE.Color(0x2f75ff),
+  backLight: new THREE.Color(0x5d98ff),
+  belly: new THREE.Color(0xffe033),
+  wingTopFront: new THREE.Color(0x4f8fff),
+  wingTopRear: new THREE.Color(0x245fdb),
+  wingUndersideFront: new THREE.Color(0xffe033),
+  wingUndersideRear: new THREE.Color(0xffcc00),
+  tailRoot: new THREE.Color(0x2f75ff),
+  tailTip: new THREE.Color(0xffe033),
+  dorsalGradient: false,
 };
 
 const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
   beak: new THREE.Color(0x161616),
-  facePatch: new THREE.Color(0xf3e8d9),
+  feet: new THREE.Color(0x6a6a6a),
+  facePatch: new THREE.Color(0xe12832),
   eyeOuter: new THREE.Color(0xffffff),
   back: new THREE.Color(0xe12832),
   backLight: new THREE.Color(0xf13a45),
@@ -79,11 +89,13 @@ const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
   wingUndersideRear: new THREE.Color(0x36549a),
   tailRoot: new THREE.Color(0xe0c45d),
   tailTip: new THREE.Color(0x2b57b0),
+  dorsalGradient: false,
 };
 
 const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
   beak: new THREE.Color(0x161616),
-  facePatch: new THREE.Color(0xcab7ff),
+  feet: new THREE.Color(0x9a9a9a),
+  facePatch: new THREE.Color(0x6b4bb3),
   eyeOuter: new THREE.Color(0x39ff14),
   back: new THREE.Color(0x6b4bb3),
   backLight: new THREE.Color(0x9a7fe0),
@@ -94,10 +106,12 @@ const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
   wingUndersideRear: new THREE.Color(0xa99ec4),
   tailRoot: new THREE.Color(0x7b60c8),
   tailTip: new THREE.Color(0xd1c2ff),
+  dorsalGradient: false,
 };
 
 const NEUTRAL_PARROT_PALETTE: ParrotPalette = {
   beak: new THREE.Color(0x161616),
+  feet: new THREE.Color(0x707070),
   facePatch: new THREE.Color(0xffffff),
   eyeOuter: new THREE.Color(0xffffff),
   back: new THREE.Color(0xffffff),
@@ -109,6 +123,7 @@ const NEUTRAL_PARROT_PALETTE: ParrotPalette = {
   wingUndersideRear: new THREE.Color(0xbfc4cb),
   tailRoot: new THREE.Color(0xffffff),
   tailTip: new THREE.Color(0xffffff),
+  dorsalGradient: false,
 };
 
 let ACTIVE_PARROT_PALETTE: ParrotPalette = GREEN_FOCUS_PARROT_PALETTE;
@@ -152,8 +167,9 @@ export function createParrotGeometries(
     const wingRight = buildParrotWingGeometry(wingSpan, wingChord, -1);
 
     const tail = buildParrotTailGeometry(length, width);
+    const legs = buildParrotLegsGeometry(length, width);
 
-    return { body, wingLeft, wingRight, tail };
+    return { body, wingLeft, wingRight, tail, legs };
   } finally {
     ACTIVE_PARROT_PALETTE = previousPalette;
   }
@@ -653,9 +669,65 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   return geometry;
 }
 
+function buildParrotLegsGeometry(length: number, width: number): THREE.BufferGeometry {
+  const legRadius = width * 0.038;
+  const legLength = length * 0.105;
+  const toeLength = length * 0.074;
+  const footY = -length * 0.18;
+  const hipZ = -width * 0.08;
+  const footZ = hipZ - legLength * 0.95;
+  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
+    const x = side * width * 0.115;
+    const leg = new THREE.CylinderGeometry(legRadius * 0.92, legRadius, legLength, 8);
+    leg.rotateX(Math.PI / 2);
+    leg.translate(x, footY, hipZ - legLength * 0.5);
+
+    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
+      const toe = new THREE.ConeGeometry(legRadius * 0.42, toeLength, 6);
+      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
+      return toe;
+    };
+    const toes = [
+      makeToe(side * legRadius * 0.55, toeLength * 0.05),
+      makeToe(0, toeLength * 0.12),
+      makeToe(-side * legRadius * 0.55, toeLength * 0.05),
+    ];
+    const hindToe = new THREE.ConeGeometry(legRadius * 0.3, toeLength * 0.62, 6);
+    hindToe.rotateX(Math.PI);
+    hindToe.translate(x, footY - toeLength * 0.28, footZ + toeLength * 0.02);
+    return mergePositionOnlyGeometries([leg, ...toes, hindToe]);
+  };
+  const left = buildLeg(1);
+  const right = buildLeg(-1);
+  return mergeGeometriesWithColor([
+    { geometry: mergePositionOnlyGeometries([left, right]), color: ACTIVE_PARROT_PALETTE.feet },
+  ]);
+}
+
 function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number): void {
   const pos = geometry.getAttribute('position');
   const colors = new Float32Array(pos.count * 3);
+
+  if (ACTIVE_PARROT_PALETTE.dorsalGradient) {
+    // Smooth dorsal→ventral gradient purely in Z: back color at the crown
+    // (max Z, dorsal surface), belly color at the underside (min Z).
+    // Using the geometry's own bounding-box extent so the gradient spans
+    // exactly from surface to surface regardless of body proportions.
+    geometry.computeBoundingBox();
+    const minZ = geometry.boundingBox?.min.z ?? -halfLen * 0.3;
+    const maxZ = geometry.boundingBox?.max.z ?? halfLen * 0.3;
+    const zSpan = Math.max(1e-5, maxZ - minZ);
+    for (let i = 0; i < pos.count; i++) {
+      const z = pos.getZ(i);
+      const t = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp((z - minZ) / zSpan, 0, 1), 0, 1);
+      colors[i * 3]     = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.r, ACTIVE_PARROT_PALETTE.back.r, t);
+      colors[i * 3 + 1] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.g, ACTIVE_PARROT_PALETTE.back.g, t);
+      colors[i * 3 + 2] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.b, ACTIVE_PARROT_PALETTE.back.b, t);
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    return;
+  }
+
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
     const z = pos.getZ(i);
