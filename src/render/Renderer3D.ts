@@ -3092,6 +3092,42 @@ export class Renderer3D {
     );
   }
 
+  private updateBoidSpeciesConfig(
+    config: BoidSpeciesConfig,
+    boidsBySpecies: Map<BoidSpecies, Boid[]>,
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+    isOrganic: boolean,
+  ): void {
+    const instances = this.speciesInstances.get(config.species);
+    if (!instances) return;
+    const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
+    const isNatureParrot = config.species === 'parrot' && isNature;
+    // Fish-tail wave (fishtank only): every fishtank species' caudal
+    // fin is rooted at the model's own local origin (sparrow/
+    // goldfinch/cardinal/bluejay's plain small-fish geometry, and
+    // now the parrot species' butterflyfish geometry too), so it's
+    // safe to sway around the shared pivot with no detachment risk
+    // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
+    if (isNatureParrot) {
+      this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, isFishtank);
+      return;
+    }
+    this.updateStandardBoidSpeciesInstances(
+      config,
+      instances,
+      entities,
+      elapsed,
+      dt,
+      isNature,
+      isFishtank,
+      isOrganic,
+      isNatureParrot,
+    );
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3105,30 +3141,14 @@ export class Renderer3D {
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
     for (const config of BOID_SPECIES_CONFIGS) {
-      const instances = this.speciesInstances.get(config.species);
-      if (!instances) continue;
-      const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
-      const isNatureParrot = config.species === 'parrot' && isNature;
-      // Fish-tail wave (fishtank only): every fishtank species' caudal
-      // fin is rooted at the model's own local origin (sparrow/
-      // goldfinch/cardinal/bluejay's plain small-fish geometry, and
-      // now the parrot species' butterflyfish geometry too), so it's
-      // safe to sway around the shared pivot with no detachment risk
-      // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
-      if (isNatureParrot) {
-        this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, isFishtank);
-        continue;
-      }
-      this.updateStandardBoidSpeciesInstances(
+      this.updateBoidSpeciesConfig(
         config,
-        instances,
-        entities,
+        boidsBySpecies,
         elapsed,
         dt,
         isNature,
         isFishtank,
         isOrganic,
-        isNatureParrot,
       );
     }
   }
