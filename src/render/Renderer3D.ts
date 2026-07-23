@@ -11,6 +11,7 @@ import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
+import type { SmallBirdPalette } from './geometry/birdGeometry';
 import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
 import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
 import { createDragonGeometries, computeDragonMouthTransform } from './styles/nature/geometry/dragonGeometry';
@@ -152,6 +153,54 @@ const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
 const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
 const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
 const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
+
+// Per-species nature-style vertex colour palettes for small songbirds.
+// Baked into dedicated per-species geometry instances so each flock has a
+// realistic gradient instead of a flat per-instance tint.
+const SPARROW_NATURE_PALETTE: SmallBirdPalette = {
+  back:     new THREE.Color(0x7a6050), // dark brown-gray dorsal
+  belly:    new THREE.Color(0xcaaa80), // buffy-tan ventral
+  wing:     new THREE.Color(0x6a4832), // dark brown at wing root
+  wingTip:  new THREE.Color(0x2a1408), // very dark brown at tip
+  tail:     new THREE.Color(0x503820), // dark brown tail base
+  tailTip:  new THREE.Color(0x281408), // near-black tail tip
+  dorsalGradient: true,
+  wingGradient:   true,
+  tailGradient:   true,
+};
+const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
+  back:     new THREE.Color(0xf5d327), // bright yellow — same as body base
+  belly:    new THREE.Color(0xf7e878), // slightly lighter yellow on breast
+  wing:     new THREE.Color(0x1c1c1c), // black (kept flat via wingGradient:false)
+  wingTip:  new THREE.Color(0x0d0d0d),
+  tail:     new THREE.Color(0x1c1c1c), // black tail (flat)
+  tailTip:  new THREE.Color(0x0d0d0d),
+  dorsalGradient: true,
+  wingGradient:   false, // black wings stay flat; gradient would look odd
+  tailGradient:   false,
+};
+const CARDINAL_NATURE_PALETTE: SmallBirdPalette = {
+  back:     new THREE.Color(0xcc2936), // vivid red dorsal — matches body base
+  belly:    new THREE.Color(0xe04858), // slightly lighter/warmer red on breast
+  wing:     new THREE.Color(0x8f1f28), // darker red at wing root
+  wingTip:  new THREE.Color(0x3d0f14), // near-black red at tip
+  tail:     new THREE.Color(0x5a1520), // dark red tail base
+  tailTip:  new THREE.Color(0x200009), // very dark at tail tip
+  dorsalGradient: true,
+  wingGradient:   true,
+  tailGradient:   true,
+};
+const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
+  back:     new THREE.Color(0x3b6fa0), // jay blue dorsal
+  belly:    new THREE.Color(0xe8eef3), // white/pale belly
+  wing:     new THREE.Color(0x4878a8), // medium blue at wing root
+  wingTip:  new THREE.Color(0x1c3350), // navy blue at tip
+  tail:     new THREE.Color(0x2a5070), // dark blue tail base
+  tailTip:  new THREE.Color(0x1c3350), // navy at tail tip
+  dorsalGradient: true,
+  wingGradient:   true,
+  tailGradient:   true,
+};
 
 // --- Optional "dragon" predator variant (nature style only): much larger,
 // purple, leathery-winged silhouette instead of the hawk geometry.
@@ -624,6 +673,11 @@ interface BoidSpeciesConfig {
    * the shared legs geometry. Defaults to SMALL_BIRD_DEFAULT_LEGS_COLOR when
    * not set. Override per-species to give e.g. a cardinal its orange-red legs. */
   legsColor?: THREE.Color;
+  /** Small-bird species only (nature style): per-species baked vertex colour
+   * palette for body/wing/tail gradients. When set, createRealisticBirdGeometries
+   * is called with this palette and the species gets its own dedicated geometry
+   * instance in Renderer3D (rather than sharing natureBoidGeometries). */
+  natureSmallBirdPalette?: SmallBirdPalette;
   /** Nature-style local-Y tail joint pivot for tail sway compensation. */
   tailSwayPivotY?: number;
   /** Optional per-style material tuning for this species' body/wing/tail meshes. */
@@ -640,6 +694,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     useSmallGeometry: true,
     beakColor: new THREE.Color(0x6b5a4a), // dark brownish-gray, typical sparrow beak
     legsColor: new THREE.Color(0x7a6450), // brownish-gray, typical sparrow leg
+    natureSmallBirdPalette: SPARROW_NATURE_PALETTE,
   },
   {
     species: 'parrot',
@@ -663,6 +718,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     useSmallGeometry: false,
     beakColor: new THREE.Color(0xf07820), // vivid orange, goldfinch's distinctive beak
     legsColor: new THREE.Color(0x8a7060), // warm brownish-gray
+    natureSmallBirdPalette: GOLDFINCH_NATURE_PALETTE,
   },
   {
     species: 'cardinal',
@@ -674,6 +730,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     useSmallGeometry: false,
     beakColor: new THREE.Color(0xe84040), // lighter red, cardinal's signature beak
     legsColor: new THREE.Color(0x8a6a5a), // brownish-gray with slight warm tint
+    natureSmallBirdPalette: CARDINAL_NATURE_PALETTE,
   },
   {
     species: 'bluejay',
@@ -685,6 +742,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     useSmallGeometry: false,
     beakColor: new THREE.Color(0x8c8c8c), // medium-light gray, blue jay beak
     legsColor: new THREE.Color(0x7a7060), // neutral brownish-gray
+    natureSmallBirdPalette: BLUEJAY_NATURE_PALETTE,
   },
 ];
 
@@ -712,6 +770,11 @@ export class Renderer3D {
   private arcadePredatorGeometries: CreatureGeometries;
   private natureBoidGeometries: CreatureGeometries;
   private natureSparrowGeometries: CreatureGeometries;
+  private natureGoldfinchGeometries: CreatureGeometries;
+  private natureCardinalGeometries: CreatureGeometries;
+  private natureBluejayGeometries: CreatureGeometries;
+  /** Quick-lookup map from BoidSpecies → per-species nature geometry for non-sparrow small birds. */
+  private readonly natureSmallSpeciesGeometries = new Map<BoidSpecies, CreatureGeometries>();
   private natureParrotGeometries: CreatureGeometries;
   private natureParrotBlueGoldGeometries: CreatureGeometries;
   private natureParrotScarletGeometries: CreatureGeometries;
@@ -892,7 +955,24 @@ export class Renderer3D {
     this.natureSparrowGeometries = createRealisticBirdGeometries(
       BOID_LENGTH * 1.3 * SPARROW_SIZE_SCALE,
       BOID_WIDTH * 2.4 * SPARROW_SIZE_SCALE,
+      new THREE.Color(0x7a6450),
+      SPARROW_NATURE_PALETTE,
     );
+    // Per-species geometry for goldfinch/cardinal/bluejay — each bakes its
+    // own gradient palette into the vertex colours so the flock doesn't need
+    // a flat per-instance tint (and gains the body/wing/tail gradient look).
+    this.natureGoldfinchGeometries = createRealisticBirdGeometries(
+      BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, new THREE.Color(0x8a7060), GOLDFINCH_NATURE_PALETTE,
+    );
+    this.natureCardinalGeometries = createRealisticBirdGeometries(
+      BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, new THREE.Color(0x8a6a5a), CARDINAL_NATURE_PALETTE,
+    );
+    this.natureBluejayGeometries = createRealisticBirdGeometries(
+      BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, new THREE.Color(0x7a7060), BLUEJAY_NATURE_PALETTE,
+    );
+    this.natureSmallSpeciesGeometries.set('goldfinch', this.natureGoldfinchGeometries);
+    this.natureSmallSpeciesGeometries.set('cardinal',  this.natureCardinalGeometries);
+    this.natureSmallSpeciesGeometries.set('bluejay',   this.natureBluejayGeometries);
     // Parrot's dedicated macaw-style geometry (curved beak, rounder body,
     // long tail streamers) — only used in nature style; arcade style still
     // shares the simple flat-diamond silhouette with every other species
@@ -1217,7 +1297,7 @@ export class Renderer3D {
                 ? this.fishtankButterflyfishGeometries
                 : this.arcadeParrotGeometries
             : isNature
-              ? this.natureBoidGeometries
+              ? (this.natureSmallSpeciesGeometries.get(config.species) ?? this.natureBoidGeometries)
               : isFishtank
                 ? this.fishtankBoidGeometries
                 : this.arcadeBoidGeometries;
@@ -1569,6 +1649,21 @@ export class Renderer3D {
     preferUpright: boolean = false,
     preserveWingVertexPalette: boolean = false,
   ): void {
+    // Detect whether this species' geometry has baked vertex colours on
+    // body/wing/tail (small songbirds in nature style) — when it does,
+    // pass white (1,1,1) as the instance colour so the gradient shows
+    // through unchanged, exactly like the parrot wing palette passthrough.
+    const isNatureStyle = params.visualStyle === 'nature';
+    const isNatureSmallBirdBody = isNatureStyle
+      && getSpeciesColors !== getParrotColors
+      && !!set.body.geometry.getAttribute('color');
+    const isNatureSmallBirdWing = isNatureStyle
+      && getSpeciesColors !== getParrotColors
+      && !!set.wingLeft.geometry.getAttribute('color');
+    const isNatureSmallBirdTail = isNatureStyle
+      && getSpeciesColors !== getParrotColors
+      && !!set.tail?.geometry.getAttribute('color');
+
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
       const pos = entity.position;
@@ -2075,9 +2170,27 @@ export class Renderer3D {
         this.variantColor.setHSL(h, s, l);
         effectiveBase = this.variantColor;
       }
-      this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
+      if (isNatureSmallBirdBody) {
+        // Baked gradient body — pass white so the vertex colours show through.
+        this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+      } else {
+        this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
+      }
       set.body.setColorAt(i, this.stateColor);
-      if (effectiveWing) {
+      if (isNatureSmallBirdWing) {
+        // Baked gradient wings — white passthrough; same for tail if baked.
+        this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+        set.wingLeft.setColorAt(i, this.wingColor);
+        set.wingRight.setColorAt(i, this.wingColor);
+        if (set.tail) {
+          if (isNatureSmallBirdTail) {
+            this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+          } else {
+            this.tailColor.copy(this.wingColor);
+          }
+          set.tail.setColorAt(i, this.tailColor);
+        }
+      } else if (effectiveWing) {
         const preserveParrotWingPalette = getSpeciesColors === getParrotColors
           && params.visualStyle === 'nature'
           && preserveWingVertexPalette
@@ -2758,6 +2871,9 @@ export class Renderer3D {
       this.arcadePredatorGeometries,
       this.natureBoidGeometries,
       this.natureSparrowGeometries,
+      this.natureGoldfinchGeometries,
+      this.natureCardinalGeometries,
+      this.natureBluejayGeometries,
       this.natureParrotGeometries,
       this.natureParrotBlueGoldGeometries,
       this.natureParrotScarletGeometries,
