@@ -2991,6 +2991,35 @@ export class Renderer3D {
     };
   }
 
+  private getParrotColourStrategy(config: BoidSpeciesConfig, bakedWingPalette: boolean): ColourStrategy {
+    return {
+      baseColor: config.natureBase,
+      highlightColor: NATURE_BOID_PANIC,
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: true,
+      getSpeciesColors: getParrotColors,
+      beakColor: config.beakColor,
+      bakedWingPalette,
+    };
+  }
+
+  private getBoidColourStrategy(config: BoidSpeciesConfig, isOrganic: boolean, isNature: boolean): ColourStrategy {
+    return {
+      baseColor: isOrganic ? config.natureBase : config.arcadeBase,
+      highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: config.colors || config.getColors ? true : isOrganic,
+      getSpeciesColors: config.getColors ?? (config.colors ? () => config.colors! : undefined),
+      beakColor: config.beakColor,
+      // All nature boids with a baked wing vertex palette (currently only
+      // parrots via getColors) pass white so the palette shows through.
+      bakedWingPalette: true,
+      // Small songbirds (sparrow/goldfinch/cardinal/bluejay) bake a
+      // species-specific gradient into body/wing/tail geometry.
+      bakedBodyGradient: isNature && !!config.natureSmallBirdPalette,
+    };
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3024,15 +3053,7 @@ export class Renderer3D {
           params.boidMaxSpeed,
           elapsed,
           dt,
-          {
-            baseColor: config.natureBase,
-            highlightColor: NATURE_BOID_PANIC,
-            getIntensity: (entity) => (entity as Boid).panicLevel,
-            individualVariation: true,
-            getSpeciesColors: getParrotColors,
-            beakColor: config.beakColor,
-            // Neutral parrots share geometry — no baked wing vertex palette.
-          },
+          this.getParrotColourStrategy(config, false),
           this.getBoidMotionConfig(config, isFishtank, false, true),
         );
         for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
@@ -3044,17 +3065,7 @@ export class Renderer3D {
             params.boidMaxSpeed,
             elapsed,
             dt,
-            {
-              baseColor: config.natureBase,
-              highlightColor: NATURE_BOID_PANIC,
-              getIntensity: (entity) => (entity as Boid).panicLevel,
-              individualVariation: true,
-              getSpeciesColors: getParrotColors,
-              beakColor: config.beakColor,
-              // Profile parrots have baked vertex colours on wings/tail/legs;
-              // pass white so the palette shows through unchanged.
-              bakedWingPalette: true,
-            },
+            this.getParrotColourStrategy(config, true),
             this.getBoidMotionConfig(config, isFishtank, false, true),
           );
         }
@@ -3066,20 +3077,7 @@ export class Renderer3D {
         params.boidMaxSpeed,
         elapsed,
         dt,
-        {
-          baseColor: isOrganic ? config.natureBase : config.arcadeBase,
-          highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
-          getIntensity: (entity) => (entity as Boid).panicLevel,
-          individualVariation: config.colors || config.getColors ? true : isOrganic,
-          getSpeciesColors: config.getColors ?? (config.colors ? () => config.colors! : undefined),
-          beakColor: config.beakColor,
-          // All nature boids with a baked wing vertex palette (currently only
-          // parrots via getColors) pass white so the palette shows through.
-          bakedWingPalette: true,
-          // Small songbirds (sparrow/goldfinch/cardinal/bluejay) bake a
-          // species-specific gradient into body/wing/tail geometry.
-          bakedBodyGradient: isNature && !!config.natureSmallBirdPalette,
-        },
+        this.getBoidColourStrategy(config, isOrganic, isNature),
         this.getBoidMotionConfig(config, isFishtank, isFishTail, isNatureParrot),
       );
     }
