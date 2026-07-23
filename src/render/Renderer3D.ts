@@ -729,6 +729,7 @@ interface UpdateEntityInstanceArgs {
   meshScaleBoost: number;
   preferUpright: boolean;
 }
+type UpdateEntitySharedArgs = Omit<UpdateEntityInstanceArgs, 'index' | 'entity'>;
 
 interface StyleFlags {
   isNature: boolean;
@@ -2487,6 +2488,19 @@ export class Renderer3D {
     });
   }
 
+  private updateEntityInstancesLoop(
+    entities: (Boid | Predator)[],
+    sharedArgs: UpdateEntitySharedArgs,
+  ): void {
+    for (let i = 0; i < entities.length; i++) {
+      this.updateEntityInstance({
+        ...sharedArgs,
+        index: i,
+        entity: entities[i],
+      });
+    }
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -2536,42 +2550,37 @@ export class Renderer3D {
       isNatureSmallBirdWing,
       isNatureSmallBirdTail,
     } = this.getSmallBirdBakedColorFlags(set, bakedBodyGradient);
-
-    for (let i = 0; i < entities.length; i++) {
-      this.updateEntityInstance({
-        set,
-        index: i,
-        entity: entities[i],
-        maxSpeed,
-        elapsed,
-        dt,
-        baseColor,
-        highlightColor,
-        getIntensity,
-        individualVariation,
-        getSpeciesColors,
-        bakedWingPalette,
-        beakColor,
-        isNatureSmallBirdBody,
-        isNatureSmallBirdWing,
-        isNatureSmallBirdTail,
-        flapFrequency,
-        flapIdleAmplitude,
-        flapSpeedAmplitude,
-        getScale,
-        keepUpright,
-        uprightStyle,
-        bankScale,
-        finRestBiasRad,
-        tailSwayAxis,
-        tailSwayAmplitude,
-        tailSwayFrequency,
-        tailSwayPivotY,
-        worldScale,
-        meshScaleBoost,
-        preferUpright,
-      });
-    }
+    this.updateEntityInstancesLoop(entities, {
+      set,
+      maxSpeed,
+      elapsed,
+      dt,
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      beakColor,
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    });
 
     this.markInstanceSetNeedsUpdate(set);
   }
