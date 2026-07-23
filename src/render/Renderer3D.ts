@@ -3266,18 +3266,35 @@ export class Renderer3D {
     this.renderFrame(sim, elapsed, dt, isNature, isFishtank, isOrganic);
   }
 
-  dispose(): void {
+  private disposeBoidInstanceSets(): void {
     for (const config of BOID_SPECIES_CONFIGS) {
       this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
     }
+  }
+
+  private disposeParrotProfileInstanceSets(): void {
     for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
       this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
       this.parrotProfileInstances.set(profile, null);
       this.parrotProfileKeys.set(profile, null);
     }
+  }
+
+  private disposePredatorInstanceSets(): void {
     for (const kind of this.predatorInstances.keys()) {
       this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
     }
+  }
+
+  private disposeCreatureGeometries(geometries: CreatureGeometries): void {
+    geometries.body.dispose();
+    geometries.wingLeft.dispose();
+    geometries.wingRight.dispose();
+    geometries.tail?.dispose();
+    geometries.legs?.dispose();
+  }
+
+  private disposeAllCreatureGeometrySets(): void {
     for (const geometries of [
       this.arcadeBoidGeometries,
       this.arcadeSparrowGeometries,
@@ -3297,12 +3314,15 @@ export class Renderer3D {
       this.dragonPredatorGeometries,
       this.unicornPredatorGeometries,
     ]) {
-      geometries.body.dispose();
-      geometries.wingLeft.dispose();
-      geometries.wingRight.dispose();
-      geometries.tail?.dispose();
-      geometries.legs?.dispose();
+      this.disposeCreatureGeometries(geometries);
     }
+  }
+
+  dispose(): void {
+    this.disposeBoidInstanceSets();
+    this.disposeParrotProfileInstanceSets();
+    this.disposePredatorInstanceSets();
+    this.disposeAllCreatureGeometrySets();
     this.natureEnv.dispose();
     this.fishtankEnv.dispose();
     this.driftingClouds.dispose();
