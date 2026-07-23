@@ -1,12 +1,42 @@
-import type { VisualStyle } from '../../sim/params';
+import type { TimeOfDayPreset, VisualStyle } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Vector3 } from 'three';
 import type { computeFishtankRoomBounds } from '../styles/fishtank/environment';
 
-type FishtankBounds = ReturnType<typeof computeFishtankRoomBounds>;
+export type FishtankBounds = ReturnType<typeof computeFishtankRoomBounds>;
+
+export interface SceneEnvironmentToggles {
+  fogEnabled: boolean;
+  timeOfDay: TimeOfDayPreset;
+  lightShaftsEnabled: boolean;
+  waterEffectsEnabled: boolean;
+}
+
+export interface ScenePresentationSettings {
+  bloomEnabled: boolean;
+  afterimageEnabled: boolean;
+  boundsHelperVisible: boolean;
+  ambientLightIntensity: number;
+  keyLightVisible: boolean;
+}
+
+export interface SceneCreatureMaterialDefaults {
+  bodyEmissive: number;
+  bodyEmissiveIntensity: number;
+  bodyRoughness: (isDragon: boolean) => number;
+  wingEmissive: number;
+  wingEmissiveIntensity: number;
+  wingRoughness: (isDragon: boolean) => number;
+  wingColor: (isDragon: boolean, isFishtank: boolean) => number;
+}
 
 export interface SceneRendererHooks {
   setStyleVisibility: () => void;
+  configureInitialFraming: (
+    sim: Simulation,
+    maxDim: number,
+    fishtankBounds: FishtankBounds,
+  ) => void;
   applyStyleTransition: (
     sim: Simulation,
     maxDim: number,
@@ -18,6 +48,14 @@ export interface SceneRendererHooks {
   configureEnvironmentAnchors: (sim: Simulation, center: Vector3, maxDim: number) => void;
   updateFrameAnchors: (sim: Simulation) => void;
   updateCameraClamp: (sim: Simulation) => void;
+  applyEnvironmentToggles: (toggles: SceneEnvironmentToggles) => void;
+  setShadowsEnabled: (enabled: boolean) => void;
+  setGalleryCreatureActive: (active: boolean) => void;
+  getPresentationSettings: () => ScenePresentationSettings;
+  getWorldScale: () => number;
+  mapPositionToRenderSpace: (x: number, y: number, z: number, target: Vector3) => void;
+  getCreatureMaterialDefaults: () => SceneCreatureMaterialDefaults;
+  dispose: () => void;
 }
 
 interface SceneRendererHookCallbacks {
