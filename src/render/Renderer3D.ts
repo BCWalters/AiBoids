@@ -1675,12 +1675,12 @@ export class Renderer3D {
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
   private ensureScene(sim: Simulation): void {
     const style = params.visualStyle;
-    const { isNature, isFishtank, isOrganic } = this.getStyleFlags(style);
-    this.reconcileBoidInstanceSets(sim, style, { isNature, isFishtank, isOrganic });
+    const flags = this.getStyleFlags(style);
+    this.reconcileBoidInstanceSets(sim, style, flags);
 
-    this.reconcilePredatorInstanceSets(sim, style, { isNature, isFishtank, isOrganic });
+    this.reconcilePredatorInstanceSets(sim, style, flags);
 
-    this.applyStyleTransitionOnStyleChange(sim, style, { isNature, isFishtank, isOrganic });
+    this.applyStyleTransitionOnStyleChange(sim, style, flags);
 
     this.updateEnvironmentParameterToggles();
 
@@ -1692,7 +1692,7 @@ export class Renderer3D {
     // doesn't show the room incongruously right behind the creature.
     this.fishtankEnv.setRoomVisible(params.galleryCreature === null);
 
-    this.ensureBoundsHelperAndFraming(sim, { isNature, isFishtank, isOrganic });
+    this.ensureBoundsHelperAndFraming(sim, flags);
 
     this.scheduleShaderWarmup(style);
   }
@@ -3374,10 +3374,9 @@ export class Renderer3D {
     sim: Simulation,
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
   ): void {
+    const { isNature, isFishtank, isOrganic } = flags;
     this.updateFishtankCenter(sim, isFishtank);
     this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
     this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
@@ -3394,8 +3393,8 @@ export class Renderer3D {
   render(sim: Simulation): void {
     this.ensureScene(sim);
     const { elapsed, dt } = this.getRenderTiming();
-    const { isNature, isFishtank, isOrganic } = this.getStyleFlags(params.visualStyle);
-    this.renderFrame(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+    const flags = this.getStyleFlags(params.visualStyle);
+    this.renderFrame(sim, elapsed, dt, flags);
   }
 
   private disposeBoidInstanceSets(): void {
