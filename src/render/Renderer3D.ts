@@ -3049,14 +3049,14 @@ export class Renderer3D {
 
   private getPredatorUpdateContext(
     sim: Simulation,
-    isOrganic: boolean,
-    isFishtank: boolean,
+    flags: StyleFlags,
   ): {
     hawks: Predator[];
     unicorns: Predator[];
     isDragon: boolean;
     isShark: boolean;
   } {
+    const { isOrganic, isFishtank } = flags;
     const { isDragon, isShark } = this.getPredatorRenderFlags(isOrganic, isFishtank);
     const { hawks, unicorns } = this.partitionPredators(sim.predators);
     return { hawks, unicorns, isDragon, isShark };
@@ -3066,10 +3066,9 @@ export class Renderer3D {
     context: { hawks: Predator[]; unicorns: Predator[]; isDragon: boolean; isShark: boolean },
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
   ): void {
+    const { isNature, isFishtank, isOrganic } = flags;
     this.updateHawkPredatorInstances(
       context.hawks,
       elapsed,
@@ -3194,9 +3193,8 @@ export class Renderer3D {
     flags: StyleFlags,
   ): void {
     if (!this.hasAnyPredatorInstances()) return;
-    const { isNature, isFishtank, isOrganic } = flags;
-    const context = this.getPredatorUpdateContext(sim, isOrganic, isFishtank);
-    this.updatePredatorInstanceSets(context, elapsed, dt, isNature, isFishtank, isOrganic);
+    const context = this.getPredatorUpdateContext(sim, flags);
+    this.updatePredatorInstanceSets(context, elapsed, dt, flags);
   }
 
   private updateHawkPredatorInstances(
