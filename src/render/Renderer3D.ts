@@ -3020,7 +3020,8 @@ export class Renderer3D {
     };
   }
 
-  private getBoidColourStrategy(config: BoidSpeciesConfig, isOrganic: boolean, isNature: boolean): ColourStrategy {
+  private getBoidColourStrategy(config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
+    const { isOrganic, isNature } = flags;
     return {
       baseColor: isOrganic ? config.natureBase : config.arcadeBase,
       highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
@@ -3088,8 +3089,9 @@ export class Renderer3D {
     entities: Boid[],
     elapsed: number,
     dt: number,
-    isFishtank: boolean,
+    flags: StyleFlags,
   ): void {
+    const { isFishtank } = flags;
     const { neutralEntities, profileEntities } = this.partitionNatureParrotEntities(entities);
     this.updateInstances(
       instances,
@@ -3121,11 +3123,10 @@ export class Renderer3D {
     entities: Boid[],
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
     isNatureParrot: boolean,
   ): void {
+    const { isFishtank } = flags;
     const isFishTail = isFishtank;
     this.updateInstances(
       instances,
@@ -3133,7 +3134,7 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      this.getBoidColourStrategy(config, isOrganic, isNature),
+      this.getBoidColourStrategy(config, flags),
       this.getBoidMotionConfig(config, isFishtank, isFishTail, isNatureParrot),
     );
   }
@@ -3143,10 +3144,9 @@ export class Renderer3D {
     boidsBySpecies: Map<BoidSpecies, Boid[]>,
     elapsed: number,
     dt: number,
-    isNature: boolean,
-    isFishtank: boolean,
-    isOrganic: boolean,
+    flags: StyleFlags,
   ): void {
+    const { isNature } = flags;
     const instances = this.speciesInstances.get(config.species);
     if (!instances) return;
     const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
@@ -3158,7 +3158,7 @@ export class Renderer3D {
     // safe to sway around the shared pivot with no detachment risk
     // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
     if (isNatureParrot) {
-      this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, isFishtank);
+      this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, flags);
       return;
     }
     this.updateStandardBoidSpeciesInstances(
@@ -3167,9 +3167,7 @@ export class Renderer3D {
       entities,
       elapsed,
       dt,
-      isNature,
-      isFishtank,
-      isOrganic,
+      flags,
       isNatureParrot,
     );
   }
@@ -3181,20 +3179,11 @@ export class Renderer3D {
     flags: StyleFlags,
   ): void {
     if (!this.hasAnyBoidSpeciesInstances()) return;
-    const { isNature, isFishtank, isOrganic } = flags;
 
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
     for (const config of BOID_SPECIES_CONFIGS) {
-      this.updateBoidSpeciesConfig(
-        config,
-        boidsBySpecies,
-        elapsed,
-        dt,
-        isNature,
-        isFishtank,
-        isOrganic,
-      );
+      this.updateBoidSpeciesConfig(config, boidsBySpecies, elapsed, dt, flags);
     }
   }
 
