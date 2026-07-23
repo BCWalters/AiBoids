@@ -1711,6 +1711,27 @@ export class Renderer3D {
     this.bodyQuat.copy(displayQuat);
   }
 
+  private applyBodyOrientationBasis(
+    entity: Boid | Predator,
+    keepUpright: boolean,
+    uprightStyle: UprightStyle,
+    preferUpright: boolean,
+  ): void {
+    if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
+      this.clampForwardPitchForUprightStyle(uprightStyle);
+    }
+
+    if (keepUpright && uprightStyle === 'dragon') {
+      this.setPersistedUprightBasis(entity);
+    } else if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
+      this.setSimpleUprightBasis(entity);
+    } else if (preferUpright) {
+      this.setPersistedUprightBasis(entity);
+    } else {
+      this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpForward);
+    }
+  }
+
   private applyInstanceColorsForEntity(
     set: BirdInstanceSet,
     i: number,
@@ -2090,122 +2111,7 @@ export class Renderer3D {
       const dir = entity.renderHeading;
       this.tmpForward.set(dir.x, dir.y, dir.z);
 
-      if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
-        // Hard pitch clamp (not a proportional flatten) — see
-        // UNICORN_ASCEND_PITCH_RADIANS / UNICORN_DESCEND_PITCH_RADIANS
-        // (or SHARK_ASCEND_PITCH_RADIANS / SHARK_DESCEND_PITCH_RADIANS for
-        // sharks) doc comments: unicorns clamp ascending to exactly flat
-        // with a small allowed nose-down droop while descending; sharks
-        // instead get a small *symmetric* range on both sides, since a
-        // shark gently angling up as well as down still reads as natural.
-        // Only the orientation basis is touched here, not
-        // entity.renderHeading/velocity, so the actual flight path
-        // (where the flock logic takes the entity) is unaffected — just
-        // how level the model looks while following it.
-        this.clampForwardPitchForUprightStyle(uprightStyle);
-        // else: heading is already (near-)vertical with essentially no
-        // horizontal component to anchor a clamped pitch to — vanishingly
-        // rare given flock steering, and the final up-tilt safety clamp
-        // below still bounds the result either way.
-      }
-
-      if (keepUpright && uprightStyle === 'dragon') {
-
-        // Dragons only: build an orientation that keeps the model
-        // right-side-up by construction, instead of the shortest-arc
-        // rotation used below for everything else
-        // (Quaternion.setFromUnitVectors(FORWARD_AXIS, dir)) — that
-        // approach has an entire free degree of roll around `dir` that it
-        // resolves arbitrarily, which reads as flying upside-down for long
-        // stretches rather than just transiently while banking. Ordinary
-        // boids/predators are fine flying upside-down sometimes (their
-        // geometry doesn't make it obvious), but dragons are large and
-        // wing-heavy enough that it looks very wrong, and the "hover-y,
-        // always-upright" look is closer to how TV/movie dragons read
-        // anyway — so this is applied to dragons only.
-        //
-        // Roll is always anchored to WORLD_UP_AXIS so dragons settle back
-        // to level rather than free-drifting/precessing over time — an
-        // earlier attempt derived right/up from each entity's own previous
-        // frame instead of a fixed world reference, which avoided a hard
-        // snap but had no anchor to correct back to level, so roll could
-        // wander until an entity's heading happened to pass near its own
-        // current up vector, hitting the exact same singularity at an
-        // unpredictable, arbitrary orientation (reported as random jumpy
-        // flips and entities going edge-on/"2D").
-        //
-        // A later attempt tried to soften the near-vertical singularity
-        // (forward parallel to WORLD_UP_AXIS) by blending WORLD_UP_AXIS
-        // with a fallback axis across a dot-product *range*. That backfired:
-        // the blend factor only depends on |forward.y|, so the blended
-        // reference can itself land parallel to forward for various
-        // headings anywhere inside that range, collapsing the cross
-        // product to ~zero and flattening the model.
-        //
-        // A third attempt only special-cased the *exact* zero-length cross
-        // product (a literal single-point singularity real headings
-        // essentially never hit) and otherwise always normalized whatever
-        // tiny cross product resulted. That still flickered/flattened,
-        // because normalizing an already-tiny vector amplifies ordinary
-        // per-frame floating-point noise into a visibly different
-        // direction each frame — a real problem for a several-degree cone
-        // around the pole, not just the exact point.
-        //
-        // Fixed by keeping a per-entity persisted "right" vector
-        // (entity.renderRight): outside the near-pole cone, it's discarded
-        // and freshly recomputed straight from WORLD_UP_AXIS every frame
-        // (no blending, no drift). Only inside the cone do we reuse last
-        // frame's right vector, re-orthogonalized against the *current*
-        // forward via Gram-Schmidt — smooth and numerically stable, and
-        // safe against long-term drift since it's discarded the instant
-        // the heading exits the cone.
-        //
-        // Restricting this whole approach to dragons also sidesteps the
-        // original motivation for the wider rollout: since regular boids
-        // are allowed to fly upside-down again, they no longer need (or
-        // hit the singularity of) a world-up-anchored basis at all.
-        // Right/up must be built so that Right x Forward = Up (matching
-        // MODEL_RIGHT_AXIS x FORWARD_AXIS = MODEL_UP_AXIS, i.e. local
-        // (1,0,0) x (0,1,0) = (0,0,1)) — otherwise the resulting basis
-        // matrix is left-handed (determinant -1), which is not a valid
-        // rotation. Quaternion.setFromRotationMatrix silently produces a
-        // garbage orientation for such a matrix instead of erroring, so
-        // this previously read `crossVectors(WORLD_UP_AXIS, tmpForward)`
-        // (giving Right x Forward = -Up, det -1) and models ended up
-        // facing a direction unrelated to their actual heading — most
-        // visible as the fishtank seahorse (a unicorn reskin) appearing
-        // to swim backwards, since its asymmetric head/tail shape makes
-        // a wrong-facing orientation obvious in a way a roughly-
-        // symmetric dragon/pegasus silhouette does not.
-        this.setPersistedUprightBasis(entity);
-      } else if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
-        // Unicorns/sharks: a much simpler basis than the dragon path
-        // above, and deliberately so — since pitch was already
-        // hard-clamped to a small angle further up, tmpForward here is
-        // never anywhere near parallel to WORLD_UP_AXIS, so the near-pole
-        // "right" vector instability the dragon path works around simply
-        // doesn't arise for either of these styles. No persisted-right
-        // fallback, no re-orthogonalization, just a direct cross product
-        // every frame.
-        // See the dragon branch above for why the operand order here
-        // (Forward x WorldUp, then Right x Forward) matters — the
-        // reversed order previously used produced a left-handed
-        // (determinant -1) basis, which is what caused seahorses (the
-        // fishtank reskin of unicorns) to visibly swim backwards.
-        this.setSimpleUprightBasis(entity);
-      } else if (preferUpright) {
-        this.setPersistedUprightBasis(entity);
-      } else {
-        // Everyone else: simple shortest-arc rotation from the model's
-        // rest forward axis to the current heading. This has a free
-        // degree of roll around `dir` (so these entities can end up
-        // flying upside-down sometimes), but it has no near-pole
-        // singularity to speak of, so it never flickers/flattens —
-        // acceptable here since non-dragon/unicorn geometry doesn't read
-        // as obviously "wrong side up" the way a large dragon or a
-        // horse-legged unicorn does.
-        this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpForward);
-      }
+      this.applyBodyOrientationBasis(entity, keepUpright, uprightStyle, preferUpright);
 
 
       // Cosmetic bank/roll: lean into turns rather than always flying
