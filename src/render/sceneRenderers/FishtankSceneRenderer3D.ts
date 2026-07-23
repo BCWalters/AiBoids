@@ -17,17 +17,15 @@ import type {
   ColourStrategy,
   MotionConfig,
   PredatorRenderFlags,
+  StyleFlags,
+  BoidMotionStyleFlags,
+  BoidSpeciesConfig,
+  SpeciesColorSet,
 } from './createSceneRendererHooks';
 
 // --- Fishtank style color constants
 // Butterflyfish (parrot reskin) color patterns: real-world butterflyfish often use
 // yellow/white/orange/blue striped combinations.
-interface SpeciesColorSet {
-  body: THREE.Color;
-  wing: THREE.Color;
-  tail: THREE.Color;
-}
-
 const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
   // Yellow longnose-style: golden body, blue accents
   { body: new THREE.Color(0xf5c518), wing: new THREE.Color(0x1f6fd8), tail: new THREE.Color(0xf5c518) },
@@ -55,6 +53,12 @@ const SHARK_FIN_REST_TILT_RAD = 0.4;
 const FISHTANK_FISH_MESH_BOOST = 2.2;
 const FISHTANK_SHARK_MESH_BOOST = 0.55;
 const SHARK_LENGTH = 4.0; // approximate length for tail pivot calculation
+
+// Utility function for deterministic per-entity hashing (used for variant selection)
+function idHash(id: number, salt: number): number {
+  const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
 
 interface FishtankSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
@@ -196,59 +200,120 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getPredatorColourStrategy(_kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
-    const isUnicorn = _kind === 'unicorn';
-    
-    // In fishtank: seahorses (unicorns) get their own colors
-    if (isUnicorn) {
-      const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
-      return {
-        baseColor: new THREE.Color(0xf0d070),
-        highlightColor: new THREE.Color(0xfffacd),
-        getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
-        getSpeciesColors: () => FISHTANK_SEAHORSE_COLORS,
-      };
+    switch (_kind) {
+      case 'unicorn': {
+        const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
+        return {
+          baseColor: new THREE.Color(0xf0d070),
+          highlightColor: new THREE.Color(0xfffacd),
+          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getSpeciesColors: () => FISHTANK_SEAHORSE_COLORS,
+        };
+      }
+      
+      case 'hawk':
+        return {
+          baseColor: SHARK_PREDATOR_BASE,
+          highlightColor: SHARK_PREDATOR_HUNT,
+          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+        };
+      
+      default:
+        throw new Error(`Unknown predator kind: ${_kind}`);
     }
-    
-    // Hawks (sharks when isDragon)
-    return {
-      baseColor: SHARK_PREDATOR_BASE,
-      highlightColor: SHARK_PREDATOR_HUNT,
-      getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
-    };
   }
 
   getPredatorMotionConfig(_kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
-    const isUnicorn = _kind === 'unicorn';
-    
-    if (isUnicorn) {
-      // Seahorse motion
-      return {
-        flapFrequency: 3.2,
-        flapIdleAmplitude: 0.22,
-        flapSpeedAmplitude: 0.5,
-        keepUpright: true,
-        uprightStyle: 'unicorn',
-        tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
-        worldScale: TANK_VISUAL_SCALE,
-        meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
-      };
+    switch (_kind) {
+      case 'unicorn':
+        // Seahorse motion
+        return {
+          flapFrequency: 3.2,
+          flapIdleAmplitude: 0.22,
+          flapSpeedAmplitude: 0.5,
+          keepUpright: true,
+          uprightStyle: 'unicorn',
+          tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
+          worldScale: TANK_VISUAL_SCALE,
+          meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
+        };
+      
+      case 'hawk':
+        // Sharks use distinct tail/fin motion
+        return {
+          flapFrequency: SHARK_FLAP_FREQUENCY,
+          flapIdleAmplitude: SHARK_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: SHARK_FLAP_SPEED_AMPLITUDE,
+          keepUpright: true,
+          uprightStyle: 'shark',
+          finRestBiasRad: SHARK_FIN_REST_TILT_RAD,
+          tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
+          tailSwayAmplitude: SHARK_TAIL_SWAY_AMPLITUDE,
+          tailSwayFrequency: SHARK_TAIL_SWAY_FREQUENCY,
+          tailSwayPivotY: getSharkTailPivotY(SHARK_LENGTH),
+          worldScale: TANK_VISUAL_SCALE,
+          meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
+        };
+      
+      default:
+        throw new Error(`Unknown predator kind: ${_kind}`);
     }
-    
-    // Sharks use distinct tail/fin motion
+  }
+
+  getBoidColourStrategy(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+    // Fishtank boids have simpler coloring than nature (no panic jitter)
+    const getColors = config.getColors;
     return {
-      flapFrequency: SHARK_FLAP_FREQUENCY,
-      flapIdleAmplitude: SHARK_FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude: SHARK_FLAP_SPEED_AMPLITUDE,
-      keepUpright: true,
-      uprightStyle: 'shark',
-      finRestBiasRad: SHARK_FIN_REST_TILT_RAD,
-      tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
-      tailSwayAmplitude: SHARK_TAIL_SWAY_AMPLITUDE,
-      tailSwayFrequency: SHARK_TAIL_SWAY_FREQUENCY,
-      tailSwayPivotY: getSharkTailPivotY(SHARK_LENGTH),
-      worldScale: TANK_VISUAL_SCALE,
-      meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
+      baseColor: config.natureBase, // Use nature base in fishtank (they're aquatic variants)
+      highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: false, // Fishtank fish have consistent coloring
+      getSpeciesColors: getColors
+        ? (entity) => getColors(entity, _flags)
+        : (config.colors ? () => config.colors! : undefined),
+      beakColor: config.beakColor,
+      bakedWingPalette: true,
     };
+  }
+
+  getBoidMotionConfig(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+    const tailSwayPivot = config.tailSwayPivotY ?? 0;
+    
+    return {
+      flapFrequency: 3.0, // Fishtank fish flap a bit slower
+      flapIdleAmplitude: 0.15,
+      flapSpeedAmplitude: 0.4,
+      getScale: (entity) => (entity as Boid).scale,
+      tailSwayAxis: new THREE.Vector3(0, 1, 0), // Vertical oscillation (tail side-to-side)
+      tailSwayAmplitude: 0.06,
+      tailSwayFrequency: 2.2,
+      tailSwayPivotY: tailSwayPivot,
+      worldScale: TANK_VISUAL_SCALE,
+      meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
+      preferUpright: false,
+    };
+  }
+
+  getParrotColourStrategy(config: BoidSpeciesConfig, _flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+    return {
+      baseColor: config.natureBase,
+      highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: true,
+      getSpeciesColors: (entity) => this.getButterflyfishColorVariant(entity),
+      beakColor: config.beakColor,
+      bakedWingPalette,
+      useNatureParrotPalette: false,
+    };
+  }
+
+  private getButterflyfishColorVariant(entity: Boid | Predator): SpeciesColorSet {
+    const baseIndex = Math.floor(idHash(entity.id, 42) * BUTTERFLYFISH_COLOR_PATTERNS.length) % BUTTERFLYFISH_COLOR_PATTERNS.length;
+    if (params.galleryCreature === 'parrot') {
+      const cycleStep = Math.floor(performance.now() / 3200);
+      return BUTTERFLYFISH_COLOR_PATTERNS[(baseIndex + cycleStep) % BUTTERFLYFISH_COLOR_PATTERNS.length];
+    }
+    return BUTTERFLYFISH_COLOR_PATTERNS[baseIndex];
   }
 
   dispose(): void {

@@ -20,7 +20,6 @@ import { createNatureEnvironment, type NatureEnvironment } from './styles/nature
 import {
   createFishtankEnvironment,
   computeFishtankRoomBounds,
-  TANK_VISUAL_SCALE,
   type FishtankEnvironment,
 } from './styles/fishtank/environment';
 import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/smallFishGeometry';
@@ -39,7 +38,6 @@ import {
 import {
   NatureSceneRenderer3D,
   NATURE_BOID_BASE,
-  NATURE_BOID_PANIC,
   PARROT_NATURE_VARIANTS,
   NON_NEUTRAL_PARROT_PROFILES,
   PARROT_FOCUS_PATTERN_INDEX,
@@ -69,7 +67,6 @@ import {
   ArcadeSceneRenderer3D,
   ARCADE_BOID_EMISSIVE,
   ARCADE_BOID_BASE,
-  ARCADE_BOID_PANIC,
   ARCADE_PARROT_EMISSIVE,
   ARCADE_PARROT_BASE,
   ARCADE_GOLDFINCH_EMISSIVE,
@@ -117,9 +114,9 @@ const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
 // Nature parrots should read as heavier, broad-winged fliers than the
 // smaller songbirds, with slower, wider wingbeats.
-const PARROT_FLAP_FREQUENCY = 5.4;
-const PARROT_FLAP_IDLE_AMPLITUDE = 0.4;
-const PARROT_FLAP_SPEED_AMPLITUDE = 0.95;
+// const PARROT_FLAP_FREQUENCY = 5.4;
+// const PARROT_FLAP_IDLE_AMPLITUDE = 0.4;
+// const PARROT_FLAP_SPEED_AMPLITUDE = 0.95;
 const CLIMB_FLAP_FREQ_BOOST = 0.12;
 const DIVE_FLAP_FREQ_CUT = 0.1;
 const TURN_FLAP_FREQ_BOOST = 0.06;
@@ -130,20 +127,9 @@ const TURN_FLAP_AMP_BOOST = 0.1;
 const PANIC_FLAP_AMP_BOOST = 0.12;
 const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 
-// Fishtank-only mesh-size boost applied on top of TANK_VISUAL_SCALE (see
-// updateInstances' meshScaleBoost param). TANK_VISUAL_SCALE alone grows
-// fish position spread and mesh size by the *same* factor as the tank/
-// room around them, which is a pure uniform zoom — it doesn't change how
-// large a fish reads *relative to the tank*, since the camera framing
-// scales right along with it. That's why fish still looked bug-sized
-// once the tank/room got big enough to need a real room around it: the
-// ratio of "fish size" to "tank size" was never actually changed, only
-// the absolute number of world units both were measured in. This boost
-// is mesh-only (position spread still uses worldScale alone, see
-// updateInstances' worldScale doc comment) so fish read as chunkier,
-// more real-aquarium-fish-sized individuals without also making them
-// range farther apart / more sparse-looking inside the tank.
-const FISHTANK_FISH_MESH_BOOST = 2.2;
+// Fishtank-only mesh-size boost applied on top of the fishtank scale (see
+// updateInstances' meshScaleBoost param). This has been moved to scene renderers.
+// const FISHTANK_FISH_MESH_BOOST = 2.2;
 
 // Dragons are ~2.5-3x the size of the hawk predator, so flapping at the
 // same fast hummingbird-like frequency read as a tiny insect (dragonfly/
@@ -195,8 +181,8 @@ const UNICORN_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(540);
 const UNICORN_CLIMB_FLAP_BOOST = 0.9; // up to +90% frequency at full climb
 const UNICORN_DESCEND_FLAP_CUT = 0.55; // down to -55% frequency at full descent
 
-// Parrot tail sway: shared across all styles for boid creature rendering
-const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
+// Parrot tail sway: moved to scene renderers for boid rendering
+// const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
 const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
 
 // Dragon tail sway: on-screen references (movies/TV) almost always show a
@@ -210,19 +196,9 @@ const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
 const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
 const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
 
-// Fish tail sway: like the shark, a real
-// fish's tail beats side to side (a yaw around the model's local up
-// axis) rather than undulating up and down like the dragon's whip tail.
-// A small fish's tail beats noticeably faster than a shark's — quicker,
-// shorter strokes rather than the shark's slower, wider sweep — so this
-// uses a smaller amplitude but a distinctly higher frequency. Unlike the
-// shark's tail, this fish's caudal fin geometry is already rooted at the
-// model's own local origin (see fishGeometry.ts's buildCaudalFinGeometry),
-// so no separate tailSwayPivotY compensation is needed — the default 0
-// (rotate around the origin) already matches the fin's own attachment
-// point exactly.
-const FISH_TAIL_SWAY_AMPLITUDE = 0.4; // radians; a brisk but not exaggerated side-to-side flick
-const FISH_TAIL_SWAY_FREQUENCY = 5.2; // noticeably quicker than the shark's slower tail beat
+// Fish tail sway: moved to scene renderers
+// const FISH_TAIL_SWAY_AMPLITUDE = 0.4; // radians; a brisk but not exaggerated side-to-side flick
+// const FISH_TAIL_SWAY_FREQUENCY = 5.2; // noticeably quicker than the shark's slower tail beat
 
 // Dragons additionally low-pass filter their heading direction (not just
 // their bank angle) before it's used for orientation — see the
@@ -2742,70 +2718,6 @@ export class Renderer3D {
   }
 
 
-  private getBoidMotionConfig(
-    config: BoidSpeciesConfig,
-    flags: StyleFlags,
-    boidMotionFlags: BoidMotionStyleFlags,
-  ): MotionConfig {
-    const { isFishtank } = flags;
-    const { isFishTail, isNatureParrot } = boidMotionFlags;
-    return {
-      flapFrequency: isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
-      flapIdleAmplitude: isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude: isNatureParrot ? PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
-      getScale: (entity) => (entity as Boid).scale,
-      tailSwayAxis: isFishTail ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-      tailSwayAmplitude: isFishTail
-        ? FISH_TAIL_SWAY_AMPLITUDE
-        : isNatureParrot
-          ? PARROT_TAIL_SWAY_AMPLITUDE
-          : DRAGON_TAIL_SWAY_AMPLITUDE,
-      tailSwayFrequency: isFishTail ? FISH_TAIL_SWAY_FREQUENCY : undefined,
-      tailSwayPivotY: isFishTail ? 0 : (config.tailSwayPivotY ?? 0),
-      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-      preferUpright: true,
-    };
-  }
-
-  private getParrotColourStrategy(
-    config: BoidSpeciesConfig,
-    flags: StyleFlags,
-    bakedWingPalette: boolean,
-  ): ColourStrategy {
-    return {
-      baseColor: config.natureBase,
-      highlightColor: NATURE_BOID_PANIC,
-      getIntensity: (entity) => (entity as Boid).panicLevel,
-      individualVariation: true,
-      getSpeciesColors: (entity) => getParrotColorsForFlags(entity, flags),
-      beakColor: config.beakColor,
-      bakedWingPalette,
-      useNatureParrotPalette: flags.isNature,
-    };
-  }
-
-  private getBoidColourStrategy(config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
-    const { isOrganic, isNature } = flags;
-    const getColors = config.getColors;
-    return {
-      baseColor: isOrganic ? config.natureBase : config.arcadeBase,
-      highlightColor: isOrganic ? NATURE_BOID_PANIC : ARCADE_BOID_PANIC,
-      getIntensity: (entity) => (entity as Boid).panicLevel,
-      individualVariation: config.colors || config.getColors ? true : isOrganic,
-      getSpeciesColors: getColors
-        ? (entity) => getColors(entity, flags)
-        : (config.colors ? () => config.colors! : undefined),
-      beakColor: config.beakColor,
-      // All nature boids with a baked wing vertex palette (currently only
-      // parrots via getColors) pass white so the palette shows through.
-      bakedWingPalette: true,
-      // Small songbirds (sparrow/goldfinch/cardinal/bluejay) bake a
-      // species-specific gradient into body/wing/tail geometry.
-      bakedBodyGradient: isNature && !!config.natureSmallBirdPalette,
-    };
-  }
-
   private hasAnyBoidSpeciesInstances(): boolean {
     return BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
   }
@@ -2847,6 +2759,7 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     const { neutralEntities, profileEntities } = this.partitionNatureParrotEntities(entities);
     const boidMotionFlags: BoidMotionStyleFlags = { isFishTail: false, isNatureParrot: true };
@@ -2856,8 +2769,8 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      this.getParrotColourStrategy(config, flags, false),
-      this.getBoidMotionConfig(config, flags, boidMotionFlags),
+      sceneRenderer.getParrotColourStrategy(config, flags, false),
+      sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
     );
     for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
       const profileSet = this.parrotProfileInstances.get(profile);
@@ -2868,8 +2781,8 @@ export class Renderer3D {
         params.boidMaxSpeed,
         elapsed,
         dt,
-        this.getParrotColourStrategy(config, flags, true),
-        this.getBoidMotionConfig(config, flags, boidMotionFlags),
+        sceneRenderer.getParrotColourStrategy(config, flags, true),
+        sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
       );
     }
   }
@@ -2882,6 +2795,7 @@ export class Renderer3D {
     dt: number,
     flags: StyleFlags,
     isNatureParrot: boolean,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     const boidMotionFlags: BoidMotionStyleFlags = {
       isFishTail: flags.isFishtank,
@@ -2893,8 +2807,8 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      this.getBoidColourStrategy(config, flags),
-      this.getBoidMotionConfig(config, flags, boidMotionFlags),
+      sceneRenderer.getBoidColourStrategy(config.species, config, flags),
+      sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
     );
   }
 
@@ -2904,6 +2818,7 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     const { isNature } = flags;
     const instances = this.speciesInstances.get(config.species);
@@ -2917,7 +2832,7 @@ export class Renderer3D {
     // safe to sway around the shared pivot with no detachment risk
     // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
     if (isNatureParrot) {
-      this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, flags);
+      this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, flags, sceneRenderer);
       return;
     }
     this.updateStandardBoidSpeciesInstances(
@@ -2928,6 +2843,7 @@ export class Renderer3D {
       dt,
       flags,
       isNatureParrot,
+      sceneRenderer,
     );
   }
 
@@ -2936,13 +2852,14 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     if (!this.hasAnyBoidSpeciesInstances()) return;
 
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
     for (const config of BOID_SPECIES_CONFIGS) {
-      this.updateBoidSpeciesConfig(config, boidsBySpecies, elapsed, dt, flags);
+      this.updateBoidSpeciesConfig(config, boidsBySpecies, elapsed, dt, flags, sceneRenderer);
     }
   }
 
@@ -3083,8 +3000,9 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
-    this.updateBoidSpeciesInstances(sim, elapsed, dt, flags);
+    this.updateBoidSpeciesInstances(sim, elapsed, dt, flags, sceneRenderer);
     this.updatePredatorInstances(sim, elapsed, dt, flags);
   }
 
@@ -3104,7 +3022,7 @@ export class Renderer3D {
   ): void {
     sceneRenderer.updateFrameAnchors(sim);
     this.updateSceneEffects(sim, elapsed, dt, sceneRenderer);
-    this.updateCreatureInstances(sim, elapsed, dt, flags);
+    this.updateCreatureInstances(sim, elapsed, dt, flags, sceneRenderer);
     sceneRenderer.updateCameraClamp(sim);
     this.renderOutput();
   }

@@ -4,7 +4,7 @@ import type { Vector3 } from 'three';
 import * as THREE from 'three';
 import type { computeFishtankRoomBounds } from '../styles/fishtank/environment';
 import type { Predator } from '../../sim/Predator';
-import type { Boid } from '../../sim/Boid';
+import type { Boid, BoidSpecies } from '../../sim/Boid';
 
 export type FishtankBounds = ReturnType<typeof computeFishtankRoomBounds>;
 
@@ -68,6 +68,31 @@ export interface PredatorRenderFlags {
   isShark: boolean;
 }
 
+export interface StyleFlags {
+  isNature: boolean;
+  isFishtank: boolean;
+  isOrganic: boolean;
+}
+
+export interface BoidMotionStyleFlags {
+  isFishTail: boolean;
+  isNatureParrot: boolean;
+}
+
+/** Minimal boid species configuration type used by boid rendering hooks.
+ * Contains only the fields needed by colour and motion configuration.
+ * Full BoidSpeciesConfig is defined in Renderer3D.
+ */
+export interface BoidSpeciesConfig {
+  species: BoidSpecies;
+  natureBase: THREE.Color;
+  arcadeBase: THREE.Color;
+  getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
+  colors?: SpeciesColorSet;
+  beakColor?: THREE.Color;
+  tailSwayPivotY?: number;
+}
+
 export interface SceneEnvironmentToggles {
   fogEnabled: boolean;
   timeOfDay: TimeOfDayPreset;
@@ -120,6 +145,9 @@ export interface SceneRendererHooks {
   getCreatureMaterialDefaults: () => SceneCreatureMaterialDefaults;
   getPredatorColourStrategy: (kind: PredatorKind, renderFlags: PredatorRenderFlags) => ColourStrategy;
   getPredatorMotionConfig: (kind: PredatorKind, renderFlags: PredatorRenderFlags) => MotionConfig;
+  getBoidColourStrategy: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => ColourStrategy;
+  getBoidMotionConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags) => MotionConfig;
+  getParrotColourStrategy: (config: BoidSpeciesConfig, flags: StyleFlags, bakedWingPalette: boolean) => ColourStrategy;
   dispose: () => void;
 }
 
