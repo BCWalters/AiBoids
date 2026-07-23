@@ -748,6 +748,11 @@ interface PredatorUpdateContext {
   renderFlags: PredatorRenderFlags;
 }
 
+interface BoidMotionStyleFlags {
+  isFishTail: boolean;
+  isNatureParrot: boolean;
+}
+
 interface PredatorCounts {
   hawkCount: number;
   unicornCount: number;
@@ -3003,10 +3008,11 @@ export class Renderer3D {
 
   private getBoidMotionConfig(
     config: BoidSpeciesConfig,
-    isFishtank: boolean,
-    isFishTail: boolean,
-    isNatureParrot: boolean,
+    flags: StyleFlags,
+    boidMotionFlags: BoidMotionStyleFlags,
   ): MotionConfig {
+    const { isFishtank } = flags;
+    const { isFishTail, isNatureParrot } = boidMotionFlags;
     return {
       flapFrequency: isNatureParrot ? PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
       flapIdleAmplitude: isNatureParrot ? PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
@@ -3098,8 +3104,8 @@ export class Renderer3D {
     dt: number,
     flags: StyleFlags,
   ): void {
-    const { isFishtank } = flags;
     const { neutralEntities, profileEntities } = this.partitionNatureParrotEntities(entities);
+    const boidMotionFlags: BoidMotionStyleFlags = { isFishTail: false, isNatureParrot: true };
     this.updateInstances(
       instances,
       neutralEntities,
@@ -3107,7 +3113,7 @@ export class Renderer3D {
       elapsed,
       dt,
       this.getParrotColourStrategy(config, false),
-      this.getBoidMotionConfig(config, isFishtank, false, true),
+      this.getBoidMotionConfig(config, flags, boidMotionFlags),
     );
     for (const profile of NON_NEUTRAL_PARROT_PROFILES) {
       const profileSet = this.parrotProfileInstances.get(profile);
@@ -3119,7 +3125,7 @@ export class Renderer3D {
         elapsed,
         dt,
         this.getParrotColourStrategy(config, true),
-        this.getBoidMotionConfig(config, isFishtank, false, true),
+        this.getBoidMotionConfig(config, flags, boidMotionFlags),
       );
     }
   }
@@ -3133,8 +3139,10 @@ export class Renderer3D {
     flags: StyleFlags,
     isNatureParrot: boolean,
   ): void {
-    const { isFishtank } = flags;
-    const isFishTail = isFishtank;
+    const boidMotionFlags: BoidMotionStyleFlags = {
+      isFishTail: flags.isFishtank,
+      isNatureParrot,
+    };
     this.updateInstances(
       instances,
       entities,
@@ -3142,7 +3150,7 @@ export class Renderer3D {
       elapsed,
       dt,
       this.getBoidColourStrategy(config, flags),
-      this.getBoidMotionConfig(config, isFishtank, isFishTail, isNatureParrot),
+      this.getBoidMotionConfig(config, flags, boidMotionFlags),
     );
   }
 
