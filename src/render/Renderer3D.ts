@@ -2165,6 +2165,51 @@ export class Renderer3D {
     set.tail.setMatrixAt(i, this.dummy.matrix);
   }
 
+  private applyEntityOrientationAndMotion(
+    entity: Boid | Predator,
+    speed: number,
+    vel: { x: number; y: number; z: number },
+    maxSpeed: number,
+    dt: number,
+    keepUpright: boolean,
+    uprightStyle: UprightStyle,
+    preferUpright: boolean,
+    bankScale: number,
+    getIntensity: (entity: Boid | Predator) => number,
+  ): {
+    blendStrength: number;
+    climbWeight: number;
+    diveWeight: number;
+    turnWeight: number;
+    panicWeight: number;
+    cruiseWeight: number;
+  } {
+    // Each entity keeps its own last-known heading (renderHeading)
+    // rather than relying on this.bodyQuat carrying over between loop
+    // iterations — otherwise an entity whose speed drops near zero
+    // (e.g. a predator gliding to a stop / digesting) would silently
+    // inherit whichever heading the *previous* entity in the array had
+    // that frame, causing it to visually snap to an unrelated
+    // direction instead of holding its own last heading.
+    this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
+    this.updateEntityRenderHeading(entity, speed, dt, keepUpright, uprightStyle);
+    const dir = entity.renderHeading;
+    this.tmpForward.set(dir.x, dir.y, dir.z);
+    this.applyBodyOrientationBasis(entity, keepUpright, uprightStyle, preferUpright);
+
+    const motionBlend = this.applyTurnBankAndPitch(
+      entity,
+      vel,
+      maxSpeed,
+      dt,
+      bankScale,
+      keepUpright,
+      getIntensity,
+    );
+    if (keepUpright) this.applyUprightDisplaySmoothing(entity, dt, uprightStyle);
+    return motionBlend;
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -2241,22 +2286,6 @@ export class Renderer3D {
       const vel = entity.velocity;
       const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
       const entityScale = getScale(entity);
-
-      // Each entity keeps its own last-known heading (renderHeading)
-      // rather than relying on this.bodyQuat carrying over between loop
-      // iterations — otherwise an entity whose speed drops near zero
-      // (e.g. a predator gliding to a stop / digesting) would silently
-      // inherit whichever heading the *previous* entity in the array had
-      // that frame, causing it to visually snap to an unrelated
-      // direction instead of holding its own last heading.
-      this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
-      this.updateEntityRenderHeading(entity, speed, dt, keepUpright, uprightStyle);
-      const dir = entity.renderHeading;
-      this.tmpForward.set(dir.x, dir.y, dir.z);
-
-      this.applyBodyOrientationBasis(entity, keepUpright, uprightStyle, preferUpright);
-
-
       const {
         blendStrength,
         climbWeight,
@@ -2264,9 +2293,18 @@ export class Renderer3D {
         turnWeight,
         panicWeight,
         cruiseWeight,
-      } = this.applyTurnBankAndPitch(entity, vel, maxSpeed, dt, bankScale, keepUpright, getIntensity);
-
-      if (keepUpright) this.applyUprightDisplaySmoothing(entity, dt, uprightStyle);
+      } = this.applyEntityOrientationAndMotion(
+        entity,
+        speed,
+        vel,
+        maxSpeed,
+        dt,
+        keepUpright,
+        uprightStyle,
+        preferUpright,
+        bankScale,
+        getIntensity,
+      );
       this.applyEntityInstanceMatrices(
         set,
         i,
