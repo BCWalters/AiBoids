@@ -621,6 +621,12 @@ interface MotionConfig {
 }
 type UprightStyle = NonNullable<MotionConfig['uprightStyle']>;
 
+interface StyleFlags {
+  isNature: boolean;
+  isFishtank: boolean;
+  isOrganic: boolean;
+}
+
 interface BirdMaterialTuning {
   bodyTint?: THREE.Color;
   wingTint?: THREE.Color;
@@ -1270,15 +1276,23 @@ export class Renderer3D {
     }, 0);
   }
 
+  private getStyleFlags(style: VisualStyle): StyleFlags {
+    const isNature = style === 'nature';
+    const isFishtank = style === 'fishtank';
+    return {
+      isNature,
+      isFishtank,
+      // Both "organic" styles (nature/fishtank) use the same instancing
+      // pattern (realistic/lathed geometry, vertex-colored variants, etc.)
+      // — only which concrete geometry set/environment is picked differs.
+      isOrganic: isNature || isFishtank,
+    };
+  }
+
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
   private ensureScene(sim: Simulation): void {
     const style = params.visualStyle;
-    const isNature = style === 'nature';
-    const isFishtank = style === 'fishtank';
-    // Both "organic" styles (nature/fishtank) use the same instancing
-    // pattern (realistic/lathed geometry, vertex-colored variants, etc.)
-    // — only which concrete geometry set/environment is picked differs.
-    const isOrganic = isNature || isFishtank;
+    const { isNature, isFishtank, isOrganic } = this.getStyleFlags(style);
     const countsBySpecies = new Map<BoidSpecies, number>();
     for (const boid of sim.boids) {
       countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
@@ -2886,9 +2900,7 @@ export class Renderer3D {
     const elapsed = (performance.now() - this.startTime) / 1000;
     const dt = Math.max(0, Math.min(elapsed - this.lastElapsed, 1 / 20));
     this.lastElapsed = elapsed;
-    const isNature = params.visualStyle === 'nature';
-    const isFishtank = params.visualStyle === 'fishtank';
-    const isOrganic = isNature || isFishtank;
+    const { isNature, isFishtank, isOrganic } = this.getStyleFlags(params.visualStyle);
     this.updateFishtankCenter(sim, isFishtank);
 
     this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
