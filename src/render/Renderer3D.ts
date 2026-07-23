@@ -1779,6 +1779,21 @@ export class Renderer3D {
     };
   }
 
+  private getSmallBirdBakedColorFlags(
+    set: BirdInstanceSet,
+    bakedBodyGradient: boolean,
+  ): {
+    isNatureSmallBirdBody: boolean;
+    isNatureSmallBirdWing: boolean;
+    isNatureSmallBirdTail: boolean;
+  } {
+    return {
+      isNatureSmallBirdBody: bakedBodyGradient && !!set.body.geometry.getAttribute('color'),
+      isNatureSmallBirdWing: bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color'),
+      isNatureSmallBirdTail: bakedBodyGradient && !!set.tail?.geometry.getAttribute('color'),
+    };
+  }
+
   private applyInstanceColorsForEntity(
     set: BirdInstanceSet,
     i: number,
@@ -2135,9 +2150,11 @@ export class Renderer3D {
     // Note: we can't infer this from geometry.getAttribute('color') alone
     // because dragon/hawk geometry also carries vertex colours and would
     // incorrectly trigger the white-passthrough branch.
-    const isNatureSmallBirdBody = bakedBodyGradient && !!set.body.geometry.getAttribute('color');
-    const isNatureSmallBirdWing = bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color');
-    const isNatureSmallBirdTail = bakedBodyGradient && !!set.tail?.geometry.getAttribute('color');
+    const {
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+    } = this.getSmallBirdBakedColorFlags(set, bakedBodyGradient);
 
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
