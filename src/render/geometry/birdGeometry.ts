@@ -10,20 +10,23 @@ import {
 /**
  * Per-species palette for baked vertex colour gradients on small-bird
  * geometry. Pass to createRealisticBirdGeometries so each species gets its
- * own geometry instance with colours baked in rather than relying on a flat
- * per-instance tint.
+ * own geometry instance with colours baked in.
  *
- * - back / belly: dorsal vs ventral body colours (Z-axis gradient on the
- *   lathed body — +Z is the dorsal/back surface, -Z is the belly).
+ * Body uses a **bilinear 4-corner gradient** blending both axes:
+ *  - Y axis: headBack/headBelly (near the face) → tailBack/tailBelly (near the tail)
+ *  - Z axis: belly (ventral, -Z) → back (dorsal, +Z)
+ *  This lets each species have independent head-vs-tail AND back-vs-belly variation.
+ *
  * - wing / wingTip: root-to-tip X-axis gradient on the wing panel.
  * - tail / tailTip: root-to-tip Y-axis gradient on the tail fan (-Y = tip).
  *
- * Set the corresponding `*Gradient` flag to false to keep that part flat
- * (the instance colour from the renderer's SpeciesColorSet is used instead).
+ * Set the corresponding `*Gradient` flag to false to skip that gradient.
  */
 export interface SmallBirdPalette {
-  back: THREE.Color;
-  belly: THREE.Color;
+  headBack:  THREE.Color;  // dorsal (back) surface near the head/face
+  headBelly: THREE.Color;  // ventral (belly) surface near the head/face
+  tailBack:  THREE.Color;  // dorsal surface near the tail end
+  tailBelly: THREE.Color;  // ventral surface near the tail end
   wing: THREE.Color;
   wingTip: THREE.Color;
   tail: THREE.Color;
@@ -176,25 +179,49 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   const body = new THREE.LatheGeometry(profile, 14);
 
   if (palette?.dorsalGradient) {
-    // Bake a belly→back dorsal gradient: +Z is the dorsal (back) surface of
-    // the bird in the scene's coordinate system, -Z is the belly. The lathe
-    // spins around Y, so vertex Z values range from -maxRadius to +maxRadius
-    // covering the full dorsal/ventral arc.
+    // Bilinear body gradient:
+    //   Y axis: maxY = head, minY = tail  →  tY: 0=head, 1=tail
+    //   Z axis: minZ = belly, maxZ = back  →  tZ: 0=belly, 1=back
+    // Blend: lerp( lerp(headBelly, headBack, tZ), lerp(tailBelly, tailBack, tZ), tY )
     body.computeBoundingBox();
+    const minY = body.boundingBox!.min.y;
+    const maxY = body.boundingBox!.max.y;
     const minZ = body.boundingBox!.min.z;
     const maxZ = body.boundingBox!.max.z;
+    const ySpan = Math.max(1e-5, maxY - minY);
     const zSpan = Math.max(1e-5, maxZ - minZ);
     const posAttr = body.getAttribute('position') as THREE.BufferAttribute;
     const gradColors = new Float32Array(posAttr.count * 3);
     for (let vi = 0; vi < posAttr.count; vi++) {
-      const t = THREE.MathUtils.smoothstep(
-        THREE.MathUtils.clamp((posAttr.getZ(vi) - minZ) / zSpan, 0, 1),
-        0.15,
-        0.85,
+      // tY = 0 → head (high +Y), tY = 1 → tail (low -Y)
+      const tY = THREE.MathUtils.smoothstep(
+        THREE.MathUtils.clamp((maxY - posAttr.getY(vi)) / ySpan, 0, 1),
+        0.05, 0.95,
       );
-      gradColors[vi * 3]     = THREE.MathUtils.lerp(palette.belly.r, palette.back.r, t);
-      gradColors[vi * 3 + 1] = THREE.MathUtils.lerp(palette.belly.g, palette.back.g, t);
-      gradColors[vi * 3 + 2] = THREE.MathUtils.lerp(palette.belly.b, palette.back.b, t);
+      // tZ = 0 → belly (-Z), tZ = 1 → back (+Z)
+      const tZ = THREE.MathUtils.smoothstep(
+        THREE.MathUtils.clamp((posAttr.getZ(vi) - minZ) / zSpan, 0, 1),
+        0.15, 0.85,
+      );
+      // Bilinear blend across the four corners
+      const r = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(palette.headBelly.r, palette.headBack.r, tZ),
+        THREE.MathUtils.lerp(palette.tailBelly.r, palette.tailBack.r, tZ),
+        tY,
+      );
+      const g = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(palette.headBelly.g, palette.headBack.g, tZ),
+        THREE.MathUtils.lerp(palette.tailBelly.g, palette.tailBack.g, tZ),
+        tY,
+      );
+      const b = THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(palette.headBelly.b, palette.headBack.b, tZ),
+        THREE.MathUtils.lerp(palette.tailBelly.b, palette.tailBack.b, tZ),
+        tY,
+      );
+      gradColors[vi * 3]     = r;
+      gradColors[vi * 3 + 1] = g;
+      gradColors[vi * 3 + 2] = b;
     }
     body.setAttribute('color', new THREE.BufferAttribute(gradColors, 3));
   }

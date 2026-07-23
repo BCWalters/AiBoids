@@ -158,45 +158,61 @@ const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 // Baked into dedicated per-species geometry instances so each flock has a
 // realistic gradient instead of a flat per-instance tint.
 const SPARROW_NATURE_PALETTE: SmallBirdPalette = {
-  back:     new THREE.Color(0x7a6050), // dark brown-gray dorsal
-  belly:    new THREE.Color(0xcaaa80), // buffy-tan ventral
-  wing:     new THREE.Color(0x6a4832), // dark brown at wing root
-  wingTip:  new THREE.Color(0x2a1408), // very dark brown at tip
-  tail:     new THREE.Color(0x503820), // dark brown tail base
-  tailTip:  new THREE.Color(0x281408), // near-black tail tip
+  // Back: warm brown at head → gray-brown toward tail
+  headBack:  new THREE.Color(0x7a4a28), // rich warm brown on the head/crown
+  tailBack:  new THREE.Color(0x6a6050), // gray-brown near the rump/tail
+  // Belly: cool gray at beak → off-white toward tail
+  headBelly: new THREE.Color(0x8c8070), // gray near the throat
+  tailBelly: new THREE.Color(0xd8cfc0), // off-white on the lower belly/vent
+  wing:    new THREE.Color(0x6a4832), // dark warm brown at wing root
+  wingTip: new THREE.Color(0x2a1408), // very dark brown at tip
+  tail:    new THREE.Color(0x584030), // dark brown tail base
+  tailTip: new THREE.Color(0x281408), // near-black tail tip
   dorsalGradient: true,
   wingGradient:   true,
   tailGradient:   true,
 };
 const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
-  back:     new THREE.Color(0xf5d327), // bright yellow — same as body base
-  belly:    new THREE.Color(0xf7e878), // slightly lighter yellow on breast
-  wing:     new THREE.Color(0x1c1c1c), // black (kept flat via wingGradient:false)
-  wingTip:  new THREE.Color(0x0d0d0d),
-  tail:     new THREE.Color(0x1c1c1c), // black tail (flat)
-  tailTip:  new THREE.Color(0x0d0d0d),
+  // Back: bright yellow at head → black toward tail (classic goldfinch pattern)
+  headBack:  new THREE.Color(0xf5d327), // bright yellow on crown/back
+  tailBack:  new THREE.Color(0x1c1c1c), // black at rump
+  // Belly: yellow at beak → lighter yellow toward tail
+  headBelly: new THREE.Color(0xf5d327), // yellow near the breast
+  tailBelly: new THREE.Color(0xf8ec80), // lighter/paler yellow toward lower belly
+  wing:    new THREE.Color(0x1c1c1c), // black wing root
+  wingTip: new THREE.Color(0x101010), // near-black wing tip
+  // Tail: dark gray base → black tip
+  tail:    new THREE.Color(0x3a3a3a), // dark gray tail base (not pure black)
+  tailTip: new THREE.Color(0x0d0d0d), // near-black tail tip
   dorsalGradient: true,
-  wingGradient:   false, // black wings stay flat; gradient would look odd
-  tailGradient:   false,
+  wingGradient:   true, // yellow→black gradient on wings
+  tailGradient:   true, // dark gray→black gradient on tail
 };
 const CARDINAL_NATURE_PALETTE: SmallBirdPalette = {
-  back:     new THREE.Color(0xcc2936), // vivid red dorsal — matches body base
-  belly:    new THREE.Color(0xe04858), // slightly lighter/warmer red on breast
-  wing:     new THREE.Color(0x8f1f28), // darker red at wing root
-  wingTip:  new THREE.Color(0x3d0f14), // near-black red at tip
-  tail:     new THREE.Color(0x5a1520), // dark red tail base
-  tailTip:  new THREE.Color(0x200009), // very dark at tail tip
+  // Both back and belly are red; gradient lightens toward the tail
+  headBack:  new THREE.Color(0xcc2936), // vivid deep red on the head/back
+  tailBack:  new THREE.Color(0xe06070), // lighter/pinker red near the rump
+  headBelly: new THREE.Color(0xd03545), // vivid red at the breast
+  tailBelly: new THREE.Color(0xf09098), // salmon-pink at the lower belly/vent
+  wing:    new THREE.Color(0x8f1f28), // dark red at wing root
+  wingTip: new THREE.Color(0x3d0f14), // near-black red at tip
+  tail:    new THREE.Color(0x8f1f28), // dark red tail base
+  tailTip: new THREE.Color(0x3d0f14), // very dark red at tail tip
   dorsalGradient: true,
   wingGradient:   true,
   tailGradient:   true,
 };
 const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
-  back:     new THREE.Color(0x3b6fa0), // jay blue dorsal
-  belly:    new THREE.Color(0xe8eef3), // white/pale belly
-  wing:     new THREE.Color(0x4878a8), // medium blue at wing root
-  wingTip:  new THREE.Color(0x1c3350), // navy blue at tip
-  tail:     new THREE.Color(0x2a5070), // dark blue tail base
-  tailTip:  new THREE.Color(0x1c3350), // navy at tail tip
+  // Back: pure/cool blue at head → brighter/more vivid blue toward tail
+  headBack:  new THREE.Color(0x3b6fa0), // pure medium blue on the crown/back
+  tailBack:  new THREE.Color(0x50a0d8), // brighter vivid blue near the rump/tail
+  // Belly: light blue/gray near beak → white toward tail
+  headBelly: new THREE.Color(0xb0c8df), // light blue-gray at throat/breast
+  tailBelly: new THREE.Color(0xf0f4f8), // near-white on the lower belly/vent
+  wing:    new THREE.Color(0x4070a8), // medium blue at wing root
+  wingTip: new THREE.Color(0x1c3350), // navy blue at tip
+  tail:    new THREE.Color(0x50a0d8), // bright blue tail base (matches tailBack)
+  tailTip: new THREE.Color(0x1c3350), // navy at tail tip
   dorsalGradient: true,
   wingGradient:   true,
   tailGradient:   true,
