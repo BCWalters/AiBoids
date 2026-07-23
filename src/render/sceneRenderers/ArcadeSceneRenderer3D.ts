@@ -13,6 +13,23 @@ import type {
   SceneRendererHooks,
 } from './createSceneRendererHooks';
 
+// --- Arcade style color constants: bright, saturated emissive colors for bloom effect
+const ARCADE_BOID_EMISSIVE = new THREE.Color(0x5ad1ff);
+const ARCADE_BOID_BASE = new THREE.Color(0x2ab6e8);
+const ARCADE_BOID_PANIC = new THREE.Color(0xffe066);
+const ARCADE_PREDATOR_BASE = new THREE.Color(0xb31f1f);
+const ARCADE_PREDATOR_HUNT = new THREE.Color(0xffffff);
+const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
+const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
+const ARCADE_GOLDFINCH_EMISSIVE = new THREE.Color(0xffe017);
+const ARCADE_GOLDFINCH_BASE = new THREE.Color(0xc7b21a);
+const ARCADE_CARDINAL_EMISSIVE = new THREE.Color(0xff8c1a); // orange-red, distinct from predator red
+const ARCADE_CARDINAL_BASE = new THREE.Color(0xcc5c14);
+const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
+const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
+const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
+const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
+
 interface ArcadeSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -117,3 +134,22 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 
   dispose(): void {}
 }
+
+// Export arcade-style color constants for use in Renderer3D
+export {
+  ARCADE_BOID_EMISSIVE,
+  ARCADE_BOID_BASE,
+  ARCADE_BOID_PANIC,
+  ARCADE_PREDATOR_BASE,
+  ARCADE_PREDATOR_HUNT,
+  ARCADE_PARROT_EMISSIVE,
+  ARCADE_PARROT_BASE,
+  ARCADE_GOLDFINCH_EMISSIVE,
+  ARCADE_GOLDFINCH_BASE,
+  ARCADE_CARDINAL_EMISSIVE,
+  ARCADE_CARDINAL_BASE,
+  ARCADE_BLUEJAY_EMISSIVE,
+  ARCADE_BLUEJAY_BASE,
+  ARCADE_UNICORN_BASE,
+  ARCADE_UNICORN_HUNT,
+};

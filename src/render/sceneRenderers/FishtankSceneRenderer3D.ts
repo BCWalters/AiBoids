@@ -13,6 +13,32 @@ import type {
   SceneRendererHooks,
 } from './createSceneRendererHooks';
 
+// --- Fishtank style color constants
+// Butterflyfish (parrot reskin) color patterns: real-world butterflyfish often use
+// yellow/white/orange/blue striped combinations.
+interface SpeciesColorSet {
+  body: THREE.Color;
+  wing: THREE.Color;
+  tail: THREE.Color;
+}
+
+const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
+  // Yellow longnose-style: golden body, blue accents
+  { body: new THREE.Color(0xf5c518), wing: new THREE.Color(0x1f6fd8), tail: new THREE.Color(0xf5c518) },
+  // Orange/white banded
+  { body: new THREE.Color(0xf07a1f), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xf07a1f) },
+  // Blue-and-yellow (raccoon-style)
+  { body: new THREE.Color(0x2f8fd0), wing: new THREE.Color(0xf5c518), tail: new THREE.Color(0x2f8fd0) },
+  // White with orange accents
+  { body: new THREE.Color(0xf2ede0), wing: new THREE.Color(0xf07a1f), tail: new THREE.Color(0xf2ede0) },
+  // Orange-and-blue (copperband-style)
+  { body: new THREE.Color(0xe8981a), wing: new THREE.Color(0x2f6fdc), tail: new THREE.Color(0xe8981a) },
+];
+
+// Shark predator (fishtank dragon-geometry variant): medium gray hide
+const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
+const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
+
 interface FishtankSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -156,3 +182,11 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     this.deps.fishtankEnv.dispose();
   }
 }
+
+// Export fishtank-style color constants and types for use in Renderer3D
+export {
+  BUTTERFLYFISH_COLOR_PATTERNS,
+  SHARK_PREDATOR_BASE,
+  SHARK_PREDATOR_HUNT,
+  type SpeciesColorSet,
+};

@@ -11,7 +11,6 @@ import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './styles/nature/geometry/smallBirdGeometry';
-import type { SmallBirdPalette } from './styles/nature/geometry/smallBirdGeometry';
 import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
 import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
 import { createDragonGeometries, computeDragonMouthTransform } from './styles/nature/geometry/dragonGeometry';
@@ -37,224 +36,64 @@ import {
   type SceneEnvironmentToggles,
   type SceneRendererHooks,
 } from './sceneRenderers/createSceneRendererHooks';
-import { NatureSceneRenderer3D } from './sceneRenderers/NatureSceneRenderer3D';
-import { FishtankSceneRenderer3D } from './sceneRenderers/FishtankSceneRenderer3D';
-import { ArcadeSceneRenderer3D } from './sceneRenderers/ArcadeSceneRenderer3D';
+import {
+  NatureSceneRenderer3D,
+  NATURE_BOID_BASE,
+  NATURE_BOID_PANIC,
+  NATURE_PREDATOR_BASE,
+  NATURE_PREDATOR_HUNT,
+  NATURE_HAWK_COLORS,
+  PARROT_NATURE_VARIANTS,
+  NON_NEUTRAL_PARROT_PROFILES,
+  PARROT_FOCUS_PATTERN_INDEX,
+  SPARROW_NATURE_PALETTE,
+  GOLDFINCH_NATURE_PALETTE,
+  CARDINAL_NATURE_PALETTE,
+  BLUEJAY_NATURE_PALETTE,
+  DRAGON_PREDATOR_BASE,
+  DRAGON_PREDATOR_HUNT,
+  NATURE_UNICORN_BODY,
+  NATURE_UNICORN_HUNT,
+  NATURE_UNICORN_WING,
+  GOLDFINCH_BODY_BASE,
+  GOLDFINCH_WING_BASE,
+  GOLDFINCH_TAIL_BASE,
+  CARDINAL_BODY_BASE,
+  CARDINAL_WING_BASE,
+  CARDINAL_TAIL_BASE,
+  BLUEJAY_BODY_BASE,
+  BLUEJAY_WING_BASE,
+  BLUEJAY_TAIL_BASE,
+  type ParrotGeometryProfile,
+  type NatureParrotVariant,
+  type SpeciesColorSet,
+  type SmallBirdPalette,
+} from './sceneRenderers/NatureSceneRenderer3D';
+import {
+  FishtankSceneRenderer3D,
+  BUTTERFLYFISH_COLOR_PATTERNS,
+  SHARK_PREDATOR_BASE,
+  SHARK_PREDATOR_HUNT,
+} from './sceneRenderers/FishtankSceneRenderer3D';
+import {
+  ArcadeSceneRenderer3D,
+  ARCADE_BOID_EMISSIVE,
+  ARCADE_BOID_BASE,
+  ARCADE_BOID_PANIC,
+  ARCADE_PREDATOR_BASE,
+  ARCADE_PREDATOR_HUNT,
+  ARCADE_PARROT_EMISSIVE,
+  ARCADE_PARROT_BASE,
+  ARCADE_GOLDFINCH_EMISSIVE,
+  ARCADE_GOLDFINCH_BASE,
+  ARCADE_CARDINAL_EMISSIVE,
+  ARCADE_CARDINAL_BASE,
+  ARCADE_BLUEJAY_EMISSIVE,
+  ARCADE_BLUEJAY_BASE,
+  ARCADE_UNICORN_BASE,
+  ARCADE_UNICORN_HUNT,
+} from './sceneRenderers/ArcadeSceneRenderer3D';
 import { UFO_BEAM_REACH } from '../sim/UFO';
-
-// --- "Arcade" style: bright, saturated emissive colors so the bloom pass
-// has something to glow — base material color stays neutral (driven
-// per-instance) so contrast against the dark background comes mostly
-// from emissive light.
-const ARCADE_BOID_EMISSIVE = new THREE.Color(0x5ad1ff);
-const ARCADE_BOID_BASE = new THREE.Color(0x2ab6e8);
-const ARCADE_BOID_PANIC = new THREE.Color(0xffe066);
-const ARCADE_PREDATOR_BASE = new THREE.Color(0xb31f1f);
-const ARCADE_PREDATOR_HUNT = new THREE.Color(0xffffff);
-
-// --- "Nature" style: matte, earth-toned plumage. No emissive glow —
-// contrast comes from the sun-lit sky/ground environment instead.
-const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrasts against green ground
-const NATURE_BOID_PANIC = new THREE.Color(0xf2e6c8); // paler alarm plumage
-const NATURE_PREDATOR_BASE = new THREE.Color(0x7a3b22); // hawk rust-brown
-const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked on
-
-// --- Nature-style hawk (bald-eagle-inspired, see geometry/hawkGeometry.ts):
-// body/wing/tail split, mirroring the parrot/goldfinch/cardinal/bluejay
-// pattern, rather than one flat NATURE_PREDATOR_BASE tint (the hawk now
-// has its own dedicated geometry with baked white-head/dark-torso/yellow-
-// beak vertex colors, which only show through correctly if the per-
-// instance "body" tint stays close to white — see hawkGeometry.ts's doc
-// comment on the tint-multiplies-vertex-color math). Wing and tail are
-// separate InstancedMesh parts (no vertex-bake needed there), so they can
-// just get plain, genuinely dark-brown/white instance tints directly —
-// a real bald eagle's tail is white too, a free extra accuracy win.
-const NATURE_HAWK_HEAD_TINT = new THREE.Color(0xefece2); // near-white so baked head/torso/beak colors read as-authored
-const NATURE_HAWK_WING = new THREE.Color(0x2a2018); // dark blackish-brown, matches the baked torso color
-const NATURE_HAWK_TAIL = new THREE.Color(0xf2efe6); // genuinely white, matches the baked head color
-const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing: NATURE_HAWK_WING, tail: NATURE_HAWK_TAIL };
-
-// --- Parrot boid species: vivid multi-hued macaw-style plumage instead of
-// the sparrow-type boid's earth tones. Body/wing/tail get distinct colors
-// (rather than one flat tint) since that's the single biggest visual cue
-// that reads as "parrot" vs. "sparrow" from a distance — see updateInstances'
-// getSpeciesColors handling. Rendered via their own InstancedMesh set (see
-// parrotInstances) rather than sharing the sparrow-type boid's instances,
-// specifically so arcade style can give them a distinct emissive color too
-// (emissive is a material-level property — shared instances would force
-// identical bloom-glow color regardless of per-instance diffuse tint).
-//
-// Rather than one flat parrot palette, pick from a handful of real-world
-// macaw/parrot color patterns per-individual (see PARROT_NATURE_VARIANTS'
-// use in getParrotColorsForFlags below) so the flock reads as visually diverse
-// rather than a uniform species, the way small songbirds do (goldfinch/
-// cardinal/bluejay are each their own distinct color already; a single-
-// hue parrot stood out as flatter/less varied than those by comparison).
-type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus';
-interface NatureParrotVariant {
-  colors: SpeciesColorSet;
-  geometryProfile: ParrotGeometryProfile;
-}
-const PARROT_NATURE_VARIANTS: NatureParrotVariant[] = [
-  // Blue-and-gold macaw
-  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'blue-gold-focus' },
-  // Scarlet-style red parrot with dedicated red/blue body gradient and blue/yellow wing gradient.
-  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'scarlet-focus' },
-  // Purple parrot variant with purple/lavender gradients and lavender accents.
-  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'purple-lavender-focus' },
-  // Focus pattern slot: pure green body/wing regions are driven by
-  // parrotGeometry vertex tints; this stays near-white so those region
-  // tints read as-authored. Tail keeps its own medium-bright green tint.
-  {
-    colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0x44b749) },
-    geometryProfile: 'green-focus',
-  },
-];
-const NON_NEUTRAL_PARROT_PROFILES: ParrotGeometryProfile[] = ['green-focus', 'blue-gold-focus', 'scarlet-focus', 'purple-lavender-focus'];
-// Keep null in normal operation so parrots rotate through all configured
-// nature variants. Set to an index temporarily only during palette tuning.
-const PARROT_FOCUS_PATTERN_INDEX: number | null = null;
-const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
-const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
-
-// Fish tank style only: the parrot species' butterflyfish reskin gets its
-// own distinct set of color patterns (real-world butterflyfish are
-// commonly yellow/white/orange/blue, often striped combinations of
-// those) rather than reusing the nature style's macaw palette above —
-// see getParrotColorsForFlags' style-flag branch below. `body` is the tinted,
-// stripe-alternating hue (multiplied onto WHITE_VERTEX_COLOR in
-// butterflyfishGeometry.ts); `wing`/`tail` pick complementary accent
-// colors for the pectoral fins and caudal fin.
-const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
-  // Yellow longnose-style: golden body, blue accents
-  { body: new THREE.Color(0xf5c518), wing: new THREE.Color(0x1f6fd8), tail: new THREE.Color(0xf5c518) },
-  // Orange/white banded
-  { body: new THREE.Color(0xf07a1f), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xf07a1f) },
-  // Blue-and-yellow (raccoon-style)
-  { body: new THREE.Color(0x2f8fd0), wing: new THREE.Color(0xf5c518), tail: new THREE.Color(0x2f8fd0) },
-  // White with orange accents
-  { body: new THREE.Color(0xf2ede0), wing: new THREE.Color(0xf07a1f), tail: new THREE.Color(0xf2ede0) },
-  // Orange-and-blue (copperband-style)
-  { body: new THREE.Color(0xe8981a), wing: new THREE.Color(0x2f6fdc), tail: new THREE.Color(0xe8981a) },
-];
-
-// --- Three more songbird species, each with distinct multi-part plumage
-// (body/wing/tail) and their own arcade emissive/base color so every
-// species reads as visually distinct in both visual styles. Each gets its
-// own InstancedMesh set for the same reason parrots do (see above).
-const GOLDFINCH_BODY_BASE = new THREE.Color(0xf5d327); // bright yellow chest/back
-const GOLDFINCH_WING_BASE = new THREE.Color(0x1c1c1c); // black wings with contrast
-const GOLDFINCH_TAIL_BASE = new THREE.Color(0x1c1c1c); // black tail
-const ARCADE_GOLDFINCH_EMISSIVE = new THREE.Color(0xffe017);
-const ARCADE_GOLDFINCH_BASE = new THREE.Color(0xc7b21a);
-
-const CARDINAL_BODY_BASE = new THREE.Color(0xcc2936); // vivid red body
-const CARDINAL_WING_BASE = new THREE.Color(0x8f1f28); // darker red wings
-const CARDINAL_TAIL_BASE = new THREE.Color(0x3d0f14); // near-black red tail
-const ARCADE_CARDINAL_EMISSIVE = new THREE.Color(0xff8c1a); // orange-red, distinct from predator red
-const ARCADE_CARDINAL_BASE = new THREE.Color(0xcc5c14);
-
-const BLUEJAY_BODY_BASE = new THREE.Color(0x3b6fa0); // jay blue back
-const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
-const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
-const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
-const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
-
-// Per-species nature-style vertex colour palettes for small songbirds.
-// Baked into dedicated per-species geometry instances so each flock has a
-// realistic gradient instead of a flat per-instance tint.
-const SPARROW_NATURE_PALETTE: SmallBirdPalette = {
-  // Back: warm brown at head → gray-brown toward tail
-  headBack:  new THREE.Color(0x7a4a28), // rich warm brown on the head/crown
-  tailBack:  new THREE.Color(0x6a6050), // gray-brown near the rump/tail
-  // Belly: cool gray at beak → off-white toward tail
-  headBelly: new THREE.Color(0x8c8070), // gray near the throat
-  tailBelly: new THREE.Color(0xd8cfc0), // off-white on the lower belly/vent
-  wing:    new THREE.Color(0x6a4832), // dark warm brown at wing root
-  wingTip: new THREE.Color(0x2a1408), // very dark brown at tip
-  tail:    new THREE.Color(0x584030), // dark brown tail base
-  tailTip: new THREE.Color(0x281408), // near-black tail tip
-  dorsalGradient: true,
-  wingGradient:   true,
-  tailGradient:   true,
-};
-const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
-  // Back: bright yellow at head → black toward tail (classic goldfinch pattern)
-  headBack:  new THREE.Color(0xf5d327), // bright yellow on crown/back
-  tailBack:  new THREE.Color(0x1c1c1c), // black at rump
-  // Belly: yellow at beak → lighter yellow toward tail
-  headBelly: new THREE.Color(0xf5d327), // yellow near the breast
-  tailBelly: new THREE.Color(0xf8ec80), // lighter/paler yellow toward lower belly
-  wing:    new THREE.Color(0xf5d327), // gold at wing root (matches back/belly colour)
-  wingTip: new THREE.Color(0x151505), // near-black at wing tip
-  // Tail: dark gray base → black tip
-  tail:    new THREE.Color(0x3a3a3a), // dark gray tail base (not pure black)
-  tailTip: new THREE.Color(0x0d0d0d), // near-black tail tip
-  dorsalGradient: true,
-  wingGradient:   true, // yellow→black gradient on wings
-  tailGradient:   true, // dark gray→black gradient on tail
-};
-const CARDINAL_NATURE_PALETTE: SmallBirdPalette = {
-  // Both back and belly are red; gradient lightens toward the tail
-  headBack:  new THREE.Color(0xcc2936), // vivid deep red on the head/back
-  tailBack:  new THREE.Color(0xe06070), // lighter/pinker red near the rump
-  headBelly: new THREE.Color(0xd03545), // vivid red at the breast
-  tailBelly: new THREE.Color(0xf09098), // salmon-pink at the lower belly/vent
-  wing:    new THREE.Color(0x8f1f28), // dark red at wing root
-  wingTip: new THREE.Color(0x3d0f14), // near-black red at tip
-  tail:    new THREE.Color(0x8f1f28), // dark red tail base
-  tailTip: new THREE.Color(0x3d0f14), // very dark red at tail tip
-  dorsalGradient: true,
-  wingGradient:   true,
-  tailGradient:   true,
-};
-const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
-  // Back: pure/cool blue at head → brighter/more vivid blue toward tail
-  headBack:  new THREE.Color(0x3b6fa0), // pure medium blue on the crown/back
-  tailBack:  new THREE.Color(0x50a0d8), // brighter vivid blue near the rump/tail
-  // Belly: light blue/gray near beak → white toward tail
-  headBelly: new THREE.Color(0xb0c8df), // light blue-gray at throat/breast
-  tailBelly: new THREE.Color(0xf0f4f8), // near-white on the lower belly/vent
-  wing:    new THREE.Color(0x4070a8), // medium blue at wing root
-  wingTip: new THREE.Color(0x1c3350), // navy blue at tip
-  tail:    new THREE.Color(0x50a0d8), // bright blue tail base (matches tailBack)
-  tailTip: new THREE.Color(0x1c3350), // navy at tail tip
-  dorsalGradient: true,
-  wingGradient:   true,
-  tailGradient:   true,
-};
-
-// --- Optional "dragon" predator variant (nature style only): much larger,
-// purple, leathery-winged silhouette instead of the hawk geometry.
-// Brightened from an earlier, much darker pair (0x4a2270/0x9c43be) — those,
-// combined with the wing material's own darkening multiply below, crushed
-// the wings/tail to near-solid black under normal lighting, hiding all the
-// scallop/bone-tube surface detail added to the wing geometry. These stay
-// deep and saturated (a "black dragon" should still read dark) but leave
-// enough headroom for facet-by-facet lighting variation to show through.
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x61339b); // matched to the visible root tone at the tail base
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0x7b4fc2); // brighter chase tint while staying in the same palette
-// Fish tank sharks reuse the dragon's geometry-selection path (isDragon)
-// but must not inherit its purple scale coloring — real sharks read as
-// medium gray, not violet. Kept as separate constants (rather than
-// reusing DRAGON_PREDATOR_BASE/HUNT for both styles) so nature's dragon
-// and fishtank's shark can be tinted independently.
-const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
-const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
-
-// --- "Unicorn" predator kind (all styles): light lavender body, always
-// upright (see keepUpright), gentle-chase-only — see Predator.kind. Wings
-// get a baked rainbow vertex-color gradient (nature style only, see
-// creatureGeometry's addRainbowVertexColors) rather than a flat tint, so the
-// body/tail colors here are deliberately close to white — a strongly
-// tinted body color would multiply against the rainbow vertex colors and
-// wash them out (InstancedMesh's per-instance color multiplies with the
-// material's vertexColors output).
-const NATURE_UNICORN_BODY = new THREE.Color(0xc9a8f0); // light lavender
-const NATURE_UNICORN_HUNT = new THREE.Color(0xe8c9ff); // brighter pale lavender-pink when locked on
-const NATURE_UNICORN_WING = new THREE.Color(0xf3ecff); // near-white so the rainbow vertex gradient reads clearly
-const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
-const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
 
 const BOID_LENGTH = 7;
 const BOID_WIDTH = 2.6;
@@ -569,17 +408,7 @@ function idHash(id: number, salt: number): number {
   return x - Math.floor(x);
 }
 
-/** Distinct body/wing/tail base colors for a boid species with non-uniform
- * plumage (e.g. the parrot's macaw-style coloring), used by updateInstances
- * in place of its default single-baseColor scheme. */
-interface SpeciesColorSet {
-  body: THREE.Color;
-  wing: THREE.Color;
-  tail: THREE.Color;
-}
-
-/**
- * All colour-related parameters for one `updateInstances` call.
+/** All colour-related parameters for one `updateInstances` call.
  * Bundled as a named-field object so call sites are self-documenting and
  * immune to positional-parameter order bugs.
  */
