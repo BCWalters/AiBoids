@@ -2903,6 +2903,69 @@ export class Renderer3D {
     return { hawks, unicorns };
   }
 
+  private getHawkColourStrategy(isDragon: boolean, isFishtank: boolean, isOrganic: boolean, isNature: boolean): ColourStrategy {
+    return {
+      baseColor: isDragon
+        ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE)
+        : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
+      highlightColor: isDragon
+        ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT)
+        : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
+      getIntensity: (entity) => (entity as Predator).huntIntensity,
+      // Plain nature hawks (not dragon/fishtank) get the bald-eagle
+      // body/wing/tail colour split. See NATURE_HAWK_COLORS' doc comment.
+      getSpeciesColors: !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
+    };
+  }
+
+  private getHawkMotionConfig(isDragon: boolean, isShark: boolean, isFishtank: boolean): MotionConfig {
+    return {
+      flapFrequency: isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
+      flapIdleAmplitude: isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
+      keepUpright: isDragon,
+      uprightStyle: isShark ? 'shark' : 'dragon',
+      // Sharks: fins droop at rest, tail yaws side-to-side (the actual
+      // swimming stroke) instead of pitching up/down like a dragon.
+      finRestBiasRad: isShark ? SHARK_FIN_REST_TILT_RAD : 0,
+      tailSwayAxis: isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
+      tailSwayAmplitude: isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency: isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
+      tailSwayPivotY: isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
+      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
+    };
+  }
+
+  private getUnicornColourStrategy(isOrganic: boolean, isFishtank: boolean): ColourStrategy {
+    return {
+      baseColor: isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
+      highlightColor: isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
+      getIntensity: (entity) => (entity as Predator).huntIntensity,
+      getSpeciesColors: () => isFishtank
+        ? FISHTANK_SEAHORSE_COLORS
+        : isOrganic
+          ? NATURE_UNICORN_COLORS
+          : ARCADE_UNICORN_COLORS,
+    };
+  }
+
+  private getUnicornMotionConfig(isFishtank: boolean): MotionConfig {
+    return {
+      flapFrequency: UNICORN_FLAP_FREQUENCY,
+      flapIdleAmplitude: UNICORN_FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: UNICORN_FLAP_SPEED_AMPLITUDE,
+      // Unicorns always fly right-side-up in every style — it's a character
+      // trait, not a nature-only cosmetic. Their own 'unicorn' orientation
+      // model (hard pitch clamp + up-tilt safety) keeps them floaty/level.
+      keepUpright: true,
+      uprightStyle: 'unicorn',
+      bankScale: UNICORN_BANK_SCALE,
+      worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
+      meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
+    };
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3047,38 +3110,11 @@ export class Renderer3D {
         params.predatorMaxSpeed,
         elapsed,
         dt,
-        {
-          baseColor: isDragon
-            ? (isFishtank ? SHARK_PREDATOR_BASE : DRAGON_PREDATOR_BASE)
-            : isOrganic ? NATURE_PREDATOR_BASE : ARCADE_PREDATOR_BASE,
-          highlightColor: isDragon
-            ? (isFishtank ? SHARK_PREDATOR_HUNT : DRAGON_PREDATOR_HUNT)
-            : isOrganic ? NATURE_PREDATOR_HUNT : ARCADE_PREDATOR_HUNT,
-          getIntensity: (entity) => (entity as Predator).huntIntensity,
-          // Plain nature hawks (not dragon/fishtank) get the bald-eagle
-          // body/wing/tail colour split. See NATURE_HAWK_COLORS' doc comment.
-          getSpeciesColors: !isDragon && isNature ? () => NATURE_HAWK_COLORS : undefined,
-        },
-        {
-          flapFrequency: isDragon ? (isShark ? SHARK_FLAP_FREQUENCY : DRAGON_FLAP_FREQUENCY) : FLAP_FREQUENCY,
-          flapIdleAmplitude: isDragon ? (isShark ? SHARK_FLAP_IDLE_AMPLITUDE : DRAGON_FLAP_IDLE_AMPLITUDE) : FLAP_IDLE_AMPLITUDE,
-          flapSpeedAmplitude: isDragon ? (isShark ? SHARK_FLAP_SPEED_AMPLITUDE : DRAGON_FLAP_SPEED_AMPLITUDE) : FLAP_SPEED_AMPLITUDE,
-          keepUpright: isDragon,
-          uprightStyle: isShark ? 'shark' : 'dragon',
-          // Sharks: fins droop at rest, tail yaws side-to-side (the actual
-          // swimming stroke) instead of pitching up/down like a dragon.
-          finRestBiasRad: isShark ? SHARK_FIN_REST_TILT_RAD : 0,
-          tailSwayAxis: isShark ? MODEL_UP_AXIS : MODEL_RIGHT_AXIS,
-          tailSwayAmplitude: isShark ? SHARK_TAIL_SWAY_AMPLITUDE : DRAGON_TAIL_SWAY_AMPLITUDE,
-          tailSwayFrequency: isShark ? SHARK_TAIL_SWAY_FREQUENCY : undefined,
-          tailSwayPivotY: isShark ? getSharkTailPivotY(SHARK_LENGTH) : 0,
-          worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-          meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST * (isShark ? FISHTANK_SHARK_MESH_BOOST : 1) : 1,
-        },
+        this.getHawkColourStrategy(isDragon, isFishtank, isOrganic, isNature),
+        this.getHawkMotionConfig(isDragon, isShark, isFishtank),
       );
     }
     const unicornInstances = this.predatorInstances.get('unicorn');
-    if (!unicornInstances) return;
     if (!unicornInstances) return;
     this.updateInstances(
       unicornInstances,
@@ -3086,29 +3122,8 @@ export class Renderer3D {
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      {
-        baseColor: isOrganic ? NATURE_UNICORN_BODY : ARCADE_UNICORN_BASE,
-        highlightColor: isOrganic ? NATURE_UNICORN_HUNT : ARCADE_UNICORN_HUNT,
-        getIntensity: (entity) => (entity as Predator).huntIntensity,
-        getSpeciesColors: () => isFishtank
-          ? FISHTANK_SEAHORSE_COLORS
-          : isOrganic
-            ? NATURE_UNICORN_COLORS
-            : ARCADE_UNICORN_COLORS,
-      },
-      {
-        flapFrequency: UNICORN_FLAP_FREQUENCY,
-        flapIdleAmplitude: UNICORN_FLAP_IDLE_AMPLITUDE,
-        flapSpeedAmplitude: UNICORN_FLAP_SPEED_AMPLITUDE,
-        // Unicorns always fly right-side-up in every style — it's a character
-        // trait, not a nature-only cosmetic. Their own 'unicorn' orientation
-        // model (hard pitch clamp + up-tilt safety) keeps them floaty/level.
-        keepUpright: true,
-        uprightStyle: 'unicorn',
-        bankScale: UNICORN_BANK_SCALE,
-        worldScale: isFishtank ? TANK_VISUAL_SCALE : 1,
-        meshScaleBoost: isFishtank ? FISHTANK_FISH_MESH_BOOST : 1,
-      },
+      this.getUnicornColourStrategy(isOrganic, isFishtank),
+      this.getUnicornMotionConfig(isFishtank),
     );
   }
 
