@@ -651,6 +651,22 @@ interface EntityInstanceMatrixArgs {
   uprightStyle: UprightStyle;
 }
 
+interface EntityInstanceColorArgs {
+  set: BirdInstanceSet;
+  index: number;
+  entity: Boid | Predator;
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Boid | Predator) => number;
+  individualVariation: boolean;
+  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  bakedWingPalette: boolean;
+  beakColor: THREE.Color | undefined;
+  isNatureSmallBirdBody: boolean;
+  isNatureSmallBirdWing: boolean;
+  isNatureSmallBirdTail: boolean;
+}
+
 interface StyleFlags {
   isNature: boolean;
   isFishtank: boolean;
@@ -1824,21 +1840,22 @@ export class Renderer3D {
     };
   }
 
-  private applyInstanceColorsForEntity(
-    set: BirdInstanceSet,
-    i: number,
-    entity: Boid | Predator,
-    baseColor: THREE.Color,
-    highlightColor: THREE.Color,
-    getIntensity: (entity: Boid | Predator) => number,
-    individualVariation: boolean,
-    getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined,
-    bakedWingPalette: boolean,
-    beakColor: THREE.Color | undefined,
-    isNatureSmallBirdBody: boolean,
-    isNatureSmallBirdWing: boolean,
-    isNatureSmallBirdTail: boolean,
-  ): void {
+  private applyInstanceColorsForEntity(args: EntityInstanceColorArgs): void {
+    const {
+      set,
+      index,
+      entity,
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      beakColor,
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+    } = args;
     const speciesColors = getSpeciesColors?.(entity);
     let effectiveBase = baseColor;
     let effectiveWing: THREE.Color | null = null;
@@ -1893,19 +1910,19 @@ export class Renderer3D {
     } else {
       this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
     }
-    set.body.setColorAt(i, this.stateColor);
+    set.body.setColorAt(index, this.stateColor);
     if (isNatureSmallBirdWing) {
       // Baked gradient wings — white passthrough; same for tail if baked.
       this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
-      set.wingLeft.setColorAt(i, this.wingColor);
-      set.wingRight.setColorAt(i, this.wingColor);
+      set.wingLeft.setColorAt(index, this.wingColor);
+      set.wingRight.setColorAt(index, this.wingColor);
       if (set.tail) {
         if (isNatureSmallBirdTail) {
           this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
         } else {
           this.tailColor.copy(this.wingColor);
         }
-        set.tail.setColorAt(i, this.tailColor);
+        set.tail.setColorAt(index, this.tailColor);
       }
     } else if (effectiveWing) {
       const preserveParrotWingPalette = getSpeciesColors === getParrotColors
@@ -1923,8 +1940,8 @@ export class Renderer3D {
       } else {
         this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
       }
-      set.wingLeft.setColorAt(i, this.wingColor);
-      set.wingRight.setColorAt(i, this.wingColor);
+      set.wingLeft.setColorAt(index, this.wingColor);
+      set.wingRight.setColorAt(index, this.wingColor);
       if (set.tail) {
         if (effectiveTail) {
           if (preserveParrotTailPalette) {
@@ -1932,9 +1949,9 @@ export class Renderer3D {
           } else {
             this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
           }
-          set.tail.setColorAt(i, this.tailColor);
+          set.tail.setColorAt(index, this.tailColor);
         } else {
-          set.tail.setColorAt(i, this.wingColor);
+          set.tail.setColorAt(index, this.wingColor);
         }
       }
     } else if (individualVariation) {
@@ -1942,12 +1959,12 @@ export class Renderer3D {
       // feathers are almost always a shade or two darker than the breast/
       // body plumage, and this reads clearly even at a distance.
       this.wingColor.copy(this.stateColor).multiplyScalar(0.82);
-      set.wingLeft.setColorAt(i, this.wingColor);
-      set.wingRight.setColorAt(i, this.wingColor);
-      if (set.tail) set.tail.setColorAt(i, this.wingColor);
+      set.wingLeft.setColorAt(index, this.wingColor);
+      set.wingRight.setColorAt(index, this.wingColor);
+      if (set.tail) set.tail.setColorAt(index, this.wingColor);
     } else {
-      set.wingLeft.setColorAt(i, this.stateColor);
-      set.wingRight.setColorAt(i, this.stateColor);
+      set.wingLeft.setColorAt(index, this.stateColor);
+      set.wingRight.setColorAt(index, this.stateColor);
       if (set.tail) {
         // Auto-detect baked vertex colours on the tail (e.g. dragon gradient
         // tail). Pass white so the gradient shows through; otherwise use
@@ -1957,7 +1974,7 @@ export class Renderer3D {
         } else {
           this.tailColor.copy(this.stateColor);
         }
-        set.tail.setColorAt(i, this.tailColor);
+        set.tail.setColorAt(index, this.tailColor);
       }
     }
     if (set.legs) {
@@ -1968,14 +1985,14 @@ export class Renderer3D {
       } else {
         this.legsColor.copy(this.stateColor);
       }
-      set.legs.setColorAt(i, this.legsColor);
+      set.legs.setColorAt(index, this.legsColor);
     }
     if (set.beak && beakColor) {
       // Small per-individual jitter, same treatment as the other parts
       // — keeps a flock of e.g. cardinals from looking like every
       // single beak is the identical exact pixel color.
       this.jitterHSL(this.beakInstanceColor, beakColor, entity.id, 5, 0.04, 0.1, 0.08);
-      set.beak.setColorAt(i, this.beakInstanceColor);
+      set.beak.setColorAt(index, this.beakInstanceColor);
     }
   }
 
@@ -2366,9 +2383,9 @@ export class Renderer3D {
         uprightStyle,
       });
 
-      this.applyInstanceColorsForEntity(
+      this.applyInstanceColorsForEntity({
         set,
-        i,
+        index: i,
         entity,
         baseColor,
         highlightColor,
@@ -2380,7 +2397,7 @@ export class Renderer3D {
         isNatureSmallBirdBody,
         isNatureSmallBirdWing,
         isNatureSmallBirdTail,
-      );
+      });
     }
 
     this.markInstanceSetNeedsUpdate(set);
