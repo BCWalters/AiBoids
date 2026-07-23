@@ -2018,6 +2018,74 @@ export class Renderer3D {
     if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
 
     // Wings: apply an extra local flap rotation around the forward axis.
+    const flapAngle = this.computeWingFlapAngle(
+      entity,
+      vel,
+      speed,
+      maxSpeed,
+      dt,
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      finRestBiasRad,
+      uprightStyle,
+    );
+
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingLeft.setMatrixAt(i, this.dummy.matrix);
+
+    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
+    this.dummy.updateMatrix();
+    set.wingRight.setMatrixAt(i, this.dummy.matrix);
+
+    // Tail sway (dragons/sharks only).
+    if (!set.tail) return;
+    if (!(uprightStyle === 'dragon' || uprightStyle === 'shark')) return;
+    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
+    const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
+    this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
+    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
+    this.dummy.updateMatrix();
+    if (tailSwayPivotY !== 0) {
+      this.dummy.quaternion.copy(this.bodyQuat);
+      this.dummy.updateMatrix();
+      this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
+      this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
+      this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
+      this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
+      this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
+      this.dummy.matrix.multiply(this.tailPivotMatrix);
+    }
+    set.tail.setMatrixAt(i, this.dummy.matrix);
+  }
+
+  private computeWingFlapAngle(
+    entity: Boid | Predator,
+    vel: { x: number; y: number; z: number },
+    speed: number,
+    maxSpeed: number,
+    dt: number,
+    blendStrength: number,
+    climbWeight: number,
+    diveWeight: number,
+    turnWeight: number,
+    panicWeight: number,
+    cruiseWeight: number,
+    flapFrequency: number,
+    flapIdleAmplitude: number,
+    flapSpeedAmplitude: number,
+    finRestBiasRad: number,
+    uprightStyle: UprightStyle,
+  ): number {
     const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
     const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
     const stateResponse = (uprightStyle === 'dragon' || uprightStyle === 'unicorn' || uprightStyle === 'shark') ? 0.55 : 0.75;
@@ -2053,37 +2121,7 @@ export class Renderer3D {
     const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
     const phase = prevPhase + effectiveFrequency * dt;
     this.flapPhase.set(entity, phase);
-    const flapAngle = amplitude * Math.sin(phase) + finRestBiasRad;
-
-    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-    this.dummy.updateMatrix();
-    set.wingLeft.setMatrixAt(i, this.dummy.matrix);
-
-    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-    this.dummy.updateMatrix();
-    set.wingRight.setMatrixAt(i, this.dummy.matrix);
-
-    // Tail sway (dragons/sharks only).
-    if (!set.tail) return;
-    if (!(uprightStyle === 'dragon' || uprightStyle === 'shark')) return;
-    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
-    const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
-    this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
-    this.dummy.updateMatrix();
-    if (tailSwayPivotY !== 0) {
-      this.dummy.quaternion.copy(this.bodyQuat);
-      this.dummy.updateMatrix();
-      this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
-      this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
-      this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
-      this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
-      this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
-      this.dummy.matrix.multiply(this.tailPivotMatrix);
-    }
-    set.tail.setMatrixAt(i, this.dummy.matrix);
+    return amplitude * Math.sin(phase) + finRestBiasRad;
   }
 
   private updateInstances(
