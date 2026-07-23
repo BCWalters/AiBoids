@@ -3244,10 +3244,11 @@ export class Renderer3D {
   private applyUfoVisualState(
     visual: UFOVisual,
     ufo: Simulation['ufos'][number] | undefined,
-    isFishtank: boolean,
+    flags: StyleFlags,
     ufoWorldScale: number,
     ufoBeamLength: number,
   ): void {
+    const { isFishtank } = flags;
     if (ufo) {
       if (isFishtank) {
         this.tmpVec3.set(
@@ -3264,19 +3265,20 @@ export class Renderer3D {
     visual.setState(false, this.tmpVec3, 0, 0);
   }
 
-  private getUfoRenderScaleParams(isFishtank: boolean): { ufoWorldScale: number; ufoBeamLength: number } {
+  private getUfoRenderScaleParams(flags: StyleFlags): { ufoWorldScale: number; ufoBeamLength: number } {
+    const { isFishtank } = flags;
     const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
     const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
     return { ufoWorldScale, ufoBeamLength };
   }
 
-  private updateUfoVisuals(sim: Simulation, dt: number, isFishtank: boolean): void {
+  private updateUfoVisuals(sim: Simulation, dt: number, flags: StyleFlags): void {
     // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
     // slots beyond the current active count are simply hidden.
-    const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(isFishtank);
+    const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(flags);
     for (let i = 0; i < this.ufoVisuals.length; i++) {
       const visual = this.ufoVisuals[i];
-      this.applyUfoVisualState(visual, sim.ufos[i], isFishtank, ufoWorldScale, ufoBeamLength);
+      this.applyUfoVisualState(visual, sim.ufos[i], flags, ufoWorldScale, ufoBeamLength);
       visual.update(dt);
     }
   }
@@ -3312,12 +3314,11 @@ export class Renderer3D {
     dt: number,
     flags: StyleFlags,
   ): void {
-    const { isFishtank } = flags;
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
     this.spawnFireFromDragons(sim, elapsed);
     this.fireBreathEffects.update(dt);
-    this.updateUfoVisuals(sim, dt, isFishtank);
+    this.updateUfoVisuals(sim, dt, flags);
   }
 
   private updateSceneEffects(
@@ -3330,7 +3331,8 @@ export class Renderer3D {
     this.updateTransientSceneEffects(sim, elapsed, dt, flags);
   }
 
-  private updateFishtankCenter(sim: Simulation, isFishtank: boolean): void {
+  private updateFishtankCenter(sim: Simulation, flags: StyleFlags): void {
+    const { isFishtank } = flags;
     if (!isFishtank) return;
     // Around the tank's true center (see updateInstances' worldScale
     // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
@@ -3356,7 +3358,8 @@ export class Renderer3D {
     return Math.min(vertCap, horizCap);
   }
 
-  private updateFishtankDynamicCameraClamp(sim: Simulation, isFishtank: boolean): void {
+  private updateFishtankDynamicCameraClamp(sim: Simulation, flags: StyleFlags): void {
+    const { isFishtank } = flags;
     if (!isFishtank) return;
     // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
     // maxCameraDistance (set once, in ensureScene) has to satisfy the
@@ -3392,11 +3395,10 @@ export class Renderer3D {
     dt: number,
     flags: StyleFlags,
   ): void {
-    const { isFishtank } = flags;
-    this.updateFishtankCenter(sim, isFishtank);
+    this.updateFishtankCenter(sim, flags);
     this.updateSceneEffects(sim, elapsed, dt, flags);
     this.updateCreatureInstances(sim, elapsed, dt, flags);
-    this.updateFishtankDynamicCameraClamp(sim, isFishtank);
+    this.updateFishtankDynamicCameraClamp(sim, flags);
     this.renderOutput();
   }
 
