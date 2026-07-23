@@ -11,16 +11,14 @@ import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './styles/nature/geometry/smallBirdGeometry';
-import type { SmallBirdPalette } from './styles/nature/geometry/smallBirdGeometry';
 import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
 import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
 import { createDragonGeometries, computeDragonMouthTransform } from './styles/nature/geometry/dragonGeometry';
 import { createUnicornGeometries } from './styles/nature/geometry/unicornGeometry';
 import type { CreatureGeometries } from './geometry/sharedGeometry';
-import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './styles/nature/environment';
+import { createNatureEnvironment, type NatureEnvironment } from './styles/nature/environment';
 import {
   createFishtankEnvironment,
-  placeFishtankEnvironment,
   computeFishtankRoomBounds,
   TANK_VISUAL_SCALE,
   type FishtankEnvironment,
@@ -33,223 +31,69 @@ import { createDriftingClouds, type DriftingClouds } from './styles/nature/cloud
 import { createBloodEffects, type BloodEffects } from './bloodEffects';
 import { createFireBreathEffects, type FireBreathEffects } from './styles/nature/fireBreath';
 import { createUFOVisual, type UFOVisual } from './ufoEffects';
+import {
+  createSceneRendererHooks,
+  type SceneEnvironmentToggles,
+  type SceneRendererHooks,
+} from './sceneRenderers/createSceneRendererHooks';
+import {
+  NatureSceneRenderer3D,
+  NATURE_BOID_BASE,
+  NATURE_BOID_PANIC,
+  NATURE_PREDATOR_BASE,
+  NATURE_PREDATOR_HUNT,
+  NATURE_HAWK_COLORS,
+  PARROT_NATURE_VARIANTS,
+  NON_NEUTRAL_PARROT_PROFILES,
+  PARROT_FOCUS_PATTERN_INDEX,
+  SPARROW_NATURE_PALETTE,
+  GOLDFINCH_NATURE_PALETTE,
+  CARDINAL_NATURE_PALETTE,
+  BLUEJAY_NATURE_PALETTE,
+  DRAGON_PREDATOR_BASE,
+  DRAGON_PREDATOR_HUNT,
+  NATURE_UNICORN_BODY,
+  NATURE_UNICORN_HUNT,
+  NATURE_UNICORN_WING,
+  GOLDFINCH_BODY_BASE,
+  GOLDFINCH_WING_BASE,
+  GOLDFINCH_TAIL_BASE,
+  CARDINAL_BODY_BASE,
+  CARDINAL_WING_BASE,
+  CARDINAL_TAIL_BASE,
+  BLUEJAY_BODY_BASE,
+  BLUEJAY_WING_BASE,
+  BLUEJAY_TAIL_BASE,
+  type ParrotGeometryProfile,
+  type NatureParrotVariant,
+  type SpeciesColorSet,
+  type SmallBirdPalette,
+} from './sceneRenderers/NatureSceneRenderer3D';
+import {
+  FishtankSceneRenderer3D,
+  BUTTERFLYFISH_COLOR_PATTERNS,
+  SHARK_PREDATOR_BASE,
+  SHARK_PREDATOR_HUNT,
+} from './sceneRenderers/FishtankSceneRenderer3D';
+import {
+  ArcadeSceneRenderer3D,
+  ARCADE_BOID_EMISSIVE,
+  ARCADE_BOID_BASE,
+  ARCADE_BOID_PANIC,
+  ARCADE_PREDATOR_BASE,
+  ARCADE_PREDATOR_HUNT,
+  ARCADE_PARROT_EMISSIVE,
+  ARCADE_PARROT_BASE,
+  ARCADE_GOLDFINCH_EMISSIVE,
+  ARCADE_GOLDFINCH_BASE,
+  ARCADE_CARDINAL_EMISSIVE,
+  ARCADE_CARDINAL_BASE,
+  ARCADE_BLUEJAY_EMISSIVE,
+  ARCADE_BLUEJAY_BASE,
+  ARCADE_UNICORN_BASE,
+  ARCADE_UNICORN_HUNT,
+} from './sceneRenderers/ArcadeSceneRenderer3D';
 import { UFO_BEAM_REACH } from '../sim/UFO';
-
-// --- "Arcade" style: bright, saturated emissive colors so the bloom pass
-// has something to glow — base material color stays neutral (driven
-// per-instance) so contrast against the dark background comes mostly
-// from emissive light.
-const ARCADE_BOID_EMISSIVE = new THREE.Color(0x5ad1ff);
-const ARCADE_PREDATOR_EMISSIVE = new THREE.Color(0xff2a2a);
-const ARCADE_BOID_BASE = new THREE.Color(0x2ab6e8);
-const ARCADE_BOID_PANIC = new THREE.Color(0xffe066);
-const ARCADE_PREDATOR_BASE = new THREE.Color(0xb31f1f);
-const ARCADE_PREDATOR_HUNT = new THREE.Color(0xffffff);
-
-// --- "Nature" style: matte, earth-toned plumage. No emissive glow —
-// contrast comes from the sun-lit sky/ground environment instead.
-const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrasts against green ground
-const NATURE_BOID_PANIC = new THREE.Color(0xf2e6c8); // paler alarm plumage
-const NATURE_PREDATOR_BASE = new THREE.Color(0x7a3b22); // hawk rust-brown
-const NATURE_PREDATOR_HUNT = new THREE.Color(0xc75a2e); // brighter when locked on
-
-// --- Nature-style hawk (bald-eagle-inspired, see geometry/hawkGeometry.ts):
-// body/wing/tail split, mirroring the parrot/goldfinch/cardinal/bluejay
-// pattern, rather than one flat NATURE_PREDATOR_BASE tint (the hawk now
-// has its own dedicated geometry with baked white-head/dark-torso/yellow-
-// beak vertex colors, which only show through correctly if the per-
-// instance "body" tint stays close to white — see hawkGeometry.ts's doc
-// comment on the tint-multiplies-vertex-color math). Wing and tail are
-// separate InstancedMesh parts (no vertex-bake needed there), so they can
-// just get plain, genuinely dark-brown/white instance tints directly —
-// a real bald eagle's tail is white too, a free extra accuracy win.
-const NATURE_HAWK_HEAD_TINT = new THREE.Color(0xefece2); // near-white so baked head/torso/beak colors read as-authored
-const NATURE_HAWK_WING = new THREE.Color(0x2a2018); // dark blackish-brown, matches the baked torso color
-const NATURE_HAWK_TAIL = new THREE.Color(0xf2efe6); // genuinely white, matches the baked head color
-const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing: NATURE_HAWK_WING, tail: NATURE_HAWK_TAIL };
-
-// --- Parrot boid species: vivid multi-hued macaw-style plumage instead of
-// the sparrow-type boid's earth tones. Body/wing/tail get distinct colors
-// (rather than one flat tint) since that's the single biggest visual cue
-// that reads as "parrot" vs. "sparrow" from a distance — see updateInstances'
-// getSpeciesColors handling. Rendered via their own InstancedMesh set (see
-// parrotInstances) rather than sharing the sparrow-type boid's instances,
-// specifically so arcade style can give them a distinct emissive color too
-// (emissive is a material-level property — shared instances would force
-// identical bloom-glow color regardless of per-instance diffuse tint).
-//
-// Rather than one flat parrot palette, pick from a handful of real-world
-// macaw/parrot color patterns per-individual (see PARROT_NATURE_VARIANTS'
-// use in getParrotColorsForFlags below) so the flock reads as visually diverse
-// rather than a uniform species, the way small songbirds do (goldfinch/
-// cardinal/bluejay are each their own distinct color already; a single-
-// hue parrot stood out as flatter/less varied than those by comparison).
-type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus';
-interface NatureParrotVariant {
-  colors: SpeciesColorSet;
-  geometryProfile: ParrotGeometryProfile;
-}
-const PARROT_NATURE_VARIANTS: NatureParrotVariant[] = [
-  // Blue-and-gold macaw
-  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'blue-gold-focus' },
-  // Scarlet-style red parrot with dedicated red/blue body gradient and blue/yellow wing gradient.
-  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'scarlet-focus' },
-  // Purple parrot variant with purple/lavender gradients and lavender accents.
-  { colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xffffff) }, geometryProfile: 'purple-lavender-focus' },
-  // Focus pattern slot: pure green body/wing regions are driven by
-  // parrotGeometry vertex tints; this stays near-white so those region
-  // tints read as-authored. Tail keeps its own medium-bright green tint.
-  {
-    colors: { body: new THREE.Color(0xffffff), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0x44b749) },
-    geometryProfile: 'green-focus',
-  },
-];
-const NON_NEUTRAL_PARROT_PROFILES: ParrotGeometryProfile[] = ['green-focus', 'blue-gold-focus', 'scarlet-focus', 'purple-lavender-focus'];
-// Keep null in normal operation so parrots rotate through all configured
-// nature variants. Set to an index temporarily only during palette tuning.
-const PARROT_FOCUS_PATTERN_INDEX: number | null = null;
-const ARCADE_PARROT_EMISSIVE = new THREE.Color(0xe030c8);
-const ARCADE_PARROT_BASE = new THREE.Color(0xd048c0);
-
-// Fish tank style only: the parrot species' butterflyfish reskin gets its
-// own distinct set of color patterns (real-world butterflyfish are
-// commonly yellow/white/orange/blue, often striped combinations of
-// those) rather than reusing the nature style's macaw palette above —
-// see getParrotColorsForFlags' style-flag branch below. `body` is the tinted,
-// stripe-alternating hue (multiplied onto WHITE_VERTEX_COLOR in
-// butterflyfishGeometry.ts); `wing`/`tail` pick complementary accent
-// colors for the pectoral fins and caudal fin.
-const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
-  // Yellow longnose-style: golden body, blue accents
-  { body: new THREE.Color(0xf5c518), wing: new THREE.Color(0x1f6fd8), tail: new THREE.Color(0xf5c518) },
-  // Orange/white banded
-  { body: new THREE.Color(0xf07a1f), wing: new THREE.Color(0xffffff), tail: new THREE.Color(0xf07a1f) },
-  // Blue-and-yellow (raccoon-style)
-  { body: new THREE.Color(0x2f8fd0), wing: new THREE.Color(0xf5c518), tail: new THREE.Color(0x2f8fd0) },
-  // White with orange accents
-  { body: new THREE.Color(0xf2ede0), wing: new THREE.Color(0xf07a1f), tail: new THREE.Color(0xf2ede0) },
-  // Orange-and-blue (copperband-style)
-  { body: new THREE.Color(0xe8981a), wing: new THREE.Color(0x2f6fdc), tail: new THREE.Color(0xe8981a) },
-];
-
-// --- Three more songbird species, each with distinct multi-part plumage
-// (body/wing/tail) and their own arcade emissive/base color so every
-// species reads as visually distinct in both visual styles. Each gets its
-// own InstancedMesh set for the same reason parrots do (see above).
-const GOLDFINCH_BODY_BASE = new THREE.Color(0xf5d327); // bright yellow chest/back
-const GOLDFINCH_WING_BASE = new THREE.Color(0x1c1c1c); // black wings with contrast
-const GOLDFINCH_TAIL_BASE = new THREE.Color(0x1c1c1c); // black tail
-const ARCADE_GOLDFINCH_EMISSIVE = new THREE.Color(0xffe017);
-const ARCADE_GOLDFINCH_BASE = new THREE.Color(0xc7b21a);
-
-const CARDINAL_BODY_BASE = new THREE.Color(0xcc2936); // vivid red body
-const CARDINAL_WING_BASE = new THREE.Color(0x8f1f28); // darker red wings
-const CARDINAL_TAIL_BASE = new THREE.Color(0x3d0f14); // near-black red tail
-const ARCADE_CARDINAL_EMISSIVE = new THREE.Color(0xff8c1a); // orange-red, distinct from predator red
-const ARCADE_CARDINAL_BASE = new THREE.Color(0xcc5c14);
-
-const BLUEJAY_BODY_BASE = new THREE.Color(0x3b6fa0); // jay blue back
-const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
-const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
-const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
-const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
-
-// Per-species nature-style vertex colour palettes for small songbirds.
-// Baked into dedicated per-species geometry instances so each flock has a
-// realistic gradient instead of a flat per-instance tint.
-const SPARROW_NATURE_PALETTE: SmallBirdPalette = {
-  // Back: warm brown at head → gray-brown toward tail
-  headBack:  new THREE.Color(0x7a4a28), // rich warm brown on the head/crown
-  tailBack:  new THREE.Color(0x6a6050), // gray-brown near the rump/tail
-  // Belly: cool gray at beak → off-white toward tail
-  headBelly: new THREE.Color(0x8c8070), // gray near the throat
-  tailBelly: new THREE.Color(0xd8cfc0), // off-white on the lower belly/vent
-  wing:    new THREE.Color(0x6a4832), // dark warm brown at wing root
-  wingTip: new THREE.Color(0x2a1408), // very dark brown at tip
-  tail:    new THREE.Color(0x584030), // dark brown tail base
-  tailTip: new THREE.Color(0x281408), // near-black tail tip
-  dorsalGradient: true,
-  wingGradient:   true,
-  tailGradient:   true,
-};
-const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
-  // Back: bright yellow at head → black toward tail (classic goldfinch pattern)
-  headBack:  new THREE.Color(0xf5d327), // bright yellow on crown/back
-  tailBack:  new THREE.Color(0x1c1c1c), // black at rump
-  // Belly: yellow at beak → lighter yellow toward tail
-  headBelly: new THREE.Color(0xf5d327), // yellow near the breast
-  tailBelly: new THREE.Color(0xf8ec80), // lighter/paler yellow toward lower belly
-  wing:    new THREE.Color(0xf5d327), // gold at wing root (matches back/belly colour)
-  wingTip: new THREE.Color(0x151505), // near-black at wing tip
-  // Tail: dark gray base → black tip
-  tail:    new THREE.Color(0x3a3a3a), // dark gray tail base (not pure black)
-  tailTip: new THREE.Color(0x0d0d0d), // near-black tail tip
-  dorsalGradient: true,
-  wingGradient:   true, // yellow→black gradient on wings
-  tailGradient:   true, // dark gray→black gradient on tail
-};
-const CARDINAL_NATURE_PALETTE: SmallBirdPalette = {
-  // Both back and belly are red; gradient lightens toward the tail
-  headBack:  new THREE.Color(0xcc2936), // vivid deep red on the head/back
-  tailBack:  new THREE.Color(0xe06070), // lighter/pinker red near the rump
-  headBelly: new THREE.Color(0xd03545), // vivid red at the breast
-  tailBelly: new THREE.Color(0xf09098), // salmon-pink at the lower belly/vent
-  wing:    new THREE.Color(0x8f1f28), // dark red at wing root
-  wingTip: new THREE.Color(0x3d0f14), // near-black red at tip
-  tail:    new THREE.Color(0x8f1f28), // dark red tail base
-  tailTip: new THREE.Color(0x3d0f14), // very dark red at tail tip
-  dorsalGradient: true,
-  wingGradient:   true,
-  tailGradient:   true,
-};
-const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
-  // Back: pure/cool blue at head → brighter/more vivid blue toward tail
-  headBack:  new THREE.Color(0x3b6fa0), // pure medium blue on the crown/back
-  tailBack:  new THREE.Color(0x50a0d8), // brighter vivid blue near the rump/tail
-  // Belly: light blue/gray near beak → white toward tail
-  headBelly: new THREE.Color(0xb0c8df), // light blue-gray at throat/breast
-  tailBelly: new THREE.Color(0xf0f4f8), // near-white on the lower belly/vent
-  wing:    new THREE.Color(0x4070a8), // medium blue at wing root
-  wingTip: new THREE.Color(0x1c3350), // navy blue at tip
-  tail:    new THREE.Color(0x50a0d8), // bright blue tail base (matches tailBack)
-  tailTip: new THREE.Color(0x1c3350), // navy at tail tip
-  dorsalGradient: true,
-  wingGradient:   true,
-  tailGradient:   true,
-};
-
-// --- Optional "dragon" predator variant (nature style only): much larger,
-// purple, leathery-winged silhouette instead of the hawk geometry.
-// Brightened from an earlier, much darker pair (0x4a2270/0x9c43be) — those,
-// combined with the wing material's own darkening multiply below, crushed
-// the wings/tail to near-solid black under normal lighting, hiding all the
-// scallop/bone-tube surface detail added to the wing geometry. These stay
-// deep and saturated (a "black dragon" should still read dark) but leave
-// enough headroom for facet-by-facet lighting variation to show through.
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x61339b); // matched to the visible root tone at the tail base
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0x7b4fc2); // brighter chase tint while staying in the same palette
-// Fish tank sharks reuse the dragon's geometry-selection path (isDragon)
-// but must not inherit its purple scale coloring — real sharks read as
-// medium gray, not violet. Kept as separate constants (rather than
-// reusing DRAGON_PREDATOR_BASE/HUNT for both styles) so nature's dragon
-// and fishtank's shark can be tinted independently.
-const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
-const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
-
-// --- "Unicorn" predator kind (all styles): light lavender body, always
-// upright (see keepUpright), gentle-chase-only — see Predator.kind. Wings
-// get a baked rainbow vertex-color gradient (nature style only, see
-// creatureGeometry's addRainbowVertexColors) rather than a flat tint, so the
-// body/tail colors here are deliberately close to white — a strongly
-// tinted body color would multiply against the rainbow vertex colors and
-// wash them out (InstancedMesh's per-instance color multiplies with the
-// material's vertexColors output).
-const NATURE_UNICORN_BODY = new THREE.Color(0xc9a8f0); // light lavender
-const NATURE_UNICORN_HUNT = new THREE.Color(0xe8c9ff); // brighter pale lavender-pink when locked on
-const NATURE_UNICORN_WING = new THREE.Color(0xf3ecff); // near-white so the rainbow vertex gradient reads clearly
-const ARCADE_UNICORN_EMISSIVE = new THREE.Color(0xd6a8ff);
-const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
-const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
 
 const BOID_LENGTH = 7;
 const BOID_WIDTH = 2.6;
@@ -564,17 +408,7 @@ function idHash(id: number, salt: number): number {
   return x - Math.floor(x);
 }
 
-/** Distinct body/wing/tail base colors for a boid species with non-uniform
- * plumage (e.g. the parrot's macaw-style coloring), used by updateInstances
- * in place of its default single-baseColor scheme. */
-interface SpeciesColorSet {
-  body: THREE.Color;
-  wing: THREE.Color;
-  tail: THREE.Color;
-}
-
-/**
- * All colour-related parameters for one `updateInstances` call.
+/** All colour-related parameters for one `updateInstances` call.
  * Bundled as a named-field object so call sites are self-documenting and
  * immune to positional-parameter order bugs.
  */
@@ -1112,6 +946,7 @@ export class Renderer3D {
   private appliedLightShaftsEnabled: boolean | null = null;
   private appliedWaterEffectsEnabled: boolean | null = null;
   private appliedShadowsEnabled: boolean | null = null;
+  private sceneRenderers!: Record<VisualStyle, SceneRendererHooks>;
 
   constructor(canvas: HTMLCanvasElement) {
     // logarithmicDepthBuffer: the camera's near/far planes span a huge
@@ -1219,12 +1054,51 @@ export class Renderer3D {
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.4, 0.15);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
+
+    this.initializeSceneRenderers();
+  }
+
+  private initializeSceneRenderers(): void {
+    this.sceneRenderers = createSceneRendererHooks({
+      nature: new NatureSceneRenderer3D({
+        camera: this.camera,
+        controls: this.controls,
+        driftingClouds: this.driftingClouds,
+        fishtankEnv: this.fishtankEnv,
+        natureEnv: this.natureEnv,
+        updateTransientEffects: (sim, elapsed) => this.spawnFireFromDragons(sim, elapsed),
+      }),
+      fishtank: new FishtankSceneRenderer3D({
+        camera: this.camera,
+        controls: this.controls,
+        driftingClouds: this.driftingClouds,
+        fishtankCenter: this.fishtankCenter,
+        fishtankEnv: this.fishtankEnv,
+        natureEnv: this.natureEnv,
+      }),
+      arcade: new ArcadeSceneRenderer3D({
+        camera: this.camera,
+        controls: this.controls,
+        driftingClouds: this.driftingClouds,
+        fishtankEnv: this.fishtankEnv,
+        natureEnv: this.natureEnv,
+      }),
+    });
+  }
+
+  private getSceneRenderer(style: VisualStyle): SceneRendererHooks {
+    return this.sceneRenderers[style];
+  }
+
+  private configureSceneEnvironmentAnchors(sim: Simulation, center: THREE.Vector3, maxDim: number): void {
+    for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+      this.sceneRenderers[style].configureEnvironmentAnchors(sim, center, maxDim);
+    }
   }
 
   private buildInstanceSet(
     geometries: CreatureGeometries,
     style: VisualStyle,
-    emissive: THREE.Color,
     count: number,
     isDragon: boolean = false,
     rainbowWings: boolean = false,
@@ -1232,18 +1106,20 @@ export class Renderer3D {
   ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
-    const { isOrganic, isFishtank } = this.getStyleFlags(style);
+    const sceneRenderer = this.getSceneRenderer(style);
+    const materialDefaults = sceneRenderer.getCreatureMaterialDefaults();
+    const { isFishtank } = this.getStyleFlags(style);
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      emissive: isOrganic ? 0x000000 : emissive,
-      emissiveIntensity: isOrganic ? 0 : 1.4,
+      emissive: materialDefaults.bodyEmissive,
+      emissiveIntensity: materialDefaults.bodyEmissiveIntensity,
       // Dragons get a slightly glossier (lower-roughness) finish than the
       // fully matte default nature/fishtank look — with the dark scale
       // color, a fully matte 0.9 roughness barely differentiates facets
       // under the key light, so faceted geometry (frill spikes, neck bend,
       // leg joints) reads as flat black regardless of angle. A touch of
       // sheen gives visible specular highlights that vary with facet normal.
-      roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
+      roughness: materialDefaults.bodyRoughness(isDragon),
       metalness: 0,
       // Unicorns only: the body geometry bakes a gold vertex color onto
       // just the horn (see creatureGeometry's mergeGeometriesWithColor) so it
@@ -1267,10 +1143,10 @@ export class Renderer3D {
       // against the dragon's purple body, and multiplying it against the
       // shark's gray body would leak a visible purple/pink cast into the
       // fins/tail instead of the intended plain gray.
-      color: isDragon ? (isFishtank ? 0xb8bcc0 : 0x9c86ab) : 0xffffff,
-      emissive: isOrganic ? 0x000000 : emissive,
-      emissiveIntensity: isOrganic ? 0 : 1.1,
-      roughness: isOrganic ? (isDragon ? 0.65 : 0.9) : 0.5,
+      color: materialDefaults.wingColor(isDragon, isFishtank),
+      emissive: materialDefaults.wingEmissive,
+      emissiveIntensity: materialDefaults.wingEmissiveIntensity,
+      roughness: materialDefaults.wingRoughness(isDragon),
       metalness: 0,
       side: THREE.DoubleSide,
       // Enable wing vertex colors whenever that geometry actually carries
@@ -1425,32 +1301,24 @@ export class Renderer3D {
     };
   }
 
-  private getActiveStyleFlags(): StyleFlags {
-    return this.getStyleFlags(params.visualStyle);
-  }
-
-  private applyStyleTransitionOnStyleChange(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+  private applyStyleTransitionOnStyleChange(sim: Simulation, style: VisualStyle): void {
     if (this.currentStyle === style) return;
-    const { isNature, isFishtank, isOrganic } = flags;
     const wasFishtank = this.currentStyle === 'fishtank';
     this.currentStyle = style;
-    this.bloomPass.enabled = !isOrganic;
+    const sceneRenderer = this.getSceneRenderer(style);
+    const presentation = sceneRenderer.getPresentationSettings();
+    this.bloomPass.enabled = presentation.bloomEnabled;
     // The screen-space afterimage/motion-trail effect persists whole
     // previous frames — great for arcade neon trails, but when the
     // camera pans in an organic (fog-using) style it drags a ghost
     // trail of the bright sky/water (especially the sun disc in nature)
     // across the frame, looking like a smeary lens flare and leaving
     // "hovering circle" afterimages.
-    this.afterimagePass.enabled = !isOrganic;
-    this.natureEnv.setVisible(isNature);
-    this.fishtankEnv.setVisible(isFishtank);
-    this.driftingClouds.setVisible(isNature);
-    // Fishtank has its own dedicated glass-box wireframe (frameEdges,
-    // see styles/fishtank/environment.ts) so the generic debug
-    // boundsHelper stays hidden for both organic styles, same as before.
-    if (this.boundsHelper) this.boundsHelper.visible = !isOrganic;
-    this.ambientLight.intensity = isOrganic ? 0.55 : 0.35;
-    this.keyLight.visible = !isOrganic;
+    this.afterimagePass.enabled = presentation.afterimageEnabled;
+    sceneRenderer.setStyleVisibility();
+    if (this.boundsHelper) this.boundsHelper.visible = presentation.boundsHelperVisible;
+    this.ambientLight.intensity = presentation.ambientLightIntensity;
+    this.keyLight.visible = presentation.keyLightVisible;
 
     // Re-apply the zoom clamp for the new style: nature's distance fog
     // needs a tight max zoom-out, while fishtank now has real geometry
@@ -1458,56 +1326,52 @@ export class Renderer3D {
     // out further, so it gets a much looser clamp than nature.
     const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
     const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-    this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
-    this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltUpRad : 0;
-    this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltDownRad : Math.PI;
-
-    // Re-frame the camera when crossing into/out of fishtank specifically.
-    if (isFishtank !== wasFishtank) {
-      const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-      if (isFishtank) center.y = fishtankBounds.tankCenterY;
-      const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-      this.camera.position.set(
-        center.x + maxDim * 0.6 * cameraDistScale,
-        center.y + maxDim * 0.4 * cameraDistScale,
-        center.z + maxDim * 0.9 * cameraDistScale,
-      );
-      this.controls.target.copy(center);
-      this.controls.update();
-    }
+    sceneRenderer.applyStyleTransition(sim, maxDim, fishtankBounds, wasFishtank);
   }
 
   private updateEnvironmentParameterToggles(): void {
+    const toggles: SceneEnvironmentToggles = {
+      fogEnabled: params.fogEnabled,
+      timeOfDay: params.timeOfDay,
+      lightShaftsEnabled: params.lightShaftsEnabled,
+      waterEffectsEnabled: params.waterEffectsEnabled,
+    };
+    const togglesChanged =
+      this.appliedFogEnabled !== params.fogEnabled ||
+      this.appliedTimeOfDay !== params.timeOfDay ||
+      this.appliedLightShaftsEnabled !== params.lightShaftsEnabled ||
+      this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled;
+    if (togglesChanged) {
+      for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+        this.sceneRenderers[style].applyEnvironmentToggles(toggles);
+      }
+    }
     if (this.appliedFogEnabled !== params.fogEnabled) {
-      this.natureEnv.setFogEnabled(params.fogEnabled);
-      this.fishtankEnv.setFogEnabled(params.fogEnabled);
       this.appliedFogEnabled = params.fogEnabled;
     }
     if (this.appliedTimeOfDay !== params.timeOfDay) {
-      this.natureEnv.setTimeOfDay(params.timeOfDay);
-      this.fishtankEnv.setTimeOfDay(params.timeOfDay);
       this.appliedTimeOfDay = params.timeOfDay;
     }
     if (this.appliedLightShaftsEnabled !== params.lightShaftsEnabled) {
-      this.natureEnv.setLightShaftsEnabled(params.lightShaftsEnabled);
       this.appliedLightShaftsEnabled = params.lightShaftsEnabled;
     }
     if (this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled) {
-      this.fishtankEnv.setWaterEffectsEnabled(params.waterEffectsEnabled);
       this.appliedWaterEffectsEnabled = params.waterEffectsEnabled;
     }
     const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled;
     if (this.appliedShadowsEnabled !== shadowsEnabled) {
       this.renderer.shadowMap.enabled = shadowsEnabled;
       this.keyLight.castShadow = shadowsEnabled;
-      this.natureEnv.sunLight.castShadow = shadowsEnabled;
-      this.fishtankEnv.keyLight.castShadow = shadowsEnabled;
+      for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+        this.sceneRenderers[style].setShadowsEnabled(shadowsEnabled);
+      }
       this.appliedShadowsEnabled = shadowsEnabled;
     }
   }
 
-  private ensureBoundsHelperAndFraming(sim: Simulation, flags: StyleFlags): void {
-    const { isNature, isFishtank, isOrganic } = flags;
+  private ensureBoundsHelperAndFraming(sim: Simulation, style: VisualStyle): void {
+    const sceneRenderer = this.getSceneRenderer(style);
+    const presentation = sceneRenderer.getPresentationSettings();
     const expectedKey = `${sim.width}x${sim.height}x${params.worldDepth}`;
     if (this.boundsHelper?.userData.key === expectedKey) return;
     if (this.boundsHelper) {
@@ -1521,31 +1385,19 @@ export class Renderer3D {
     this.boundsHelper = new THREE.LineSegments(edges, material);
     this.boundsHelper.position.set(sim.width / 2, sim.height / 2, params.worldDepth / 2);
     this.boundsHelper.userData.key = expectedKey;
-    this.boundsHelper.visible = !isOrganic;
+    this.boundsHelper.visible = presentation.boundsHelperVisible;
     this.scene.add(this.boundsHelper);
     box.dispose();
 
     const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
     const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
     const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-    const cameraTarget = center.clone();
-    if (isFishtank) cameraTarget.y = fishtankBounds.tankCenterY;
-    const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-    this.camera.position.set(
-      cameraTarget.x + maxDim * 0.6 * cameraDistScale,
-      cameraTarget.y + maxDim * 0.4 * cameraDistScale,
-      cameraTarget.z + maxDim * 0.9 * cameraDistScale,
-    );
-    this.controls.target.copy(cameraTarget);
-    this.controls.update();
+    sceneRenderer.configureInitialFraming(sim, maxDim, fishtankBounds);
 
-    placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
-    placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
-    this.driftingClouds.configure(center, maxDim);
+    this.configureSceneEnvironmentAnchors(sim, center, maxDim);
 
-    const flockScale = maxDim;
     this.controls.minDistance = maxDim * 0.05;
-    this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
+    sceneRenderer.applyStyleTransition(sim, maxDim, fishtankBounds, false);
   }
 
   private reconcileBoidInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
@@ -1581,7 +1433,7 @@ export class Renderer3D {
           this.disposeInstanceSet(this.speciesInstances.get('parrot') ?? null);
           this.speciesInstances.set(
             'parrot',
-            this.buildInstanceSet(this.natureParrotNeutralGeometries, style, config.arcadeEmissive, neutralCount, false, false, true),
+            this.buildInstanceSet(this.natureParrotNeutralGeometries, style, neutralCount, false, false, true),
           );
           this.speciesInstanceKeys.set('parrot', neutralKey);
         }
@@ -1602,7 +1454,6 @@ export class Renderer3D {
               this.buildInstanceSet(
                 geometryForProfile(profile),
                 style,
-                config.arcadeEmissive,
                 profileCount,
                 false,
                 false,
@@ -1637,7 +1488,7 @@ export class Renderer3D {
         const bodyVertexColors = isOrganic;
         this.speciesInstances.set(
           config.species,
-          this.buildInstanceSet(geometries, style, config.arcadeEmissive, count, false, false, bodyVertexColors),
+          this.buildInstanceSet(geometries, style, count, false, false, bodyVertexColors),
         );
         this.speciesInstanceKeys.set(config.species, key);
       }
@@ -1663,7 +1514,7 @@ export class Renderer3D {
             : this.arcadePredatorGeometries;
       this.predatorInstances.set(
         'hawk',
-        this.buildInstanceSet(geometries, style, ARCADE_PREDATOR_EMISSIVE, hawkCount, isDragon, false, isDragon || isOrganic),
+        this.buildInstanceSet(geometries, style, hawkCount, isDragon, false, isDragon || isOrganic),
       );
       this.predatorInstanceKeys.set('hawk', hawkKey);
       this.dragonDisplayQuats.clear();
@@ -1685,7 +1536,6 @@ export class Renderer3D {
         this.buildInstanceSet(
           geometries,
           style,
-          ARCADE_UNICORN_EMISSIVE,
           unicornCount,
           false,
           rainbowWings,
@@ -1708,14 +1558,12 @@ export class Renderer3D {
   }
 
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
-  private ensureScene(sim: Simulation): void {
-    const style = params.visualStyle;
-    const flags = this.getStyleFlags(style);
+  private ensureScene(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     this.reconcileBoidInstanceSets(sim, style, flags);
 
     this.reconcilePredatorInstanceSets(sim, style, flags);
 
-    this.applyStyleTransitionOnStyleChange(sim, style, flags);
+    this.applyStyleTransitionOnStyleChange(sim, style);
 
     this.updateEnvironmentParameterToggles();
 
@@ -1725,9 +1573,12 @@ export class Renderer3D {
     // whole tank" distance normal fishtank browsing uses — hide the
     // surrounding room while it's active so the transparent glass/water
     // doesn't show the room incongruously right behind the creature.
-    this.fishtankEnv.setRoomVisible(params.galleryCreature === null);
+    const galleryCreatureActive = params.galleryCreature !== null;
+    for (const sceneStyle of ['nature', 'fishtank', 'arcade'] as const) {
+      this.sceneRenderers[sceneStyle].setGalleryCreatureActive(galleryCreatureActive);
+    }
 
-    this.ensureBoundsHelperAndFraming(sim, flags);
+    this.ensureBoundsHelperAndFraming(sim, style);
 
     this.scheduleShaderWarmup(style);
   }
@@ -2700,8 +2551,8 @@ export class Renderer3D {
    * actually pursuing prey (huntIntensity above a threshold) and never
    * while digesting/resting.
    */
-  private spawnFireFromDragons(sim: Simulation, elapsed: number, flags: StyleFlags): void {
-    if (!(flags.isNature && params.dragonPredators)) return;
+  private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
+    if (!params.dragonPredators) return;
     for (const predator of sim.predators) {
       // Unicorns are never rendered as dragons (they have their own
       // geometry) and shouldn't breathe fire regardless.
@@ -2744,11 +2595,9 @@ export class Renderer3D {
    * space next to the creature instead of the creature itself.
    */
   toRenderedPosition(x: number, y: number, z: number): THREE.Vector3 {
-    const { isFishtank } = this.getActiveStyleFlags();
-    if (!isFishtank) return new THREE.Vector3(x, y, z);
-    const scale = TANK_VISUAL_SCALE;
-    const c = this.fishtankCenter;
-    return new THREE.Vector3(c.x + (x - c.x) * scale, c.y + (y - c.y) * scale, c.z + (z - c.z) * scale);
+    const rendered = new THREE.Vector3();
+    this.getSceneRenderer(params.visualStyle).mapPositionToRenderSpace(x, y, z, rendered);
+    return rendered;
   }
 
   /**
@@ -2828,7 +2677,7 @@ export class Renderer3D {
     // param) — the geometry's own local bounding box doesn't reflect that,
     // so without this the fishtank creature would actually render larger
     // than this distance was solved for and clip out of frame.
-    const worldScale = this.getActiveStyleFlags().isFishtank ? TANK_VISUAL_SCALE : 1;
+    const worldScale = this.getSceneRenderer(params.visualStyle).getWorldScale();
     const radius = sphere.radius * worldScale;
     if (!radius) return fallbackDistance;
 
@@ -3276,41 +3125,31 @@ export class Renderer3D {
   private applyUfoVisualState(
     visual: UFOVisual,
     ufo: Simulation['ufos'][number] | undefined,
-    flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
     ufoWorldScale: number,
     ufoBeamLength: number,
   ): void {
-    const { isFishtank } = flags;
     if (ufo) {
-      if (isFishtank) {
-        this.tmpVec3.set(
-          this.fishtankCenter.x + (ufo.position.x - this.fishtankCenter.x) * ufoWorldScale,
-          this.fishtankCenter.y + (ufo.position.y - this.fishtankCenter.y) * ufoWorldScale,
-          this.fishtankCenter.z + (ufo.position.z - this.fishtankCenter.z) * ufoWorldScale,
-        );
-      } else {
-        this.tmpVec3.set(ufo.position.x, ufo.position.y, ufo.position.z);
-      }
+      sceneRenderer.mapPositionToRenderSpace(ufo.position.x, ufo.position.y, ufo.position.z, this.tmpVec3);
       visual.setState(true, this.tmpVec3, ufo.beamStrength, ufoBeamLength, ufoWorldScale);
       return;
     }
     visual.setState(false, this.tmpVec3, 0, 0);
   }
 
-  private getUfoRenderScaleParams(flags: StyleFlags): { ufoWorldScale: number; ufoBeamLength: number } {
-    const { isFishtank } = flags;
-    const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+  private getUfoRenderScaleParams(sceneRenderer: SceneRendererHooks): { ufoWorldScale: number; ufoBeamLength: number } {
+    const ufoWorldScale = sceneRenderer.getWorldScale();
     const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
     return { ufoWorldScale, ufoBeamLength };
   }
 
-  private updateUfoVisuals(sim: Simulation, dt: number, flags: StyleFlags): void {
+  private updateUfoVisuals(sim: Simulation, dt: number, sceneRenderer: SceneRendererHooks): void {
     // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
     // slots beyond the current active count are simply hidden.
-    const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(flags);
+    const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(sceneRenderer);
     for (let i = 0; i < this.ufoVisuals.length; i++) {
       const visual = this.ufoVisuals[i];
-      this.applyUfoVisualState(visual, sim.ufos[i], flags, ufoWorldScale, ufoBeamLength);
+      this.applyUfoVisualState(visual, sim.ufos[i], sceneRenderer, ufoWorldScale, ufoBeamLength);
       visual.update(dt);
     }
   }
@@ -3328,14 +3167,12 @@ export class Renderer3D {
   private updatePostProcessingAndEnvironment(
     elapsed: number,
     dt: number,
-    flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
-    const { isNature, isFishtank } = flags;
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
-    if (isNature) this.natureEnv.update(elapsed);
-    if (isFishtank) this.fishtankEnv.update(elapsed);
+    sceneRenderer.updateEnvironment(elapsed);
     this.renderer.toneMappingExposure = this.getToneMappingExposureForTimeOfDay(params.timeOfDay);
     this.driftingClouds.update(dt);
   }
@@ -3344,64 +3181,23 @@ export class Renderer3D {
     sim: Simulation,
     elapsed: number,
     dt: number,
-    flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
-    this.spawnFireFromDragons(sim, elapsed, flags);
+    sceneRenderer.updateTransientEffects(sim, elapsed);
     this.fireBreathEffects.update(dt);
-    this.updateUfoVisuals(sim, dt, flags);
+    this.updateUfoVisuals(sim, dt, sceneRenderer);
   }
 
   private updateSceneEffects(
     sim: Simulation,
     elapsed: number,
     dt: number,
-    flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
-    this.updatePostProcessingAndEnvironment(elapsed, dt, flags);
-    this.updateTransientSceneEffects(sim, elapsed, dt, flags);
-  }
-
-  private updateFishtankCenter(sim: Simulation, flags: StyleFlags): void {
-    const { isFishtank } = flags;
-    if (!isFishtank) return;
-    // Around the tank's true center (see updateInstances' worldScale
-    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
-    // is the sim's raw center, matching placeFishtankEnvironment's
-    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
-    // resting on the table — NOT the sim's raw vertical center, matching
-    // placeFishtankEnvironment's bottom-anchored vertical growth so fish
-    // grow in lockstep with the glass box instead of drifting out of sync.
-    this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
-  }
-
-  private computeFishtankMaxDistance(sim: Simulation): number {
-    const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-    const polarAngle = this.controls.getPolarAngle();
-    const elevation = Math.abs(polarAngle - Math.PI / 2);
-    const distToCeiling = bounds.roomFloorY + bounds.roomHeight - bounds.tankCenterY;
-    const distToFloor = bounds.tankCenterY - bounds.roomFloorY;
-    const vertClearance = polarAngle < Math.PI / 2 ? distToCeiling : distToFloor;
-    const sinE = Math.sin(elevation);
-    const cosE = Math.cos(elevation);
-    const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
-    const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
-    return Math.min(vertCap, horizCap);
-  }
-
-  private updateFishtankDynamicCameraClamp(sim: Simulation, flags: StyleFlags): void {
-    const { isFishtank } = flags;
-    if (!isFishtank) return;
-    // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
-    // maxCameraDistance (set once, in ensureScene) has to satisfy the
-    // *worst-case* permitted tilt at all times, which is overly
-    // conservative at/near a level (untitled) view — there's no
-    // floor/ceiling to clip through at all when looking straight
-    // across the room. Recomputed every frame from the camera's current
-    // polar angle so level view can zoom farther while steep tilts keep
-    // safe clearance to walls/floor/ceiling.
-    this.controls.maxDistance = this.computeFishtankMaxDistance(sim);
+    this.updatePostProcessingAndEnvironment(elapsed, dt, sceneRenderer);
+    this.updateTransientSceneEffects(sim, elapsed, dt, sceneRenderer);
   }
 
   private updateCreatureInstances(
@@ -3423,14 +3219,15 @@ export class Renderer3D {
 
   private renderFrame(
     sim: Simulation,
+    sceneRenderer: SceneRendererHooks,
     elapsed: number,
     dt: number,
     flags: StyleFlags,
   ): void {
-    this.updateFishtankCenter(sim, flags);
-    this.updateSceneEffects(sim, elapsed, dt, flags);
+    sceneRenderer.updateFrameAnchors(sim);
+    this.updateSceneEffects(sim, elapsed, dt, sceneRenderer);
     this.updateCreatureInstances(sim, elapsed, dt, flags);
-    this.updateFishtankDynamicCameraClamp(sim, flags);
+    sceneRenderer.updateCameraClamp(sim);
     this.renderOutput();
   }
 
@@ -3440,10 +3237,12 @@ export class Renderer3D {
   }
 
   render(sim: Simulation): void {
-    this.ensureScene(sim);
+    const style = params.visualStyle;
+    const flags = this.getStyleFlags(style);
+    const sceneRenderer = this.getSceneRenderer(style);
+    this.ensureScene(sim, style, flags);
     const { elapsed, dt } = this.getRenderTiming();
-    const flags = this.getActiveStyleFlags();
-    this.renderFrame(sim, elapsed, dt, flags);
+    this.renderFrame(sim, sceneRenderer, elapsed, dt, flags);
   }
 
   private disposeBoidInstanceSets(): void {
@@ -3503,9 +3302,9 @@ export class Renderer3D {
     this.disposeParrotProfileInstanceSets();
     this.disposePredatorInstanceSets();
     this.disposeAllCreatureGeometrySets();
-    this.natureEnv.dispose();
-    this.fishtankEnv.dispose();
-    this.driftingClouds.dispose();
+    for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+      this.sceneRenderers[style].dispose();
+    }
     this.bloodEffects.dispose();
     this.fireBreathEffects.dispose();
     this.ufoVisuals.forEach((visual) => visual.dispose());
