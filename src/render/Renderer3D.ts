@@ -742,6 +742,21 @@ interface StyleFlags {
   isOrganic: boolean;
 }
 
+interface SceneRendererHooks {
+  setStyleVisibility: () => void;
+  applyStyleTransition: (
+    sim: Simulation,
+    maxDim: number,
+    fishtankBounds: ReturnType<typeof computeFishtankRoomBounds>,
+    wasFishtank: boolean,
+  ) => void;
+  updateEnvironment: (elapsed: number) => void;
+  updateTransientEffects: (sim: Simulation, elapsed: number) => void;
+  configureEnvironmentAnchors: (sim: Simulation, center: THREE.Vector3, maxDim: number) => void;
+  updateFrameAnchors: (sim: Simulation) => void;
+  updateCameraClamp: (sim: Simulation) => void;
+}
+
 interface PredatorRenderFlags {
   isDragon: boolean;
   isShark: boolean;
@@ -1112,6 +1127,7 @@ export class Renderer3D {
   private appliedLightShaftsEnabled: boolean | null = null;
   private appliedWaterEffectsEnabled: boolean | null = null;
   private appliedShadowsEnabled: boolean | null = null;
+  private sceneRenderers!: Record<VisualStyle, SceneRendererHooks>;
 
   constructor(canvas: HTMLCanvasElement) {
     // logarithmicDepthBuffer: the camera's near/far planes span a huge
@@ -1219,6 +1235,144 @@ export class Renderer3D {
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.4, 0.15);
     this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
+
+    this.sceneRenderers = this.createSceneRenderers();
+  }
+
+  private createSceneRenderers(): Record<VisualStyle, SceneRendererHooks> {
+    return {
+      nature: {
+        setStyleVisibility: () => this.setNatureStyleVisibility(),
+        applyStyleTransition: (sim, maxDim, fishtankBounds, wasFishtank) =>
+          this.applyNatureStyleTransition(sim, maxDim, fishtankBounds, wasFishtank),
+        updateEnvironment: (elapsed) => this.updateNatureEnvironment(elapsed),
+        updateTransientEffects: (sim, elapsed) => this.spawnFireFromDragons(sim, elapsed),
+        configureEnvironmentAnchors: (_sim, center, maxDim) => this.configureNatureEnvironmentAnchors(center, maxDim),
+        updateFrameAnchors: (_sim) => {},
+        updateCameraClamp: (_sim) => {},
+      },
+      fishtank: {
+        setStyleVisibility: () => this.setFishtankStyleVisibility(),
+        applyStyleTransition: (sim, maxDim, fishtankBounds, wasFishtank) =>
+          this.applyFishtankStyleTransition(sim, maxDim, fishtankBounds, wasFishtank),
+        updateEnvironment: (elapsed) => this.fishtankEnv.update(elapsed),
+        updateTransientEffects: (_sim, _elapsed) => {},
+        configureEnvironmentAnchors: (sim, _center, _maxDim) => this.configureFishtankEnvironmentAnchors(sim),
+        updateFrameAnchors: (sim) => this.updateFishtankCenter(sim),
+        updateCameraClamp: (sim) => this.updateFishtankDynamicCameraClamp(sim),
+      },
+      arcade: {
+        setStyleVisibility: () => this.setArcadeStyleVisibility(),
+        applyStyleTransition: (sim, maxDim, fishtankBounds, wasFishtank) =>
+          this.applyArcadeStyleTransition(sim, maxDim, fishtankBounds, wasFishtank),
+        updateEnvironment: (_elapsed) => {},
+        updateTransientEffects: (_sim, _elapsed) => {},
+        configureEnvironmentAnchors: (_sim, _center, _maxDim) => {},
+        updateFrameAnchors: (_sim) => {},
+        updateCameraClamp: (_sim) => {},
+      },
+    };
+  }
+
+  private getSceneRenderer(style: VisualStyle): SceneRendererHooks {
+    return this.sceneRenderers[style];
+  }
+
+  private setNatureStyleVisibility(): void {
+    this.natureEnv.setVisible(true);
+    this.fishtankEnv.setVisible(false);
+    this.driftingClouds.setVisible(true);
+  }
+
+  private setFishtankStyleVisibility(): void {
+    this.natureEnv.setVisible(false);
+    this.fishtankEnv.setVisible(true);
+    this.driftingClouds.setVisible(false);
+  }
+
+  private setArcadeStyleVisibility(): void {
+    this.natureEnv.setVisible(false);
+    this.fishtankEnv.setVisible(false);
+    this.driftingClouds.setVisible(false);
+  }
+
+  private applyNatureStyleTransition(
+    sim: Simulation,
+    maxDim: number,
+    _fishtankBounds: ReturnType<typeof computeFishtankRoomBounds>,
+    wasFishtank: boolean,
+  ): void {
+    this.controls.maxDistance = maxDim * 5.5;
+    this.controls.minPolarAngle = 0;
+    this.controls.maxPolarAngle = Math.PI;
+    if (!wasFishtank) return;
+    const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    this.camera.position.set(
+      center.x + maxDim * 0.6,
+      center.y + maxDim * 0.4,
+      center.z + maxDim * 0.9,
+    );
+    this.controls.target.copy(center);
+    this.controls.update();
+  }
+
+  private applyFishtankStyleTransition(
+    sim: Simulation,
+    maxDim: number,
+    fishtankBounds: ReturnType<typeof computeFishtankRoomBounds>,
+    wasFishtank: boolean,
+  ): void {
+    this.controls.maxDistance = fishtankBounds.maxCameraDistance;
+    this.controls.minPolarAngle = Math.PI / 2 - fishtankBounds.cameraTiltUpRad;
+    this.controls.maxPolarAngle = Math.PI / 2 + fishtankBounds.cameraTiltDownRad;
+    if (wasFishtank) return;
+    const center = new THREE.Vector3(sim.width / 2, fishtankBounds.tankCenterY, params.worldDepth / 2);
+    this.camera.position.set(
+      center.x + maxDim * 0.6 * TANK_VISUAL_SCALE,
+      center.y + maxDim * 0.4 * TANK_VISUAL_SCALE,
+      center.z + maxDim * 0.9 * TANK_VISUAL_SCALE,
+    );
+    this.controls.target.copy(center);
+    this.controls.update();
+  }
+
+  private applyArcadeStyleTransition(
+    sim: Simulation,
+    maxDim: number,
+    _fishtankBounds: ReturnType<typeof computeFishtankRoomBounds>,
+    wasFishtank: boolean,
+  ): void {
+    this.controls.maxDistance = maxDim * 25;
+    this.controls.minPolarAngle = 0;
+    this.controls.maxPolarAngle = Math.PI;
+    if (!wasFishtank) return;
+    const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    this.camera.position.set(
+      center.x + maxDim * 0.6,
+      center.y + maxDim * 0.4,
+      center.z + maxDim * 0.9,
+    );
+    this.controls.target.copy(center);
+    this.controls.update();
+  }
+
+  private updateNatureEnvironment(elapsed: number): void {
+    this.natureEnv.update(elapsed);
+  }
+
+  private configureNatureEnvironmentAnchors(center: THREE.Vector3, maxDim: number): void {
+    placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
+    this.driftingClouds.configure(center, maxDim);
+  }
+
+  private configureFishtankEnvironmentAnchors(sim: Simulation): void {
+    placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
+  }
+
+  private configureSceneEnvironmentAnchors(sim: Simulation, center: THREE.Vector3, maxDim: number): void {
+    for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+      this.sceneRenderers[style].configureEnvironmentAnchors(sim, center, maxDim);
+    }
   }
 
   private buildInstanceSet(
@@ -1431,9 +1585,10 @@ export class Renderer3D {
 
   private applyStyleTransitionOnStyleChange(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     if (this.currentStyle === style) return;
-    const { isNature, isFishtank, isOrganic } = flags;
+    const { isOrganic } = flags;
     const wasFishtank = this.currentStyle === 'fishtank';
     this.currentStyle = style;
+    const sceneRenderer = this.getSceneRenderer(style);
     this.bloomPass.enabled = !isOrganic;
     // The screen-space afterimage/motion-trail effect persists whole
     // previous frames — great for arcade neon trails, but when the
@@ -1442,9 +1597,7 @@ export class Renderer3D {
     // across the frame, looking like a smeary lens flare and leaving
     // "hovering circle" afterimages.
     this.afterimagePass.enabled = !isOrganic;
-    this.natureEnv.setVisible(isNature);
-    this.fishtankEnv.setVisible(isFishtank);
-    this.driftingClouds.setVisible(isNature);
+    sceneRenderer.setStyleVisibility();
     // Fishtank has its own dedicated glass-box wireframe (frameEdges,
     // see styles/fishtank/environment.ts) so the generic debug
     // boundsHelper stays hidden for both organic styles, same as before.
@@ -1458,23 +1611,7 @@ export class Renderer3D {
     // out further, so it gets a much looser clamp than nature.
     const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
     const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-    this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? maxDim * 5.5 : maxDim * 25;
-    this.controls.minPolarAngle = isFishtank ? Math.PI / 2 - fishtankBounds.cameraTiltUpRad : 0;
-    this.controls.maxPolarAngle = isFishtank ? Math.PI / 2 + fishtankBounds.cameraTiltDownRad : Math.PI;
-
-    // Re-frame the camera when crossing into/out of fishtank specifically.
-    if (isFishtank !== wasFishtank) {
-      const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-      if (isFishtank) center.y = fishtankBounds.tankCenterY;
-      const cameraDistScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-      this.camera.position.set(
-        center.x + maxDim * 0.6 * cameraDistScale,
-        center.y + maxDim * 0.4 * cameraDistScale,
-        center.z + maxDim * 0.9 * cameraDistScale,
-      );
-      this.controls.target.copy(center);
-      this.controls.update();
-    }
+    sceneRenderer.applyStyleTransition(sim, maxDim, fishtankBounds, wasFishtank);
   }
 
   private updateEnvironmentParameterToggles(): void {
@@ -1539,9 +1676,7 @@ export class Renderer3D {
     this.controls.target.copy(cameraTarget);
     this.controls.update();
 
-    placeNatureEnvironment(this.natureEnv, center, maxDim * 30);
-    placeFishtankEnvironment(this.fishtankEnv, sim.width, sim.height, params.worldDepth);
-    this.driftingClouds.configure(center, maxDim);
+    this.configureSceneEnvironmentAnchors(sim, center, maxDim);
 
     const flockScale = maxDim;
     this.controls.minDistance = maxDim * 0.05;
@@ -1708,9 +1843,7 @@ export class Renderer3D {
   }
 
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
-  private ensureScene(sim: Simulation): void {
-    const style = params.visualStyle;
-    const flags = this.getStyleFlags(style);
+  private ensureScene(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     this.reconcileBoidInstanceSets(sim, style, flags);
 
     this.reconcilePredatorInstanceSets(sim, style, flags);
@@ -2700,8 +2833,8 @@ export class Renderer3D {
    * actually pursuing prey (huntIntensity above a threshold) and never
    * while digesting/resting.
    */
-  private spawnFireFromDragons(sim: Simulation, elapsed: number, flags: StyleFlags): void {
-    if (!(flags.isNature && params.dragonPredators)) return;
+  private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
+    if (!params.dragonPredators) return;
     for (const predator of sim.predators) {
       // Unicorns are never rendered as dragons (they have their own
       // geometry) and shouldn't breathe fire regardless.
@@ -3328,14 +3461,12 @@ export class Renderer3D {
   private updatePostProcessingAndEnvironment(
     elapsed: number,
     dt: number,
-    flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
-    const { isNature, isFishtank } = flags;
     // AfterimagePass's damp uniform controls how strongly the previous
     // frame persists — same trailAmount knob used by the 2D renderer.
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
-    if (isNature) this.natureEnv.update(elapsed);
-    if (isFishtank) this.fishtankEnv.update(elapsed);
+    sceneRenderer.updateEnvironment(elapsed);
     this.renderer.toneMappingExposure = this.getToneMappingExposureForTimeOfDay(params.timeOfDay);
     this.driftingClouds.update(dt);
   }
@@ -3345,10 +3476,11 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
-    this.spawnFireFromDragons(sim, elapsed, flags);
+    sceneRenderer.updateTransientEffects(sim, elapsed);
     this.fireBreathEffects.update(dt);
     this.updateUfoVisuals(sim, dt, flags);
   }
@@ -3358,14 +3490,13 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
-    this.updatePostProcessingAndEnvironment(elapsed, dt, flags);
-    this.updateTransientSceneEffects(sim, elapsed, dt, flags);
+    this.updatePostProcessingAndEnvironment(elapsed, dt, sceneRenderer);
+    this.updateTransientSceneEffects(sim, elapsed, dt, flags, sceneRenderer);
   }
 
-  private updateFishtankCenter(sim: Simulation, flags: StyleFlags): void {
-    const { isFishtank } = flags;
-    if (!isFishtank) return;
+  private updateFishtankCenter(sim: Simulation): void {
     // Around the tank's true center (see updateInstances' worldScale
     // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
     // is the sim's raw center, matching placeFishtankEnvironment's
@@ -3390,9 +3521,7 @@ export class Renderer3D {
     return Math.min(vertCap, horizCap);
   }
 
-  private updateFishtankDynamicCameraClamp(sim: Simulation, flags: StyleFlags): void {
-    const { isFishtank } = flags;
-    if (!isFishtank) return;
+  private updateFishtankDynamicCameraClamp(sim: Simulation): void {
     // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
     // maxCameraDistance (set once, in ensureScene) has to satisfy the
     // *worst-case* permitted tilt at all times, which is overly
@@ -3423,14 +3552,15 @@ export class Renderer3D {
 
   private renderFrame(
     sim: Simulation,
+    sceneRenderer: SceneRendererHooks,
     elapsed: number,
     dt: number,
     flags: StyleFlags,
   ): void {
-    this.updateFishtankCenter(sim, flags);
-    this.updateSceneEffects(sim, elapsed, dt, flags);
+    sceneRenderer.updateFrameAnchors(sim);
+    this.updateSceneEffects(sim, elapsed, dt, flags, sceneRenderer);
     this.updateCreatureInstances(sim, elapsed, dt, flags);
-    this.updateFishtankDynamicCameraClamp(sim, flags);
+    sceneRenderer.updateCameraClamp(sim);
     this.renderOutput();
   }
 
@@ -3440,10 +3570,12 @@ export class Renderer3D {
   }
 
   render(sim: Simulation): void {
-    this.ensureScene(sim);
+    const style = params.visualStyle;
+    const flags = this.getStyleFlags(style);
+    const sceneRenderer = this.getSceneRenderer(style);
+    this.ensureScene(sim, style, flags);
     const { elapsed, dt } = this.getRenderTiming();
-    const flags = this.getActiveStyleFlags();
-    this.renderFrame(sim, elapsed, dt, flags);
+    this.renderFrame(sim, sceneRenderer, elapsed, dt, flags);
   }
 
   private disposeBoidInstanceSets(): void {
