@@ -2696,8 +2696,8 @@ export class Renderer3D {
    * actually pursuing prey (huntIntensity above a threshold) and never
    * while digesting/resting.
    */
-  private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
-    if (!(params.visualStyle === 'nature' && params.dragonPredators)) return;
+  private spawnFireFromDragons(sim: Simulation, elapsed: number, flags: StyleFlags): void {
+    if (!(flags.isNature && params.dragonPredators)) return;
     for (const predator of sim.predators) {
       // Unicorns are never rendered as dragons (they have their own
       // geometry) and shouldn't breathe fire regardless.
@@ -3341,7 +3341,7 @@ export class Renderer3D {
   ): void {
     this.spawnBloodFromCatches(sim);
     this.bloodEffects.update(dt);
-    this.spawnFireFromDragons(sim, elapsed);
+    this.spawnFireFromDragons(sim, elapsed, flags);
     this.fireBreathEffects.update(dt);
     this.updateUfoVisuals(sim, dt, flags);
   }
