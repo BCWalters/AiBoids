@@ -3251,6 +3251,10 @@ export class Renderer3D {
     this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
     this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
     this.updateFishtankDynamicCameraClamp(sim, isFishtank);
+    this.renderOutput();
+  }
+
+  private renderOutput(): void {
     this.controls.update();
     this.composer.render();
   }
