@@ -3024,6 +3024,11 @@ export class Renderer3D {
     return BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
   }
 
+  private hasAnyPredatorInstances(): boolean {
+    return this.predatorInstances.get('hawk') !== undefined
+      || this.predatorInstances.get('unicorn') !== undefined;
+  }
+
   private updateBoidSpeciesInstances(
     sim: Simulation,
     elapsed: number,
@@ -3094,6 +3099,7 @@ export class Renderer3D {
     isFishtank: boolean,
     isOrganic: boolean,
   ): void {
+    if (!this.hasAnyPredatorInstances()) return;
     const { isDragon, isShark } = this.getPredatorRenderFlags(isOrganic, isFishtank);
     const { hawks, unicorns } = this.partitionPredators(sim.predators);
     const hawkInstances = this.predatorInstances.get('hawk');
