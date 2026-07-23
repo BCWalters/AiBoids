@@ -1,14 +1,16 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometry,
-  extrudeRingGeometryAlongX,
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
-  bakeVerticalStripeColors,
   buildEyeDotsGeometry,
+} from '../../../geometry/sharedGeometry';
+import {
+  extrudeRingGeometryAlongX,
+  bakeVerticalStripeColors,
   latheBodyRadiusAt,
-} from '../../../geometry/creatureGeometry';
+} from './fishSharedGeometry';
 
 // Fish tank style: the "parrot" boid species' fishtank-exclusive
 // silhouette, reskinned from an earlier placeholder (a duplicate of the

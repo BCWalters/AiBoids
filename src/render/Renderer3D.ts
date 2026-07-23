@@ -10,13 +10,13 @@ import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
 import type { Predator, PredatorKind } from '../sim/Predator';
-import { createBirdGeometries, createRealisticBirdGeometries } from './geometry/birdGeometry';
-import type { SmallBirdPalette } from './geometry/birdGeometry';
+import { createBirdGeometries, createRealisticBirdGeometries } from './styles/nature/geometry/smallBirdGeometry';
+import type { SmallBirdPalette } from './styles/nature/geometry/smallBirdGeometry';
 import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
 import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
 import { createDragonGeometries, computeDragonMouthTransform } from './styles/nature/geometry/dragonGeometry';
 import { createUnicornGeometries } from './styles/nature/geometry/unicornGeometry';
-import type { CreatureGeometries } from './geometry/creatureGeometry';
+import type { CreatureGeometries } from './geometry/sharedGeometry';
 import { createNatureEnvironment, placeNatureEnvironment, type NatureEnvironment } from './styles/nature/environment';
 import {
   createFishtankEnvironment,
@@ -25,7 +25,7 @@ import {
   TANK_VISUAL_SCALE,
   type FishtankEnvironment,
 } from './styles/fishtank/environment';
-import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/fishGeometry';
+import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/smallFishGeometry';
 import { createButterflyfishGeometries } from './styles/fishtank/geometry/butterflyfishGeometry';
 import { createSharkGeometries as createFishtankSharkGeometries, getSharkTailPivotY } from './styles/fishtank/geometry/sharkGeometry';
 import { createSeaHorseGeometries as createFishtankSeaHorseGeometries } from './styles/fishtank/geometry/seaHorseGeometry';

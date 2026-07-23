@@ -1,64 +1,18 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometry,
-  extrudeRingGeometryAlongX,
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
-} from '../../../geometry/creatureGeometry';
+} from '../../../geometry/sharedGeometry';
+import { extrudeRingGeometryAlongX } from './fishSharedGeometry';
 
-// Fish tank style: originally a duplicate of nature's birdGeometry.ts;
-// createFishGeometries (the function actually used for the
-// small-species instances — see Renderer3D's createFishtankFishGeometries
-// alias) has since been reskinned below into a real small-fish silhouette
-// (laterally-compressed torpedo body, dorsal fin, forked caudal fin,
-// small paddle-shaped pectoral fins) instead of the bird shape it started
-// as. createArcadeFishGeometries and buildWingGeometry below are unused
-// leftovers from that original duplicate, kept only in case a future
-// arcade+fishtank combination needs them.
-/**
- * Builds a simple low-poly bird silhouette: an elongated diamond body
- * (nose pointing along local +Y, matching the orientation convention used
- * elsewhere in Renderer3D) plus a pair of flat, swept-back triangular
- * wings that extend sideways from the body's origin. Wings are separate
- * geometries (rather than baked into the body) so each can be given its
- * own per-instance flap rotation in the render loop.
- */
-export function createArcadeFishGeometries(length: number, width: number): CreatureGeometries {
-  const body = new THREE.OctahedronGeometry(1, 0);
-  body.scale(width, length, width);
-
-  const wingSpan = length * 1.1;
-  const wingChord = length * 0.55;
-
-  const wingLeft = buildWingGeometry(wingSpan, wingChord, 1);
-  const wingRight = buildWingGeometry(wingSpan, wingChord, -1);
-
-  return { body, wingLeft, wingRight };
-}
-
-
-/**
- * A flat triangular wing rooted at the origin, extending along the X axis.
- * `side` is +1 for the wing extending toward +X (left) or -1 toward -X
- * (right, mirrored). Swept back slightly (negative Y) for a more natural
- * silhouette than a plain rectangle.
- */
-function buildWingGeometry(span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  const tipX = span * side;
-  const positions = new Float32Array([
-    0, 0, 0, // root, at the body's pivot
-    tipX, -chord * 0.5, 0, // swept-back tip
-    tipX * 0.45, chord * 0.35, 0, // leading-edge shoulder point
-  ]);
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setIndex([0, 1, 2]);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
+// Fish tank style: createFishGeometries builds the small-fish silhouette
+// used for the small-species instances (see Renderer3D's
+// createFishtankFishGeometries alias): a laterally-compressed torpedo
+// body, dorsal fin, forked caudal fin, and small paddle-shaped pectoral
+// fins.
 
 /**
  * Small-fish geometry: a laterally-compressed (taller than it is wide,
@@ -191,70 +145,6 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
   const trailingBulge = new THREE.Vector3(trailingBulgeX, rootY - chord * 0.5, 0);
   const thickness = chord * 0.08;
   return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
-}
-
-
-/**
- * A wing with a solid inner panel plus a fan of thin, separated triangular
- * "finger" feathers at the tip (rooted along the outer trailing edge, each
- * angled slightly differently) — the visual cue that reads as "wingtip
- * primary feathers" on a soaring bird of prey.
- */
-export function buildFingeredWingGeometry(span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
-  const s = side;
-  const positions: number[] = [];
-  const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
-  const lerp3 = (a: number[], b: number[], t: number) => [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-  ];
-
-  const mainSpan = span * 0.72;
-  const root = [0, 0, 0];
-  const tip = [mainSpan * s, -chord * 0.4, 0];
-  const shoulder = [mainSpan * 0.42 * s, chord * 0.42, 0];
-  pushTri(root, shoulder, tip);
-
-  // fingerCount raised from 5->6 and each feather now has an explicit,
-  // deliberate gap to its neighbors (rather than nearly-touching bases)
-  // so individual feathers read as separate shapes rather than one solid
-  // scalloped edge — closer to a real fanned primary-feather look.
-  const fingerCount = 6;
-  const innerAnchor = [mainSpan * 0.5 * s, -chord * 0.1, 0];
-  const outerAnchor = tip;
-  const halfWidth = 0.075;
-  for (let i = 0; i < fingerCount; i++) {
-    const t = i / (fingerCount - 1);
-    const rootPt = lerp3(innerAnchor, outerAnchor, Math.max(0, t - halfWidth));
-    const rootPt2 = lerp3(innerAnchor, outerAnchor, Math.min(1, t + halfWidth));
-    // Lengthened back up from the prior pass (which overcorrected to
-    // 0.08-0.25*span and read as "fingering effect gone" — barely
-    // visible against the solid main panel). Longest (outermost) feather
-    // now reaches almost exactly to the wing's own nominal total span
-    // (mainSpan 0.72 + 0.28 = 1.0*span) rather than needle-spiking well
-    // past it (the old 0.3-0.42*span bug) or staying tucked well inside
-    // it (barely past the main panel's own edge).
-    const fingerLen = span * (0.12 + 0.16 * t);
-    const spreadRad = ((-16 + 42 * t) * Math.PI) / 180;
-
-    const baseDirX = s;
-    const baseDirY = -0.55;
-    const mag = Math.hypot(baseDirX, baseDirY);
-    const dx = baseDirX / mag;
-    const dy = baseDirY / mag;
-    const rot = spreadRad * s;
-    const rdx = dx * Math.cos(rot) - dy * Math.sin(rot);
-    const rdy = dx * Math.sin(rot) + dy * Math.cos(rot);
-    const tipPt = [rootPt[0] + rdx * fingerLen, rootPt[1] + rdy * fingerLen, 0];
-
-    pushTri(rootPt, rootPt2, tipPt);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.computeVertexNormals();
-  return geometry;
 }
 
 

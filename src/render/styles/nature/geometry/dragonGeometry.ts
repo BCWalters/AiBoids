@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/creatureGeometry';
-import { mergeGeometriesWithColor } from '../../../geometry/creatureGeometry';
+import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
+import { mergeGeometriesWithColor } from '../../../geometry/sharedGeometry';
 
 /**
  * "Dragon" predator geometry: a bulkier, longer-necked lathed body with a
