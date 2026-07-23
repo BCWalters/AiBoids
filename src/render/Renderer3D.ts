@@ -3268,11 +3268,16 @@ export class Renderer3D {
     visual.setState(false, this.tmpVec3, 0, 0);
   }
 
+  private getUfoRenderScaleParams(isFishtank: boolean): { ufoWorldScale: number; ufoBeamLength: number } {
+    const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
+    const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
+    return { ufoWorldScale, ufoBeamLength };
+  }
+
   private updateUfoVisuals(sim: Simulation, dt: number, isFishtank: boolean): void {
     // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
     // slots beyond the current active count are simply hidden.
-    const ufoWorldScale = isFishtank ? TANK_VISUAL_SCALE : 1;
-    const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
+    const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(isFishtank);
     for (let i = 0; i < this.ufoVisuals.length; i++) {
       const visual = this.ufoVisuals[i];
       this.applyUfoVisualState(visual, sim.ufos[i], isFishtank, ufoWorldScale, ufoBeamLength);
