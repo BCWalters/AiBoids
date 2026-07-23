@@ -619,6 +619,7 @@ interface MotionConfig {
   meshScaleBoost?: number;
   preferUpright?: boolean;
 }
+type UprightStyle = NonNullable<MotionConfig['uprightStyle']>;
 
 interface BirdMaterialTuning {
   bodyTint?: THREE.Color;
@@ -1639,6 +1640,130 @@ export class Renderer3D {
     this.scheduleShaderWarmup(style);
   }
 
+  private getUprightHeadingSmoothingRate(style: UprightStyle): number {
+    if (style === 'unicorn') return UNICORN_HEADING_SMOOTHING_RATE;
+    if (style === 'shark') return SHARK_HEADING_SMOOTHING_RATE;
+    return DRAGON_HEADING_SMOOTHING_RATE;
+  }
+
+  private updateEntityRenderHeading(
+    entity: Boid | Predator,
+    speed: number,
+    dt: number,
+    keepUpright: boolean,
+    uprightStyle: UprightStyle,
+  ): void {
+    if (speed <= 1e-6) return;
+    const invSpeed = 1 / speed;
+    const targetX = entity.velocity.x * invSpeed;
+    const targetY = entity.velocity.y * invSpeed;
+    const targetZ = entity.velocity.z * invSpeed;
+    if (keepUpright) {
+      const rate = 1 - Math.exp(-dt * this.getUprightHeadingSmoothingRate(uprightStyle));
+      let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
+      let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
+      let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
+      const len = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
+      entity.renderHeading.x = hx / len;
+      entity.renderHeading.y = hy / len;
+      entity.renderHeading.z = hz / len;
+      return;
+    }
+    entity.renderHeading.x = targetX;
+    entity.renderHeading.y = targetY;
+    entity.renderHeading.z = targetZ;
+  }
+
+  private clampForwardPitchForUprightStyle(uprightStyle: UprightStyle): void {
+    this.tmpUnicornHorizontal.set(this.tmpForward.x, 0, this.tmpForward.z);
+    const horizontalLen = this.tmpUnicornHorizontal.length();
+    if (horizontalLen <= 1e-6) return;
+    this.tmpUnicornHorizontal.divideScalar(horizontalLen);
+    const rawPitch = Math.atan2(this.tmpForward.y, horizontalLen);
+    const ascendLimit = uprightStyle === 'shark' ? SHARK_ASCEND_PITCH_RADIANS : UNICORN_ASCEND_PITCH_RADIANS;
+    const descendLimit = uprightStyle === 'shark' ? SHARK_DESCEND_PITCH_RADIANS : UNICORN_DESCEND_PITCH_RADIANS;
+    const clampedPitch = THREE.MathUtils.clamp(rawPitch, -descendLimit, ascendLimit);
+    this.tmpForward.copy(this.tmpUnicornHorizontal).multiplyScalar(Math.cos(clampedPitch));
+    this.tmpForward.y = Math.sin(clampedPitch);
+  }
+
+  private setPersistedUprightBasis(entity: Boid | Predator): void {
+    this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
+    if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
+      this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
+      this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
+      if (this.tmpPersistedRight.lengthSq() < 1e-10) {
+        this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
+      }
+      this.tmpRight.copy(this.tmpPersistedRight);
+    }
+    this.tmpRight.normalize();
+    entity.renderRight.x = this.tmpRight.x;
+    entity.renderRight.y = this.tmpRight.y;
+    entity.renderRight.z = this.tmpRight.z;
+    this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
+    this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+    this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+  }
+
+  private setSimpleUprightBasis(entity: Boid | Predator): void {
+    this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
+    entity.renderRight.x = this.tmpRight.x;
+    entity.renderRight.y = this.tmpRight.y;
+    entity.renderRight.z = this.tmpRight.z;
+    this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
+    this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
+    this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+  }
+
+  private clampDisplayUpTilt(displayQuat: THREE.Quaternion, maxUpTiltRadians: number): void {
+    this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
+    const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
+    if (upTilt <= maxUpTiltRadians) return;
+    this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
+    if (this.tmpUnicornTiltAxis.lengthSq() <= 1e-10) return;
+    this.tmpUnicornTiltAxis.normalize();
+    this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - maxUpTiltRadians);
+    displayQuat.premultiply(this.unicornTiltCorrection);
+  }
+
+  private applyUprightDisplaySmoothing(entity: Boid | Predator, dt: number, uprightStyle: UprightStyle): void {
+    if (uprightStyle === 'dragon') {
+      let displayQuat = this.dragonDisplayQuats.get(entity.id);
+      if (!displayQuat) {
+        displayQuat = this.bodyQuat.clone();
+        this.dragonDisplayQuats.set(entity.id, displayQuat);
+      } else {
+        displayQuat.rotateTowards(this.bodyQuat, DRAGON_MAX_TURN_RADIANS_PER_SEC * dt);
+      }
+      this.bodyQuat.copy(displayQuat);
+      return;
+    }
+
+    if (uprightStyle === 'unicorn') {
+      let displayQuat = this.unicornDisplayQuats.get(entity.id);
+      if (!displayQuat) {
+        displayQuat = this.bodyQuat.clone();
+        this.unicornDisplayQuats.set(entity.id, displayQuat);
+      } else {
+        displayQuat.rotateTowards(this.bodyQuat, UNICORN_MAX_TURN_RADIANS_PER_SEC * dt);
+      }
+      this.clampDisplayUpTilt(displayQuat, UNICORN_MAX_UP_TILT_RADIANS);
+      this.bodyQuat.copy(displayQuat);
+      return;
+    }
+
+    let displayQuat = this.sharkDisplayQuats.get(entity.id);
+    if (!displayQuat) {
+      displayQuat = this.bodyQuat.clone();
+      this.sharkDisplayQuats.set(entity.id, displayQuat);
+    } else {
+      displayQuat.rotateTowards(this.bodyQuat, SHARK_MAX_TURN_RADIANS_PER_SEC * dt);
+    }
+    this.clampDisplayUpTilt(displayQuat, SHARK_MAX_UP_TILT_RADIANS);
+    this.bodyQuat.copy(displayQuat);
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -1722,31 +1847,7 @@ export class Renderer3D {
       // that frame, causing it to visually snap to an unrelated
       // direction instead of holding its own last heading.
       this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
-      if (speed > 1e-6) {
-        const invSpeed = 1 / speed;
-        const targetX = vel.x * invSpeed;
-        const targetY = vel.y * invSpeed;
-        const targetZ = vel.z * invSpeed;
-        if (keepUpright) {
-          // Low-pass filter the heading itself — see
-          // DRAGON_HEADING_SMOOTHING_RATE / UNICORN_HEADING_SMOOTHING_RATE
-          // above for why this is needed in addition to whatever
-          // per-style basis-building stabilization follows below. Each
-          // style uses its own rate constant rather than sharing one.
-          const rate = 1 - Math.exp(-dt * (uprightStyle === 'unicorn' ? UNICORN_HEADING_SMOOTHING_RATE : uprightStyle === 'shark' ? SHARK_HEADING_SMOOTHING_RATE : DRAGON_HEADING_SMOOTHING_RATE));
-          let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
-          let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
-          let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
-          const len = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
-          entity.renderHeading.x = hx / len;
-          entity.renderHeading.y = hy / len;
-          entity.renderHeading.z = hz / len;
-        } else {
-          entity.renderHeading.x = targetX;
-          entity.renderHeading.y = targetY;
-          entity.renderHeading.z = targetZ;
-        }
-      }
+      this.updateEntityRenderHeading(entity, speed, dt, keepUpright, uprightStyle);
       const dir = entity.renderHeading;
       this.tmpForward.set(dir.x, dir.y, dir.z);
 
@@ -1762,21 +1863,7 @@ export class Renderer3D {
         // entity.renderHeading/velocity, so the actual flight path
         // (where the flock logic takes the entity) is unaffected — just
         // how level the model looks while following it.
-        this.tmpUnicornHorizontal.set(this.tmpForward.x, 0, this.tmpForward.z);
-        const horizontalLen = this.tmpUnicornHorizontal.length();
-        if (horizontalLen > 1e-6) {
-          this.tmpUnicornHorizontal.divideScalar(horizontalLen);
-          const rawPitch = Math.atan2(this.tmpForward.y, horizontalLen);
-          // Ceiling is UNICORN_ASCEND_PITCH_RADIANS (0 — never nose-up),
-          // floor is -UNICORN_DESCEND_PITCH_RADIANS (a small allowed
-          // nose-down droop while sinking). Sharks use their own shallow
-          // symmetric ceiling/floor instead.
-          const ascendLimit = uprightStyle === 'shark' ? SHARK_ASCEND_PITCH_RADIANS : UNICORN_ASCEND_PITCH_RADIANS;
-          const descendLimit = uprightStyle === 'shark' ? SHARK_DESCEND_PITCH_RADIANS : UNICORN_DESCEND_PITCH_RADIANS;
-          const clampedPitch = THREE.MathUtils.clamp(rawPitch, -descendLimit, ascendLimit);
-          this.tmpForward.copy(this.tmpUnicornHorizontal).multiplyScalar(Math.cos(clampedPitch));
-          this.tmpForward.y = Math.sin(clampedPitch);
-        }
+        this.clampForwardPitchForUprightStyle(uprightStyle);
         // else: heading is already (near-)vertical with essentially no
         // horizontal component to anchor a clamped pitch to — vanishingly
         // rare given flock steering, and the final up-tilt safety clamp
@@ -1851,31 +1938,7 @@ export class Renderer3D {
         // to swim backwards, since its asymmetric head/tail shape makes
         // a wrong-facing orientation obvious in a way a roughly-
         // symmetric dragon/pegasus silhouette does not.
-        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
-        if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
-          this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
-          // Re-orthogonalize: remove any component along the *current*
-          // forward so the persisted vector stays a valid "right" even as
-          // forward keeps moving through the cone.
-          this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
-          if (this.tmpPersistedRight.lengthSq() < 1e-10) {
-            // Last-ditch fallback: the persisted vector itself has
-            // collapsed (forward jumped drastically frame to frame) —
-            // vanishingly rare, but keep the math well-defined.
-            this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
-          }
-          this.tmpRight.copy(this.tmpPersistedRight);
-        }
-        this.tmpRight.normalize();
-        entity.renderRight.x = this.tmpRight.x;
-        entity.renderRight.y = this.tmpRight.y;
-        entity.renderRight.z = this.tmpRight.z;
-        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
-        // Columns are where each local axis (X, Y, Z) maps to in world
-        // space: local X -> right, local Y -> forward (matches
-        // FORWARD_AXIS), local Z -> up (matches MODEL_UP_AXIS).
-        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
-        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+        this.setPersistedUprightBasis(entity);
       } else if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
         // Unicorns/sharks: a much simpler basis than the dragon path
         // above, and deliberately so — since pitch was already
@@ -1890,30 +1953,9 @@ export class Renderer3D {
         // reversed order previously used produced a left-handed
         // (determinant -1) basis, which is what caused seahorses (the
         // fishtank reskin of unicorns) to visibly swim backwards.
-        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
-        entity.renderRight.x = this.tmpRight.x;
-        entity.renderRight.y = this.tmpRight.y;
-        entity.renderRight.z = this.tmpRight.z;
-        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
-        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
-        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+        this.setSimpleUprightBasis(entity);
       } else if (preferUpright) {
-        this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
-        if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
-          this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
-          this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
-          if (this.tmpPersistedRight.lengthSq() < 1e-10) {
-            this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
-          }
-          this.tmpRight.copy(this.tmpPersistedRight);
-        }
-        this.tmpRight.normalize();
-        entity.renderRight.x = this.tmpRight.x;
-        entity.renderRight.y = this.tmpRight.y;
-        entity.renderRight.z = this.tmpRight.z;
-        this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
-        this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
-        this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
+        this.setPersistedUprightBasis(entity);
       } else {
         // Everyone else: simple shortest-arc rotation from the model's
         // rest forward axis to the current heading. This has a free
@@ -1955,81 +1997,7 @@ export class Renderer3D {
         this.bodyQuat.multiply(this.pitchQuat);
       }
 
-      if (keepUpright && uprightStyle === 'dragon') {
-        // Final safety net (see dragonDisplayQuats doc comment): never
-        // let the *displayed* orientation jump straight to this frame's
-        // target — only rotate toward it at a bounded rate. This can't
-        // eliminate a bad target computation, but it guarantees any such
-        // glitch is never visible as an instant flip/flatten, only ever
-        // as a smooth (if momentarily oddly-directed) turn.
-        let displayQuat = this.dragonDisplayQuats.get(entity.id);
-        if (!displayQuat) {
-          displayQuat = this.bodyQuat.clone();
-          this.dragonDisplayQuats.set(entity.id, displayQuat);
-        } else {
-          displayQuat.rotateTowards(this.bodyQuat, DRAGON_MAX_TURN_RADIANS_PER_SEC * dt);
-        }
-        this.bodyQuat.copy(displayQuat);
-      } else if (keepUpright && uprightStyle === 'unicorn') {
-        // Same turn-rate-limiting idea as the dragon branch above, but
-        // its own map/constant (see unicornDisplayQuats' doc comment).
-        let displayQuat = this.unicornDisplayQuats.get(entity.id);
-        if (!displayQuat) {
-          displayQuat = this.bodyQuat.clone();
-          this.unicornDisplayQuats.set(entity.id, displayQuat);
-        } else {
-          displayQuat.rotateTowards(this.bodyQuat, UNICORN_MAX_TURN_RADIANS_PER_SEC * dt);
-        }
-
-        // Hard ceiling on how far the model's up/legs axis can end up
-        // tilted from true vertical, applied last (after pitch clamp,
-        // basis construction, bank, and the turn-rate smoothing above
-        // have all already been baked in) — see
-        // UNICORN_MAX_UP_TILT_RADIANS' doc comment for why this is a
-        // belt-and-suspenders guarantee rather than just relying on the
-        // upstream constants being tuned correctly. Applied directly to
-        // the persisted displayQuat (not a local copy) so next frame's
-        // rotateTowards target already reflects the clamp, rather than
-        // fighting it back open every frame.
-        this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
-        const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
-        if (upTilt > UNICORN_MAX_UP_TILT_RADIANS) {
-          this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
-          if (this.tmpUnicornTiltAxis.lengthSq() > 1e-10) {
-            this.tmpUnicornTiltAxis.normalize();
-            this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - UNICORN_MAX_UP_TILT_RADIANS);
-            displayQuat.premultiply(this.unicornTiltCorrection);
-          }
-        }
-        this.bodyQuat.copy(displayQuat);
-      } else if (keepUpright && uprightStyle === 'shark') {
-        // Same turn-rate-limiting + final up-tilt safety clamp as the
-        // unicorn branch above, reusing its own map/constants (see
-        // sharkDisplayQuats' / SHARK_MAX_TURN_RADIANS_PER_SEC' /
-        // SHARK_MAX_UP_TILT_RADIANS' doc comments) rather than sharing the
-        // unicorn's, since sharks/unicorns are otherwise-unrelated
-        // entities that just happen to use the same shape of orientation
-        // model.
-        let displayQuat = this.sharkDisplayQuats.get(entity.id);
-        if (!displayQuat) {
-          displayQuat = this.bodyQuat.clone();
-          this.sharkDisplayQuats.set(entity.id, displayQuat);
-        } else {
-          displayQuat.rotateTowards(this.bodyQuat, SHARK_MAX_TURN_RADIANS_PER_SEC * dt);
-        }
-
-        this.tmpUnicornUpWorld.copy(MODEL_UP_AXIS).applyQuaternion(displayQuat);
-        const upTilt = this.tmpUnicornUpWorld.angleTo(WORLD_UP_AXIS);
-        if (upTilt > SHARK_MAX_UP_TILT_RADIANS) {
-          this.tmpUnicornTiltAxis.crossVectors(this.tmpUnicornUpWorld, WORLD_UP_AXIS);
-          if (this.tmpUnicornTiltAxis.lengthSq() > 1e-10) {
-            this.tmpUnicornTiltAxis.normalize();
-            this.unicornTiltCorrection.setFromAxisAngle(this.tmpUnicornTiltAxis, upTilt - SHARK_MAX_UP_TILT_RADIANS);
-            displayQuat.premultiply(this.unicornTiltCorrection);
-          }
-        }
-        this.bodyQuat.copy(displayQuat);
-      }
+      if (keepUpright) this.applyUprightDisplaySmoothing(entity, dt, uprightStyle);
       // Body: just position + orientation, no flap. Caught boids shrink
       // (entityScale -> 0) as they're "swallowed" — see Boid.dying.
       // worldScale !== 1 (fishtank only) grows the position outward from
