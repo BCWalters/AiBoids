@@ -1408,10 +1408,8 @@ export class Renderer3D {
     this.controls.maxDistance = isFishtank ? fishtankBounds.maxCameraDistance : isNature ? flockScale * 5.5 : maxDim * 25;
   }
 
-  /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
-  private ensureScene(sim: Simulation): void {
-    const style = params.visualStyle;
-    const { isNature, isFishtank, isOrganic } = this.getStyleFlags(style);
+  private reconcileBoidInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+    const { isNature, isFishtank, isOrganic } = flags;
     const countsBySpecies = new Map<BoidSpecies, number>();
     for (const boid of sim.boids) {
       countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
@@ -1432,13 +1430,6 @@ export class Renderer3D {
       }
     }
 
-    // Each species gets its own InstancedMesh set — separate materials so
-    // arcade style can give each a distinct emissive bloom color (emissive
-    // is a material-level property; shared instances would force identical
-    // bloom-glow color regardless of per-instance diffuse tint). Sparrows
-    // use the shrunken geometry, parrots use their own dedicated macaw-
-    // style geometry (nature/fishtank styles only), and everything else
-    // uses the shared "reference" small-bird size/shape.
     for (const config of BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
       if (config.species === 'parrot' && isNature) {
@@ -1503,12 +1494,6 @@ export class Renderer3D {
               : isFishtank
                 ? this.fishtankBoidGeometries
                 : this.arcadeBoidGeometries;
-        // Parrot geometry (nature + fishtank) bakes vertex colors for its
-        // beak/eyes; small-bird geometry (sparrow/goldfinch/cardinal/
-        // bluejay) now does too in both the nature-style file and the
-        // fishtank small-fish reskin (fishGeometry.ts bakes its own eye
-        // dots the same way), so vertex colors are safe to enable for
-        // any organic (nature or fishtank) style, not just nature.
         const bodyVertexColors = isOrganic;
         this.speciesInstances.set(
           config.species,
@@ -1517,11 +1502,10 @@ export class Renderer3D {
         this.speciesInstanceKeys.set(config.species, key);
       }
     }
+  }
 
-    // Predators are split by kind (see Predator.kind / predatorInstances'
-    // doc comment) — hawks/dragons and unicorns are independent
-    // populations, each with their own InstancedMesh set, so both can be
-    // present in the scene at once.
+  private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+    const { isNature, isFishtank, isOrganic } = flags;
     let hawkCount = 0;
     let unicornCount = 0;
     for (const predator of sim.predators) {
@@ -1529,11 +1513,6 @@ export class Renderer3D {
       else hawkCount++;
     }
 
-    // dragonPredators is a generic "give the flying/swimming predator a
-    // bigger bespoke silhouette" toggle: in nature it swaps hawks for
-    // dragons, and in fishtank (reusing the same checkbox until a
-    // dedicated tank-specific UI exists) it swaps the small fish-shaped
-    // predator for the shark.
     const isDragon = isOrganic && params.dragonPredators;
     const hawkKey = `${hawkCount}:${style}:${isDragon}`;
     if (this.predatorInstanceKeys.get('hawk') !== hawkKey) {
@@ -1556,12 +1535,6 @@ export class Renderer3D {
       this.sharkDisplayQuats.clear();
     }
 
-    // Unicorns get the full pegasus-with-rainbow-wings geometry in nature
-    // style, and its fishtank-duplicate stand-in in fishtank style; arcade
-    // style reuses the plain hawk silhouette (just tinted lavender via
-    // updateInstances' color params) rather than a second bespoke
-    // geometry, since arcade's glowing-instanced look doesn't call for the
-    // same level of cosmetic detail.
     const unicornKey = `${unicornCount}:${style}`;
     if (this.predatorInstanceKeys.get('unicorn') !== unicornKey) {
       this.disposeInstanceSet(this.predatorInstances.get('unicorn') ?? null);
@@ -1570,15 +1543,7 @@ export class Renderer3D {
         : isFishtank
           ? this.fishtankUnicornPredatorGeometries
           : this.arcadePredatorGeometries;
-      // The fishtank seahorse's "wing" slot is solid-colored pectoral fins
-      // (no baked rainbow gradient), unlike the nature unicorn's wings —
-      // only enable the rainbow-wing vertex-color path for nature style.
       const rainbowWings = isNature;
-      // The gold-horn vertex colors are only baked into the organic-style
-      // horse geometry (unicornPredatorGeometries/fishtankUnicornPredator
-      // Geometries) — arcade style reuses the plain hawk geometry, which
-      // has no 'color' attribute at all, so enabling vertexColors there
-      // would have nothing to read.
       const bodyVertexColors = isOrganic;
       this.predatorInstances.set(
         'unicorn',
@@ -1595,6 +1560,15 @@ export class Renderer3D {
       this.predatorInstanceKeys.set('unicorn', unicornKey);
       this.unicornDisplayQuats.clear();
     }
+  }
+
+  /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
+  private ensureScene(sim: Simulation): void {
+    const style = params.visualStyle;
+    const { isNature, isFishtank, isOrganic } = this.getStyleFlags(style);
+    this.reconcileBoidInstanceSets(sim, style, { isNature, isFishtank, isOrganic });
+
+    this.reconcilePredatorInstanceSets(sim, style, { isNature, isFishtank, isOrganic });
 
     this.applyStyleTransitionOnStyleChange(sim, style, { isNature, isFishtank, isOrganic });
 
