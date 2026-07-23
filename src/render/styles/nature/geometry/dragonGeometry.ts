@@ -508,8 +508,8 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   // Tail root sits at the body's rump (Y = -halfLen = -length*0.5) and
   // slightly below the body's belly axis (Z = -length*0.08), so it
   // projects rearward from the haunch rather than from the body's center.
-  const yOffset = -length * 0.25; // halfway between original (0) and previous (-0.5)
-  const zOffset = -length * 0.04; // subtle belly offset, halved to match
+  const yOffset = -length * 0.25;
+  const zOffset = length * 0.06; // lifted slightly above center (positive Z = dorsal/up)
 
   // Walk from the body root (t=0) to the tip (t=1), each entry giving a
   // tapering half-width (used as the tube radius) and a curved (x, y, z)
@@ -535,7 +535,7 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
     const droop = zOffset + length * 0.2 * Math.sin(t * Math.PI * 2.2) - length * 0.46 * Math.pow(t, 1.35);
     const sway = length * 0.16 * Math.sin(t * Math.PI * 0.85);
     path.push(new THREE.Vector3(sway, y, droop));
-    radii.push(width * 0.34 * (1 - t) + width * 0.02 * t * (1 - t)); // tapers smoothly to ~0
+    radii.push(width * 0.255 * (1 - t) + width * 0.02 * t * (1 - t)); // base radius 25% slimmer
   }
   radii[radii.length - 1] = 0; // sharp spike tip
 
