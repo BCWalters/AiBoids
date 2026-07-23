@@ -227,7 +227,7 @@ const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
 // deep and saturated (a "black dragon" should still read dark) but leave
 // enough headroom for facet-by-facet lighting variation to show through.
 const DRAGON_PREDATOR_BASE = new THREE.Color(0x220e42); // very dark deep purple body
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0xb355d6); // brighter magenta-purple when locked on
+const DRAGON_PREDATOR_HUNT = new THREE.Color(0x6a28a8); // deeper purple when locked on (was bright magenta)
 // Fish tank sharks reuse the dragon's geometry-selection path (isDragon)
 // but must not inherit its purple scale coloring — real sharks read as
 // medium gray, not violet. Kept as separate constants (rather than
