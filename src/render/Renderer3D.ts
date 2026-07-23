@@ -2846,6 +2846,41 @@ export class Renderer3D {
     this.updateUfoVisuals(sim, dt, isFishtank);
   }
 
+  private updateFishtankCenter(sim: Simulation, isFishtank: boolean): void {
+    if (!isFishtank) return;
+    // Around the tank's true center (see updateInstances' worldScale
+    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
+    // is the sim's raw center, matching placeFishtankEnvironment's
+    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
+    // resting on the table — NOT the sim's raw vertical center, matching
+    // placeFishtankEnvironment's bottom-anchored vertical growth so fish
+    // grow in lockstep with the glass box instead of drifting out of sync.
+    this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
+  }
+
+  private updateFishtankDynamicCameraClamp(sim: Simulation, isFishtank: boolean): void {
+    if (!isFishtank) return;
+    // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
+    // maxCameraDistance (set once, in ensureScene) has to satisfy the
+    // *worst-case* permitted tilt at all times, which is overly
+    // conservative at/near a level (untitled) view — there's no
+    // floor/ceiling to clip through at all when looking straight
+    // across the room. Recomputed every frame from the camera's current
+    // polar angle so level view can zoom farther while steep tilts keep
+    // safe clearance to walls/floor/ceiling.
+    const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
+    const polarAngle = this.controls.getPolarAngle();
+    const elevation = Math.abs(polarAngle - Math.PI / 2);
+    const distToCeiling = bounds.roomFloorY + bounds.roomHeight - bounds.tankCenterY;
+    const distToFloor = bounds.tankCenterY - bounds.roomFloorY;
+    const vertClearance = polarAngle < Math.PI / 2 ? distToCeiling : distToFloor;
+    const sinE = Math.sin(elevation);
+    const cosE = Math.cos(elevation);
+    const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
+    const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
+    this.controls.maxDistance = Math.min(vertCap, horizCap);
+  }
+
   render(sim: Simulation): void {
     this.ensureScene(sim);
     const elapsed = (performance.now() - this.startTime) / 1000;
@@ -2854,61 +2889,14 @@ export class Renderer3D {
     const isNature = params.visualStyle === 'nature';
     const isFishtank = params.visualStyle === 'fishtank';
     const isOrganic = isNature || isFishtank;
-    // Recomputed every frame (cheap) rather than cached, so it always
-    // reflects the current sim/world params without needing extra
-    // invalidation logic — used below to grow fishtank's boid positions
-    // around the tank's true center (see updateInstances' worldScale
-    // param / TANK_VISUAL_SCALE's doc comment). Horizontally (x/z) this
-    // is the sim's raw center, matching placeFishtankEnvironment's
-    // horizontal anchor; vertically (y) it's 0 — the tank's bottom,
-    // resting on the table — NOT the sim's raw vertical center, matching
-    // placeFishtankEnvironment's bottom-anchored vertical growth (see
-    // its `center.y` doc comment) so fish grow in lockstep with the
-    // glass box instead of drifting out of sync with it.
-    if (isFishtank) {
-      this.fishtankCenter.set(sim.width / 2, 0, params.worldDepth / 2);
-    }
+    this.updateFishtankCenter(sim, isFishtank);
 
     this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
 
     this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
     this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
 
-    if (isFishtank) {
-      // Dynamic zoom-out clamp: computeFishtankRoomBounds' own
-      // maxCameraDistance (set once, in ensureScene) has to satisfy the
-      // *worst-case* permitted tilt at all times, which is overly
-      // conservative at/near a level (untitled) view — there's no
-      // floor/ceiling to clip through at all when looking straight
-      // across the room. Recomputed every frame (cheap pure math, no
-      // allocations worth caching) from the camera's *current* polar
-      // angle via OrbitControls' own getPolarAngle(), so at level view
-      // the camera can pull back much farther, right up near the far
-      // wall (per an explicit ask to "zoom out farther... virtually
-      // close to the wall behind"), while steeper tilts still clamp
-      // down toward the same safe distance computed by
-      // computeFishtankRoomBounds.
-      const bounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-      const polarAngle = this.controls.getPolarAngle();
-      // 0 at a level/horizontal view, growing toward cameraTiltUpRad
-      // (looking down) or cameraTiltDownRad (looking up) at the tilt
-      // extremes — see FishtankRoomBounds' cameraTiltUpRad/DownRad.
-      const elevation = Math.abs(polarAngle - Math.PI / 2);
-      const distToCeiling = bounds.roomFloorY + bounds.roomHeight - bounds.tankCenterY;
-      const distToFloor = bounds.tankCenterY - bounds.roomFloorY;
-      // Looking down (polarAngle < PI/2) rises toward the ceiling as
-      // distance grows; looking up (polarAngle > PI/2) drops toward the
-      // floor — each direction is clamped by its own clearance.
-      const vertClearance = polarAngle < Math.PI / 2 ? distToCeiling : distToFloor;
-      const sinE = Math.sin(elevation);
-      const cosE = Math.cos(elevation);
-      // Safety factor (0.92) matches computeFishtankRoomBounds' own 0.9,
-      // just shy of 1 so the camera never grazes the actual floor/
-      // ceiling/wall plane.
-      const vertCap = sinE > 1e-4 ? (vertClearance / sinE) * 0.92 : Infinity;
-      const horizCap = (bounds.wallMargin / Math.max(cosE, 1e-4)) * 0.92;
-      this.controls.maxDistance = Math.min(vertCap, horizCap);
-    }
+    this.updateFishtankDynamicCameraClamp(sim, isFishtank);
 
     this.controls.update();
     this.composer.render();
