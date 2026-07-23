@@ -696,6 +696,40 @@ interface ResolvedColourStrategy {
   beakColor: THREE.Color | undefined;
 }
 
+interface UpdateEntityInstanceArgs {
+  set: BirdInstanceSet;
+  index: number;
+  entity: Boid | Predator;
+  maxSpeed: number;
+  elapsed: number;
+  dt: number;
+  baseColor: THREE.Color;
+  highlightColor: THREE.Color;
+  getIntensity: (entity: Boid | Predator) => number;
+  individualVariation: boolean;
+  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  bakedWingPalette: boolean;
+  beakColor: THREE.Color | undefined;
+  isNatureSmallBirdBody: boolean;
+  isNatureSmallBirdWing: boolean;
+  isNatureSmallBirdTail: boolean;
+  flapFrequency: number;
+  flapIdleAmplitude: number;
+  flapSpeedAmplitude: number;
+  getScale: (entity: Boid | Predator) => number;
+  keepUpright: boolean;
+  uprightStyle: UprightStyle;
+  bankScale: number;
+  finRestBiasRad: number;
+  tailSwayAxis: THREE.Vector3;
+  tailSwayAmplitude: number;
+  tailSwayFrequency: number | undefined;
+  tailSwayPivotY: number;
+  worldScale: number;
+  meshScaleBoost: number;
+  preferUpright: boolean;
+}
+
 interface StyleFlags {
   isNature: boolean;
   isFishtank: boolean;
@@ -2349,6 +2383,110 @@ export class Renderer3D {
     };
   }
 
+  private updateEntityInstance(args: UpdateEntityInstanceArgs): void {
+    const {
+      set,
+      index,
+      entity,
+      maxSpeed,
+      elapsed,
+      dt,
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      beakColor,
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      getScale,
+      keepUpright,
+      uprightStyle,
+      bankScale,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      preferUpright,
+    } = args;
+    const pos = entity.position;
+    const vel = entity.velocity;
+    const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+    const entityScale = getScale(entity);
+    const {
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+    } = this.applyEntityOrientationAndMotion(
+      entity,
+      speed,
+      vel,
+      maxSpeed,
+      dt,
+      keepUpright,
+      uprightStyle,
+      preferUpright,
+      bankScale,
+      getIntensity,
+    );
+    this.applyEntityInstanceMatrices({
+      set,
+      index,
+      entity,
+      position: pos,
+      velocity: vel,
+      speed,
+      maxSpeed,
+      elapsed,
+      dt,
+      entityScale,
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
+      finRestBiasRad,
+      tailSwayAxis,
+      tailSwayAmplitude,
+      tailSwayFrequency,
+      tailSwayPivotY,
+      worldScale,
+      meshScaleBoost,
+      uprightStyle,
+    });
+
+    this.applyInstanceColorsForEntity({
+      set,
+      index,
+      entity,
+      baseColor,
+      highlightColor,
+      getIntensity,
+      individualVariation,
+      getSpeciesColors,
+      bakedWingPalette,
+      beakColor,
+      isNatureSmallBirdBody,
+      isNatureSmallBirdWing,
+      isNatureSmallBirdTail,
+    });
+  }
+
   private updateInstances(
     set: BirdInstanceSet,
     entities: (Boid | Predator)[],
@@ -2400,64 +2538,13 @@ export class Renderer3D {
     } = this.getSmallBirdBakedColorFlags(set, bakedBodyGradient);
 
     for (let i = 0; i < entities.length; i++) {
-      const entity = entities[i];
-      const pos = entity.position;
-      const vel = entity.velocity;
-      const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
-      const entityScale = getScale(entity);
-      const {
-        blendStrength,
-        climbWeight,
-        diveWeight,
-        turnWeight,
-        panicWeight,
-        cruiseWeight,
-      } = this.applyEntityOrientationAndMotion(
-        entity,
-        speed,
-        vel,
-        maxSpeed,
-        dt,
-        keepUpright,
-        uprightStyle,
-        preferUpright,
-        bankScale,
-        getIntensity,
-      );
-      this.applyEntityInstanceMatrices({
+      this.updateEntityInstance({
         set,
         index: i,
-        entity,
-        position: pos,
-        velocity: vel,
-        speed,
+        entity: entities[i],
         maxSpeed,
         elapsed,
         dt,
-        entityScale,
-        blendStrength,
-        climbWeight,
-        diveWeight,
-        turnWeight,
-        panicWeight,
-        cruiseWeight,
-        flapFrequency,
-        flapIdleAmplitude,
-        flapSpeedAmplitude,
-        finRestBiasRad,
-        tailSwayAxis,
-        tailSwayAmplitude,
-        tailSwayFrequency,
-        tailSwayPivotY,
-        worldScale,
-        meshScaleBoost,
-        uprightStyle,
-      });
-
-      this.applyInstanceColorsForEntity({
-        set,
-        index: i,
-        entity,
         baseColor,
         highlightColor,
         getIntensity,
@@ -2468,6 +2555,21 @@ export class Renderer3D {
         isNatureSmallBirdBody,
         isNatureSmallBirdWing,
         isNatureSmallBirdTail,
+        flapFrequency,
+        flapIdleAmplitude,
+        flapSpeedAmplitude,
+        getScale,
+        keepUpright,
+        uprightStyle,
+        bankScale,
+        finRestBiasRad,
+        tailSwayAxis,
+        tailSwayAmplitude,
+        tailSwayFrequency,
+        tailSwayPivotY,
+        worldScale,
+        meshScaleBoost,
+        preferUpright,
       });
     }
 
