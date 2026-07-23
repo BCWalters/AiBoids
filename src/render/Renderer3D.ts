@@ -3234,21 +3234,28 @@ export class Renderer3D {
     return { elapsed, dt };
   }
 
+  private renderFrame(
+    sim: Simulation,
+    elapsed: number,
+    dt: number,
+    isNature: boolean,
+    isFishtank: boolean,
+    isOrganic: boolean,
+  ): void {
+    this.updateFishtankCenter(sim, isFishtank);
+    this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
+    this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+    this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
+    this.updateFishtankDynamicCameraClamp(sim, isFishtank);
+    this.controls.update();
+    this.composer.render();
+  }
+
   render(sim: Simulation): void {
     this.ensureScene(sim);
     const { elapsed, dt } = this.getRenderTiming();
     const { isNature, isFishtank, isOrganic } = this.getStyleFlags(params.visualStyle);
-    this.updateFishtankCenter(sim, isFishtank);
-
-    this.updateSceneEffects(sim, elapsed, dt, isNature, isFishtank);
-
-    this.updateBoidSpeciesInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
-    this.updatePredatorInstances(sim, elapsed, dt, isNature, isFishtank, isOrganic);
-
-    this.updateFishtankDynamicCameraClamp(sim, isFishtank);
-
-    this.controls.update();
-    this.composer.render();
+    this.renderFrame(sim, elapsed, dt, isNature, isFishtank, isOrganic);
   }
 
   dispose(): void {
