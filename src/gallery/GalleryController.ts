@@ -1,6 +1,8 @@
 import { params, type SimMode, type SimParams, type GalleryCreature } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import type { Renderer3D } from '../render/Renderer3D';
+import type { PredatorSpecies } from '../sim/Predator';
+import type { BoidSpecies } from '../sim/Boid';
 
 /**
  * External wiring the gallery/deep-link subsystem needs back from the app
@@ -41,7 +43,7 @@ interface DeepLinkState {
   camera: { position: [number, number, number]; target: [number, number, number] } | null;
 }
 
-const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['horse', 'dragon', 'predator']);
+const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['horse', 'monster', 'predator']);
 const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['normal', 'multicolor', 'gold', 'red', 'blue']);
 
 function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number | null } | null {
@@ -157,8 +159,8 @@ export class GalleryController {
     | 'redCount'
     | 'blueCount'
     | 'predatorCount'
+    | 'monsterCount'
     | 'horseCount'
-    | 'dragonPredators'
     | 'running'
   > | null = null;
 
@@ -287,8 +289,8 @@ export class GalleryController {
       redCount: params.redCount,
       blueCount: params.blueCount,
       predatorCount: params.predatorCount,
+      monsterCount: params.monsterCount,
       horseCount: params.horseCount,
-      dragonPredators: params.dragonPredators,
       running: params.running,
     };
 
@@ -299,14 +301,12 @@ export class GalleryController {
     params.redCount = 0;
     params.blueCount = 0;
     params.predatorCount = 0;
+    params.monsterCount = 0;
     params.horseCount = 0;
-    params.dragonPredators = false;
 
     if (kind === 'horse') params.horseCount = 1;
-    else if (kind === 'dragon') {
-      params.predatorCount = 1;
-      params.dragonPredators = true;
-    } else if (kind === 'predator') params.predatorCount = 1;
+    else if (kind === 'monster') params.monsterCount = 1;
+    else if (kind === 'predator') params.predatorCount = 1;
     else if (kind === 'normal') params.boidCount = 1;
     else if (kind === 'multicolor') params.multicolorCount = 1;
     else if (kind === 'gold') params.goldCount = 1;
@@ -365,9 +365,14 @@ export class GalleryController {
     this.galleryPosed = true;
     this.previousGalleryVisualStyle = params.visualStyle;
 
-    // Dragons render through the 'normal' predator instance slot (see Predator.kind/dragonPredators),
-    // and 'predator' gallery kind also maps to the 'normal' predator slot.
-    const instanceKind = (kind === 'dragon' || kind === 'predator') ? 'normal' : kind;
+    // 'predator' gallery kind maps to the 'normal' predator species (hawk).
+    // 'monster' maps directly to its own species.
+    const instanceKind: PredatorSpecies | BoidSpecies = (() => {
+      if (kind === 'predator') return 'normal' as const;
+      if (kind === 'monster') return 'monster' as const;
+      if (kind === 'horse') return 'horse' as const;
+      return kind as BoidSpecies;
+    })();
     const distance = this.galleryDistanceOverride ?? renderer3D.getGalleryFramingDistance(instanceKind);
     // The camera must target where the creature actually *renders*, not
     // its raw sim-space position — fishtank style inflates every fish/

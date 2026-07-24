@@ -5,16 +5,14 @@ import { Boid } from './Boid';
 import { boundarySteer, nearWallAxisCount, type WorldBounds } from './boundary';
 
 /**
- * Canonical species identifiers for predators. 'Normal' is the default
- * chase-and-catch predator (its geometry is further swapped to a "dragon" or
- * "shark" look by the cosmetic dragonPredators toggle — that toggle never
- * changes behavior, only rendering). 'Horse' is a separate, independent
- * population that chases boids the same way but never catches them (see
- * Simulation.checkCatches) and only triggers a much weaker flee response
- * in boids — a gentle, playful pursuit rather than a real threat. Scene
- * renderers map these to creature-specific display labels
- * (e.g. Normal → "Hawk" in nature, "Shark" in fishtank;
- *  Horse → "Unicorn" in nature, "Sea Horse" in fishtank).
+ * Canonical species identifiers for predators. 'Normal' is a standard
+ * chase-and-catch predator (hawk in nature, hawk in arcade). 'Monster' is
+ * also a chase-and-catch predator but with distinct geometry: dragon in
+ * nature/arcade, shark in fishtank. 'Horse' is a separate population that
+ * chases boids but never catches them and only triggers a weak flee response.
+ * Scene renderers map these to creature-specific display labels
+ * (e.g. Normal → "Hawk" in nature; Monster → "Dragon" in nature, "Shark" in
+ * fishtank; Horse → "Unicorn" in nature, "Sea Horse" in fishtank).
  *
  * Uses the const-object pattern (value + derived union type with the same name)
  * so call sites can write PredatorSpecies.Horse instead of bare 'horse' strings
@@ -22,6 +20,7 @@ import { boundarySteer, nearWallAxisCount, type WorldBounds } from './boundary';
  */
 export const PredatorSpecies = {
   Normal: 'normal',
+  Monster: 'monster',
   Horse: 'horse',
 } as const;
 export type PredatorSpecies = (typeof PredatorSpecies)[keyof typeof PredatorSpecies];

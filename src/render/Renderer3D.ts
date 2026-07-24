@@ -52,7 +52,6 @@ import {
   type MotionConfig,
   PredatorSpecies,
   type PredatorRenderFlags,
-  resolvePredatorRenderFlagsForKind,
   SCENE_PREDATOR_SPECIES,
   SCENE_STYLES,
   type SceneEnvironmentToggles,
@@ -820,7 +819,7 @@ export class Renderer3D {
     geometries: CreatureGeometries,
     style: VisualStyle,
     count: number,
-    isDragon: boolean = false,
+    isMonster: boolean = false,
     rainbowWings: boolean = false,
     bodyVertexColors: boolean = false,
     bodyEmissiveOverride?: THREE.Color,
@@ -835,13 +834,13 @@ export class Renderer3D {
       color: 0xffffff,
       emissive: bodyEmissive,
       emissiveIntensity: materialDefaults.bodyEmissiveIntensity,
-      // Dragons get a slightly glossier (lower-roughness) finish than the
-      // fully matte default nature/fishtank look — with the dark scale
+      // Monster predators (dragons/sharks) get a slightly glossier (lower-roughness)
+      // finish than the fully matte default nature/fishtank look — with the dark scale
       // color, a fully matte 0.9 roughness barely differentiates facets
       // under the key light, so faceted geometry (frill spikes, neck bend,
       // leg joints) reads as flat black regardless of angle. A touch of
       // sheen gives visible specular highlights that vary with facet normal.
-      roughness: materialDefaults.bodyRoughness(isDragon),
+      roughness: materialDefaults.bodyRoughness(isMonster),
       metalness: 0,
       // Unicorns only: the body geometry bakes a gold vertex color onto
       // just the horn (see creatureGeometry's mergeGeometriesWithColor) so it
@@ -851,7 +850,7 @@ export class Renderer3D {
       vertexColors: bodyVertexColors,
     });
     const wingMaterial = new THREE.MeshStandardMaterial({
-      // Dragons: tint the membrane/tail material itself darker (multiplies
+      // Monster predators: tint the membrane/tail material itself darker (multiplies
       // against the per-instance purple state color set in updateInstances)
       // so the leathery wings/tail read visibly darker than the scaly body
       // — a classic bat-wing-on-dragon cue — for free, with no extra
@@ -865,10 +864,10 @@ export class Renderer3D {
       // against the dragon's purple body, and multiplying it against the
       // shark's gray body would leak a visible purple/pink cast into the
       // fins/tail instead of the intended plain gray.
-      color: materialDefaults.wingColor(isDragon, isFishtank),
+      color: materialDefaults.wingColor(isMonster, isFishtank),
       emissive: materialDefaults.wingEmissive,
       emissiveIntensity: materialDefaults.wingEmissiveIntensity,
-      roughness: materialDefaults.wingRoughness(isDragon),
+      roughness: materialDefaults.wingRoughness(isMonster),
       metalness: 0,
       side: THREE.DoubleSide,
       // Enable wing vertex colors whenever that geometry actually carries
@@ -1243,11 +1242,10 @@ export class Renderer3D {
   private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const sceneRenderer = this.getSceneRenderer(style);
     const countsBySpecies = this.getPredatorCountsBySpecies(sim.predators);
-    const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
     for (const species of SCENE_PREDATOR_SPECIES) {
       const count = countsBySpecies.get(species) ?? 0;
-      const speciesRenderFlags = resolvePredatorRenderFlagsForKind(species, renderFlags);
-      const instanceKey = createPredatorInstanceKey(species, count, style, speciesRenderFlags);
+      const speciesRenderFlags = createPredatorRenderFlags(species, flags);
+      const instanceKey = createPredatorInstanceKey(species, count, style);
       if (this.predatorInstanceKeys.get(species) !== instanceKey) {
         this.disposeInstanceSet(this.predatorInstances.get(species) ?? null);
         const config = sceneRenderer.getPredatorInstanceConfig(species, flags, speciesRenderFlags);
@@ -1257,7 +1255,7 @@ export class Renderer3D {
             config.geometries,
             style,
             count,
-            speciesRenderFlags.isDragon,
+            speciesRenderFlags.isMonster,
             config.rainbowWings,
             config.bodyVertexColors,
           ),
@@ -1284,7 +1282,11 @@ export class Renderer3D {
       this.clampedUprightDisplayQuats.unicorn.clear();
       return;
     }
-    this.dragonDisplayQuats.clear();
+    if (species === PredatorSpecies.Monster) {
+      this.dragonDisplayQuats.clear();
+      return;
+    }
+    // Normal (hawk) — uses the shark clamp cache for the shark upright style in fishtank
     this.clampedUprightDisplayQuats.shark.clear();
   }
 
@@ -2274,11 +2276,9 @@ export class Renderer3D {
    * while digesting/resting.
    */
   private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
-    if (!params.dragonPredators) return;
     for (const predator of sim.predators) {
-      // Unicorns are never rendered as dragons (they have their own
-      // geometry) and shouldn't breathe fire regardless.
-      if (predator.species === UNICORN_PREDATOR_SPECIES) continue;
+      // Only Monster predators (dragons) breathe fire.
+      if (predator.species !== PredatorSpecies.Monster) continue;
       if (predator.digesting) continue;
       const nextTime = this.getOrSeedNextFireBreathTime(predator, elapsed);
       if (elapsed < nextTime) continue;
@@ -2533,25 +2533,6 @@ export class Renderer3D {
     return SCENE_PREDATOR_SPECIES.some((species) => this.predatorInstances.get(species) !== undefined);
   }
 
-  private updatePredatorInstanceSets(
-    predatorsBySpecies: ReadonlyMap<PredatorSpecies, Predator[]>,
-    renderFlags: PredatorRenderFlags,
-    elapsed: number,
-    dt: number,
-    sceneRenderer: SceneRendererHooks,
-  ): void {
-    for (const species of SCENE_PREDATOR_SPECIES) {
-      this.updatePredatorKindInstances(
-        species,
-        predatorsBySpecies.get(species) ?? [],
-        elapsed,
-        dt,
-        sceneRenderer,
-        resolvePredatorRenderFlagsForKind(species, renderFlags),
-      );
-    }
-  }
-
   private updateProfiledParrotInstances(
     config: BoidSpeciesConfig,
     instances: BirdInstanceSet,
@@ -2665,9 +2646,18 @@ export class Renderer3D {
     sceneRenderer: SceneRendererHooks,
   ): void {
     if (!this.hasAnyPredatorInstances()) return;
-    const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
     const predatorsBySpecies = this.partitionPredatorsBySpecies(sim.predators);
-    this.updatePredatorInstanceSets(predatorsBySpecies, renderFlags, elapsed, dt, sceneRenderer);
+    for (const species of SCENE_PREDATOR_SPECIES) {
+      const speciesRenderFlags = createPredatorRenderFlags(species, flags);
+      this.updatePredatorKindInstances(
+        species,
+        predatorsBySpecies.get(species) ?? [],
+        elapsed,
+        dt,
+        sceneRenderer,
+        speciesRenderFlags,
+      );
+    }
   }
 
   private updatePredatorKindInstances(

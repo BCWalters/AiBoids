@@ -168,11 +168,11 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     return {
       bodyEmissive: 0xffffff,
       bodyEmissiveIntensity: 1.4,
-      bodyRoughness: (_isDragon: boolean) => 0.5,
+      bodyRoughness: (_isMonster: boolean) => 0.5,
       wingEmissive: 0xffffff,
       wingEmissiveIntensity: 1.1,
-      wingRoughness: (_isDragon: boolean) => 0.5,
-      wingColor: (_isDragon: boolean, _isFishtank: boolean) => 0xffffff,
+      wingRoughness: (_isMonster: boolean) => 0.5,
+      wingColor: (_isMonster: boolean, _isFishtank: boolean) => 0xffffff,
     };
   }
 
@@ -185,6 +185,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
         };
       
+      case PredatorSpecies.Monster:
       case PredatorSpecies.Normal:
         return {
           baseColor: ARCADE_PREDATOR_BASE,
@@ -211,6 +212,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: 1,
         };
       
+      case PredatorSpecies.Monster:
       case PredatorSpecies.Normal:
         return {
           flapFrequency: ARCADE_FLAP_FREQUENCY,
@@ -306,6 +308,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   ): ScenePredatorInstanceConfig {
     switch (species) {
       case PredatorSpecies.Normal:
+      case PredatorSpecies.Monster:
       case PredatorSpecies.Horse:
         return {
           geometries: this.deps.arcadePredatorGeometries,
@@ -328,8 +331,8 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       },
       predator: {
         normal: 'Predator',
+        monster: 'Dragon',
         horse: 'Floater',
-        dragon: 'Dragon',
       },
     };
   }

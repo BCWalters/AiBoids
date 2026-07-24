@@ -202,11 +202,11 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     return {
       bodyEmissive: 0x000000,
       bodyEmissiveIntensity: 0,
-      bodyRoughness: (isDragon: boolean) => isDragon ? 0.65 : 0.9,
+      bodyRoughness: (isMonster: boolean) => isMonster ? 0.65 : 0.9,
       wingEmissive: 0x000000,
       wingEmissiveIntensity: 0,
-      wingRoughness: (isDragon: boolean) => isDragon ? 0.65 : 0.9,
-      wingColor: (isDragon: boolean, _isFishtank: boolean) => isDragon ? 0xb8bcc0 : 0xffffff,
+      wingRoughness: (isMonster: boolean) => isMonster ? 0.65 : 0.9,
+      wingColor: (isMonster: boolean, _isFishtank: boolean) => isMonster ? 0xb8bcc0 : 0xffffff,
     };
   }
 
@@ -222,6 +222,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         };
       }
       
+      case PredatorSpecies.Monster:
       case PredatorSpecies.Normal:
         return {
           baseColor: SHARK_PREDATOR_BASE,
@@ -248,8 +249,9 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
         };
       
+      case PredatorSpecies.Monster:
       case PredatorSpecies.Normal:
-        // Sharks use distinct tail/fin motion
+        // Both map to shark motion in the fishtank
         return {
           flapFrequency: SHARK_FLAP_FREQUENCY,
           flapIdleAmplitude: SHARK_FLAP_IDLE_AMPLITUDE,
@@ -352,26 +354,27 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getPredatorInstanceConfig(
-    kind: 'normal' | 'horse',
+    species: PredatorSpecies,
     _flags: StyleFlags,
     _renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
-    switch (kind) {
-      case 'normal':
-        // Predators in the fishtank are always sharks — the dragonPredators flag has no meaning here.
+    switch (species) {
+      case PredatorSpecies.Monster:
+      case PredatorSpecies.Normal:
+        // Both map to shark geometry in the fishtank
         return {
           geometries: this.deps.fishtankSharkPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
-      case 'horse':
+      case PredatorSpecies.Horse:
         return {
           geometries: this.deps.fishtankUnicornPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
       default:
-        throw new Error(`Unknown predator kind: ${kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
@@ -386,8 +389,8 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       },
       predator: {
         normal: 'Shark',
+        monster: 'Shark',
         horse: 'Sea Horse',
-        dragon: 'Shark',
       },
     };
   }

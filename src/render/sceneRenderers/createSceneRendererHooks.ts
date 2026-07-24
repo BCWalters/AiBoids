@@ -68,21 +68,33 @@ export interface MotionConfig {
 }
 
 export const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
+export const MONSTER_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Monster;
 export const UNICORN_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Horse;
 export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
-export const SCENE_PREDATOR_SPECIES: readonly PredatorSpecies[] = [HAWK_PREDATOR_SPECIES, UNICORN_PREDATOR_SPECIES];
+export const SCENE_PREDATOR_SPECIES: readonly PredatorSpecies[] = [
+  HAWK_PREDATOR_SPECIES,
+  MONSTER_PREDATOR_SPECIES,
+  UNICORN_PREDATOR_SPECIES,
+];
 
 export function isPredatorSpecies(species: string): species is PredatorSpecies {
   return SCENE_PREDATOR_SPECIES.includes(species as PredatorSpecies);
 }
 
+/**
+ * Render flags for a predator instance set. `isMonster` is true when the
+ * species is PredatorSpecies.Monster — used by buildInstanceSet to select
+ * the slightly glossier/darker material finish that reads well on dragon/shark
+ * geometry. `isShark` additionally true in the fishtank scene (Monster in
+ * fishtank → shark wing-material tint instead of dragon-wing purple).
+ */
 export interface PredatorRenderFlags {
-  isDragon: boolean;
+  isMonster: boolean;
   isShark: boolean;
 }
 
-export const NON_DRAGON_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = {
-  isDragon: false,
+export const DEFAULT_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = {
+  isMonster: false,
   isShark: false,
 };
 
@@ -103,31 +115,20 @@ export function createStyleFlags(style: VisualStyle): StyleFlags {
 }
 
 export function createPredatorRenderFlags(
-  flags: StyleFlags,
-  dragonPredatorsEnabled: boolean,
-): PredatorRenderFlags {
-  const isDragon = flags.isOrganic && dragonPredatorsEnabled;
-  const isShark = isDragon && flags.isFishtank;
-  return { isDragon, isShark };
-}
-
-export function resolvePredatorRenderFlagsForKind(
   species: PredatorSpecies,
-  renderFlags: PredatorRenderFlags,
+  flags: StyleFlags,
 ): PredatorRenderFlags {
-  if (species === HAWK_PREDATOR_SPECIES) return renderFlags;
-  return NON_DRAGON_PREDATOR_RENDER_FLAGS;
+  const isMonster = species === PredatorSpecies.Monster;
+  const isShark = isMonster && flags.isFishtank;
+  return { isMonster, isShark };
 }
 
 export function createPredatorInstanceKey(
   species: PredatorSpecies,
   count: number,
   style: VisualStyle,
-  renderFlags: PredatorRenderFlags,
 ): string {
-  return species === HAWK_PREDATOR_SPECIES
-    ? `${count}:${style}:${renderFlags.isDragon}`
-    : `${count}:${style}`;
+  return `${count}:${style}:${species}`;
 }
 
 export interface BoidMotionStyleFlags {
@@ -169,11 +170,11 @@ export interface ScenePresentationSettings {
 export interface SceneCreatureMaterialDefaults {
   bodyEmissive: number;
   bodyEmissiveIntensity: number;
-  bodyRoughness: (isDragon: boolean) => number;
+  bodyRoughness: (isMonster: boolean) => number;
   wingEmissive: number;
   wingEmissiveIntensity: number;
-  wingRoughness: (isDragon: boolean) => number;
-  wingColor: (isDragon: boolean, isFishtank: boolean) => number;
+  wingRoughness: (isMonster: boolean) => number;
+  wingColor: (isMonster: boolean, isFishtank: boolean) => number;
 }
 
 export interface SceneBoidInstanceConfig {
@@ -191,10 +192,10 @@ export interface ScenePredatorInstanceConfig {
 
 /** Scene-specific display names for all canonical sim entity types.
  * Boid species use their canonical sim keys; predator species use their
- * canonical sim keys plus 'dragon' as a visual variant of 'normal'. */
+ * canonical sim keys (normal, monster, horse). */
 export interface CreatureLabels {
   boid: Record<BoidSpecies, string>;
-  predator: Record<PredatorSpecies | 'dragon', string>;
+  predator: Record<PredatorSpecies, string>;
 }
 
 export interface SceneRendererHooks {

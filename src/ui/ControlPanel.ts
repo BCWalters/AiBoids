@@ -16,14 +16,19 @@ interface SliderSpec {
 // Population/speed: the settings the user tunes most often — shown
 // ungrouped at the top (always visible, not tucked behind a collapsible
 // section) rather than folded away with everything else.
-const populationSpeedSpecs: SliderSpec[] = [
+const boidPopulationSpecs: SliderSpec[] = [
   { key: 'boidCount', labelKey: 'boidCount', min: 0, max: 500, step: 1 },
   { key: 'multicolorCount', labelKey: 'multicolorCount', min: 0, max: 300, step: 1 },
   { key: 'goldCount', labelKey: 'goldCount', min: 0, max: 300, step: 1 },
   { key: 'redCount', labelKey: 'redCount', min: 0, max: 300, step: 1 },
   { key: 'blueCount', labelKey: 'blueCount', min: 0, max: 300, step: 1 },
+];
+const predatorPopulationSpecs: SliderSpec[] = [
   { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 25, step: 1 },
+  { key: 'monsterCount', labelKey: 'monsterCount', min: 0, max: 25, step: 1 },
   { key: 'horseCount', labelKey: 'horseCount', min: 0, max: 25, step: 1 },
+];
+const speedSpecs: SliderSpec[] = [
   { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
   { key: 'predatorMaxSpeed', labelKey: 'predatorMaxSpeed', min: 20, max: 350, step: 5 },
 ];
@@ -71,7 +76,7 @@ const animationBlendSliderSpec: SliderSpec = { key: 'animationBlendStrength', la
 // "outdoor" default counts must stay exactly as they were).
 type PopulationSnapshot = Pick<
   SimParams,
-  'boidCount' | 'multicolorCount' | 'goldCount' | 'redCount' | 'blueCount' | 'predatorCount' | 'horseCount'
+  'boidCount' | 'multicolorCount' | 'goldCount' | 'redCount' | 'blueCount' | 'predatorCount' | 'monsterCount' | 'horseCount'
 >;
 const POPULATION_KEYS: (keyof PopulationSnapshot)[] = [
   'boidCount',
@@ -80,6 +85,7 @@ const POPULATION_KEYS: (keyof PopulationSnapshot)[] = [
   'redCount',
   'blueCount',
   'predatorCount',
+  'monsterCount',
   'horseCount',
 ];
 const FISHTANK_DEFAULT_POPULATION: PopulationSnapshot = {
@@ -88,7 +94,8 @@ const FISHTANK_DEFAULT_POPULATION: PopulationSnapshot = {
   goldCount: 20,
   redCount: 20,
   blueCount: 20,
-  predatorCount: 1,
+  predatorCount: 0,
+  monsterCount: 1,
   horseCount: 2,
 };
 let savedOutdoorPopulation: PopulationSnapshot | null = null;
@@ -181,11 +188,21 @@ export class ControlPanel {
     // silently fight the isolation until Gallery is exited.
     const galleryActive = params.galleryCreature !== null;
     const creatureLabels = this.getCreatureLabels();
+    const boidGroup = this.buildPopulationGroup(
+      boidPopulationSpecs,
+      galleryActive,
+      creatureLabels,
+    );
+    const predatorGroup = this.buildPopulationGroup(
+      predatorPopulationSpecs,
+      galleryActive,
+      creatureLabels,
+    );
     this.container.appendChild(
       this.buildSection(
         'populationSpeed',
         t('sectionPopulationSpeed'),
-        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec, galleryActive, this.resolvePopulationSliderLabel(spec, creatureLabels))), this.buildAlienInvasionButton()],
+        [boidGroup, predatorGroup, ...speedSpecs.map((spec) => this.buildSlider(spec)), this.buildAlienInvasionButton()],
         true,
       ),
     );
@@ -208,7 +225,6 @@ export class ControlPanel {
       visualSettingsChildren.push(this.buildTimeOfDayToggle());
       visualSettingsChildren.push(this.buildSoftShadowsToggle());
       if (params.visualStyle === 'nature') {
-        visualSettingsChildren.push(this.buildDragonPredatorsToggle());
         visualSettingsChildren.push(this.buildParrotReviewHoverToggle());
       }
       visualSettingsChildren.push(this.buildLightShaftsToggle());
@@ -385,7 +401,8 @@ export class ControlPanel {
     select.id = 'param-gallery-creature';
     const sceneLabels = this.getCreatureLabels();
     const galleryLabel = (key: GalleryCreature | 'none', textKey: TranslationKey): string => {
-      if (!sceneLabels || key === 'none' || key === 'dragon') return t(textKey);
+      if (!sceneLabels || key === 'none') return t(textKey);
+      if (key === 'monster')     return sceneLabels.predator.monster;
       if (key === 'predator')    return sceneLabels.predator.normal;
       if (key === 'horse')       return sceneLabels.predator.horse;
       if (key === 'normal')      return sceneLabels.boid.normal;
@@ -398,7 +415,7 @@ export class ControlPanel {
     const options: { value: GalleryCreature | 'none'; textKey: TranslationKey }[] = [
       { value: 'none', textKey: 'galleryNone' },
       { value: 'horse', textKey: 'galleryHorse' },
-      ...(params.visualStyle === 'nature' ? [{ value: 'dragon' as const, textKey: 'galleryDragon' as TranslationKey }] : []),
+      { value: 'monster', textKey: 'galleryMonster' },
       { value: 'predator', textKey: 'galleryPredator' },
       { value: 'normal', textKey: 'galleryNormal' },
       { value: 'multicolor', textKey: 'galleryMulticolor' },
@@ -424,25 +441,18 @@ export class ControlPanel {
     return wrapper;
   }
 
-  private buildDragonPredatorsToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('dragonPredatorsLabel');
-    label.htmlFor = 'param-dragon-predators';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-dragon-predators';
-    input.checked = params.dragonPredators;
-    input.addEventListener('change', () => {
-      params.dragonPredators = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
+  /** Builds an outlined group of population sliders with a visible border. */
+  private buildPopulationGroup(
+    specs: SliderSpec[],
+    galleryActive: boolean,
+    creatureLabels: CreatureLabels | null,
+  ): HTMLElement {
+    const group = document.createElement('div');
+    group.className = 'population-group';
+    for (const spec of specs) {
+      group.appendChild(this.buildSlider(spec, galleryActive, this.resolvePopulationSliderLabel(spec, creatureLabels)));
+    }
+    return group;
   }
 
   private buildParrotReviewHoverToggle(): HTMLElement {
@@ -731,6 +741,7 @@ export class ControlPanel {
       case 'redCount':         return count(labels.boid.red);
       case 'blueCount':        return count(labels.boid.blue);
       case 'predatorCount':    return count(labels.predator.normal);
+      case 'monsterCount':     return count(labels.predator.monster);
       case 'horseCount':       return count(labels.predator.horse);
       default:                 return undefined;
     }

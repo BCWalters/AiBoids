@@ -320,16 +320,15 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     return {
       bodyEmissive: 0x000000,
       bodyEmissiveIntensity: 0,
-      bodyRoughness: (isDragon: boolean) => isDragon ? 0.65 : 0.9,
+      bodyRoughness: (isMonster: boolean) => isMonster ? 0.65 : 0.9,
       wingEmissive: 0x000000,
       wingEmissiveIntensity: 0,
-      wingRoughness: (isDragon: boolean) => isDragon ? 0.65 : 0.9,
-      wingColor: (_isDragon: boolean, _isFishtank: boolean) => 0xffffff,
+      wingRoughness: (isMonster: boolean) => isMonster ? 0.65 : 0.9,
+      wingColor: (_isMonster: boolean, _isFishtank: boolean) => 0xffffff,
     };
   }
 
-  getPredatorColourStrategy(species: PredatorSpecies, renderFlags: PredatorRenderFlags): ColourStrategy {
-    const { isDragon } = renderFlags;
+  getPredatorColourStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColourStrategy {
     
     switch (species) {
       case PredatorSpecies.Horse:
@@ -340,13 +339,19 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           getSpeciesColors: () => NATURE_UNICORN_COLORS,
         };
       
+      case PredatorSpecies.Monster:
+        return {
+          baseColor: DRAGON_PREDATOR_BASE,
+          highlightColor: DRAGON_PREDATOR_HUNT,
+          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+        };
+      
       case PredatorSpecies.Normal:
         return {
-          baseColor: isDragon ? DRAGON_PREDATOR_BASE : NATURE_PREDATOR_BASE,
-          highlightColor: isDragon ? DRAGON_PREDATOR_HUNT : NATURE_PREDATOR_HUNT,
+          baseColor: NATURE_PREDATOR_BASE,
+          highlightColor: NATURE_PREDATOR_HUNT,
           getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
-          // Plain nature hawks (not dragon) get the bald-eagle body/wing/tail colour split.
-          getSpeciesColors: !isDragon ? () => NATURE_HAWK_COLORS : undefined,
+          getSpeciesColors: () => NATURE_HAWK_COLORS,
         };
       
       default:
@@ -354,8 +359,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getPredatorMotionConfig(species: PredatorSpecies, renderFlags: PredatorRenderFlags): MotionConfig {
-    const { isDragon } = renderFlags;
+  getPredatorMotionConfig(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): MotionConfig {
     
     switch (species) {
       case PredatorSpecies.Horse:
@@ -370,15 +374,25 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: 1,
         };
       
-      case PredatorSpecies.Normal:
+      case PredatorSpecies.Monster:
         return {
-          flapFrequency: isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
-          flapIdleAmplitude: isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
-          flapSpeedAmplitude: isDragon ? DRAGON_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
-          keepUpright: isDragon,
+          flapFrequency: DRAGON_FLAP_FREQUENCY,
+          flapIdleAmplitude: DRAGON_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: DRAGON_FLAP_SPEED_AMPLITUDE,
+          keepUpright: true,
           uprightStyle: 'dragon',
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
-          tailSwayAmplitude: isDragon ? DRAGON_TAIL_SWAY_AMPLITUDE : 0,
+          tailSwayAmplitude: DRAGON_TAIL_SWAY_AMPLITUDE,
+          worldScale: 1,
+          meshScaleBoost: 1,
+        };
+      
+      case PredatorSpecies.Normal:
+        return {
+          flapFrequency: FLAP_FREQUENCY,
+          flapIdleAmplitude: FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: FLAP_SPEED_AMPLITUDE,
+          keepUpright: false,
           worldScale: 1,
           meshScaleBoost: 1,
         };
@@ -486,12 +500,18 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   getPredatorInstanceConfig(
     species: PredatorSpecies,
     _flags: StyleFlags,
-    renderFlags: PredatorRenderFlags,
+    _renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
     switch (species) {
       case PredatorSpecies.Normal:
         return {
-          geometries: renderFlags.isDragon ? this.deps.dragonPredatorGeometries : this.deps.naturePredatorGeometries,
+          geometries: this.deps.naturePredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: true,
+        };
+      case PredatorSpecies.Monster:
+        return {
+          geometries: this.deps.dragonPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
@@ -517,8 +537,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       },
       predator: {
         normal: 'Hawk',
+        monster: 'Dragon',
         horse: 'Unicorn',
-        dragon: 'Dragon',
       },
     };
   }
