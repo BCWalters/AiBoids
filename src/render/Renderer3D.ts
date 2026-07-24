@@ -1111,13 +1111,13 @@ export class Renderer3D {
     const hasParrotProfiles = parrotProfileNames.length > 0;
     const countsBySpecies = this.getBoidCountsBySpecies(sim.boids);
     const parrotProfileCounts = hasParrotProfiles
-      ? this.getParrotProfileCounts(sim.boids, sceneRenderer, flags)
+      ? this.getProfileCountsForSpecies(sim.boids, PARROT_SPECIES, sceneRenderer, flags)
       : new Map<string, number>();
     if (!hasParrotProfiles) this.clearParrotProfileInstances();
 
     for (const config of BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
-      if (config.species === PARROT_SPECIES && hasParrotProfiles) {
+      if (this.isProfiledSpecies(config.species) && hasParrotProfiles) {
         this.reconcileProfiledParrotInstanceSets(
           count,
           style,
@@ -1154,22 +1154,28 @@ export class Renderer3D {
     sceneRenderer: SceneRendererHooks,
     flags: StyleFlags,
   ): readonly string[] {
-    if (species !== PARROT_SPECIES) return [];
+    if (!this.isProfiledSpecies(species)) return [];
     return sceneRenderer.getParrotProfileNames(flags);
   }
 
-  private getParrotProfileCounts(
+  private isProfiledSpecies(species: BoidSpecies): boolean {
+    return species === PARROT_SPECIES;
+  }
+
+  private getProfileCountsForSpecies(
     boids: Boid[],
+    species: BoidSpecies,
     sceneRenderer: SceneRendererHooks,
     flags: StyleFlags,
   ): Map<string, number> {
-    const parrotProfileCounts = new Map<string, number>();
+    const profileCounts = new Map<string, number>();
+    if (!this.isProfiledSpecies(species)) return profileCounts;
     for (const boid of boids) {
-      if (boid.species !== PARROT_SPECIES) continue;
+      if (boid.species !== species) continue;
       const profile = sceneRenderer.getParrotGeometryProfile(boid, flags);
-      parrotProfileCounts.set(profile, (parrotProfileCounts.get(profile) ?? 0) + 1);
+      profileCounts.set(profile, (profileCounts.get(profile) ?? 0) + 1);
     }
-    return parrotProfileCounts;
+    return profileCounts;
   }
 
   private clearParrotProfileInstances(): void {
