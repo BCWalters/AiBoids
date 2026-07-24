@@ -140,6 +140,7 @@ export interface BoidSpeciesConfig {
   species: BoidSpecies;
   natureBase: THREE.Color;
   arcadeBase: THREE.Color;
+  arcadeEmissive: THREE.Color;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
   getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
@@ -176,6 +177,8 @@ export interface SceneCreatureMaterialDefaults {
 export interface SceneBoidInstanceConfig {
   geometries: CreatureGeometries;
   bodyVertexColors: boolean;
+  /** Optional per-species emissive color override (used by arcade for neon glow). */
+  bodyEmissiveOverride?: THREE.Color;
 }
 
 export interface ScenePredatorInstanceConfig {

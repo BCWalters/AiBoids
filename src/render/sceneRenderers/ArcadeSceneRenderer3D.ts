@@ -290,12 +290,12 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 
   getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
     if (config.useSmallGeometry) {
-      return { geometries: this.deps.arcadeSparrowGeometries, bodyVertexColors: false };
+      return { geometries: this.deps.arcadeSparrowGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
     }
     if (config.useParrotGeometry) {
-      return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false };
+      return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
     }
-    return { geometries: this.deps.arcadeBoidGeometries, bodyVertexColors: false };
+    return { geometries: this.deps.arcadeBoidGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
   }
 
   getPredatorInstanceConfig(

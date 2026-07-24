@@ -822,15 +822,17 @@ export class Renderer3D {
     isDragon: boolean = false,
     rainbowWings: boolean = false,
     bodyVertexColors: boolean = false,
+    bodyEmissiveOverride?: THREE.Color,
   ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
     const sceneRenderer = this.getSceneRenderer(style);
     const materialDefaults = sceneRenderer.getCreatureMaterialDefaults();
     const { isFishtank } = createStyleFlags(style);
+    const bodyEmissive = bodyEmissiveOverride ?? new THREE.Color(materialDefaults.bodyEmissive);
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      emissive: materialDefaults.bodyEmissive,
+      emissive: bodyEmissive,
       emissiveIntensity: materialDefaults.bodyEmissiveIntensity,
       // Dragons get a slightly glossier (lower-roughness) finish than the
       // fully matte default nature/fishtank look — with the dark scale
@@ -1132,10 +1134,10 @@ export class Renderer3D {
       const key = `${count}:${style}`;
       if (this.speciesInstanceKeys.get(config.species) !== key) {
         this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
-        const { geometries, bodyVertexColors } = sceneRenderer.getBoidInstanceConfig(config.species, config, flags);
+        const { geometries, bodyVertexColors, bodyEmissiveOverride } = sceneRenderer.getBoidInstanceConfig(config.species, config, flags);
         this.speciesInstances.set(
           config.species,
-          this.buildInstanceSet(geometries, style, count, false, false, bodyVertexColors),
+          this.buildInstanceSet(geometries, style, count, false, false, bodyVertexColors, bodyEmissiveOverride),
         );
         this.speciesInstanceKeys.set(config.species, key);
       }
