@@ -325,6 +325,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           }
         : undefined,
       beakColor: config.beakColor,
+      colorMode: species === BoidSpecies.Multicolor ? 'speciesTint' : undefined,
     };
   }
 
