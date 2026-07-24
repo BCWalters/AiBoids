@@ -2,15 +2,12 @@ import type { TimeOfDayPreset, VisualStyle } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Vector3 } from 'three';
 import * as THREE from 'three';
-import type { computeFishtankRoomBounds } from '../styles/fishtank/environment';
 import type { Predator } from '../../sim/Predator';
 import { PredatorSpecies } from '../../sim/Predator';
 import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
 
 export { PredatorSpecies };
-
-export type FishtankBounds = ReturnType<typeof computeFishtankRoomBounds>;
 
 export interface SpeciesColorSet {
   body: THREE.Color;
@@ -46,13 +43,15 @@ export interface ColourStrategy {
 }
 
 /** Per-species animation/motion parameters for one `updateInstances` call.
- * All fields are optional; defaults match the original parameter defaults so
- * call sites can omit anything they don't need to override.
+ * The three flap fields are required — every scene owns and provides its own
+ * creature flap tuning, so there is deliberately no shared fallback for them.
+ * The remaining fields are optional; their defaults match the shared render
+ * path's neutral behavior so call sites can omit anything they don't override.
  */
 export interface MotionConfig {
-  flapFrequency?: number;
-  flapIdleAmplitude?: number;
-  flapSpeedAmplitude?: number;
+  flapFrequency: number;
+  flapIdleAmplitude: number;
+  flapSpeedAmplitude: number;
   getScale?: (creature: Predator | Boid) => number;
   keepUpright?: boolean;
   uprightStyle?: 'dragon' | 'unicorn' | 'shark';
@@ -82,8 +81,8 @@ export function isPredatorSpecies(species: string): species is PredatorSpecies {
 }
 
 /**
- * Render flags for a predator instance set. `isMonster` is true when the
- * species is PredatorSpecies.Monster — used by buildInstanceSet to select
+ * Render flags for a predator render batch. `isMonster` is true when the
+ * species is PredatorSpecies.Monster — used by buildRenderBatch to select
  * the slightly glossier/darker material finish that reads well on dragon/shark
  * geometry. `isShark` additionally true in the fishtank scene (Monster in
  * fishtank → shark wing-material tint instead of dragon-wing purple).
@@ -203,12 +202,10 @@ export interface SceneRendererHooks {
   configureInitialFraming: (
     sim: Simulation,
     maxDim: number,
-    fishtankBounds: FishtankBounds,
   ) => void;
   applyStyleTransition: (
     sim: Simulation,
     maxDim: number,
-    fishtankBounds: FishtankBounds,
     wasFishtank: boolean,
   ) => void;
   updateEnvironment: (elapsed: number) => void;
@@ -221,6 +218,10 @@ export interface SceneRendererHooks {
   setGalleryCreatureActive: (active: boolean) => void;
   getPresentationSettings: () => ScenePresentationSettings;
   getWorldScale: () => number;
+  /** World-space scale for the blood-splatter burst spawned when a predator
+   * catches prey in this scene. Owned per-scene so each can tune it (or size
+   * it relative to that scene's base creature). */
+  getBloodSplatterScale: () => number;
   mapPositionToRenderSpace: (x: number, y: number, z: number, target: Vector3) => void;
   getCreatureMaterialDefaults: () => SceneCreatureMaterialDefaults;
   getPredatorColourStrategy: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => ColourStrategy;

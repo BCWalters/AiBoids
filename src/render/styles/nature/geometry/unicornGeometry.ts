@@ -8,14 +8,14 @@ import { buildFingeredWingGeometry } from './birdSharedGeometry';
 
 // Rainbow vertex-colour gradients used only by the unicorn's pegasus
 // wings and rainbow tail (violet at the root, red at the tip), read by a
-// vertexColors-enabled material — see Renderer3D's buildInstanceSet
+// vertexColors-enabled material — see Renderer3D's buildRenderBatch
 // rainbowWings handling. Kept local to this file since the unicorn is
 // their sole user.
 
 /**
  * Bakes a rainbow hue gradient (violet at the wing root, red at the tip)
  * into a per-vertex 'color' attribute, read by a vertexColors-enabled
- * material — see Renderer3D's buildInstanceSet rainbowWings handling.
+ * material — see Renderer3D's buildRenderBatch rainbowWings handling.
  * The base geometry (position-only triangle soup) is otherwise
  * untouched, so this can wrap any of the flat-shaded wing builders above.
  */

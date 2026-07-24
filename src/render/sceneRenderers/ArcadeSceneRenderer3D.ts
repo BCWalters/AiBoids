@@ -8,10 +8,12 @@ import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { NatureEnvironment } from '../styles/nature/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
+import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
+import { createBirdGeometries } from '../styles/nature/geometry/smallBirdGeometry';
+import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
   type SpeciesColorSet,
-  type FishtankBounds,
   type SceneCreatureMaterialDefaults,
   type SceneEnvironmentToggles,
   type ScenePresentationSettings,
@@ -26,6 +28,24 @@ import {
   type ScenePredatorInstanceConfig,
   type CreatureLabels,
 } from './createSceneRendererHooks';
+
+// --- Arcade creature sizing: every arcade creature is a factor of this
+// single base creature size. No arcade creature is sized relative to another
+// creature or to another scene.
+const ARCADE_BASE_CREATURE: CreatureSize = { length: 7, width: 2.6 };
+const arcadeSize = createCreatureSizer(ARCADE_BASE_CREATURE);
+
+export const ARCADE_CREATURE_SIZES = {
+  boid: arcadeSize(1),
+  sparrow: arcadeSize(0.7),
+  parrot: arcadeSize(1),
+  // Hawk-style predator — 12 x 4.4 world units.
+  predator: arcadeSize(12 / ARCADE_BASE_CREATURE.length, 4.4 / ARCADE_BASE_CREATURE.width),
+} as const;
+
+// Blood-splatter burst world size for arcade catches. Owned per-scene so it
+// can be tuned independently of the other scenes.
+const ARCADE_BLOOD_SPLATTER_SCALE = 6.3;
 
 // --- Arcade style color constants: bright, saturated emissive colors for bloom effect
 const ARCADE_BOID_EMISSIVE = new THREE.Color(0x5ad1ff);
@@ -76,17 +96,24 @@ interface ArcadeSceneRendererDependencies {
   driftingClouds: DriftingClouds;
   fishtankEnv: FishtankEnvironment;
   natureEnv: NatureEnvironment;
-  arcadeSparrowGeometries: CreatureGeometries;
-  arcadeParrotGeometries: CreatureGeometries;
-  arcadeBoidGeometries: CreatureGeometries;
-  arcadePredatorGeometries: CreatureGeometries;
 }
 
 export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   private readonly deps: ArcadeSceneRendererDependencies;
 
+  // Arcade owns and disposes its own creature geometries, sized from
+  // ARCADE_CREATURE_SIZES. No other scene knows about these.
+  private readonly boidGeometries: CreatureGeometries;
+  private readonly sparrowGeometries: CreatureGeometries;
+  private readonly parrotGeometries: CreatureGeometries;
+  private readonly predatorGeometries: CreatureGeometries;
+
   constructor(deps: ArcadeSceneRendererDependencies) {
     this.deps = deps;
+    this.boidGeometries = createBirdGeometries(ARCADE_CREATURE_SIZES.boid.length, ARCADE_CREATURE_SIZES.boid.width);
+    this.sparrowGeometries = createBirdGeometries(ARCADE_CREATURE_SIZES.sparrow.length, ARCADE_CREATURE_SIZES.sparrow.width);
+    this.parrotGeometries = createBirdGeometries(ARCADE_CREATURE_SIZES.parrot.length, ARCADE_CREATURE_SIZES.parrot.width);
+    this.predatorGeometries = createBirdGeometries(ARCADE_CREATURE_SIZES.predator.length, ARCADE_CREATURE_SIZES.predator.width);
   }
 
   setStyleVisibility(): void {
@@ -98,7 +125,6 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   configureInitialFraming(
     sim: Simulation,
     maxDim: number,
-    _fishtankBounds: FishtankBounds,
   ): void {
     const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
     this.deps.camera.position.set(
@@ -113,7 +139,6 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   applyStyleTransition(
     sim: Simulation,
     maxDim: number,
-    _fishtankBounds: FishtankBounds,
     wasFishtank: boolean,
   ): void {
     this.deps.controls.maxDistance = maxDim * 25;
@@ -158,6 +183,10 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 
   getWorldScale(): number {
     return 1;
+  }
+
+  getBloodSplatterScale(): number {
+    return ARCADE_BLOOD_SPLATTER_SCALE;
   }
 
   mapPositionToRenderSpace(x: number, y: number, z: number, target: THREE.Vector3): void {
@@ -288,17 +317,17 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   }
 
   getParrotProfileInstanceConfig(_profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
-    return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false };
+    return { geometries: this.parrotGeometries, bodyVertexColors: false };
   }
 
   getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
     if (config.useSmallGeometry) {
-      return { geometries: this.deps.arcadeSparrowGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
+      return { geometries: this.sparrowGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
     }
     if (config.useParrotGeometry) {
-      return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
+      return { geometries: this.parrotGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
     }
-    return { geometries: this.deps.arcadeBoidGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
+    return { geometries: this.boidGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
   }
 
   getPredatorInstanceConfig(
@@ -311,7 +340,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       case PredatorSpecies.Monster:
       case PredatorSpecies.Horse:
         return {
-          geometries: this.deps.arcadePredatorGeometries,
+          geometries: this.predatorGeometries,
           rainbowWings: false,
           bodyVertexColors: false,
         };
@@ -337,7 +366,12 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  dispose(): void {}
+  dispose(): void {
+    disposeCreatureGeometries(this.boidGeometries);
+    disposeCreatureGeometries(this.sparrowGeometries);
+    disposeCreatureGeometries(this.parrotGeometries);
+    disposeCreatureGeometries(this.predatorGeometries);
+  }
 }
 
 // Export arcade-style color constants for use in Renderer3D

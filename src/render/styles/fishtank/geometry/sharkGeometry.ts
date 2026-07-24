@@ -32,11 +32,11 @@ import {
 /**
  * Shark predator geometry: a real shark silhouette rather than the
  * bat-winged dragon placeholder this file used to contain. `length` and
- * `width` are the same DRAGON_LENGTH/DRAGON_WIDTH scale Renderer3D
- * already used for the old dragon-shaped predator; `length` is stretched
+ * `width` are the fishtank shark's world-space size (see
+ * FISHTANK_CREATURE_SIZES.shark); `length` is stretched
  * by SHARK_LENGTH_SCALE below (while `width` is used as-is) since a
- * shark reads as a long, lean torpedo rather than the stubbier, rounder
- * proportions that scale worked for on the old dragon body.
+ * shark reads as a long, lean torpedo rather than a stubbier, rounder
+ * body.
  */
 const SHARK_LENGTH_SCALE = 1.35;
 
