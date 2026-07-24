@@ -404,19 +404,19 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 
   getBoidMotionConfig(species: string, config: BoidSpeciesConfig, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
-    const { isFishTail, isNatureParrot } = boidMotionFlags;
+    const { isFishTail, isProfiledParrot } = boidMotionFlags;
     const isParrot = species === 'parrot';
     const tailSwayPivot = config.tailSwayPivotY ?? 0;
     
     return {
-      flapFrequency: isParrot && isNatureParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
-      flapIdleAmplitude: isParrot && isNatureParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude: isParrot && isNatureParrot ? _PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+      flapFrequency: isParrot && isProfiledParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
+      flapIdleAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
       getScale: (entity) => (entity as Boid).scale,
       tailSwayAxis: isFishTail ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0), // MODEL_UP_AXIS : MODEL_RIGHT_AXIS
       tailSwayAmplitude: isFishTail
         ? 0.06 // FISH_TAIL_SWAY_AMPLITUDE placeholder
-        : isParrot && isNatureParrot
+        : isParrot && isProfiledParrot
           ? _PARROT_TAIL_SWAY_AMPLITUDE
           : DRAGON_TAIL_SWAY_AMPLITUDE,
       tailSwayFrequency: isFishTail ? 2.2 : undefined, // FISH_TAIL_SWAY_FREQUENCY placeholder

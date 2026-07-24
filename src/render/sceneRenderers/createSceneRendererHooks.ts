@@ -83,7 +83,7 @@ export interface StyleFlags {
 
 export interface BoidMotionStyleFlags {
   isFishTail: boolean;
-  isNatureParrot: boolean;
+  isProfiledParrot: boolean;
 }
 
 /** Minimal boid species configuration type used by boid rendering hooks.

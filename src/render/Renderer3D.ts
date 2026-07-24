@@ -2539,7 +2539,7 @@ export class Renderer3D {
     this.updateUnicornPredatorInstances(context.unicorns, elapsed, dt, flags);
   }
 
-  private updateNatureParrotInstances(
+  private updateProfiledParrotInstances(
     config: BoidSpeciesConfig,
     instances: BirdInstanceSet,
     entities: Boid[],
@@ -2547,9 +2547,10 @@ export class Renderer3D {
     dt: number,
     flags: StyleFlags,
     sceneRenderer: SceneRendererHooks,
+    profileNames: readonly string[],
   ): void {
     const { neutralEntities, profileEntities } = this.partitionParrotEntities(entities, sceneRenderer, flags);
-    const boidMotionFlags: BoidMotionStyleFlags = { isFishTail: false, isNatureParrot: true };
+    const boidMotionFlags: BoidMotionStyleFlags = { isFishTail: false, isProfiledParrot: true };
     this.updateInstances(
       instances,
       neutralEntities,
@@ -2559,7 +2560,7 @@ export class Renderer3D {
       sceneRenderer.getParrotColourStrategy(config, flags, false),
       sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
     );
-    for (const profile of sceneRenderer.getParrotProfileNames(flags)) {
+    for (const profile of profileNames) {
       const profileSet = this.parrotProfileInstances.get(profile);
       if (!profileSet) continue;
       this.updateInstances(
@@ -2581,12 +2582,12 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
-    isNatureParrot: boolean,
+    isProfiledParrot: boolean,
     sceneRenderer: SceneRendererHooks,
   ): void {
     const boidMotionFlags: BoidMotionStyleFlags = {
       isFishTail: flags.isFishtank,
-      isNatureParrot,
+      isProfiledParrot,
     };
     this.updateInstances(
       instances,
@@ -2607,19 +2608,19 @@ export class Renderer3D {
     flags: StyleFlags,
     sceneRenderer: SceneRendererHooks,
   ): void {
-    const { isNature } = flags;
     const instances = this.speciesInstances.get(config.species);
     if (!instances) return;
     const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
-    const isNatureParrot = config.species === 'parrot' && isNature;
+    const parrotProfileNames = config.species === 'parrot' ? sceneRenderer.getParrotProfileNames(flags) : [];
+    const isProfiledParrot = parrotProfileNames.length > 0;
     // Fish-tail wave (fishtank only): every fishtank species' caudal
     // fin is rooted at the model's own local origin (sparrow/
     // goldfinch/cardinal/bluejay's plain small-fish geometry, and
     // now the parrot species' butterflyfish geometry too), so it's
     // safe to sway around the shared pivot with no detachment risk
     // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
-    if (isNatureParrot) {
-      this.updateNatureParrotInstances(config, instances, entities, elapsed, dt, flags, sceneRenderer);
+    if (isProfiledParrot) {
+      this.updateProfiledParrotInstances(config, instances, entities, elapsed, dt, flags, sceneRenderer, parrotProfileNames);
       return;
     }
     this.updateStandardBoidSpeciesInstances(
@@ -2629,7 +2630,7 @@ export class Renderer3D {
       elapsed,
       dt,
       flags,
-      isNatureParrot,
+      isProfiledParrot,
       sceneRenderer,
     );
   }
