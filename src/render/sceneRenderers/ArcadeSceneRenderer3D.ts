@@ -8,6 +8,7 @@ import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { NatureEnvironment } from '../styles/nature/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
+import type { SpeciesColorSet } from './createSceneRendererHooks';
 import type {
   FishtankBounds,
   SceneCreatureMaterialDefaults,
@@ -41,6 +42,23 @@ const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
 const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
 const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
+
+// Neon rainbow palette for multicolor ("Rainbow") boids in arcade style.
+// Each entry gives body/wing/tail a vivid hue so the flock shows real variety.
+const ARCADE_MULTICOLOR_VARIANTS: SpeciesColorSet[] = [
+  { body: new THREE.Color(0xd048c0), wing: new THREE.Color(0xe060d8), tail: new THREE.Color(0xb03898) }, // magenta
+  { body: new THREE.Color(0xff4040), wing: new THREE.Color(0xff6060), tail: new THREE.Color(0xcc2020) }, // red
+  { body: new THREE.Color(0x40c0ff), wing: new THREE.Color(0x60d0ff), tail: new THREE.Color(0x2090cc) }, // cyan
+  { body: new THREE.Color(0x40e060), wing: new THREE.Color(0x60f080), tail: new THREE.Color(0x20a040) }, // green
+  { body: new THREE.Color(0xffe040), wing: new THREE.Color(0xfff060), tail: new THREE.Color(0xc0a820) }, // yellow
+  { body: new THREE.Color(0xff8020), wing: new THREE.Color(0xffa040), tail: new THREE.Color(0xcc5010) }, // orange
+  { body: new THREE.Color(0x8040ff), wing: new THREE.Color(0xa060ff), tail: new THREE.Color(0x6020cc) }, // violet
+];
+
+function arcadeIdHash(id: number, salt: number): number {
+  const x = Math.sin(id * 127.1 + salt * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
 
 // Arcade motion constants (simplified, no exotic variants)
 const ARCADE_FLAP_FREQUENCY = 7.6;
@@ -208,17 +226,21 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
-    // Arcade has bright, simple coloring with no panic variations
-    const getColors = config.getColors;
+  getBoidColourStrategy(species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+    // Arcade has bright, simple coloring. Each species uses its arcadeBase color.
+    // Multicolor ("Rainbow") boids get a per-entity neon variant for visual variety.
+    // config.colors is nature-specific plumage and must NOT be used here.
     return {
       baseColor: config.arcadeBase,
       highlightColor: ARCADE_BOID_PANIC,
       getIntensity: (entity) => (entity as Boid).panicLevel,
-      individualVariation: false, // Arcade boids have uniform coloring per species
-      getSpeciesColors: getColors
-        ? (entity) => getColors(entity, _flags)
-        : (config.colors ? () => config.colors! : undefined),
+      individualVariation: species !== 'multicolor' && !!config.colors,
+      getSpeciesColors: species === 'multicolor'
+        ? (entity) => {
+            const idx = Math.floor(arcadeIdHash(entity.id, 42) * ARCADE_MULTICOLOR_VARIANTS.length) % ARCADE_MULTICOLOR_VARIANTS.length;
+            return ARCADE_MULTICOLOR_VARIANTS[idx];
+          }
+        : undefined,
       beakColor: config.beakColor,
       bakedWingPalette: true,
     };
