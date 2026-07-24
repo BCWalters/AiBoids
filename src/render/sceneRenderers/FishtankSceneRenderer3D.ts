@@ -302,6 +302,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           highlightColor: new THREE.Color(0xfffacd),
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => FISHTANK_SEAHORSE_COLORS,
+          colorMode: 'speciesTint',
         };
       }
       
@@ -368,6 +369,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         ? (creature) => this.getButterflyfishColorVariant(creature)
         : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
+      colorMode: (isParrot || config.colors) ? 'speciesTint' : undefined,
     };
   }
 
@@ -398,6 +400,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       individualVariation: true,
       getSpeciesColors: (creature) => this.getButterflyfishColorVariant(creature),
       beakColor: parrotConfig.beakColor,
+      colorMode: 'speciesTint',
     };
   }
 
