@@ -2547,7 +2547,6 @@ export class Renderer3D {
     context: PredatorUpdateContext,
     elapsed: number,
     dt: number,
-    _flags: StyleFlags,
   ): void {
     for (const kind of SCENE_PREDATOR_KINDS) {
       this.updatePredatorKindInstances(
@@ -2673,7 +2672,7 @@ export class Renderer3D {
   ): void {
     if (!this.hasAnyPredatorInstances()) return;
     const context = this.getPredatorUpdateContext(sim, flags);
-    this.updatePredatorInstanceSets(context, elapsed, dt, flags);
+    this.updatePredatorInstanceSets(context, elapsed, dt);
   }
 
   private updatePredatorKindInstances(
