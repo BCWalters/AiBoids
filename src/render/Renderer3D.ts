@@ -306,9 +306,9 @@ interface EntityInstanceColorArgs {
   useNatureParrotPalette: boolean;
   lockSpeciesPalette: boolean;
   beakColor: THREE.Color | undefined;
-  isNatureSmallBirdBody: boolean;
-  isNatureSmallBirdWing: boolean;
-  isNatureSmallBirdTail: boolean;
+  hasBakedBodyVertexColors: boolean;
+  hasBakedWingVertexColors: boolean;
+  hasBakedTailVertexColors: boolean;
 }
 
 interface ResolvedMotionConfig {
@@ -358,9 +358,9 @@ interface UpdateEntityInstanceArgs {
   useNatureParrotPalette: boolean;
   lockSpeciesPalette: boolean;
   beakColor: THREE.Color | undefined;
-  isNatureSmallBirdBody: boolean;
-  isNatureSmallBirdWing: boolean;
-  isNatureSmallBirdTail: boolean;
+  hasBakedBodyVertexColors: boolean;
+  hasBakedWingVertexColors: boolean;
+  hasBakedTailVertexColors: boolean;
   flapFrequency: number;
   flapIdleAmplitude: number;
   flapSpeedAmplitude: number;
@@ -1476,18 +1476,18 @@ export class Renderer3D {
     };
   }
 
-  private getSmallBirdBakedColorFlags(
+  private getBakedColorAttributeFlags(
     set: BirdInstanceSet,
     bakedBodyGradient: boolean,
   ): {
-    isNatureSmallBirdBody: boolean;
-    isNatureSmallBirdWing: boolean;
-    isNatureSmallBirdTail: boolean;
+    hasBakedBodyVertexColors: boolean;
+    hasBakedWingVertexColors: boolean;
+    hasBakedTailVertexColors: boolean;
   } {
     return {
-      isNatureSmallBirdBody: bakedBodyGradient && !!set.body.geometry.getAttribute('color'),
-      isNatureSmallBirdWing: bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color'),
-      isNatureSmallBirdTail: bakedBodyGradient && !!set.tail?.geometry.getAttribute('color'),
+      hasBakedBodyVertexColors: bakedBodyGradient && !!set.body.geometry.getAttribute('color'),
+      hasBakedWingVertexColors: bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color'),
+      hasBakedTailVertexColors: bakedBodyGradient && !!set.tail?.geometry.getAttribute('color'),
     };
   }
 
@@ -1505,9 +1505,9 @@ export class Renderer3D {
       useNatureParrotPalette,
       lockSpeciesPalette,
       beakColor,
-      isNatureSmallBirdBody,
-      isNatureSmallBirdWing,
-      isNatureSmallBirdTail,
+      hasBakedBodyVertexColors,
+      hasBakedWingVertexColors,
+      hasBakedTailVertexColors,
     } = args;
     const speciesColors = getSpeciesColors?.(entity);
     let effectiveBase = baseColor;
@@ -1553,20 +1553,20 @@ export class Renderer3D {
       this.variantColor.setHSL(h, s, l);
       effectiveBase = this.variantColor;
     }
-    if (isNatureSmallBirdBody) {
+    if (hasBakedBodyVertexColors) {
       // Baked gradient body — pass white so the vertex colours show through.
       this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
     } else {
       this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
     }
     set.body.setColorAt(index, this.stateColor);
-    if (isNatureSmallBirdWing) {
+    if (hasBakedWingVertexColors) {
       // Baked gradient wings — white passthrough; same for tail if baked.
       this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
       set.wingLeft.setColorAt(index, this.wingColor);
       set.wingRight.setColorAt(index, this.wingColor);
       if (set.tail) {
-        if (isNatureSmallBirdTail) {
+        if (hasBakedTailVertexColors) {
           this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
         } else {
           this.tailColor.copy(this.wingColor);
@@ -1984,9 +1984,9 @@ export class Renderer3D {
       useNatureParrotPalette,
       lockSpeciesPalette,
       beakColor,
-      isNatureSmallBirdBody,
-      isNatureSmallBirdWing,
-      isNatureSmallBirdTail,
+      hasBakedBodyVertexColors,
+      hasBakedWingVertexColors,
+      hasBakedTailVertexColors,
       flapFrequency,
       flapIdleAmplitude,
       flapSpeedAmplitude,
@@ -2069,9 +2069,9 @@ export class Renderer3D {
       useNatureParrotPalette,
       lockSpeciesPalette,
       beakColor,
-      isNatureSmallBirdBody,
-      isNatureSmallBirdWing,
-      isNatureSmallBirdTail,
+      hasBakedBodyVertexColors,
+      hasBakedWingVertexColors,
+      hasBakedTailVertexColors,
     });
   }
 
@@ -2135,10 +2135,10 @@ export class Renderer3D {
     // because dragon/hawk geometry also carries vertex colours and would
     // incorrectly trigger the white-passthrough branch.
     const {
-      isNatureSmallBirdBody,
-      isNatureSmallBirdWing,
-      isNatureSmallBirdTail,
-    } = this.getSmallBirdBakedColorFlags(set, bakedBodyGradient);
+      hasBakedBodyVertexColors,
+      hasBakedWingVertexColors,
+      hasBakedTailVertexColors,
+    } = this.getBakedColorAttributeFlags(set, bakedBodyGradient);
     this.updateEntityInstancesLoop(entities, {
       set,
       maxSpeed,
@@ -2153,9 +2153,9 @@ export class Renderer3D {
       useNatureParrotPalette,
       lockSpeciesPalette,
       beakColor,
-      isNatureSmallBirdBody,
-      isNatureSmallBirdWing,
-      isNatureSmallBirdTail,
+      hasBakedBodyVertexColors,
+      hasBakedWingVertexColors,
+      hasBakedTailVertexColors,
       flapFrequency,
       flapIdleAmplitude,
       flapSpeedAmplitude,
