@@ -41,6 +41,7 @@ import {
   type UprightStyle,
 } from './creatureUprightTuning';
 import {
+  createPredatorRenderFlags,
   createStyleFlags,
   createSceneRendererHooks,
   type BoidMotionStyleFlags,
@@ -50,6 +51,7 @@ import {
   type MotionConfig,
   type PredatorKind,
   type PredatorRenderFlags,
+  resolvePredatorRenderFlagsForKind,
   SCENE_PREDATOR_KINDS,
   SCENE_STYLES,
   type SceneEnvironmentToggles,
@@ -171,7 +173,6 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
 const PARROT_SPECIES: BoidSpecies = 'parrot';
 const NEUTRAL_PARROT_PROFILE = 'neutral';
-const NON_DRAGON_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = { isDragon: false, isShark: false };
 
 // Dragon tail sway: on-screen references (movies/TV) almost always show a
 // dragon's tail undulating up and down as it flies, driven by the same
@@ -1240,10 +1241,10 @@ export class Renderer3D {
   private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const sceneRenderer = this.getSceneRenderer(style);
     const countsByKind = this.getPredatorCountsByKind(sim.predators);
-    const renderFlags = this.getPredatorRenderFlags(flags);
+    const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
     for (const kind of SCENE_PREDATOR_KINDS) {
       const count = countsByKind.get(kind) ?? 0;
-      const kindRenderFlags = this.getPredatorRenderFlagsForKind(kind, renderFlags);
+      const kindRenderFlags = resolvePredatorRenderFlagsForKind(kind, renderFlags);
       const instanceKey = this.getPredatorInstanceKey(kind, count, style, kindRenderFlags);
       if (this.predatorInstanceKeys.get(kind) !== instanceKey) {
         this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
@@ -2513,13 +2514,6 @@ export class Renderer3D {
     return boidsBySpecies.get(species) ?? [];
   }
 
-  private getPredatorRenderFlags(flags: StyleFlags): PredatorRenderFlags {
-    const { isOrganic, isFishtank } = flags;
-    const isDragon = isOrganic && params.dragonPredators;
-    const isShark = isDragon && isFishtank;
-    return { isDragon, isShark };
-  }
-
   private partitionPredatorsByKind(predators: Predator[]): Map<PredatorKind, Predator[]> {
     const predatorsByKind = new Map<PredatorKind, Predator[]>();
     for (const kind of SCENE_PREDATOR_KINDS) {
@@ -2544,7 +2538,7 @@ export class Renderer3D {
     sim: Simulation,
     flags: StyleFlags,
   ): PredatorUpdateContext {
-    const renderFlags = this.getPredatorRenderFlags(flags);
+    const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
     const predatorsByKind = this.partitionPredatorsByKind(sim.predators);
     return { predatorsByKind, renderFlags };
   }
@@ -2561,17 +2555,9 @@ export class Renderer3D {
         context.predatorsByKind.get(kind) ?? [],
         elapsed,
         dt,
-        this.getPredatorRenderFlagsForKind(kind, context.renderFlags),
+        resolvePredatorRenderFlagsForKind(kind, context.renderFlags),
       );
     }
-  }
-
-  private getPredatorRenderFlagsForKind(
-    kind: PredatorKind,
-    renderFlags: PredatorRenderFlags,
-  ): PredatorRenderFlags {
-    if (kind === HAWK_PREDATOR_KIND) return renderFlags;
-    return NON_DRAGON_PREDATOR_RENDER_FLAGS;
   }
 
   private updateProfiledParrotInstances(

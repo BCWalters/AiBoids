@@ -79,6 +79,11 @@ export interface PredatorRenderFlags {
   isShark: boolean;
 }
 
+export const NON_DRAGON_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = {
+  isDragon: false,
+  isShark: false,
+};
+
 export interface StyleFlags {
   isNature: boolean;
   isFishtank: boolean;
@@ -93,6 +98,23 @@ export function createStyleFlags(style: VisualStyle): StyleFlags {
     isFishtank,
     isOrganic: isNature || isFishtank,
   };
+}
+
+export function createPredatorRenderFlags(
+  flags: StyleFlags,
+  dragonPredatorsEnabled: boolean,
+): PredatorRenderFlags {
+  const isDragon = flags.isOrganic && dragonPredatorsEnabled;
+  const isShark = isDragon && flags.isFishtank;
+  return { isDragon, isShark };
+}
+
+export function resolvePredatorRenderFlagsForKind(
+  kind: PredatorKind,
+  renderFlags: PredatorRenderFlags,
+): PredatorRenderFlags {
+  if (kind === HAWK_PREDATOR_KIND) return renderFlags;
+  return NON_DRAGON_PREDATOR_RENDER_FLAGS;
 }
 
 export interface BoidMotionStyleFlags {
