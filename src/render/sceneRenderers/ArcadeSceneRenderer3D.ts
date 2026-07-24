@@ -3,10 +3,11 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
-import type { Boid } from '../../sim/Boid';
+import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { NatureEnvironment } from '../styles/nature/environment';
+import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import type {
   FishtankBounds,
   SceneCreatureMaterialDefaults,
@@ -19,6 +20,8 @@ import type {
   StyleFlags,
   BoidMotionStyleFlags,
   BoidSpeciesConfig,
+  SceneBoidInstanceConfig,
+  ScenePredatorInstanceConfig,
 } from './createSceneRendererHooks';
 
 // --- Arcade style color constants: bright, saturated emissive colors for bloom effect
@@ -53,6 +56,10 @@ interface ArcadeSceneRendererDependencies {
   driftingClouds: DriftingClouds;
   fishtankEnv: FishtankEnvironment;
   natureEnv: NatureEnvironment;
+  arcadeSparrowGeometries: CreatureGeometries;
+  arcadeParrotGeometries: CreatureGeometries;
+  arcadeBoidGeometries: CreatureGeometries;
+  arcadePredatorGeometries: CreatureGeometries;
 }
 
 export class ArcadeSceneRenderer3D implements SceneRendererHooks {
@@ -244,6 +251,46 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       bakedWingPalette,
       useNatureParrotPalette: false,
     };
+  }
+
+  getParrotGeometryProfile(_entity: Boid | Predator, _flags: StyleFlags): string {
+    return 'neutral';
+  }
+
+  getParrotProfileNames(_flags: StyleFlags): string[] {
+    return [];
+  }
+
+  getParrotProfileInstanceConfig(_profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
+    return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false };
+  }
+
+  getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+    if (config.useSmallGeometry) {
+      return { geometries: this.deps.arcadeSparrowGeometries, bodyVertexColors: false };
+    }
+    if (config.useParrotGeometry) {
+      return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false };
+    }
+    return { geometries: this.deps.arcadeBoidGeometries, bodyVertexColors: false };
+  }
+
+  getPredatorInstanceConfig(
+    kind: 'hawk' | 'unicorn',
+    _flags: StyleFlags,
+    _renderFlags: PredatorRenderFlags,
+  ): ScenePredatorInstanceConfig {
+    switch (kind) {
+      case 'hawk':
+      case 'unicorn':
+        return {
+          geometries: this.deps.arcadePredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: false,
+        };
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
   }
 
   dispose(): void {}

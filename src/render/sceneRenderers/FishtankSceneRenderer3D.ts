@@ -3,11 +3,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
-import type { Boid } from '../../sim/Boid';
+import type { Boid, BoidSpecies } from '../../sim/Boid';
 import { computeFishtankRoomBounds, placeFishtankEnvironment, TANK_VISUAL_SCALE } from '../styles/fishtank/environment';
 import { getSharkTailPivotY } from '../styles/fishtank/geometry/sharkGeometry';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
+import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import type {
   FishtankBounds,
   SceneCreatureMaterialDefaults,
@@ -20,6 +21,8 @@ import type {
   StyleFlags,
   BoidMotionStyleFlags,
   BoidSpeciesConfig,
+  SceneBoidInstanceConfig,
+  ScenePredatorInstanceConfig,
   SpeciesColorSet,
 } from './createSceneRendererHooks';
 
@@ -67,6 +70,12 @@ interface FishtankSceneRendererDependencies {
   fishtankCenter: THREE.Vector3;
   fishtankEnv: FishtankEnvironment;
   natureEnv: { setVisible: (visible: boolean) => void };
+  fishtankSparrowGeometries: CreatureGeometries;
+  fishtankButterflyfishGeometries: CreatureGeometries;
+  fishtankBoidGeometries: CreatureGeometries;
+  fishtankPredatorGeometries: CreatureGeometries;
+  fishtankSharkPredatorGeometries: CreatureGeometries;
+  fishtankUnicornPredatorGeometries: CreatureGeometries;
 }
 
 export class FishtankSceneRenderer3D implements SceneRendererHooks {
@@ -260,17 +269,20 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+  getBoidColourStrategy(species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
     // Fishtank boids have simpler coloring than nature (no panic jitter)
     const getColors = config.getColors;
+    const isParrot = species === 'parrot';
     return {
       baseColor: config.natureBase, // Use nature base in fishtank (they're aquatic variants)
       highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
       getIntensity: (entity) => (entity as Boid).panicLevel,
       individualVariation: false, // Fishtank fish have consistent coloring
-      getSpeciesColors: getColors
-        ? (entity) => getColors(entity, _flags)
-        : (config.colors ? () => config.colors! : undefined),
+      getSpeciesColors: isParrot
+        ? (entity) => this.getButterflyfishColorVariant(entity)
+        : getColors
+          ? (entity) => getColors(entity, _flags)
+          : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       bakedWingPalette: true,
     };
@@ -314,6 +326,51 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       return BUTTERFLYFISH_COLOR_PATTERNS[(baseIndex + cycleStep) % BUTTERFLYFISH_COLOR_PATTERNS.length];
     }
     return BUTTERFLYFISH_COLOR_PATTERNS[baseIndex];
+  }
+
+  getParrotGeometryProfile(_entity: Boid | Predator, _flags: StyleFlags): string {
+    return 'neutral';
+  }
+
+  getParrotProfileNames(_flags: StyleFlags): string[] {
+    return [];
+  }
+
+  getParrotProfileInstanceConfig(_profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
+    return { geometries: this.deps.fishtankButterflyfishGeometries, bodyVertexColors: true };
+  }
+
+  getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+    if (config.useSmallGeometry) {
+      return { geometries: this.deps.fishtankSparrowGeometries, bodyVertexColors: true };
+    }
+    if (config.useParrotGeometry) {
+      return { geometries: this.deps.fishtankButterflyfishGeometries, bodyVertexColors: true };
+    }
+    return { geometries: this.deps.fishtankBoidGeometries, bodyVertexColors: true };
+  }
+
+  getPredatorInstanceConfig(
+    kind: 'hawk' | 'unicorn',
+    _flags: StyleFlags,
+    renderFlags: PredatorRenderFlags,
+  ): ScenePredatorInstanceConfig {
+    switch (kind) {
+      case 'hawk':
+        return {
+          geometries: renderFlags.isDragon ? this.deps.fishtankSharkPredatorGeometries : this.deps.fishtankPredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: true,
+        };
+      case 'unicorn':
+        return {
+          geometries: this.deps.fishtankUnicornPredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: true,
+        };
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
   }
 
   dispose(): void {

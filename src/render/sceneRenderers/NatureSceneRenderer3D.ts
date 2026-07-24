@@ -3,9 +3,10 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
-import type { Boid } from '../../sim/Boid';
+import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import { placeNatureEnvironment, type NatureEnvironment } from '../styles/nature/environment';
+import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import type {
   FishtankBounds,
   SceneCreatureMaterialDefaults,
@@ -18,6 +19,8 @@ import type {
   StyleFlags,
   BoidMotionStyleFlags,
   BoidSpeciesConfig,
+  SceneBoidInstanceConfig,
+  ScenePredatorInstanceConfig,
   SpeciesColorSet,
 } from './createSceneRendererHooks';
 
@@ -181,6 +184,21 @@ function idHash(id: number, salt: number): number {
   return x - Math.floor(x);
 }
 
+function getNatureParrotVariants(): NatureParrotVariant[] {
+  if (PARROT_FOCUS_PATTERN_INDEX === null) return PARROT_NATURE_VARIANTS;
+  return [PARROT_NATURE_VARIANTS[THREE.MathUtils.clamp(PARROT_FOCUS_PATTERN_INDEX, 0, PARROT_NATURE_VARIANTS.length - 1)]];
+}
+
+function getNatureParrotVariant(entity: Boid | Predator): NatureParrotVariant {
+  const variants = getNatureParrotVariants();
+  const baseIndex = Math.floor(idHash(entity.id, 42) * variants.length) % variants.length;
+  if (params.galleryCreature === 'parrot') {
+    const cycleStep = Math.floor(performance.now() / 3200);
+    return variants[(baseIndex + cycleStep) % variants.length];
+  }
+  return variants[baseIndex];
+}
+
 interface NatureSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -188,6 +206,17 @@ interface NatureSceneRendererDependencies {
   fishtankEnv: { setVisible: (visible: boolean) => void };
   natureEnv: NatureEnvironment;
   updateTransientEffects: (sim: Simulation, elapsed: number) => void;
+  natureSparrowGeometries: CreatureGeometries;
+  natureParrotGeometries: CreatureGeometries;
+  natureParrotBlueGoldGeometries: CreatureGeometries;
+  natureParrotScarletGeometries: CreatureGeometries;
+  natureParrotPurpleLavenderGeometries: CreatureGeometries;
+  natureParrotNeutralGeometries: CreatureGeometries;
+  natureBoidGeometries: CreatureGeometries;
+  natureSmallSpeciesGeometries: Map<BoidSpecies, CreatureGeometries>;
+  naturePredatorGeometries: CreatureGeometries;
+  dragonPredatorGeometries: CreatureGeometries;
+  unicornPredatorGeometries: CreatureGeometries;
 }
 
 export class NatureSceneRenderer3D implements SceneRendererHooks {
@@ -408,14 +437,73 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       beakColor: config.beakColor,
       bakedWingPalette,
       useNatureParrotPalette: true, // Always use nature parrot palette in nature renderer
+      lockSpeciesPalette: PARROT_FOCUS_PATTERN_INDEX !== null,
     };
   }
 
   private getParrotColorVariant(entity: Boid | Predator): SpeciesColorSet {
-    const variants = PARROT_NATURE_VARIANTS;
-    const baseIndex = Math.floor(idHash(entity.id, 42) * variants.length) % variants.length;
-    // Note: params.galleryCreature cycling is handled elsewhere in the render pipeline
-    return variants[baseIndex].colors;
+    return getNatureParrotVariant(entity).colors;
+  }
+
+  getParrotGeometryProfile(entity: Boid | Predator, _flags: StyleFlags): string {
+    return getNatureParrotVariant(entity).geometryProfile;
+  }
+
+  getParrotProfileNames(_flags: StyleFlags): string[] {
+    return NON_NEUTRAL_PARROT_PROFILES;
+  }
+
+  getParrotProfileInstanceConfig(profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
+    switch (profile) {
+      case 'green-focus':
+        return { geometries: this.deps.natureParrotGeometries, bodyVertexColors: true };
+      case 'blue-gold-focus':
+        return { geometries: this.deps.natureParrotBlueGoldGeometries, bodyVertexColors: true };
+      case 'scarlet-focus':
+        return { geometries: this.deps.natureParrotScarletGeometries, bodyVertexColors: true };
+      case 'purple-lavender-focus':
+        return { geometries: this.deps.natureParrotPurpleLavenderGeometries, bodyVertexColors: true };
+      case 'neutral':
+        return { geometries: this.deps.natureParrotNeutralGeometries, bodyVertexColors: true };
+      default:
+        throw new Error(`Unknown parrot profile: ${profile}`);
+    }
+  }
+
+  getBoidInstanceConfig(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+    if (config.useSmallGeometry) {
+      return { geometries: this.deps.natureSparrowGeometries, bodyVertexColors: true };
+    }
+    if (config.useParrotGeometry) {
+      return { geometries: this.deps.natureParrotGeometries, bodyVertexColors: true };
+    }
+    return {
+      geometries: this.deps.natureSmallSpeciesGeometries.get(species) ?? this.deps.natureBoidGeometries,
+      bodyVertexColors: true,
+    };
+  }
+
+  getPredatorInstanceConfig(
+    kind: 'hawk' | 'unicorn',
+    _flags: StyleFlags,
+    renderFlags: PredatorRenderFlags,
+  ): ScenePredatorInstanceConfig {
+    switch (kind) {
+      case 'hawk':
+        return {
+          geometries: renderFlags.isDragon ? this.deps.dragonPredatorGeometries : this.deps.naturePredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: true,
+        };
+      case 'unicorn':
+        return {
+          geometries: this.deps.unicornPredatorGeometries,
+          rainbowWings: true,
+          bodyVertexColors: true,
+        };
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
   }
 
   dispose(): void {

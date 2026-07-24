@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import type { computeFishtankRoomBounds } from '../styles/fishtank/environment';
 import type { Predator } from '../../sim/Predator';
 import type { Boid, BoidSpecies } from '../../sim/Boid';
+import type { CreatureGeometries } from '../geometry/sharedGeometry';
 
 export type FishtankBounds = ReturnType<typeof computeFishtankRoomBounds>;
 
@@ -36,6 +37,8 @@ export interface ColourStrategy {
   bakedBodyGradient?: boolean;
   /** Enables nature-parrot-specific palette lock/passthrough behavior. */
   useNatureParrotPalette?: boolean;
+  /** Disables per-entity species jitter and preserves exact species colors. */
+  lockSpeciesPalette?: boolean;
   beakColor?: THREE.Color;
 }
 
@@ -87,6 +90,8 @@ export interface BoidSpeciesConfig {
   species: BoidSpecies;
   natureBase: THREE.Color;
   arcadeBase: THREE.Color;
+  useSmallGeometry: boolean;
+  useParrotGeometry?: boolean;
   getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
   colors?: SpeciesColorSet;
   beakColor?: THREE.Color;
@@ -116,6 +121,17 @@ export interface SceneCreatureMaterialDefaults {
   wingEmissiveIntensity: number;
   wingRoughness: (isDragon: boolean) => number;
   wingColor: (isDragon: boolean, isFishtank: boolean) => number;
+}
+
+export interface SceneBoidInstanceConfig {
+  geometries: CreatureGeometries;
+  bodyVertexColors: boolean;
+}
+
+export interface ScenePredatorInstanceConfig {
+  geometries: CreatureGeometries;
+  rainbowWings: boolean;
+  bodyVertexColors: boolean;
 }
 
 export interface SceneRendererHooks {
@@ -148,6 +164,11 @@ export interface SceneRendererHooks {
   getBoidColourStrategy: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => ColourStrategy;
   getBoidMotionConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags) => MotionConfig;
   getParrotColourStrategy: (config: BoidSpeciesConfig, flags: StyleFlags, bakedWingPalette: boolean) => ColourStrategy;
+  getParrotGeometryProfile: (entity: Boid | Predator, flags: StyleFlags) => string;
+  getParrotProfileNames: (flags: StyleFlags) => string[];
+  getParrotProfileInstanceConfig: (profile: string, flags: StyleFlags) => SceneBoidInstanceConfig;
+  getBoidInstanceConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => SceneBoidInstanceConfig;
+  getPredatorInstanceConfig: (kind: PredatorKind, flags: StyleFlags, renderFlags: PredatorRenderFlags) => ScenePredatorInstanceConfig;
   dispose: () => void;
 }
 
