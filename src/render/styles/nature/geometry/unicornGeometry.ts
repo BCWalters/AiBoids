@@ -254,22 +254,21 @@ function buildHorseBodyProfileGeometry(
     // Head shortened (poll -> muzzle distance scaled toward the poll)
     // and widened (radii increased) per direct feedback: "slightly
     // wider and slightly shorter".
-    { y: halfLen * 0.29, z: length * 0.345, radius: width * 0.185 }, // top of head/forehead, starting to bend down+forward
+    { y: halfLen * 0.29, z: length * 0.345, radius: width * 0.215 }, // top of head/forehead, starting to bend down+forward
     // Cheek/jaw bulge — a distinct wider point partway down the face
     // (real horses have a noticeably thicker jaw/cheek area right below
     // the forehead, before the face narrows into the muzzle) so the
     // taper isn't one continuous pinch from poll to nose-tip, which read
-    // as a thin anteater snout. zScale eased slightly (0.9, not fully
-    // round) since the jaw is a touch flatter than the throat/neck.
-    { y: halfLen * 0.325, z: length * 0.32, radius: width * 0.175, zScale: 0.9 }, // cheek/jaw
-    // Mouth/muzzle area: flattened (reduced zScale) and tinted a darker
-    // purple (multiplies against the lavender instance color) so it
-    // reads as a distinct muzzle rather than a continuation of the neck.
-    // Shortened considerably (was reaching halfLen*0.447 — a long thin
-    // taper that read as an anteater snout) and the taper eased so the
-    // muzzle stays noticeably thick right up until the blunt nose tip.
-    { y: halfLen * 0.365, z: length * 0.29, radius: width * 0.15, zScale: 0.8, color: UNICORN_MUZZLE_TINT }, // nose bridge — head angling down
-    { y: halfLen * 0.4, z: length * 0.24, radius: width * 0.115, zScale: 0.72, color: UNICORN_MUZZLE_TINT }, // muzzle tip — blunt, not pinched to a point
+    // as a thin anteater snout. zScale kept near-round (per feedback the
+    // head read as too flat — it now stays rounder/deeper front-to-back).
+    { y: halfLen * 0.325, z: length * 0.32, radius: width * 0.205, zScale: 0.97 }, // cheek/jaw
+    // Mouth/muzzle area: only gently flattened (reduced zScale) and
+    // tinted a darker purple (multiplies against the lavender instance
+    // color) so it reads as a distinct muzzle rather than a continuation
+    // of the neck. Kept thick and only mildly flattened per feedback that
+    // the head/muzzle read as too flat.
+    { y: halfLen * 0.365, z: length * 0.29, radius: width * 0.175, zScale: 0.9, color: UNICORN_MUZZLE_TINT }, // nose bridge — head angling down
+    { y: halfLen * 0.4, z: length * 0.24, radius: width * 0.14, zScale: 0.85, color: UNICORN_MUZZLE_TINT }, // muzzle tip — blunt, not pinched to a point
   ];
 
   const segments = 10;
@@ -410,12 +409,14 @@ function buildUnicornEyesGeometry(headTopY: number, headTopZ: number, headTopRad
  * muzzle rather than a separate protruding bulb.
  */
 function buildUnicornNoseGeometry(muzzleTipY: number, muzzleTipZ: number, muzzleTipRadius: number): THREE.BufferGeometry {
-  const bulbRadius = muzzleTipRadius * 0.7;
-  const bulbRadiusZ = muzzleTipRadius * 0.55;
-  // Only a small fraction of the bulb's own radius pokes past the
-  // tip ring — mostly flush with it, not projecting forward as its own
-  // separate shape.
-  const noseY = muzzleTipY + bulbRadius * 0.2;
+  const bulbRadius = muzzleTipRadius * 0.6;
+  const bulbRadiusZ = muzzleTipRadius * 0.5;
+  // The bulb sits slightly recessed INTO the muzzle-tip ring (a small
+  // negative offset) rather than projecting forward off it — per direct
+  // feedback the nose "looks disconnected, there's a space between the
+  // nose and the face". Embedding it flush against the tip removes that
+  // gap so the nose reads as part of the muzzle, not a separate ball.
+  const noseY = muzzleTipY - bulbRadius * 0.15;
   // thetaStart=0, thetaLength=PI/2 keeps just the pole cap (a dome/half-
   // sphere bulging forward in local +Y, the sphere's default pole axis,
   // which already matches the model's forward axis here) with a flat
