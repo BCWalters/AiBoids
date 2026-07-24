@@ -8,27 +8,30 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  fullyParallel: false,
   // CI runners have limited CPU and no GPU — several tests each running
   // their own software-rendered (SwiftShader) WebGL context in parallel
   // starve each other badly enough to blow through generous timeouts
   // (observed: a plain selectOption() call taking >60s under contention).
   // Running one test at a time on CI trades total wall-clock time for
-  // reliability; locally (real GPU, no contention) full parallelism is
-  // fine and fast.
-  workers: process.env.CI ? 1 : undefined,
+  // reliability. Locally, cap at two workers to reduce transient contention
+  // between multiple SwiftShader/WebGL contexts while keeping turnaround fast.
+  workers: process.env.CI ? 1 : 2,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? 'github' : 'list',
+  expect: {
+    timeout: process.env.CI ? 15_000 : 5_000,
+  },
   use: {
     baseURL: 'http://localhost:4319',
     trace: 'retain-on-failure',
     // CI runners have no GPU, so Chromium falls back to software WebGL
     // (SwiftShader). It works, but is much slower than a real GPU —
     // giving actions more time to complete avoids flaky timeouts there.
-    actionTimeout: 20_000,
+    actionTimeout: 30_000,
   },
-  timeout: process.env.CI ? 90_000 : 30_000,
+  timeout: process.env.CI ? 120_000 : 30_000,
   projects: [
     {
       name: 'chromium',
@@ -48,6 +51,6 @@ export default defineConfig({
     command: 'npm run dev -- --port 4319 --strictPort --host',
     url: 'http://localhost:4319',
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: 60_000,
   },
 });
