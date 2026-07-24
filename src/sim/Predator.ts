@@ -4,22 +4,29 @@ import { params } from './params';
 import { Boid } from './Boid';
 import { boundarySteer, nearWallAxisCount, type WorldBounds } from './boundary';
 
-let nextId = 1;
-
 /**
- * Which kind of predator this is. 'normal' is the default chase-and-catch
- * predator (its geometry is further swapped to a "dragon" or "shark" look
- * by the cosmetic params.dragonPredators toggle — that toggle never changes
- * behavior, only rendering). 'horse' is a separate, independent population
- * that chases boids the same way but never catches them (see
- * Simulation.checkCatches, which skips horse-kind entirely) and only
- * triggers a much weaker flee response in boids (see Boid.update's flee
- * loop) — a gentle, playful pursuit rather than a real threat. Scene
- * renderers map these canonical names to creature-specific display labels
- * (e.g. 'normal' → "Hawk" in nature, "Shark" in fishtank;
- *  'horse' → "Unicorn" in nature, "Sea Horse" in fishtank).
+ * Canonical species identifiers for predators. 'Normal' is the default
+ * chase-and-catch predator (its geometry is further swapped to a "dragon" or
+ * "shark" look by the cosmetic dragonPredators toggle — that toggle never
+ * changes behavior, only rendering). 'Horse' is a separate, independent
+ * population that chases boids the same way but never catches them (see
+ * Simulation.checkCatches) and only triggers a much weaker flee response
+ * in boids — a gentle, playful pursuit rather than a real threat. Scene
+ * renderers map these to creature-specific display labels
+ * (e.g. Normal → "Hawk" in nature, "Shark" in fishtank;
+ *  Horse → "Unicorn" in nature, "Sea Horse" in fishtank).
+ *
+ * Uses the const-object pattern (value + derived union type with the same name)
+ * so call sites can write PredatorSpecies.Horse instead of bare 'horse' strings
+ * while remaining compatible with erasableSyntaxOnly (no enum runtime code).
  */
-export type PredatorKind = 'normal' | 'horse';
+export const PredatorSpecies = {
+  Normal: 'normal',
+  Horse: 'horse',
+} as const;
+export type PredatorSpecies = (typeof PredatorSpecies)[keyof typeof PredatorSpecies];
+
+let nextId = 1;
 
 // How long (seconds) a predator takes to glide to a full stop after
 // catching prey, and how long it then rests in place "digesting" before
@@ -46,7 +53,7 @@ const PREDATOR_MUTUAL_SEPARATION_WEIGHT = 2.2;
 
 export class Predator {
   readonly id: number;
-  readonly kind: PredatorKind;
+  readonly species: PredatorSpecies;
   position: Vec3;
   velocity: Vec3;
 
@@ -124,9 +131,9 @@ export class Predator {
    */
   private cornerStuckTime = 0;
 
-  constructor(position: Vec3, velocity: Vec3, kind: PredatorKind = 'normal') {
+  constructor(position: Vec3, velocity: Vec3, species: PredatorSpecies = PredatorSpecies.Normal) {
     this.id = nextId++;
-    this.kind = kind;
+    this.species = species;
     this.position = position;
     this.velocity = velocity;
   }

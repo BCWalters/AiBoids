@@ -4,8 +4,11 @@ import type { Vector3 } from 'three';
 import * as THREE from 'three';
 import type { computeFishtankRoomBounds } from '../styles/fishtank/environment';
 import type { Predator } from '../../sim/Predator';
+import { PredatorSpecies } from '../../sim/Predator';
 import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
+
+export { PredatorSpecies };
 
 export type FishtankBounds = ReturnType<typeof computeFishtankRoomBounds>;
 
@@ -64,14 +67,13 @@ export interface MotionConfig {
   preferUpright?: boolean;
 }
 
-export type PredatorKind = 'normal' | 'horse';
-export const HAWK_PREDATOR_KIND: PredatorKind = 'normal';
-export const UNICORN_PREDATOR_KIND: PredatorKind = 'horse';
+export const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
+export const UNICORN_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Horse;
 export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
-export const SCENE_PREDATOR_KINDS: readonly PredatorKind[] = [HAWK_PREDATOR_KIND, UNICORN_PREDATOR_KIND];
+export const SCENE_PREDATOR_SPECIES: readonly PredatorSpecies[] = [HAWK_PREDATOR_SPECIES, UNICORN_PREDATOR_SPECIES];
 
-export function isPredatorKind(kind: string): kind is PredatorKind {
-  return SCENE_PREDATOR_KINDS.includes(kind as PredatorKind);
+export function isPredatorSpecies(species: string): species is PredatorSpecies {
+  return SCENE_PREDATOR_SPECIES.includes(species as PredatorSpecies);
 }
 
 export interface PredatorRenderFlags {
@@ -110,20 +112,20 @@ export function createPredatorRenderFlags(
 }
 
 export function resolvePredatorRenderFlagsForKind(
-  kind: PredatorKind,
+  species: PredatorSpecies,
   renderFlags: PredatorRenderFlags,
 ): PredatorRenderFlags {
-  if (kind === HAWK_PREDATOR_KIND) return renderFlags;
+  if (species === HAWK_PREDATOR_SPECIES) return renderFlags;
   return NON_DRAGON_PREDATOR_RENDER_FLAGS;
 }
 
 export function createPredatorInstanceKey(
-  kind: PredatorKind,
+  species: PredatorSpecies,
   count: number,
   style: VisualStyle,
   renderFlags: PredatorRenderFlags,
 ): string {
-  return kind === HAWK_PREDATOR_KIND
+  return species === HAWK_PREDATOR_SPECIES
     ? `${count}:${style}:${renderFlags.isDragon}`
     : `${count}:${style}`;
 }
@@ -188,11 +190,11 @@ export interface ScenePredatorInstanceConfig {
 }
 
 /** Scene-specific display names for all canonical sim entity types.
- * Boid species use their canonical sim keys; predator kinds use their
+ * Boid species use their canonical sim keys; predator species use their
  * canonical sim keys plus 'dragon' as a visual variant of 'normal'. */
 export interface CreatureLabels {
   boid: Record<BoidSpecies, string>;
-  predator: Record<PredatorKind | 'dragon', string>;
+  predator: Record<PredatorSpecies | 'dragon', string>;
 }
 
 export interface SceneRendererHooks {
@@ -220,8 +222,8 @@ export interface SceneRendererHooks {
   getWorldScale: () => number;
   mapPositionToRenderSpace: (x: number, y: number, z: number, target: Vector3) => void;
   getCreatureMaterialDefaults: () => SceneCreatureMaterialDefaults;
-  getPredatorColourStrategy: (kind: PredatorKind, renderFlags: PredatorRenderFlags) => ColourStrategy;
-  getPredatorMotionConfig: (kind: PredatorKind, renderFlags: PredatorRenderFlags) => MotionConfig;
+  getPredatorColourStrategy: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => ColourStrategy;
+  getPredatorMotionConfig: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => MotionConfig;
   getBoidColourStrategy: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => ColourStrategy;
   getBoidMotionConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags) => MotionConfig;
   getParrotColourStrategy: (config: BoidSpeciesConfig, flags: StyleFlags, bakedWingPalette: boolean) => ColourStrategy;
@@ -229,7 +231,7 @@ export interface SceneRendererHooks {
   getParrotProfileNames: (flags: StyleFlags) => string[];
   getParrotProfileInstanceConfig: (profile: string, flags: StyleFlags) => SceneBoidInstanceConfig;
   getBoidInstanceConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => SceneBoidInstanceConfig;
-  getPredatorInstanceConfig: (kind: PredatorKind, flags: StyleFlags, renderFlags: PredatorRenderFlags) => ScenePredatorInstanceConfig;
+  getPredatorInstanceConfig: (species: PredatorSpecies, flags: StyleFlags, renderFlags: PredatorRenderFlags) => ScenePredatorInstanceConfig;
   /** Scene-specific display labels for each canonical sim entity type.
    * Used by the UI to show creature names appropriate to the current scene
    * (e.g. 'normal' boid → "Sparrow" in nature, "Fish" in fishtank, "Boid" in arcade).

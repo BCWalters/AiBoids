@@ -3,26 +3,27 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
-import type { Boid, BoidSpecies } from '../../sim/Boid';
+import { type Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import { placeNatureEnvironment, type NatureEnvironment } from '../styles/nature/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
-import type {
-  FishtankBounds,
-  SceneCreatureMaterialDefaults,
-  SceneEnvironmentToggles,
-  ScenePresentationSettings,
-  SceneRendererHooks,
-  ColourStrategy,
-  MotionConfig,
-  PredatorRenderFlags,
-  StyleFlags,
-  BoidMotionStyleFlags,
-  BoidSpeciesConfig,
-  SceneBoidInstanceConfig,
-  ScenePredatorInstanceConfig,
-  SpeciesColorSet,
-  CreatureLabels,
+import {
+  PredatorSpecies,
+  type FishtankBounds,
+  type SceneCreatureMaterialDefaults,
+  type SceneEnvironmentToggles,
+  type ScenePresentationSettings,
+  type SceneRendererHooks,
+  type ColourStrategy,
+  type MotionConfig,
+  type PredatorRenderFlags,
+  type StyleFlags,
+  type BoidMotionStyleFlags,
+  type BoidSpeciesConfig,
+  type SceneBoidInstanceConfig,
+  type ScenePredatorInstanceConfig,
+  type SpeciesColorSet,
+  type CreatureLabels,
 } from './createSceneRendererHooks';
 
 // --- Nature style color constants: matte, earth-toned plumage with realistic gradients
@@ -327,11 +328,11 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getPredatorColourStrategy(kind: string, renderFlags: PredatorRenderFlags): ColourStrategy {
+  getPredatorColourStrategy(species: PredatorSpecies, renderFlags: PredatorRenderFlags): ColourStrategy {
     const { isDragon } = renderFlags;
     
-    switch (kind) {
-      case 'horse':
+    switch (species) {
+      case PredatorSpecies.Horse:
         return {
           baseColor: NATURE_UNICORN_BODY,
           highlightColor: NATURE_UNICORN_HUNT,
@@ -339,7 +340,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           getSpeciesColors: () => NATURE_UNICORN_COLORS,
         };
       
-      case 'normal':
+      case PredatorSpecies.Normal:
         return {
           baseColor: isDragon ? DRAGON_PREDATOR_BASE : NATURE_PREDATOR_BASE,
           highlightColor: isDragon ? DRAGON_PREDATOR_HUNT : NATURE_PREDATOR_HUNT,
@@ -349,15 +350,15 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
         };
       
       default:
-        throw new Error(`Unknown predator kind: ${kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
-  getPredatorMotionConfig(kind: string, renderFlags: PredatorRenderFlags): MotionConfig {
+  getPredatorMotionConfig(species: PredatorSpecies, renderFlags: PredatorRenderFlags): MotionConfig {
     const { isDragon } = renderFlags;
     
-    switch (kind) {
-      case 'horse':
+    switch (species) {
+      case PredatorSpecies.Horse:
         return {
           flapFrequency: _UNICORN_FLAP_FREQUENCY,
           flapIdleAmplitude: _UNICORN_FLAP_IDLE_AMPLITUDE,
@@ -369,7 +370,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: 1,
         };
       
-      case 'normal':
+      case PredatorSpecies.Normal:
         return {
           flapFrequency: isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
           flapIdleAmplitude: isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
@@ -383,11 +384,11 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
         };
       
       default:
-        throw new Error(`Unknown predator kind: ${kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
-  getBoidColourStrategy(species: string, config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
+  getBoidColourStrategy(species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
     const { isOrganic, isNature } = flags;
     const getColors = config.getColors;
     return {
@@ -400,13 +401,13 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
         : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       bakedWingPalette: true,
-      bakedBodyGradient: isNature && (species === 'normal' || species === 'gold' || species === 'red' || species === 'blue'),
+      bakedBodyGradient: isNature && (species === BoidSpecies.Normal || species === BoidSpecies.Gold || species === BoidSpecies.Red || species === BoidSpecies.Blue),
     };
   }
 
-  getBoidMotionConfig(species: string, config: BoidSpeciesConfig, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+  getBoidMotionConfig(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
     const { isProfiledParrot } = boidMotionFlags;
-    const isParrot = species === 'multicolor';
+    const isParrot = species === BoidSpecies.Multicolor;
     const tailSwayPivot = config.tailSwayPivotY ?? 0;
     
     return {
@@ -483,25 +484,25 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 
   getPredatorInstanceConfig(
-    kind: 'normal' | 'horse',
+    species: PredatorSpecies,
     _flags: StyleFlags,
     renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
-    switch (kind) {
-      case 'normal':
+    switch (species) {
+      case PredatorSpecies.Normal:
         return {
           geometries: renderFlags.isDragon ? this.deps.dragonPredatorGeometries : this.deps.naturePredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
-      case 'horse':
+      case PredatorSpecies.Horse:
         return {
           geometries: this.deps.unicornPredatorGeometries,
           rainbowWings: true,
           bodyVertexColors: true,
         };
       default:
-        throw new Error(`Unknown predator kind: ${kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 

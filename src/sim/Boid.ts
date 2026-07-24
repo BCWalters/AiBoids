@@ -9,24 +9,31 @@ let nextId = 1;
 /** How long (seconds) the "caught" shrink-and-slide-into-mouth animation lasts. */
 export const DYING_DURATION = 0.35;
 
-// Horse-kind predators (see Predator.kind) gently chase boids without ever
-// catching them — this scales down how strongly boids react to one being
+// Horse-species predators (see Predator.species) gently chase boids without
+// ever catching them — this scales down how strongly boids react to one being
 // nearby, so it reads as a much weaker, playful "drift away" rather than
 // the full-blown panic flight a real predator triggers.
 const HORSE_THREAT_FACTOR = 0.25;
 
 /**
- * Which flock a boid belongs to. Boids only align/cohere with same-species
- * neighbors (see the flocking loop in update()) — a mixed normal+multicolor
- * scene reads as two independently-flocking groups sharing the same sky,
- * rather than one uniform flock, which is both more visually interesting
- * and closer to how real mixed-species bird gatherings behave. Separation
- * (basic collision avoidance) still applies across species, since birds of
- * any species still dodge each other rather than flying straight through.
- * Scene renderers map these canonical names to creature-specific display
- * labels (e.g. 'normal' → "Sparrow" in nature, "Fish" in fishtank).
+ * Canonical species identifiers for boids. Boids only align/cohere with
+ * same-species neighbors (see the flocking loop in update()) — a mixed
+ * normal+multicolor scene reads as two independently-flocking groups sharing
+ * the same sky. Scene renderers map these to creature-specific display labels
+ * (e.g. Normal → "Sparrow" in nature, "Fish" in fishtank).
+ *
+ * Uses the const-object pattern (value + derived union type with the same name)
+ * so call sites can write BoidSpecies.Normal instead of bare 'normal' strings
+ * while remaining compatible with erasableSyntaxOnly (no enum runtime code).
  */
-export type BoidSpecies = 'normal' | 'multicolor' | 'gold' | 'red' | 'blue';
+export const BoidSpecies = {
+  Normal: 'normal',
+  Multicolor: 'multicolor',
+  Gold: 'gold',
+  Red: 'red',
+  Blue: 'blue',
+} as const;
+export type BoidSpecies = (typeof BoidSpecies)[keyof typeof BoidSpecies];
 
 export class Boid {
   readonly id: number;
@@ -111,7 +118,7 @@ export class Boid {
    */
   renderBank = 0;
 
-  constructor(position: Vec3, velocity: Vec3, species: BoidSpecies = 'normal') {
+  constructor(position: Vec3, velocity: Vec3, species: BoidSpecies = BoidSpecies.Normal) {
     this.id = nextId++;
     this.species = species;
     this.position = position;
@@ -259,7 +266,7 @@ export class Boid {
         // scales down both the steering push and the reported proximity
         // (which drives panicLevel, read by renderers for the alarm-color
         // tint) so a horse nearby reads as mild wariness, not full flight.
-        const threatFactor = predator.kind === 'horse' ? HORSE_THREAT_FACTOR : 1;
+        const threatFactor = predator.species === 'horse' ? HORSE_THREAT_FACTOR : 1;
         // Closer predators produce a proportionally stronger push.
         const proximity = (1 - d / p.panicRadius) * threatFactor; // 0..1, 1 = right on top of us
         const away = V.scale(V.sub(this.position, predator.position), proximity / d);

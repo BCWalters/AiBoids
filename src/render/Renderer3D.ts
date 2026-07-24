@@ -8,7 +8,8 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { params, type TimeOfDayPreset, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
-import type { Boid, BoidSpecies } from '../sim/Boid';
+import { BoidSpecies } from '../sim/Boid';
+import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './styles/nature/geometry/smallBirdGeometry';
 import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
@@ -47,17 +48,17 @@ import {
   createSceneRendererHooks,
   type BoidMotionStyleFlags,
   type ColourStrategy,
-  isPredatorKind,
+  isPredatorSpecies,
   type MotionConfig,
-  type PredatorKind,
+  PredatorSpecies,
   type PredatorRenderFlags,
   resolvePredatorRenderFlagsForKind,
-  SCENE_PREDATOR_KINDS,
+  SCENE_PREDATOR_SPECIES,
   SCENE_STYLES,
   type SceneEnvironmentToggles,
   type SceneRendererHooks,
   type StyleFlags,
-  UNICORN_PREDATOR_KIND,
+  UNICORN_PREDATOR_SPECIES,
   type CreatureLabels,
 } from './sceneRenderers/createSceneRendererHooks';
 import {
@@ -172,7 +173,7 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // Parrot tail sway: moved to scene renderers for boid rendering
 // const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
 const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
-const PARROT_SPECIES: BoidSpecies = 'multicolor';
+const PARROT_SPECIES: BoidSpecies = BoidSpecies.Multicolor;
 const NEUTRAL_PARROT_PROFILE = 'neutral';
 
 // Dragon tail sway: on-screen references (movies/TV) almost always show a
@@ -443,7 +444,7 @@ interface BoidSpeciesConfig {
 
 const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
   {
-    species: 'normal',
+    species: BoidSpecies.Normal,
     countParam: 'boidCount',
     arcadeEmissive: ARCADE_BOID_EMISSIVE,
     arcadeBase: ARCADE_BOID_BASE,
@@ -454,7 +455,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureSmallBirdPalette: SPARROW_NATURE_PALETTE,
   },
   {
-    species: 'multicolor',
+    species: BoidSpecies.Multicolor,
     countParam: 'multicolorCount',
     arcadeEmissive: ARCADE_PARROT_EMISSIVE,
     arcadeBase: ARCADE_PARROT_BASE,
@@ -464,7 +465,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     tailSwayPivotY: PARROT_TAIL_SWAY_PIVOT_Y,
   },
   {
-    species: 'gold',
+    species: BoidSpecies.Gold,
     countParam: 'goldCount',
     arcadeEmissive: ARCADE_GOLDFINCH_EMISSIVE,
     arcadeBase: ARCADE_GOLDFINCH_BASE,
@@ -476,7 +477,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureSmallBirdPalette: GOLDFINCH_NATURE_PALETTE,
   },
   {
-    species: 'red',
+    species: BoidSpecies.Red,
     countParam: 'redCount',
     arcadeEmissive: ARCADE_CARDINAL_EMISSIVE,
     arcadeBase: ARCADE_CARDINAL_BASE,
@@ -488,7 +489,7 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureSmallBirdPalette: CARDINAL_NATURE_PALETTE,
   },
   {
-    species: 'blue',
+    species: BoidSpecies.Blue,
     countParam: 'blueCount',
     arcadeEmissive: ARCADE_BLUEJAY_EMISSIVE,
     arcadeBase: ARCADE_BLUEJAY_BASE,
@@ -552,10 +553,10 @@ export class Renderer3D {
   /**
    * Predator instances are split by kind (mirrors speciesInstances above)
    * so hawks/dragons and unicorns can coexist as independent populations
-   * with entirely different geometries/materials — see Predator.kind.
+   * with entirely different geometries/materials — see Predator.species.
    */
-  private predatorInstances = new Map<PredatorKind, BirdInstanceSet | null>();
-  private predatorInstanceKeys = new Map<PredatorKind, string | null>();
+  private predatorInstances = new Map<PredatorSpecies, BirdInstanceSet | null>();
+  private predatorInstanceKeys = new Map<PredatorSpecies, string | null>();
   /**
    * Persisted, per-dragon *displayed* orientation — see the keepUpright
    * branch in updateInstances for why this exists as a final safety net
@@ -710,9 +711,9 @@ export class Renderer3D {
     this.natureBluejayGeometries = createRealisticBirdGeometries(
       BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x7a7060), BLUEJAY_NATURE_PALETTE,
     );
-    this.natureSmallSpeciesGeometries.set('gold', this.natureGoldfinchGeometries);
-    this.natureSmallSpeciesGeometries.set('red',  this.natureCardinalGeometries);
-    this.natureSmallSpeciesGeometries.set('blue',  this.natureBluejayGeometries);
+    this.natureSmallSpeciesGeometries.set(BoidSpecies.Gold, this.natureGoldfinchGeometries);
+    this.natureSmallSpeciesGeometries.set(BoidSpecies.Red,  this.natureCardinalGeometries);
+    this.natureSmallSpeciesGeometries.set(BoidSpecies.Blue,  this.natureBluejayGeometries);
     // Parrot's dedicated macaw-style geometry (curved beak, rounder body,
     // long tail streamers) — only used in nature style; arcade style still
     // shares the simple flat-diamond silhouette with every other species
@@ -1241,45 +1242,45 @@ export class Renderer3D {
 
   private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const sceneRenderer = this.getSceneRenderer(style);
-    const countsByKind = this.getPredatorCountsByKind(sim.predators);
+    const countsBySpecies = this.getPredatorCountsBySpecies(sim.predators);
     const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
-    for (const kind of SCENE_PREDATOR_KINDS) {
-      const count = countsByKind.get(kind) ?? 0;
-      const kindRenderFlags = resolvePredatorRenderFlagsForKind(kind, renderFlags);
-      const instanceKey = createPredatorInstanceKey(kind, count, style, kindRenderFlags);
-      if (this.predatorInstanceKeys.get(kind) !== instanceKey) {
-        this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
-        const config = sceneRenderer.getPredatorInstanceConfig(kind, flags, kindRenderFlags);
+    for (const species of SCENE_PREDATOR_SPECIES) {
+      const count = countsBySpecies.get(species) ?? 0;
+      const speciesRenderFlags = resolvePredatorRenderFlagsForKind(species, renderFlags);
+      const instanceKey = createPredatorInstanceKey(species, count, style, speciesRenderFlags);
+      if (this.predatorInstanceKeys.get(species) !== instanceKey) {
+        this.disposeInstanceSet(this.predatorInstances.get(species) ?? null);
+        const config = sceneRenderer.getPredatorInstanceConfig(species, flags, speciesRenderFlags);
         this.predatorInstances.set(
-          kind,
+          species,
           this.buildInstanceSet(
             config.geometries,
             style,
             count,
-            kindRenderFlags.isDragon,
+            speciesRenderFlags.isDragon,
             config.rainbowWings,
             config.bodyVertexColors,
           ),
         );
-        this.predatorInstanceKeys.set(kind, instanceKey);
-        this.resetPredatorOrientationCaches(kind);
+        this.predatorInstanceKeys.set(species, instanceKey);
+        this.resetPredatorOrientationCaches(species);
       }
     }
   }
 
-  private getPredatorCountsByKind(predators: Predator[]): Map<PredatorKind, number> {
-    const countsByKind = new Map<PredatorKind, number>();
-    for (const kind of SCENE_PREDATOR_KINDS) {
-      countsByKind.set(kind, 0);
+  private getPredatorCountsBySpecies(predators: Predator[]): Map<PredatorSpecies, number> {
+    const countsBySpecies = new Map<PredatorSpecies, number>();
+    for (const species of SCENE_PREDATOR_SPECIES) {
+      countsBySpecies.set(species, 0);
     }
     for (const predator of predators) {
-      countsByKind.set(predator.kind, (countsByKind.get(predator.kind) ?? 0) + 1);
+      countsBySpecies.set(predator.species, (countsBySpecies.get(predator.species) ?? 0) + 1);
     }
-    return countsByKind;
+    return countsBySpecies;
   }
 
-  private resetPredatorOrientationCaches(kind: PredatorKind): void {
-    if (kind === UNICORN_PREDATOR_KIND) {
+  private resetPredatorOrientationCaches(species: PredatorSpecies): void {
+    if (species === UNICORN_PREDATOR_SPECIES) {
       this.clampedUprightDisplayQuats.unicorn.clear();
       return;
     }
@@ -2277,7 +2278,7 @@ export class Renderer3D {
     for (const predator of sim.predators) {
       // Unicorns are never rendered as dragons (they have their own
       // geometry) and shouldn't breathe fire regardless.
-      if (predator.kind === UNICORN_PREDATOR_KIND) continue;
+      if (predator.species === UNICORN_PREDATOR_SPECIES) continue;
       if (predator.digesting) continue;
       const nextTime = this.getOrSeedNextFireBreathTime(predator, elapsed);
       if (elapsed < nextTime) continue;
@@ -2369,13 +2370,13 @@ export class Renderer3D {
    * be tuned against — every other kind, being a very different
    * physical size (a sparrow vs. a dragon, say), ended up looking
    * comparatively tiny/zoomed-out at that same distance. Falls back to
-   * `fallbackDistance` if the instance set for `kind` doesn't exist yet
+   * `fallbackDistance` if the instance set for `species` doesn't exist yet
    * (e.g. called before the gallery entity has spawned on this frame).
    */
-  getGalleryFramingDistance(kind: PredatorKind | BoidSpecies, fallbackDistance = 220): number {
-    const set = isPredatorKind(kind)
-      ? this.predatorInstances.get(kind)
-      : this.speciesInstances.get(kind);
+  getGalleryFramingDistance(species: PredatorSpecies | BoidSpecies, fallbackDistance = 220): number {
+    const set = isPredatorSpecies(species)
+      ? this.predatorInstances.get(species)
+      : this.speciesInstances.get(species);
     if (!set) return fallbackDistance;
 
     // Union the bounding boxes of every part (body, wings, tail, legs,
@@ -2512,15 +2513,15 @@ export class Renderer3D {
     return boidsBySpecies.get(species) ?? [];
   }
 
-  private partitionPredatorsByKind(predators: Predator[]): Map<PredatorKind, Predator[]> {
-    const predatorsByKind = new Map<PredatorKind, Predator[]>();
-    for (const kind of SCENE_PREDATOR_KINDS) {
-      predatorsByKind.set(kind, []);
+  private partitionPredatorsBySpecies(predators: Predator[]): Map<PredatorSpecies, Predator[]> {
+    const predatorsBySpecies = new Map<PredatorSpecies, Predator[]>();
+    for (const species of SCENE_PREDATOR_SPECIES) {
+      predatorsBySpecies.set(species, []);
     }
     for (const predator of predators) {
-      predatorsByKind.get(predator.kind)?.push(predator);
+      predatorsBySpecies.get(predator.species)?.push(predator);
     }
-    return predatorsByKind;
+    return predatorsBySpecies;
   }
 
 
@@ -2529,24 +2530,24 @@ export class Renderer3D {
   }
 
   private hasAnyPredatorInstances(): boolean {
-    return SCENE_PREDATOR_KINDS.some((kind) => this.predatorInstances.get(kind) !== undefined);
+    return SCENE_PREDATOR_SPECIES.some((species) => this.predatorInstances.get(species) !== undefined);
   }
 
   private updatePredatorInstanceSets(
-    predatorsByKind: ReadonlyMap<PredatorKind, Predator[]>,
+    predatorsBySpecies: ReadonlyMap<PredatorSpecies, Predator[]>,
     renderFlags: PredatorRenderFlags,
     elapsed: number,
     dt: number,
     sceneRenderer: SceneRendererHooks,
   ): void {
-    for (const kind of SCENE_PREDATOR_KINDS) {
+    for (const species of SCENE_PREDATOR_SPECIES) {
       this.updatePredatorKindInstances(
-        kind,
-        predatorsByKind.get(kind) ?? [],
+        species,
+        predatorsBySpecies.get(species) ?? [],
         elapsed,
         dt,
         sceneRenderer,
-        resolvePredatorRenderFlagsForKind(kind, renderFlags),
+        resolvePredatorRenderFlagsForKind(species, renderFlags),
       );
     }
   }
@@ -2665,19 +2666,19 @@ export class Renderer3D {
   ): void {
     if (!this.hasAnyPredatorInstances()) return;
     const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
-    const predatorsByKind = this.partitionPredatorsByKind(sim.predators);
-    this.updatePredatorInstanceSets(predatorsByKind, renderFlags, elapsed, dt, sceneRenderer);
+    const predatorsBySpecies = this.partitionPredatorsBySpecies(sim.predators);
+    this.updatePredatorInstanceSets(predatorsBySpecies, renderFlags, elapsed, dt, sceneRenderer);
   }
 
   private updatePredatorKindInstances(
-    kind: PredatorKind,
+    species: PredatorSpecies,
     predators: Predator[],
     elapsed: number,
     dt: number,
     sceneRenderer: SceneRendererHooks,
     renderFlags: PredatorRenderFlags,
   ): void {
-    const instances = this.predatorInstances.get(kind);
+    const instances = this.predatorInstances.get(species);
     if (!instances) return;
     if (predators.length === 0) return;
     this.updateInstances(
@@ -2686,8 +2687,8 @@ export class Renderer3D {
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getPredatorColourStrategy(kind, renderFlags),
-      sceneRenderer.getPredatorMotionConfig(kind, renderFlags),
+      sceneRenderer.getPredatorColourStrategy(species, renderFlags),
+      sceneRenderer.getPredatorMotionConfig(species, renderFlags),
     );
   }
 
