@@ -25,13 +25,13 @@ export interface SpeciesColorSet {
 export interface ColourStrategy {
   baseColor: THREE.Color;
   highlightColor: THREE.Color;
-  getIntensity: (entity: Predator | Boid) => number;
-  /** Each entity gets a small HSL jitter + occasional rare morph around
+  getIntensity: (creature: Predator | Boid) => number;
+  /** Each creature gets a small HSL jitter + occasional rare morph around
    * baseColor (sparrow-style individual variation). Default false. */
   individualVariation?: boolean;
-  /** Per-entity body/wing/tail hue function (parrot/hawk plumage).
+  /** Per-creature body/wing/tail hue function (parrot/hawk plumage).
    * Overrides individualVariation when provided. */
-  getSpeciesColors?: (entity: Predator | Boid) => SpeciesColorSet | null;
+  getSpeciesColors?: (creature: Predator | Boid) => SpeciesColorSet | null;
   /** True for parrot profile variants whose geometry has baked vertex colours
    * on wings/tail/legs — passes white so the vertex palette shows through. */
   bakedWingPalette?: boolean;
@@ -40,7 +40,7 @@ export interface ColourStrategy {
   bakedBodyGradient?: boolean;
   /** Enables nature-parrot-specific palette lock/passthrough behavior. */
   useNatureParrotPalette?: boolean;
-  /** Disables per-entity species jitter and preserves exact species colors. */
+  /** Disables per-creature species jitter and preserves exact species colors. */
   lockSpeciesPalette?: boolean;
   beakColor?: THREE.Color;
 }
@@ -53,7 +53,7 @@ export interface MotionConfig {
   flapFrequency?: number;
   flapIdleAmplitude?: number;
   flapSpeedAmplitude?: number;
-  getScale?: (entity: Predator | Boid) => number;
+  getScale?: (creature: Predator | Boid) => number;
   keepUpright?: boolean;
   uprightStyle?: 'dragon' | 'unicorn' | 'shark';
   bankScale?: number;
@@ -146,7 +146,7 @@ export interface BoidSpeciesConfig {
   arcadeEmissive: THREE.Color;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
-  getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
+  getColors?: (creature: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
   colors?: SpeciesColorSet;
   beakColor?: THREE.Color;
   tailSwayPivotY?: number;
@@ -190,7 +190,7 @@ export interface ScenePredatorInstanceConfig {
   bodyVertexColors: boolean;
 }
 
-/** Scene-specific display names for all canonical sim entity types.
+/** Scene-specific display names for all canonical sim creature types.
  * Boid species use their canonical sim keys; predator species use their
  * canonical sim keys (normal, monster, horse). */
 export interface CreatureLabels {
@@ -228,12 +228,12 @@ export interface SceneRendererHooks {
   getBoidColourStrategy: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => ColourStrategy;
   getBoidMotionConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags) => MotionConfig;
   getParrotColourStrategy: (config: BoidSpeciesConfig, flags: StyleFlags, bakedWingPalette: boolean) => ColourStrategy;
-  getParrotGeometryProfile: (entity: Boid | Predator, flags: StyleFlags) => string;
+  getParrotGeometryProfile: (creature: Boid | Predator, flags: StyleFlags) => string;
   getParrotProfileNames: (flags: StyleFlags) => string[];
   getParrotProfileInstanceConfig: (profile: string, flags: StyleFlags) => SceneBoidInstanceConfig;
   getBoidInstanceConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => SceneBoidInstanceConfig;
   getPredatorInstanceConfig: (species: PredatorSpecies, flags: StyleFlags, renderFlags: PredatorRenderFlags) => ScenePredatorInstanceConfig;
-  /** Scene-specific display labels for each canonical sim entity type.
+  /** Scene-specific display labels for each canonical sim creature type.
    * Used by the UI to show creature names appropriate to the current scene
    * (e.g. 'normal' boid → "Sparrow" in nature, "Fish" in fishtank, "Boid" in arcade).
    */
