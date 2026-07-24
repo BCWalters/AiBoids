@@ -59,7 +59,7 @@ const FISHTANK_FISH_MESH_BOOST = 2.2;
 const FISHTANK_SHARK_MESH_BOOST = 0.55;
 const SHARK_LENGTH = 4.0; // approximate length for tail pivot calculation
 
-// Utility function for deterministic per-entity hashing (used for variant selection)
+// Utility function for deterministic per-creature hashing (used for variant selection)
 function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
   return x - Math.floor(x);
@@ -217,7 +217,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         return {
           baseColor: new THREE.Color(0xf0d070),
           highlightColor: new THREE.Color(0xfffacd),
-          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => FISHTANK_SEAHORSE_COLORS,
         };
       }
@@ -227,7 +227,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         return {
           baseColor: SHARK_PREDATOR_BASE,
           highlightColor: SHARK_PREDATOR_HUNT,
-          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
         };
       
       default:
@@ -279,12 +279,12 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     return {
       baseColor: config.natureBase, // Use nature base in fishtank (they're aquatic variants)
       highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
-      getIntensity: (entity) => (entity as Boid).panicLevel,
+      getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: false, // Fishtank fish have consistent coloring
       getSpeciesColors: isParrot
-        ? (entity) => this.getButterflyfishColorVariant(entity)
+        ? (creature) => this.getButterflyfishColorVariant(creature)
         : getColors
-          ? (entity) => getColors(entity, _flags)
+          ? (creature) => getColors(creature, _flags)
           : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       bakedWingPalette: true,
@@ -298,7 +298,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       flapFrequency: 3.0, // Fishtank fish flap a bit slower
       flapIdleAmplitude: 0.15,
       flapSpeedAmplitude: 0.4,
-      getScale: (entity) => (entity as Boid).scale,
+      getScale: (creature) => (creature as Boid).scale,
       tailSwayAxis: new THREE.Vector3(0, 1, 0), // Vertical oscillation (tail side-to-side)
       tailSwayAmplitude: 0.06,
       tailSwayFrequency: 2.2,
@@ -313,17 +313,17 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     return {
       baseColor: config.natureBase,
       highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
-      getIntensity: (entity) => (entity as Boid).panicLevel,
+      getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: true,
-      getSpeciesColors: (entity) => this.getButterflyfishColorVariant(entity),
+      getSpeciesColors: (creature) => this.getButterflyfishColorVariant(creature),
       beakColor: config.beakColor,
       bakedWingPalette,
       useNatureParrotPalette: false,
     };
   }
 
-  private getButterflyfishColorVariant(entity: Boid | Predator): SpeciesColorSet {
-    const baseIndex = Math.floor(idHash(entity.id, 42) * BUTTERFLYFISH_COLOR_PATTERNS.length) % BUTTERFLYFISH_COLOR_PATTERNS.length;
+  private getButterflyfishColorVariant(creature: Boid | Predator): SpeciesColorSet {
+    const baseIndex = Math.floor(idHash(creature.id, 42) * BUTTERFLYFISH_COLOR_PATTERNS.length) % BUTTERFLYFISH_COLOR_PATTERNS.length;
     if (params.galleryCreature === 'multicolor') {
       const cycleStep = Math.floor(performance.now() / 3200);
       return BUTTERFLYFISH_COLOR_PATTERNS[(baseIndex + cycleStep) % BUTTERFLYFISH_COLOR_PATTERNS.length];

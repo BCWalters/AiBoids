@@ -182,7 +182,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
         return {
           baseColor: ARCADE_UNICORN_BASE,
           highlightColor: ARCADE_UNICORN_HUNT,
-          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
         };
       
       case PredatorSpecies.Monster:
@@ -190,7 +190,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
         return {
           baseColor: ARCADE_PREDATOR_BASE,
           highlightColor: ARCADE_PREDATOR_HUNT,
-          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
         };
       
       default:
@@ -231,16 +231,16 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 
   getBoidColourStrategy(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
     // Arcade has bright, simple coloring. Each species uses its arcadeBase color.
-    // Multicolor ("Rainbow") boids get a per-entity neon variant for visual variety.
+    // Multicolor ("Rainbow") boids get a per-creature neon variant for visual variety.
     // config.colors is nature-specific plumage and must NOT be used here.
     return {
       baseColor: config.arcadeBase,
       highlightColor: ARCADE_BOID_PANIC,
-      getIntensity: (entity) => (entity as Boid).panicLevel,
+      getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: species !== BoidSpecies.Multicolor && !!config.colors,
       getSpeciesColors: species === BoidSpecies.Multicolor
-        ? (entity) => {
-            const idx = Math.floor(arcadeIdHash(entity.id, 42) * ARCADE_MULTICOLOR_VARIANTS.length) % ARCADE_MULTICOLOR_VARIANTS.length;
+        ? (creature) => {
+            const idx = Math.floor(arcadeIdHash(creature.id, 42) * ARCADE_MULTICOLOR_VARIANTS.length) % ARCADE_MULTICOLOR_VARIANTS.length;
             return ARCADE_MULTICOLOR_VARIANTS[idx];
           }
         : undefined,
@@ -256,7 +256,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       flapFrequency: ARCADE_FLAP_FREQUENCY,
       flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
       flapSpeedAmplitude: ARCADE_FLAP_SPEED_AMPLITUDE,
-      getScale: (entity) => (entity as Boid).scale,
+      getScale: (creature) => (creature as Boid).scale,
       tailSwayAxis: new THREE.Vector3(1, 0, 0), // Right axis
       tailSwayAmplitude: 0,
       tailSwayPivotY: tailSwayPivot,
@@ -270,7 +270,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     return {
       baseColor: ARCADE_PARROT_BASE,
       highlightColor: ARCADE_BOID_PANIC,
-      getIntensity: (entity) => (entity as Boid).panicLevel,
+      getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: false, // Arcade parrots are uniform
       getSpeciesColors: undefined, // All arcade parrots use the base color
       beakColor: config.beakColor,

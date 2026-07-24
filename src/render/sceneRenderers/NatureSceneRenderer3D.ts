@@ -180,7 +180,7 @@ const BLUEJAY_BODY_BASE = new THREE.Color(0x3b6fa0); // jay blue back
 const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
 const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
 
-// Utility function for deterministic per-entity hashing (used for variant selection)
+// Utility function for deterministic per-creature hashing (used for variant selection)
 function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
   return x - Math.floor(x);
@@ -191,9 +191,9 @@ function getNatureParrotVariants(): NatureParrotVariant[] {
   return [PARROT_NATURE_VARIANTS[THREE.MathUtils.clamp(PARROT_FOCUS_PATTERN_INDEX, 0, PARROT_NATURE_VARIANTS.length - 1)]];
 }
 
-function getNatureParrotVariant(entity: Boid | Predator): NatureParrotVariant {
+function getNatureParrotVariant(creature: Boid | Predator): NatureParrotVariant {
   const variants = getNatureParrotVariants();
-  const baseIndex = Math.floor(idHash(entity.id, 42) * variants.length) % variants.length;
+  const baseIndex = Math.floor(idHash(creature.id, 42) * variants.length) % variants.length;
   if (params.galleryCreature === 'multicolor') {
     const cycleStep = Math.floor(performance.now() / 3200);
     return variants[(baseIndex + cycleStep) % variants.length];
@@ -335,7 +335,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
         return {
           baseColor: NATURE_UNICORN_BODY,
           highlightColor: NATURE_UNICORN_HUNT,
-          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => NATURE_UNICORN_COLORS,
         };
       
@@ -343,14 +343,14 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
         return {
           baseColor: DRAGON_PREDATOR_BASE,
           highlightColor: DRAGON_PREDATOR_HUNT,
-          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
         };
       
       case PredatorSpecies.Normal:
         return {
           baseColor: NATURE_PREDATOR_BASE,
           highlightColor: NATURE_PREDATOR_HUNT,
-          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => NATURE_HAWK_COLORS,
         };
       
@@ -408,10 +408,10 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     return {
       baseColor: isOrganic ? config.natureBase : config.arcadeBase,
       highlightColor: isOrganic ? NATURE_BOID_PANIC : new THREE.Color(0xffcc00), // arcade panic placeholder
-      getIntensity: (entity) => (entity as Boid).panicLevel,
+      getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: config.colors || config.getColors ? true : isOrganic,
       getSpeciesColors: getColors
-        ? (entity) => getColors(entity, flags)
+        ? (creature) => getColors(creature, flags)
         : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       bakedWingPalette: true,
@@ -428,7 +428,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       flapFrequency: isParrot && isProfiledParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
       flapIdleAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
       flapSpeedAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
-      getScale: (entity) => (entity as Boid).scale,
+      getScale: (creature) => (creature as Boid).scale,
       tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
       tailSwayAmplitude: isParrot && isProfiledParrot
         ? _PARROT_TAIL_SWAY_AMPLITUDE
@@ -445,9 +445,9 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     return {
       baseColor: config.natureBase,
       highlightColor: NATURE_BOID_PANIC,
-      getIntensity: (entity) => (entity as Boid).panicLevel,
+      getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: true,
-      getSpeciesColors: (entity) => this.getParrotColorVariant(entity),
+      getSpeciesColors: (creature) => this.getParrotColorVariant(creature),
       beakColor: config.beakColor,
       bakedWingPalette,
       useNatureParrotPalette: true, // Always use nature parrot palette in nature renderer
@@ -455,12 +455,12 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  private getParrotColorVariant(entity: Boid | Predator): SpeciesColorSet {
-    return getNatureParrotVariant(entity).colors;
+  private getParrotColorVariant(creature: Boid | Predator): SpeciesColorSet {
+    return getNatureParrotVariant(creature).colors;
   }
 
-  getParrotGeometryProfile(entity: Boid | Predator, _flags: StyleFlags): string {
-    return getNatureParrotVariant(entity).geometryProfile;
+  getParrotGeometryProfile(creature: Boid | Predator, _flags: StyleFlags): string {
+    return getNatureParrotVariant(creature).geometryProfile;
   }
 
   getParrotProfileNames(_flags: StyleFlags): string[] {

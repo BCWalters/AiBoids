@@ -126,7 +126,7 @@ const UNICORN_LENGTH = DRAGON_LENGTH * 0.8;
 const UNICORN_WIDTH = DRAGON_WIDTH * 0.75;
 
 // Wing-flap tuning: base idle flutter plus extra amplitude proportional to
-// how fast the entity is currently moving (relative to its own max speed).
+// how fast the creature is currently moving (relative to its own max speed).
 const FLAP_FREQUENCY = 7.6; // radians/sec-ish; controls flap speed
 const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
@@ -163,7 +163,7 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // gentler flight style, not the same math dialed down.
 //
 // Pitch (nose up/down) is hard-clamped, asymmetrically, based on
-// whether the entity is climbing or sinking:
+// whether the creature is climbing or sinking:
 // - Ascending: pitch is clamped to exactly 0 — "they stay flat rather
 //   than turning upward", no nose-up tilt at all while climbing.
 // - Descending: pitch is allowed a small nose-down droop, capped well
@@ -199,10 +199,10 @@ const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather
 // compass spins wildly near the magnetic pole), independent of how
 // robustly "right"/"up" are then derived from it. Smoothing the heading
 // itself removes this jitter at its source rather than just downstream.
-// Non-dragon entities intentionally skip this (see keepUpright) since
+// Non-dragon creatures intentionally skip this (see keepUpright) since
 // they don't anchor to world-up and so have no equivalent instability.
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
-// "forward" direction we rotate onto each entity's velocity vector.
+// "forward" direction we rotate onto each creature's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
 // The bodies' wings lie flat in the local Z=0 plane (see geometry/birdGeometry.ts, geometry/dragonGeometry.ts, geometry/unicornGeometry.ts)
 // — local +Z is therefore the model's own "dorsal/up" direction when
@@ -214,7 +214,7 @@ const MODEL_UP_AXIS = new THREE.Vector3(0, 0, 1);
 // forward/up plane, i.e. swings the tail, which trails behind along -Y).
 const MODEL_RIGHT_AXIS = new THREE.Vector3(1, 0, 0);
 const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
-// When an entity's heading points anywhere near straight up/down,
+// When a creature's heading points anywhere near straight up/down,
 // world-up stops being a good reference for "which way is level": the
 // cross product used to derive "right" (cross(WORLD_UP_AXIS, forward))
 // shrinks toward zero as forward approaches parallel to WORLD_UP_AXIS.
@@ -231,7 +231,7 @@ const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
 // the same problem (see git history) since the blended reference could
 // itself land parallel to forward for various headings inside the range.
 //
-// Fixed instead by keeping a per-entity persisted "right" vector
+// Fixed instead by keeping a per-creature persisted "right" vector
 // (Boid/Predator.renderRight): outside this cone, it's discarded and
 // freshly recomputed straight from WORLD_UP_AXIS every single frame (no
 // blending, no drift). Only *inside* the cone does the renderer reuse
@@ -240,7 +240,7 @@ const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
 // unstable one from scratch — a form of parallel transport, but one
 // that's safe against the long-term roll drift that sank the earlier
 // persisted-state attempt, since it only ever runs for the brief stretch
-// an entity's heading actually stays inside this narrow near-vertical
+// a creature's heading actually stays inside this narrow near-vertical
 // cone, immediately re-anchoring to WORLD_UP_AXIS the instant it exits.
 const NEAR_POLE_RIGHT_LENGTH_THRESHOLD = 0.15; // ~= sin(8.6°) from vertical
 const NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ = NEAR_POLE_RIGHT_LENGTH_THRESHOLD * NEAR_POLE_RIGHT_LENGTH_THRESHOLD;
@@ -271,10 +271,10 @@ function idHash(id: number, salt: number): number {
   return x - Math.floor(x);
 }
 
-interface EntityInstanceMatrixArgs {
+interface CreatureInstanceMatrixArgs {
   set: BirdInstanceSet;
   index: number;
-  entity: Boid | Predator;
+  creature: Boid | Predator;
   position: { x: number; y: number; z: number };
   velocity: { x: number; y: number; z: number };
   speed: number;
@@ -301,15 +301,15 @@ interface EntityInstanceMatrixArgs {
   uprightStyle: UprightStyle;
 }
 
-interface EntityInstanceColorArgs {
+interface CreatureInstanceColorArgs {
   set: BirdInstanceSet;
   index: number;
-  entity: Boid | Predator;
+  creature: Boid | Predator;
   baseColor: THREE.Color;
   highlightColor: THREE.Color;
-  getIntensity: (entity: Boid | Predator) => number;
+  getIntensity: (creature: Boid | Predator) => number;
   individualVariation: boolean;
-  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  getSpeciesColors: ((creature: Boid | Predator) => SpeciesColorSet | null) | undefined;
   bakedWingPalette: boolean;
   useNatureParrotPalette: boolean;
   lockSpeciesPalette: boolean;
@@ -323,7 +323,7 @@ interface ResolvedMotionConfig {
   flapFrequency: number;
   flapIdleAmplitude: number;
   flapSpeedAmplitude: number;
-  getScale: (entity: Boid | Predator) => number;
+  getScale: (creature: Boid | Predator) => number;
   keepUpright: boolean;
   uprightStyle: UprightStyle;
   bankScale: number;
@@ -340,9 +340,9 @@ interface ResolvedMotionConfig {
 interface ResolvedColourStrategy {
   baseColor: THREE.Color;
   highlightColor: THREE.Color;
-  getIntensity: (entity: Boid | Predator) => number;
+  getIntensity: (creature: Boid | Predator) => number;
   individualVariation: boolean;
-  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  getSpeciesColors: ((creature: Boid | Predator) => SpeciesColorSet | null) | undefined;
   bakedWingPalette: boolean;
   bakedBodyGradient: boolean;
   useNatureParrotPalette: boolean;
@@ -350,18 +350,18 @@ interface ResolvedColourStrategy {
   beakColor: THREE.Color | undefined;
 }
 
-interface UpdateEntityInstanceArgs {
+interface UpdateCreatureInstanceArgs {
   set: BirdInstanceSet;
   index: number;
-  entity: Boid | Predator;
+  creature: Boid | Predator;
   maxSpeed: number;
   elapsed: number;
   dt: number;
   baseColor: THREE.Color;
   highlightColor: THREE.Color;
-  getIntensity: (entity: Boid | Predator) => number;
+  getIntensity: (creature: Boid | Predator) => number;
   individualVariation: boolean;
-  getSpeciesColors: ((entity: Boid | Predator) => SpeciesColorSet | null) | undefined;
+  getSpeciesColors: ((creature: Boid | Predator) => SpeciesColorSet | null) | undefined;
   bakedWingPalette: boolean;
   useNatureParrotPalette: boolean;
   lockSpeciesPalette: boolean;
@@ -372,7 +372,7 @@ interface UpdateEntityInstanceArgs {
   flapFrequency: number;
   flapIdleAmplitude: number;
   flapSpeedAmplitude: number;
-  getScale: (entity: Boid | Predator) => number;
+  getScale: (creature: Boid | Predator) => number;
   keepUpright: boolean;
   uprightStyle: UprightStyle;
   bankScale: number;
@@ -385,12 +385,12 @@ interface UpdateEntityInstanceArgs {
   meshScaleBoost: number;
   preferUpright: boolean;
 }
-type UpdateEntitySharedArgs = Omit<UpdateEntityInstanceArgs, 'index' | 'entity'>;
+type UpdateCreatureSharedArgs = Omit<UpdateCreatureInstanceArgs, 'index' | 'creature'>;
 
 // Unicorns reuse the same body/wing/tail split (lavender body+tail, near-
 // white wings so the baked rainbow vertex gradient shows through) in nature
 // style — see NATURE_UNICORN_WING's doc comment above. The fishtank seahorse
-// reuses this same predator-kind/color pipeline but its "wing" slot is
+// reuses this same predator-species/color pipeline but its "wing" slot is
 // repurposed as solid-colored pectoral fins (no rainbow gradient baked in),
 // so its wing/tail tint should match the body instead of the near-white
 // rainbow-reading tint, or the fins render as washed-out white flags that
@@ -411,7 +411,7 @@ interface BirdInstanceSet {
  * shrunken geometry, the 'multicolor' species' dedicated parrot-style geometry,
  * or the shared "reference" small-bird geometry (gold/red/blue).
  * Non-'normal' multi-colored species use either a static `colors` set or
- * a per-entity `getColors` function ('multicolor' only, for its multi-pattern
+ * a per-creature `getColors` function ('multicolor' only, for its multi-pattern
  * flock) for distinct body/wing/tail plumage instead of one flat tint. */
 interface BoidSpeciesConfig {
   species: BoidSpecies;
@@ -420,7 +420,7 @@ interface BoidSpeciesConfig {
   arcadeBase: THREE.Color;
   natureBase: THREE.Color;
   colors?: SpeciesColorSet;
-  getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
+  getColors?: (creature: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
   /** Small-bird species only (nature style): the beak's own instance
@@ -550,7 +550,7 @@ export class Renderer3D {
   private parrotProfileInstances = new Map<string, BirdInstanceSet | null>();
   private parrotProfileKeys = new Map<string, string | null>();
   /**
-   * Predator instances are split by kind (mirrors speciesInstances above)
+   * Predator instances are split by species (mirrors speciesInstances above)
    * so hawks/dragons and unicorns can coexist as independent populations
    * with entirely different geometries/materials — see Predator.species.
    */
@@ -578,7 +578,7 @@ export class Renderer3D {
     unicorn: new Map<number, THREE.Quaternion>(),
     shark: new Map<number, THREE.Quaternion>(),
   };
-  /** Per-entity accumulated flap phase (radians), integrated every frame. */
+  /** Per-creature accumulated flap phase (radians), integrated every frame. */
   private flapPhase = new WeakMap<Boid | Predator, number>();
   private boundsHelper: THREE.LineSegments | null = null;
   private currentStyle: VisualStyle | null = null;
@@ -888,7 +888,7 @@ export class Renderer3D {
     // the view frustum — it has no idea individual instances are
     // scattered all over the world via per-instance matrices. Since our
     // instances can be anywhere in a large world box, that culling sphere
-    // essentially never lines up with where the entities actually are,
+    // essentially never lines up with where the creatures actually are,
     // so the whole population can wrongly vanish depending on camera
     // angle/framing (most obvious with a tightly-framed camera, e.g. the
     // Model Gallery, but the same wrong culling can affect the normal
@@ -1302,7 +1302,7 @@ export class Renderer3D {
 
     // Model Gallery uses a close, creature-relative camera distance that
     // sits *inside* the tank/water volume (see main.ts's
-    // poseGalleryEntityIfReady) rather than the far-outside "view the
+    // poseGalleryCreatureIfReady) rather than the far-outside "view the
     // whole tank" distance normal fishtank browsing uses — hide the
     // surrounding room while it's active so the transparent glass/water
     // doesn't show the room incongruously right behind the creature.
@@ -1316,8 +1316,8 @@ export class Renderer3D {
     this.scheduleShaderWarmup(style);
   }
 
-  private updateEntityRenderHeading(
-    entity: Boid | Predator,
+  private updateCreatureRenderHeading(
+    creature: Boid | Predator,
     speed: number,
     dt: number,
     keepUpright: boolean,
@@ -1325,23 +1325,23 @@ export class Renderer3D {
   ): void {
     if (speed <= 1e-6) return;
     const invSpeed = 1 / speed;
-    const targetX = entity.velocity.x * invSpeed;
-    const targetY = entity.velocity.y * invSpeed;
-    const targetZ = entity.velocity.z * invSpeed;
+    const targetX = creature.velocity.x * invSpeed;
+    const targetY = creature.velocity.y * invSpeed;
+    const targetZ = creature.velocity.z * invSpeed;
     if (keepUpright) {
       const rate = 1 - Math.exp(-dt * getUprightHeadingSmoothingRate(uprightStyle));
-      let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
-      let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
-      let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
+      let hx = creature.renderHeading.x + (targetX - creature.renderHeading.x) * rate;
+      let hy = creature.renderHeading.y + (targetY - creature.renderHeading.y) * rate;
+      let hz = creature.renderHeading.z + (targetZ - creature.renderHeading.z) * rate;
       const len = Math.sqrt(hx * hx + hy * hy + hz * hz) || 1;
-      entity.renderHeading.x = hx / len;
-      entity.renderHeading.y = hy / len;
-      entity.renderHeading.z = hz / len;
+      creature.renderHeading.x = hx / len;
+      creature.renderHeading.y = hy / len;
+      creature.renderHeading.z = hz / len;
       return;
     }
-    entity.renderHeading.x = targetX;
-    entity.renderHeading.y = targetY;
-    entity.renderHeading.z = targetZ;
+    creature.renderHeading.x = targetX;
+    creature.renderHeading.y = targetY;
+    creature.renderHeading.z = targetZ;
   }
 
   private clampForwardPitchForUprightStyle(uprightStyle: UprightStyle): void {
@@ -1357,10 +1357,10 @@ export class Renderer3D {
     this.tmpForward.y = Math.sin(clampedPitch);
   }
 
-  private setPersistedUprightBasis(entity: Boid | Predator): void {
+  private setPersistedUprightBasis(creature: Boid | Predator): void {
     this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS);
     if (this.tmpRight.lengthSq() < NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ) {
-      this.tmpPersistedRight.set(entity.renderRight.x, entity.renderRight.y, entity.renderRight.z);
+      this.tmpPersistedRight.set(creature.renderRight.x, creature.renderRight.y, creature.renderRight.z);
       this.tmpPersistedRight.addScaledVector(this.tmpForward, -this.tmpPersistedRight.dot(this.tmpForward));
       if (this.tmpPersistedRight.lengthSq() < 1e-10) {
         this.tmpPersistedRight.crossVectors(this.tmpForward, UP_REFERENCE_FALLBACK_AXIS);
@@ -1368,19 +1368,19 @@ export class Renderer3D {
       this.tmpRight.copy(this.tmpPersistedRight);
     }
     this.tmpRight.normalize();
-    entity.renderRight.x = this.tmpRight.x;
-    entity.renderRight.y = this.tmpRight.y;
-    entity.renderRight.z = this.tmpRight.z;
+    creature.renderRight.x = this.tmpRight.x;
+    creature.renderRight.y = this.tmpRight.y;
+    creature.renderRight.z = this.tmpRight.z;
     this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
     this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
     this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
   }
 
-  private setSimpleUprightBasis(entity: Boid | Predator): void {
+  private setSimpleUprightBasis(creature: Boid | Predator): void {
     this.tmpRight.crossVectors(this.tmpForward, WORLD_UP_AXIS).normalize();
-    entity.renderRight.x = this.tmpRight.x;
-    entity.renderRight.y = this.tmpRight.y;
-    entity.renderRight.z = this.tmpRight.z;
+    creature.renderRight.x = this.tmpRight.x;
+    creature.renderRight.y = this.tmpRight.y;
+    creature.renderRight.z = this.tmpRight.z;
     this.tmpUp.crossVectors(this.tmpRight, this.tmpForward).normalize();
     this.tmpBasisMatrix.makeBasis(this.tmpRight, this.tmpForward, this.tmpUp);
     this.bodyQuat.setFromRotationMatrix(this.tmpBasisMatrix);
@@ -1397,12 +1397,12 @@ export class Renderer3D {
     displayQuat.premultiply(this.unicornTiltCorrection);
   }
 
-  private applyUprightDisplaySmoothing(entity: Boid | Predator, dt: number, uprightStyle: UprightStyle): void {
+  private applyUprightDisplaySmoothing(creature: Boid | Predator, dt: number, uprightStyle: UprightStyle): void {
     if (uprightStyle === 'dragon') {
-      let displayQuat = this.dragonDisplayQuats.get(entity.id);
+      let displayQuat = this.dragonDisplayQuats.get(creature.id);
       if (!displayQuat) {
         displayQuat = this.bodyQuat.clone();
-        this.dragonDisplayQuats.set(entity.id, displayQuat);
+        this.dragonDisplayQuats.set(creature.id, displayQuat);
       } else {
         displayQuat.rotateTowards(this.bodyQuat, getUprightTurnRate(uprightStyle) * dt);
       }
@@ -1411,10 +1411,10 @@ export class Renderer3D {
     }
 
     const displayQuatMap = this.getClampedUprightDisplayQuatMap(uprightStyle);
-    let displayQuat = displayQuatMap.get(entity.id);
+    let displayQuat = displayQuatMap.get(creature.id);
     if (!displayQuat) {
       displayQuat = this.bodyQuat.clone();
-      displayQuatMap.set(entity.id, displayQuat);
+      displayQuatMap.set(creature.id, displayQuat);
     } else {
       displayQuat.rotateTowards(this.bodyQuat, getUprightTurnRate(uprightStyle) * dt);
     }
@@ -1432,7 +1432,7 @@ export class Renderer3D {
   }
 
   private applyBodyOrientationBasis(
-    entity: Boid | Predator,
+    creature: Boid | Predator,
     keepUpright: boolean,
     uprightStyle: UprightStyle,
     preferUpright: boolean,
@@ -1442,24 +1442,24 @@ export class Renderer3D {
     }
 
     if (keepUpright && uprightStyle === 'dragon') {
-      this.setPersistedUprightBasis(entity);
+      this.setPersistedUprightBasis(creature);
     } else if (keepUpright && isClampedUprightStyle(uprightStyle)) {
-      this.setSimpleUprightBasis(entity);
+      this.setSimpleUprightBasis(creature);
     } else if (preferUpright) {
-      this.setPersistedUprightBasis(entity);
+      this.setPersistedUprightBasis(creature);
     } else {
       this.bodyQuat.setFromUnitVectors(FORWARD_AXIS, this.tmpForward);
     }
   }
 
   private applyTurnBankAndPitch(
-    entity: Boid | Predator,
+    creature: Boid | Predator,
     vel: { x: number; y: number; z: number },
     maxSpeed: number,
     dt: number,
     bankScale: number,
     keepUpright: boolean,
-    getIntensity: (entity: Boid | Predator) => number,
+    getIntensity: (creature: Boid | Predator) => number,
   ): {
     blendStrength: number;
     climbWeight: number;
@@ -1472,7 +1472,7 @@ export class Renderer3D {
     const turnWeight = THREE.MathUtils.clamp(Math.abs(turnSignal) * 16, 0, 1);
     const climbWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, 0, 1) : 0;
     const diveWeight = maxSpeed > 0 ? THREE.MathUtils.clamp(-vel.y / maxSpeed, 0, 1) : 0;
-    const panicWeight = THREE.MathUtils.clamp(getIntensity(entity), 0, 1);
+    const panicWeight = THREE.MathUtils.clamp(getIntensity(creature), 0, 1);
     const cruiseWeight = Math.max(0, 1 - Math.max(climbWeight, diveWeight, turnWeight, panicWeight * 0.75));
     const blendStrength = THREE.MathUtils.clamp(params.animationBlendStrength, 0, 1);
     const targetBank = THREE.MathUtils.clamp(
@@ -1481,8 +1481,8 @@ export class Renderer3D {
       MAX_BANK_RADIANS * bankScale,
     );
     const bankSmoothing = 1 - Math.exp(-dt * BANK_SMOOTHING_RATE);
-    entity.renderBank += (targetBank - entity.renderBank) * bankSmoothing;
-    this.rollQuat.setFromAxisAngle(FORWARD_AXIS, entity.renderBank);
+    creature.renderBank += (targetBank - creature.renderBank) * bankSmoothing;
+    this.rollQuat.setFromAxisAngle(FORWARD_AXIS, creature.renderBank);
     this.bodyQuat.multiply(this.rollQuat);
     if (!keepUpright) {
       const blendedPitch = (diveWeight - climbWeight) * STATE_PITCH_SCALE * blendStrength;
@@ -1514,11 +1514,11 @@ export class Renderer3D {
     };
   }
 
-  private applyInstanceColorsForEntity(args: EntityInstanceColorArgs): void {
+  private applyInstanceColorsForCreature(args: CreatureInstanceColorArgs): void {
     const {
       set,
       index,
-      entity,
+      creature,
       baseColor,
       highlightColor,
       getIntensity,
@@ -1532,7 +1532,7 @@ export class Renderer3D {
       hasBakedWingVertexColors,
       hasBakedTailVertexColors,
     } = args;
-    const speciesColors = getSpeciesColors?.(entity);
+    const speciesColors = getSpeciesColors?.(creature);
     let effectiveBase = baseColor;
     let effectiveWing: THREE.Color | null = null;
     let effectiveTail: THREE.Color | null = null;
@@ -1547,9 +1547,9 @@ export class Renderer3D {
         effectiveWing = speciesColors.wing;
         effectiveTail = speciesColors.tail;
       } else {
-        this.jitterHSL(this.variantColor, speciesColors.body, entity.id, 1, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.wingColor, speciesColors.wing, entity.id, 2, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.tailColor, speciesColors.tail, entity.id, 3, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.variantColor, speciesColors.body, creature.id, 1, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.wingColor, speciesColors.wing, creature.id, 2, 0.05, 0.12, 0.1);
+        this.jitterHSL(this.tailColor, speciesColors.tail, creature.id, 3, 0.05, 0.12, 0.1);
         effectiveBase = this.variantColor;
         effectiveWing = this.wingColor;
         effectiveTail = this.tailColor;
@@ -1557,10 +1557,10 @@ export class Renderer3D {
     } else if (individualVariation) {
       baseColor.getHSL(this.hsl);
       let { h, s, l } = this.hsl;
-      h = (h + (idHash(entity.id, 1) - 0.5) * 0.05 + 1) % 1;
-      s = Math.max(0, Math.min(1, s + (idHash(entity.id, 2) - 0.5) * 0.16));
-      l = Math.max(0, Math.min(1, l + (idHash(entity.id, 3) - 0.5) * 0.18));
-      const morphRoll = idHash(entity.id, 4);
+      h = (h + (idHash(creature.id, 1) - 0.5) * 0.05 + 1) % 1;
+      s = Math.max(0, Math.min(1, s + (idHash(creature.id, 2) - 0.5) * 0.16));
+      l = Math.max(0, Math.min(1, l + (idHash(creature.id, 3) - 0.5) * 0.18));
+      const morphRoll = idHash(creature.id, 4);
       if (morphRoll < 0.06) {
         // Pale/leucistic-like morph: much lighter, slightly desaturated.
         l = Math.max(0, Math.min(0.92, l + 0.28));
@@ -1578,19 +1578,19 @@ export class Renderer3D {
     }
     if (hasBakedBodyVertexColors) {
       // Baked gradient body — pass white so the vertex colours show through.
-      this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+      this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(creature));
     } else {
-      this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(entity));
+      this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(creature));
     }
     set.body.setColorAt(index, this.stateColor);
     if (hasBakedWingVertexColors) {
       // Baked gradient wings — white passthrough; same for tail if baked.
-      this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+      this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(creature));
       set.wingLeft.setColorAt(index, this.wingColor);
       set.wingRight.setColorAt(index, this.wingColor);
       if (set.tail) {
         if (hasBakedTailVertexColors) {
-          this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(entity));
+          this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(creature));
         } else {
           this.tailColor.copy(this.wingColor);
         }
@@ -1609,7 +1609,7 @@ export class Renderer3D {
       if (preserveParrotWingPalette) {
         this.wingColor.setRGB(1, 1, 1);
       } else {
-        this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(entity));
+        this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(creature));
       }
       set.wingLeft.setColorAt(index, this.wingColor);
       set.wingRight.setColorAt(index, this.wingColor);
@@ -1618,7 +1618,7 @@ export class Renderer3D {
           if (preserveParrotTailPalette) {
             this.tailColor.setRGB(1, 1, 1);
           } else {
-            this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(entity));
+            this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(creature));
           }
           set.tail.setColorAt(index, this.tailColor);
         } else {
@@ -1662,7 +1662,7 @@ export class Renderer3D {
       // Small per-individual jitter, same treatment as the other parts
       // — keeps a flock of e.g. cardinals from looking like every
       // single beak is the identical exact pixel color.
-      this.jitterHSL(this.beakInstanceColor, beakColor, entity.id, 5, 0.04, 0.1, 0.08);
+      this.jitterHSL(this.beakInstanceColor, beakColor, creature.id, 5, 0.04, 0.1, 0.08);
       set.beak.setColorAt(index, this.beakInstanceColor);
     }
   }
@@ -1688,11 +1688,11 @@ export class Renderer3D {
     }
   }
 
-  private applyEntityInstanceMatrices(args: EntityInstanceMatrixArgs): void {
+  private applyCreatureInstanceMatrices(args: CreatureInstanceMatrixArgs): void {
     const {
       set,
       index,
-      entity,
+      creature,
       position,
       velocity,
       speed,
@@ -1718,11 +1718,11 @@ export class Renderer3D {
       meshScaleBoost,
       uprightStyle,
     } = args;
-    this.applyEntityBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle);
+    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle);
 
     // Wings: apply an extra local flap rotation around the forward axis.
     const flapAngle = this.computeWingFlapAngle(
-      entity,
+      creature,
       velocity,
       speed,
       maxSpeed,
@@ -1741,10 +1741,10 @@ export class Renderer3D {
     );
     this.applyWingFlapMatrices(set, index, flapAngle);
 
-    this.applyEntityTailSwayMatrix(
+    this.applyCreatureTailSwayMatrix(
       set,
       index,
-      entity,
+      creature,
       elapsed,
       flapFrequency,
       tailSwayAxis,
@@ -1755,7 +1755,7 @@ export class Renderer3D {
     );
   }
 
-  private applyEntityBodyMatrices(
+  private applyCreatureBodyMatrices(
     set: BirdInstanceSet,
     i: number,
     pos: { x: number; y: number; z: number },
@@ -1784,7 +1784,7 @@ export class Renderer3D {
   }
 
   private computeWingFlapAngle(
-    entity: Boid | Predator,
+    creature: Boid | Predator,
     vel: { x: number; y: number; z: number },
     speed: number,
     maxSpeed: number,
@@ -1828,9 +1828,9 @@ export class Renderer3D {
     const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
     const uprightFrequencyMultiplier = getUprightFlapFrequencyMultiplier(uprightStyle, climbFrac);
     const effectiveFrequency = flapFrequency * stateFrequencyMult * uprightFrequencyMultiplier;
-    const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
+    const prevPhase = this.flapPhase.get(creature) ?? creature.id * 1.7;
     const phase = prevPhase + effectiveFrequency * dt;
-    this.flapPhase.set(entity, phase);
+    this.flapPhase.set(creature, phase);
     return amplitude * Math.sin(phase) + finRestBiasRad;
   }
 
@@ -1846,10 +1846,10 @@ export class Renderer3D {
     set.wingRight.setMatrixAt(i, this.dummy.matrix);
   }
 
-  private applyEntityTailSwayMatrix(
+  private applyCreatureTailSwayMatrix(
     set: BirdInstanceSet,
     i: number,
-    entity: Boid | Predator,
+    creature: Boid | Predator,
     elapsed: number,
     flapFrequency: number,
     tailSwayAxis: THREE.Vector3,
@@ -1861,7 +1861,7 @@ export class Renderer3D {
     // Tail sway (dragons/sharks only).
     if (!set.tail) return;
     if (!usesTailSwayMatrix(uprightStyle)) return;
-    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
+    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + creature.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
     const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
     this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
     this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
@@ -1879,8 +1879,8 @@ export class Renderer3D {
     set.tail.setMatrixAt(i, this.dummy.matrix);
   }
 
-  private applyEntityOrientationAndMotion(
-    entity: Boid | Predator,
+  private applyCreatureOrientationAndMotion(
+    creature: Boid | Predator,
     speed: number,
     vel: { x: number; y: number; z: number },
     maxSpeed: number,
@@ -1889,7 +1889,7 @@ export class Renderer3D {
     uprightStyle: UprightStyle,
     preferUpright: boolean,
     bankScale: number,
-    getIntensity: (entity: Boid | Predator) => number,
+    getIntensity: (creature: Boid | Predator) => number,
   ): {
     blendStrength: number;
     climbWeight: number;
@@ -1898,21 +1898,21 @@ export class Renderer3D {
     panicWeight: number;
     cruiseWeight: number;
   } {
-    // Each entity keeps its own last-known heading (renderHeading)
+    // Each creature keeps its own last-known heading (renderHeading)
     // rather than relying on this.bodyQuat carrying over between loop
-    // iterations — otherwise an entity whose speed drops near zero
+    // iterations — otherwise a creature whose speed drops near zero
     // (e.g. a predator gliding to a stop / digesting) would silently
-    // inherit whichever heading the *previous* entity in the array had
+    // inherit whichever heading the *previous* creature in the array had
     // that frame, causing it to visually snap to an unrelated
     // direction instead of holding its own last heading.
-    this.tmpPrevDir.set(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
-    this.updateEntityRenderHeading(entity, speed, dt, keepUpright, uprightStyle);
-    const dir = entity.renderHeading;
+    this.tmpPrevDir.set(creature.renderHeading.x, creature.renderHeading.y, creature.renderHeading.z);
+    this.updateCreatureRenderHeading(creature, speed, dt, keepUpright, uprightStyle);
+    const dir = creature.renderHeading;
     this.tmpForward.set(dir.x, dir.y, dir.z);
-    this.applyBodyOrientationBasis(entity, keepUpright, uprightStyle, preferUpright);
+    this.applyBodyOrientationBasis(creature, keepUpright, uprightStyle, preferUpright);
 
     const motionBlend = this.applyTurnBankAndPitch(
-      entity,
+      creature,
       vel,
       maxSpeed,
       dt,
@@ -1920,7 +1920,7 @@ export class Renderer3D {
       keepUpright,
       getIntensity,
     );
-    if (keepUpright) this.applyUprightDisplaySmoothing(entity, dt, uprightStyle);
+    if (keepUpright) this.applyUprightDisplaySmoothing(creature, dt, uprightStyle);
     return motionBlend;
   }
 
@@ -1990,11 +1990,11 @@ export class Renderer3D {
     };
   }
 
-  private updateEntityInstance(args: UpdateEntityInstanceArgs): void {
+  private updateCreatureInstance(args: UpdateCreatureInstanceArgs): void {
     const {
       set,
       index,
-      entity,
+      creature,
       maxSpeed,
       elapsed,
       dt,
@@ -2026,10 +2026,10 @@ export class Renderer3D {
       meshScaleBoost,
       preferUpright,
     } = args;
-    const pos = entity.position;
-    const vel = entity.velocity;
+    const pos = creature.position;
+    const vel = creature.velocity;
     const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
-    const entityScale = getScale(entity);
+    const entityScale = getScale(creature);
     const {
       blendStrength,
       climbWeight,
@@ -2037,8 +2037,8 @@ export class Renderer3D {
       turnWeight,
       panicWeight,
       cruiseWeight,
-    } = this.applyEntityOrientationAndMotion(
-      entity,
+    } = this.applyCreatureOrientationAndMotion(
+      creature,
       speed,
       vel,
       maxSpeed,
@@ -2049,10 +2049,10 @@ export class Renderer3D {
       bankScale,
       getIntensity,
     );
-    this.applyEntityInstanceMatrices({
+    this.applyCreatureInstanceMatrices({
       set,
       index,
-      entity,
+      creature,
       position: pos,
       velocity: vel,
       speed,
@@ -2079,10 +2079,10 @@ export class Renderer3D {
       uprightStyle,
     });
 
-    this.applyInstanceColorsForEntity({
+    this.applyInstanceColorsForCreature({
       set,
       index,
-      entity,
+      creature,
       baseColor,
       highlightColor,
       getIntensity,
@@ -2098,22 +2098,22 @@ export class Renderer3D {
     });
   }
 
-  private updateEntityInstancesLoop(
-    entities: (Boid | Predator)[],
-    sharedArgs: UpdateEntitySharedArgs,
+  private updateCreatureInstancesLoop(
+    creatures: (Boid | Predator)[],
+    sharedArgs: UpdateCreatureSharedArgs,
   ): void {
-    for (let i = 0; i < entities.length; i++) {
-      this.updateEntityInstance({
+    for (let i = 0; i < creatures.length; i++) {
+      this.updateCreatureInstance({
         ...sharedArgs,
         index: i,
-        entity: entities[i],
+        creature: creatures[i],
       });
     }
   }
 
   private updateInstances(
     set: BirdInstanceSet,
-    entities: (Boid | Predator)[],
+    creatures: (Boid | Predator)[],
     maxSpeed: number,
     elapsed: number,
     dt: number,
@@ -2162,7 +2162,7 @@ export class Renderer3D {
       hasBakedWingVertexColors,
       hasBakedTailVertexColors,
     } = this.getBakedColorAttributeFlags(set, bakedBodyGradient);
-    this.updateEntityInstancesLoop(entities, {
+    this.updateCreatureInstancesLoop(creatures, {
       set,
       maxSpeed,
       elapsed,
@@ -2303,8 +2303,8 @@ export class Renderer3D {
   }
 
   /**
-   * Model Gallery: converts a *sim-space* position (e.g. an entity's raw
-   * `entity.position`, in the same coordinate space as `sim.width` /
+   * Model Gallery: converts a *sim-space* position (e.g. a creature's raw
+   * `creature.position`, in the same coordinate space as `sim.width` /
    * `sim.height` / `params.worldDepth`) into the actual rendered
    * world-space position it appears at. For nature/arcade styles this is
    * a no-op (identity), but fishtank style inflates both the tank and
@@ -2367,11 +2367,11 @@ export class Renderer3D {
    * the union of that creature's part geometries (body, wings, tail,
    * legs, beak). A single flat distance (the old approach) only ever
    * looked "maximally zoomed in" for whichever creature it happened to
-   * be tuned against — every other kind, being a very different
+   * be tuned against — every other species, being a very different
    * physical size (a sparrow vs. a dragon, say), ended up looking
    * comparatively tiny/zoomed-out at that same distance. Falls back to
    * `fallbackDistance` if the instance set for `species` doesn't exist yet
-   * (e.g. called before the gallery entity has spawned on this frame).
+   * (e.g. called before the gallery creature has spawned on this frame).
    */
   getGalleryFramingDistance(species: PredatorSpecies | BoidSpecies, fallbackDistance = 220): number {
     const set = isPredatorSpecies(species)
@@ -2484,29 +2484,29 @@ export class Renderer3D {
     return boidsBySpecies;
   }
 
-  private partitionParrotEntities(
-    entities: Boid[],
+  private partitionParrotCreatures(
+    creatures: Boid[],
     sceneRenderer: SceneRendererHooks,
     flags: StyleFlags,
   ): {
-    neutralEntities: Boid[];
-    profileEntities: Map<string, Boid[]>;
+    neutralCreatures: Boid[];
+    profileCreatures: Map<string, Boid[]>;
   } {
-    const profileEntities = new Map<string, Boid[]>();
-    const neutralEntities: Boid[] = [];
-    for (const entity of entities) {
-      const profile = sceneRenderer.getParrotGeometryProfile(entity, flags);
-      if (profile === NEUTRAL_PARROT_PROFILE) neutralEntities.push(entity);
+    const profileCreatures = new Map<string, Boid[]>();
+    const neutralCreatures: Boid[] = [];
+    for (const creature of creatures) {
+      const profile = sceneRenderer.getParrotGeometryProfile(creature, flags);
+      if (profile === NEUTRAL_PARROT_PROFILE) neutralCreatures.push(creature);
       else {
-        const bucket = profileEntities.get(profile);
-        if (bucket) bucket.push(entity);
-        else profileEntities.set(profile, [entity]);
+        const bucket = profileCreatures.get(profile);
+        if (bucket) bucket.push(creature);
+        else profileCreatures.set(profile, [creature]);
       }
     }
-    return { neutralEntities, profileEntities };
+    return { neutralCreatures, profileCreatures };
   }
 
-  private getBoidEntitiesForSpecies(
+  private getBoidCreaturesForSpecies(
     boidsBySpecies: Map<BoidSpecies, Boid[]>,
     species: BoidSpecies,
   ): Boid[] {
@@ -2536,18 +2536,18 @@ export class Renderer3D {
   private updateProfiledParrotInstances(
     config: BoidSpeciesConfig,
     instances: BirdInstanceSet,
-    entities: Boid[],
+    creatures: Boid[],
     elapsed: number,
     dt: number,
     flags: StyleFlags,
     sceneRenderer: SceneRendererHooks,
     profileNames: readonly string[],
   ): void {
-    const { neutralEntities, profileEntities } = this.partitionParrotEntities(entities, sceneRenderer, flags);
+    const { neutralCreatures, profileCreatures } = this.partitionParrotCreatures(creatures, sceneRenderer, flags);
     const boidMotionFlags: BoidMotionStyleFlags = { isProfiledParrot: true };
     this.updateInstances(
       instances,
-      neutralEntities,
+      neutralCreatures,
       params.boidMaxSpeed,
       elapsed,
       dt,
@@ -2559,7 +2559,7 @@ export class Renderer3D {
       if (!profileSet) continue;
       this.updateInstances(
         profileSet,
-        profileEntities.get(profile) ?? [],
+        profileCreatures.get(profile) ?? [],
         params.boidMaxSpeed,
         elapsed,
         dt,
@@ -2572,7 +2572,7 @@ export class Renderer3D {
   private updateStandardBoidSpeciesInstances(
     config: BoidSpeciesConfig,
     instances: BirdInstanceSet,
-    entities: Boid[],
+    creatures: Boid[],
     elapsed: number,
     dt: number,
     flags: StyleFlags,
@@ -2584,7 +2584,7 @@ export class Renderer3D {
     };
     this.updateInstances(
       instances,
-      entities,
+      creatures,
       params.boidMaxSpeed,
       elapsed,
       dt,
@@ -2603,17 +2603,17 @@ export class Renderer3D {
   ): void {
     const instances = this.speciesInstances.get(config.species);
     if (!instances) return;
-    const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
+    const creatures = this.getBoidCreaturesForSpecies(boidsBySpecies, config.species);
     const parrotProfileNames = this.getProfileNamesForSpecies(config.species, sceneRenderer, flags);
     const isProfiledParrot = parrotProfileNames.length > 0;
     if (isProfiledParrot) {
-      this.updateProfiledParrotInstances(config, instances, entities, elapsed, dt, flags, sceneRenderer, parrotProfileNames);
+      this.updateProfiledParrotInstances(config, instances, creatures, elapsed, dt, flags, sceneRenderer, parrotProfileNames);
       return;
     }
     this.updateStandardBoidSpeciesInstances(
       config,
       instances,
-      entities,
+      creatures,
       elapsed,
       dt,
       flags,
@@ -2821,8 +2821,8 @@ export class Renderer3D {
   }
 
   private disposePredatorInstanceSets(): void {
-    for (const kind of this.predatorInstances.keys()) {
-      this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
+    for (const species of this.predatorInstances.keys()) {
+      this.disposeInstanceSet(this.predatorInstances.get(species) ?? null);
     }
   }
 

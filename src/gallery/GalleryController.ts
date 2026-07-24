@@ -43,24 +43,24 @@ interface DeepLinkState {
   camera: { position: [number, number, number]; target: [number, number, number] } | null;
 }
 
-const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['horse', 'monster', 'predator']);
+const GALLERY_PREDATOR_CREATURES = new Set<GalleryCreature>(['horse', 'monster', 'predator']);
 const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['normal', 'multicolor', 'gold', 'red', 'blue']);
 
-function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number | null } | null {
+function readGalleryCreatureFromURL(): { creatureSpecies: GalleryCreature; distance: number | null } | null {
   const searchParams = new URLSearchParams(window.location.search);
-  const kind = searchParams.get('galleryCreature')?.toLowerCase() ?? null;
-  if (!kind || !(GALLERY_PREDATOR_KINDS.has(kind as GalleryCreature) || GALLERY_BOID_SPECIES.has(kind as GalleryCreature))) {
+  const creatureSpecies = searchParams.get('galleryCreature')?.toLowerCase() ?? null;
+  if (!creatureSpecies || !(GALLERY_PREDATOR_CREATURES.has(creatureSpecies as GalleryCreature) || GALLERY_BOID_SPECIES.has(creatureSpecies as GalleryCreature))) {
     return null;
   }
   const distanceParam = Number(searchParams.get('galleryDistance'));
   // null (rather than a flat default) when the URL doesn't explicitly
-  // request a distance — poseGalleryEntityIfReady then computes a
+  // request a distance — poseGalleryCreatureIfReady then computes a
   // per-creature "as zoomed in as possible" distance instead (see
   // Renderer3D.getGalleryFramingDistance), since a single flat default
   // only ever looks right for whichever creature it happened to be
   // tuned against.
   const distance = Number.isFinite(distanceParam) && distanceParam > 0 ? distanceParam : null;
-  return { kind: kind as GalleryCreature, distance };
+  return { creatureSpecies: creatureSpecies as GalleryCreature, distance };
 }
 
 function readStateFromURL(): DeepLinkState | null {
@@ -89,7 +89,7 @@ function readStateFromURL(): DeepLinkState | null {
  * orbit (OrbitControls stays fully interactive), or screenshot a single
  * creature's geometry without fighting flocking/wander motion or camera
  * drift. Useful for comparing geometry against a reference image, or
- * simply showing off a model. Reused across creature kinds (unicorns,
+ * simply showing off a model. Reused across creature species (unicorns,
  * dragons, hawks, boid species) rather than being unicorn-specific, so
  * any future creature gets this for free.
  *
@@ -98,7 +98,7 @@ function readStateFromURL(): DeepLinkState | null {
  *  - Interactively, via the "Model Gallery" dropdown in the control
  *    panel (see ui/ControlPanel.ts) — pick a creature, inspect it, pick
  *    "None" to return to the normal simulation.
- *  - Via the `?galleryCreature=<kind>` URL param (optionally paired with
+ *  - Via the `?galleryCreature=<creatureSpecies>` URL param (optionally paired with
  *    `?galleryDistance=<number>` to override the default camera
  *    distance) — meant for scripted/automated screenshot tooling (e.g. a
  *    short Playwright script) that needs a stable, repeatable framing
@@ -129,7 +129,7 @@ export class GalleryController {
   // automation) — the interactive dropdown leaves the panel exactly as
   // the user had it, since they need it open to use the dropdown itself.
   private readonly _launchedFromURL: boolean;
-  // null means "no explicit override" — poseGalleryEntityIfReady computes
+  // null means "no explicit override" — poseGalleryCreatureIfReady computes
   // a tight, per-creature distance in that case (see
   // Renderer3D.getGalleryFramingDistance).
   private galleryDistanceOverride: number | null;
@@ -181,7 +181,7 @@ export class GalleryController {
     const galleryFromURL = stateFromURL ? null : readGalleryCreatureFromURL();
     this._launchedFromURL = galleryFromURL !== null || (stateFromURL?.params.galleryCreature ?? null) !== null;
     this.galleryDistanceOverride = galleryFromURL?.distance ?? null;
-    if (galleryFromURL) params.galleryCreature = galleryFromURL.kind;
+    if (galleryFromURL) params.galleryCreature = galleryFromURL.creatureSpecies;
   }
 
   /**
@@ -268,11 +268,11 @@ export class GalleryController {
    * first frame.
    */
   poseAndRestoreCameraIfReady(): void {
-    this.poseGalleryEntityIfReady();
+    this.poseGalleryCreatureIfReady();
     this.applyPendingCameraStateIfReady();
   }
 
-  private enterGallery(kind: GalleryCreature): void {
+  private enterGallery(creatureSpecies: GalleryCreature): void {
     this.gallerySnapshot = {
       mode: params.mode,
       // Snapshotted (and restored on exit) same as the other fields below,
@@ -304,14 +304,14 @@ export class GalleryController {
     params.monsterCount = 0;
     params.horseCount = 0;
 
-    if (kind === 'horse') params.horseCount = 1;
-    else if (kind === 'monster') params.monsterCount = 1;
-    else if (kind === 'predator') params.predatorCount = 1;
-    else if (kind === 'normal') params.boidCount = 1;
-    else if (kind === 'multicolor') params.multicolorCount = 1;
-    else if (kind === 'gold') params.goldCount = 1;
-    else if (kind === 'red') params.redCount = 1;
-    else if (kind === 'blue') params.blueCount = 1;
+    if (creatureSpecies === 'horse') params.horseCount = 1;
+    else if (creatureSpecies === 'monster') params.monsterCount = 1;
+    else if (creatureSpecies === 'predator') params.predatorCount = 1;
+    else if (creatureSpecies === 'normal') params.boidCount = 1;
+    else if (creatureSpecies === 'multicolor') params.multicolorCount = 1;
+    else if (creatureSpecies === 'gold') params.goldCount = 1;
+    else if (creatureSpecies === 'red') params.redCount = 1;
+    else if (creatureSpecies === 'blue') params.blueCount = 1;
 
     this.galleryPosed = false;
     this.previousGalleryVisualStyle = null;
@@ -344,36 +344,36 @@ export class GalleryController {
    * prop. The camera stays fully orbit/zoom-able afterward via
    * OrbitControls.
    */
-  private poseGalleryEntityIfReady(): void {
+  private poseGalleryCreatureIfReady(): void {
     const renderer3D = this.getRenderer3D();
     if (!params.galleryCreature || this.galleryPosed || !renderer3D || params.mode !== '3d') return;
-    const kind = params.galleryCreature;
-    const entity = GALLERY_PREDATOR_KINDS.has(kind) ? this.sim.predators[0] : this.sim.boids[0];
-    if (!entity) return;
+    const creatureSpecies = params.galleryCreature;
+    const creature = GALLERY_PREDATOR_CREATURES.has(creatureSpecies) ? this.sim.predators[0] : this.sim.boids[0];
+    if (!creature) return;
 
     const center = { x: this.sim.width / 2, y: this.sim.height / 2, z: params.worldDepth / 2 };
-    entity.position.x = center.x;
-    entity.position.y = center.y;
-    entity.position.z = center.z;
+    creature.position.x = center.x;
+    creature.position.y = center.y;
+    creature.position.z = center.z;
 
-    const speed = GALLERY_PREDATOR_KINDS.has(kind) ? params.predatorMaxSpeed : params.boidMaxSpeed;
-    entity.velocity.x = speed * 0.9;
-    entity.velocity.y = speed * 0.12;
-    entity.velocity.z = speed * 0.35;
+    const speed = GALLERY_PREDATOR_CREATURES.has(creatureSpecies) ? params.predatorMaxSpeed : params.boidMaxSpeed;
+    creature.velocity.x = speed * 0.9;
+    creature.velocity.y = speed * 0.12;
+    creature.velocity.z = speed * 0.35;
 
     params.running = false;
     this.galleryPosed = true;
     this.previousGalleryVisualStyle = params.visualStyle;
 
-    // 'predator' gallery kind maps to the 'normal' predator species (hawk).
+    // 'predator' gallery creature maps to the 'normal' predator species (hawk).
     // 'monster' maps directly to its own species.
-    const instanceKind: PredatorSpecies | BoidSpecies = (() => {
-      if (kind === 'predator') return 'normal' as const;
-      if (kind === 'monster') return 'monster' as const;
-      if (kind === 'horse') return 'horse' as const;
-      return kind as BoidSpecies;
+    const instanceSpecies: PredatorSpecies | BoidSpecies = (() => {
+      if (creatureSpecies === 'predator') return 'normal' as const;
+      if (creatureSpecies === 'monster') return 'monster' as const;
+      if (creatureSpecies === 'horse') return 'horse' as const;
+      return creatureSpecies as BoidSpecies;
     })();
-    const distance = this.galleryDistanceOverride ?? renderer3D.getGalleryFramingDistance(instanceKind);
+    const distance = this.galleryDistanceOverride ?? renderer3D.getGalleryFramingDistance(instanceSpecies);
     // The camera must target where the creature actually *renders*, not
     // its raw sim-space position — fishtank style inflates every fish/
     // predator's rendered position around fishtankCenter by
@@ -385,8 +385,8 @@ export class GalleryController {
     renderer3D.debugFrameCamera(renderTarget.x, renderTarget.y, renderTarget.z, distance);
 
     // Exposed for an external screenshot/automation script to poll for
-    // readiness and to inspect/tweak the posed entity directly.
-    (window as unknown as { __debugEntity?: unknown; __debugPosed?: boolean; __debugRenderer?: unknown }).__debugEntity = entity;
+    // readiness and to inspect/tweak the posed creature directly.
+    (window as unknown as { __debugEntity?: unknown; __debugPosed?: boolean; __debugRenderer?: unknown }).__debugEntity = creature;
     (window as unknown as { __debugPosed?: boolean }).__debugPosed = true;
     (window as unknown as { __debugRenderer?: unknown }).__debugRenderer = renderer3D;
   }
@@ -396,7 +396,7 @@ export class GalleryController {
    * exactly once, on the first frame after renderer3D exists and has run
    * its first render() call — any earlier and ensureScene's own one-time
    * auto-framing (keyed on world size, ambient to render()) would
-   * immediately clobber it. Mirrors poseGalleryEntityIfReady's same
+   * immediately clobber it. Mirrors poseGalleryCreatureIfReady's same
    * "apply once, right after render()" pattern for the same reason.
    */
   private applyPendingCameraStateIfReady(): void {
