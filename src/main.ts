@@ -133,8 +133,12 @@ const controlPanel = new ControlPanel(
   () => gallery.buildDeepLinkURL(),
   () => diagnostics.downloadDiagnostics(),
   () => diagnostics.clearRecords(),
+  () => renderer3D?.getCreatureLabels() ?? null,
 );
 applyMode(params.mode);
+// Refresh the panel now that renderer3D may have been created by applyMode,
+// so scene-specific creature labels are available on first render.
+if (renderer3D) controlPanel.refresh();
 
 if (gallery.launchedFromURL) {
   // Collapsing the panel gives a clean, unobstructed shot and a wider

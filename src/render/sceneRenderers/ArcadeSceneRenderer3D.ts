@@ -22,6 +22,7 @@ import type {
   BoidSpeciesConfig,
   SceneBoidInstanceConfig,
   ScenePredatorInstanceConfig,
+  CreatureLabels,
 } from './createSceneRendererHooks';
 
 // --- Arcade style color constants: bright, saturated emissive colors for bloom effect
@@ -291,6 +292,23 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       default:
         throw new Error(`Unknown predator kind: ${kind}`);
     }
+  }
+
+  getCreatureLabels(): CreatureLabels {
+    return {
+      boid: {
+        normal: 'Boid',
+        multicolor: 'Rainbow',
+        gold: 'Gold',
+        red: 'Red',
+        blue: 'Blue',
+      },
+      predator: {
+        normal: 'Predator',
+        horse: 'Floater',
+        dragon: 'Dragon',
+      },
+    };
   }
 
   dispose(): void {}

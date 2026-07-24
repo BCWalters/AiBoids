@@ -3,6 +3,7 @@ import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES, type Language } from '../i18n/language';
 import { t, type TranslationKey } from '../i18n/translations';
+import type { CreatureLabels } from '../render/sceneRenderers/createSceneRendererHooks';
 
 interface SliderSpec {
   key: keyof SimParams;
@@ -106,6 +107,7 @@ export class ControlPanel {
   private getDeepLinkURL: () => string;
   private onDownloadDiagnostics: () => 'downloaded' | 'no_data' | 'error';
   private onClearDiagnostics: () => number;
+  private getCreatureLabels: () => CreatureLabels | null;
   private alienButton: HTMLButtonElement | null = null;
   private respawnButton: HTMLButtonElement | null = null;
   private unsubscribeLanguage: () => void;
@@ -129,6 +131,7 @@ export class ControlPanel {
     getDeepLinkURL: () => string,
     onDownloadDiagnostics: () => 'downloaded' | 'no_data' | 'error',
     onClearDiagnostics: () => number,
+    getCreatureLabels: () => CreatureLabels | null = () => null,
   ) {
     this.container = container;
     this.sim = sim;
@@ -136,6 +139,7 @@ export class ControlPanel {
     this.getDeepLinkURL = getDeepLinkURL;
     this.onDownloadDiagnostics = onDownloadDiagnostics;
     this.onClearDiagnostics = onClearDiagnostics;
+    this.getCreatureLabels = getCreatureLabels;
     // Full re-render on language change — simplest way to refresh every
     // label/title in the panel, consistent with how other setting
     // changes (mode, visual style) already trigger a re-render.
@@ -176,11 +180,12 @@ export class ControlPanel {
     // params itself while active, so a live slider drag would otherwise
     // silently fight the isolation until Gallery is exited.
     const galleryActive = params.galleryCreature !== null;
+    const creatureLabels = this.getCreatureLabels();
     this.container.appendChild(
       this.buildSection(
         'populationSpeed',
         t('sectionPopulationSpeed'),
-        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec, galleryActive)), this.buildAlienInvasionButton()],
+        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec, galleryActive, this.resolvePopulationSliderLabel(spec, creatureLabels))), this.buildAlienInvasionButton()],
         true,
       ),
     );
@@ -376,6 +381,18 @@ export class ControlPanel {
 
     const select = document.createElement('select');
     select.id = 'param-gallery-creature';
+    const sceneLabels = this.getCreatureLabels();
+    const galleryLabel = (key: GalleryCreature | 'none', textKey: TranslationKey): string => {
+      if (!sceneLabels || key === 'none' || key === 'dragon') return t(textKey);
+      if (key === 'predator')    return sceneLabels.predator.normal;
+      if (key === 'horse')       return sceneLabels.predator.horse;
+      if (key === 'normal')      return sceneLabels.boid.normal;
+      if (key === 'multicolor')  return sceneLabels.boid.multicolor;
+      if (key === 'gold')        return sceneLabels.boid.gold;
+      if (key === 'red')         return sceneLabels.boid.red;
+      if (key === 'blue')        return sceneLabels.boid.blue;
+      return t(textKey);
+    };
     const options: { value: GalleryCreature | 'none'; textKey: TranslationKey }[] = [
       { value: 'none', textKey: 'galleryNone' },
       { value: 'horse', textKey: 'galleryHorse' },
@@ -390,7 +407,7 @@ export class ControlPanel {
     for (const opt of options) {
       const option = document.createElement('option');
       option.value = opt.value;
-      option.textContent = t(opt.textKey);
+      option.textContent = galleryLabel(opt.value, opt.textKey);
       if (opt.value === (params.galleryCreature ?? 'none')) option.selected = true;
       select.appendChild(option);
     }
@@ -701,7 +718,23 @@ export class ControlPanel {
     return details;
   }
 
-  private buildSlider(spec: SliderSpec, disabled: boolean = false): HTMLElement {
+  /** Maps a population slider's param key to a scene-specific creature label when available. */
+  private resolvePopulationSliderLabel(spec: SliderSpec, labels: CreatureLabels | null): string | undefined {
+    if (!labels) return undefined;
+    const count = (text: string) => `${text} count`;
+    switch (spec.key) {
+      case 'boidCount':        return count(labels.boid.normal);
+      case 'multicolorCount':  return count(labels.boid.multicolor);
+      case 'goldCount':        return count(labels.boid.gold);
+      case 'redCount':         return count(labels.boid.red);
+      case 'blueCount':        return count(labels.boid.blue);
+      case 'predatorCount':    return count(labels.predator.normal);
+      case 'horseCount':       return count(labels.predator.horse);
+      default:                 return undefined;
+    }
+  }
+
+  private buildSlider(spec: SliderSpec, disabled: boolean = false, labelOverride?: string): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-row';
     if (disabled) wrapper.classList.add('control-row-disabled');
@@ -710,7 +743,7 @@ export class ControlPanel {
     labelRow.className = 'control-label-row';
 
     const label = document.createElement('label');
-    label.textContent = t(spec.labelKey);
+    label.textContent = labelOverride ?? t(spec.labelKey);
     label.htmlFor = `param-${spec.key}`;
 
     const valueOut = document.createElement('span');

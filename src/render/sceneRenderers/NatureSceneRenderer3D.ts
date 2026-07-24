@@ -22,6 +22,7 @@ import type {
   SceneBoidInstanceConfig,
   ScenePredatorInstanceConfig,
   SpeciesColorSet,
+  CreatureLabels,
 } from './createSceneRendererHooks';
 
 // --- Nature style color constants: matte, earth-toned plumage with realistic gradients
@@ -502,6 +503,23 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       default:
         throw new Error(`Unknown predator kind: ${kind}`);
     }
+  }
+
+  getCreatureLabels(): CreatureLabels {
+    return {
+      boid: {
+        normal: 'Sparrow',
+        multicolor: 'Parrot',
+        gold: 'Goldfinch',
+        red: 'Cardinal',
+        blue: 'Blue Jay',
+      },
+      predator: {
+        normal: 'Hawk',
+        horse: 'Unicorn',
+        dragon: 'Dragon',
+      },
+    };
   }
 
   dispose(): void {

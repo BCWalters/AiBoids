@@ -184,6 +184,14 @@ export interface ScenePredatorInstanceConfig {
   bodyVertexColors: boolean;
 }
 
+/** Scene-specific display names for all canonical sim entity types.
+ * Boid species use their canonical sim keys; predator kinds use their
+ * canonical sim keys plus 'dragon' as a visual variant of 'normal'. */
+export interface CreatureLabels {
+  boid: Record<BoidSpecies, string>;
+  predator: Record<PredatorKind | 'dragon', string>;
+}
+
 export interface SceneRendererHooks {
   setStyleVisibility: () => void;
   configureInitialFraming: (
@@ -219,6 +227,11 @@ export interface SceneRendererHooks {
   getParrotProfileInstanceConfig: (profile: string, flags: StyleFlags) => SceneBoidInstanceConfig;
   getBoidInstanceConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => SceneBoidInstanceConfig;
   getPredatorInstanceConfig: (kind: PredatorKind, flags: StyleFlags, renderFlags: PredatorRenderFlags) => ScenePredatorInstanceConfig;
+  /** Scene-specific display labels for each canonical sim entity type.
+   * Used by the UI to show creature names appropriate to the current scene
+   * (e.g. 'normal' boid → "Sparrow" in nature, "Fish" in fishtank, "Boid" in arcade).
+   */
+  getCreatureLabels: () => CreatureLabels;
   dispose: () => void;
 }
 

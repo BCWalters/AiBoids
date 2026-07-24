@@ -58,6 +58,7 @@ import {
   type SceneRendererHooks,
   type StyleFlags,
   UNICORN_PREDATOR_KIND,
+  type CreatureLabels,
 } from './sceneRenderers/createSceneRendererHooks';
 import {
   NatureSceneRenderer3D,
@@ -2409,6 +2410,11 @@ export class Renderer3D {
     // bounding sphere fill the viewport height.
     const effectiveRadius = radius * 1.15;
     return effectiveRadius / Math.tan(verticalFovRad / 2) / offsetMagnitude;
+  }
+
+  /** Returns the scene-specific creature display labels for the active visual style. */
+  getCreatureLabels(): CreatureLabels {
+    return this.getActiveSceneRenderer().getCreatureLabels();
   }
 
   /**

@@ -24,6 +24,7 @@ import type {
   SceneBoidInstanceConfig,
   ScenePredatorInstanceConfig,
   SpeciesColorSet,
+  CreatureLabels,
 } from './createSceneRendererHooks';
 
 // --- Fishtank style color constants
@@ -370,6 +371,23 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       default:
         throw new Error(`Unknown predator kind: ${kind}`);
     }
+  }
+
+  getCreatureLabels(): CreatureLabels {
+    return {
+      boid: {
+        normal: 'Fish',
+        multicolor: 'Butterflyfish',
+        gold: 'Goldfish',
+        red: 'Clownfish',
+        blue: 'Blue Tang',
+      },
+      predator: {
+        normal: 'Shark',
+        horse: 'Sea Horse',
+        dragon: 'Shark',
+      },
+    };
   }
 
   dispose(): void {
