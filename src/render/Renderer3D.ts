@@ -7,30 +7,10 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { params, type TimeOfDayPreset, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
-import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import { BoidSpecies } from '../sim/Boid';
 import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
-import { createBirdGeometries, createRealisticBirdGeometries } from './styles/nature/geometry/smallBirdGeometry';
-import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
-import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
-import { createDragonGeometries, computeDragonMouthTransform } from './styles/nature/geometry/dragonGeometry';
-import { createUnicornGeometries } from './styles/nature/geometry/unicornGeometry';
 import type { CreatureGeometries } from './geometry/sharedGeometry';
-import { createNatureEnvironment, type NatureEnvironment } from './styles/nature/environment';
-import {
-  createFishtankEnvironment,
-  computeFishtankRoomBounds,
-  type FishtankEnvironment,
-} from './styles/fishtank/environment';
-import { createFishGeometries as createFishtankFishGeometries } from './styles/fishtank/geometry/smallFishGeometry';
-import { createButterflyfishGeometries } from './styles/fishtank/geometry/butterflyfishGeometry';
-import { createSharkGeometries as createFishtankSharkGeometries } from './styles/fishtank/geometry/sharkGeometry';
-import { createSeaHorseGeometries as createFishtankSeaHorseGeometries } from './styles/fishtank/geometry/seaHorseGeometry';
-import { createDriftingClouds, type DriftingClouds } from './styles/nature/clouds';
-import { createBloodEffects, type BloodEffects } from './bloodEffects';
-import { createFireBreathEffects, type FireBreathEffects } from './styles/nature/fireBreath';
-import { createUFOVisual, type UFOVisual } from './ufoEffects';
 import {
   getUprightFlapFrequencyMultiplier,
   getUprightHeadingSmoothingRate,
@@ -45,13 +25,13 @@ import {
   createPredatorInstanceKey,
   createPredatorRenderFlags,
   createStyleFlags,
-  createSceneRendererHooks,
   type BoidMotionStyleFlags,
   type ColourStrategy,
   isPredatorSpecies,
   type MotionConfig,
   PredatorSpecies,
   type PredatorRenderFlags,
+  type SpeciesColorSet,
   SCENE_PREDATOR_SPECIES,
   SCENE_STYLES,
   type SceneEnvironmentToggles,
@@ -61,80 +41,21 @@ import {
   type CreatureLabels,
 } from './sceneRenderers/createSceneRendererHooks';
 import {
-  NatureSceneRenderer3D,
-  NATURE_BOID_BASE,
-  PARROT_NATURE_VARIANTS,
-  SPARROW_NATURE_PALETTE,
-  GOLDFINCH_NATURE_PALETTE,
-  CARDINAL_NATURE_PALETTE,
-  BLUEJAY_NATURE_PALETTE,
-  GOLDFINCH_BODY_BASE,
-  GOLDFINCH_WING_BASE,
-  GOLDFINCH_TAIL_BASE,
-  CARDINAL_BODY_BASE,
-  CARDINAL_WING_BASE,
-  CARDINAL_TAIL_BASE,
-  BLUEJAY_BODY_BASE,
-  BLUEJAY_WING_BASE,
-  BLUEJAY_TAIL_BASE,
-  type SpeciesColorSet,
-  type SmallBirdPalette,
-} from './sceneRenderers/NatureSceneRenderer3D';
-import { FishtankSceneRenderer3D } from './sceneRenderers/FishtankSceneRenderer3D';
-import {
-  ArcadeSceneRenderer3D,
-  ARCADE_BOID_EMISSIVE,
-  ARCADE_BOID_BASE,
-  ARCADE_PARROT_EMISSIVE,
-  ARCADE_PARROT_BASE,
-  ARCADE_GOLDFINCH_EMISSIVE,
-  ARCADE_GOLDFINCH_BASE,
-  ARCADE_CARDINAL_EMISSIVE,
-  ARCADE_CARDINAL_BASE,
-  ARCADE_BLUEJAY_EMISSIVE,
-  ARCADE_BLUEJAY_BASE,
-} from './sceneRenderers/ArcadeSceneRenderer3D';
+  PROFILED_BOID_NEUTRAL_PROFILE,
+  PROFILED_BOID_SPECIES,
+  RENDERER_BOID_SPECIES_CONFIGS,
+  type RendererBoidSpeciesConfig,
+} from './boidSpeciesRegistry';
+import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';
+import { createRendererSceneRenderers } from './sceneRendererFactory';
+import { NATURE_CREATURE_SIZES, NATURE_DRAGON_MOUTH } from './sceneRenderers/NatureSceneRenderer3D';
+import { DragonFireBreathController } from './dragonFireBreathController';
 import { UFO_BEAM_REACH } from '../sim/UFO';
 
-const BOID_LENGTH = 7;
-const BOID_WIDTH = 2.6;
-// Sparrows render a bit smaller than parrots — parrots keep the
-// "reference" boid size, sparrows are scaled down from it (see
-// arcadeSparrowGeometries/natureSparrowGeometries below).
-const SPARROW_SIZE_SCALE = 0.7;
-// Nature small songbirds (sparrow/goldfinch/cardinal/bluejay) are 25% smaller
-// than the base nature boid scale — they should read as noticeably smaller than
-// parrots in the same scene without shrinking so far they lose their silhouette.
-const NATURE_SMALL_BIRD_SIZE = 0.975; // 1.3 * 0.75
-const NATURE_SMALL_BIRD_WIDTH = 1.8;  // 2.4 * 0.75
-const PREDATOR_LENGTH = 12;
-const PREDATOR_WIDTH = 4.4;
-// Dragons should read as dramatically larger than boids, not just a
-// slightly bigger hawk — roughly 2x the nature-style hawk's footprint.
-const DRAGON_SIZE_SCALE = 1.25;
-const DRAGON_LENGTH_BASE = PREDATOR_LENGTH * 3.0;
-const DRAGON_WIDTH_BASE = PREDATOR_WIDTH * 3.6;
-const DRAGON_LENGTH = DRAGON_LENGTH_BASE * DRAGON_SIZE_SCALE;
-const DRAGON_WIDTH = DRAGON_WIDTH_BASE * DRAGON_SIZE_SCALE;
-const DRAGON_MOUTH = computeDragonMouthTransform(DRAGON_LENGTH);
-const SHARK_LENGTH = DRAGON_LENGTH_BASE;
-const SHARK_WIDTH = DRAGON_WIDTH_BASE;
-// Unicorns: a large, substantial creature — a little smaller than the
-// dragon, not just a slightly bigger hawk (the earlier hawk-relative
-// sizing read as bird-sized, not horse-sized).
-const UNICORN_LENGTH = DRAGON_LENGTH * 0.8;
-const UNICORN_WIDTH = DRAGON_WIDTH * 0.75;
-
-// Wing-flap tuning: base idle flutter plus extra amplitude proportional to
-// how fast the creature is currently moving (relative to its own max speed).
-const FLAP_FREQUENCY = 7.6; // radians/sec-ish; controls flap speed
-const FLAP_IDLE_AMPLITUDE = 0.25;
-const FLAP_SPEED_AMPLITUDE = 0.9;
-// Nature parrots should read as heavier, broad-winged fliers than the
-// smaller songbirds, with slower, wider wingbeats.
-// const PARROT_FLAP_FREQUENCY = 5.4;
-// const PARROT_FLAP_IDLE_AMPLITUDE = 0.4;
-// const PARROT_FLAP_SPEED_AMPLITUDE = 0.95;
+// Wing-flap tuning. NOTE: the actual flap frequency/amplitude values are owned
+// per-scene (each scene's MotionConfig provides them); only the shared
+// flap-state-blend response constants below live here since they describe the
+// one shared animation algorithm and are not varied per scene.
 const CLIMB_FLAP_FREQ_BOOST = 0.12;
 const DIVE_FLAP_FREQ_CUT = 0.1;
 const TURN_FLAP_FREQ_BOOST = 0.06;
@@ -144,15 +65,6 @@ const DIVE_FLAP_AMP_BOOST = 0.08;
 const TURN_FLAP_AMP_BOOST = 0.1;
 const PANIC_FLAP_AMP_BOOST = 0.12;
 const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
-
-// Fishtank-only mesh-size boost applied on top of the fishtank scale (see
-// updateInstances' meshScaleBoost param). This has been moved to scene renderers.
-// const FISHTANK_FISH_MESH_BOOST = 2.2;
-
-// Dragons are ~2.5-3x the size of the hawk predator, so flapping at the
-// same fast hummingbird-like frequency read as a tiny insect (dragonfly/
-// hummingbird) rather than a huge beast — big wings should beat slower
-// and sweep through a wider arc.
 
 // Unicorns get their own dedicated "stay upright" orientation model in
 // updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
@@ -169,26 +81,14 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // - Descending: pitch is allowed a small nose-down droop, capped well
 //   below the overall tilt ceiling below, so sinking reads as a gentle
 //   "floating down" rather than either a flat glide or a diving swoop.
-// Parrot tail sway: moved to scene renderers for boid rendering
-// const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
-const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
-const PARROT_SPECIES: BoidSpecies = BoidSpecies.Multicolor;
-const NEUTRAL_PARROT_PROFILE = 'neutral';
-
-// Dragon tail sway: on-screen references (movies/TV) almost always show a
-// dragon's tail undulating up and down as it flies, driven by the same
-// wingbeat that powers the body through the air, rather than trailing
-// perfectly rigid behind it like a glider's tailplane. Reuses the wing's
-// flap phase (so the whole silhouette reads as one coordinated wingbeat)
-// but at a smaller amplitude and a phase offset, so the tail lags/leads
-// the wings rather than moving in a way that looks mechanically identical
-// to them.
-const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22; // radians; smaller than the wing flap itself
+//
+// Shared tail-sway phase offset: creatures with a swaying tail (dragons,
+// sharks — see usesTailSwayMatrix) drive the tail from the wing's flap
+// phase but offset it so the tail lags/leads the wingbeat rather than
+// mirroring it exactly. The per-scene tail-sway *amplitude* and axis are
+// owned by each scene's MotionConfig; only this shared phase relationship
+// lives here.
 const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
-
-// Fish tail sway: moved to scene renderers
-// const FISH_TAIL_SWAY_AMPLITUDE = 0.4; // radians; a brisk but not exaggerated side-to-side flick
-// const FISH_TAIL_SWAY_FREQUENCY = 5.2; // noticeably quicker than the shark's slower tail beat
 
 // Dragons additionally low-pass filter their heading direction (not just
 // their bank angle) before it's used for orientation — see the
@@ -272,7 +172,7 @@ function idHash(id: number, salt: number): number {
 }
 
 interface CreatureInstanceMatrixArgs {
-  set: BirdInstanceSet;
+  set: BoidRenderBatch;
   index: number;
   creature: Boid | Predator;
   position: { x: number; y: number; z: number };
@@ -302,7 +202,7 @@ interface CreatureInstanceMatrixArgs {
 }
 
 interface CreatureInstanceColorArgs {
-  set: BirdInstanceSet;
+  set: BoidRenderBatch;
   index: number;
   creature: Boid | Predator;
   baseColor: THREE.Color;
@@ -351,7 +251,7 @@ interface ResolvedColourStrategy {
 }
 
 interface UpdateCreatureInstanceArgs {
-  set: BirdInstanceSet;
+  set: BoidRenderBatch;
   index: number;
   creature: Boid | Predator;
   maxSpeed: number;
@@ -396,7 +296,7 @@ type UpdateCreatureSharedArgs = Omit<UpdateCreatureInstanceArgs, 'index' | 'crea
 // rainbow-reading tint, or the fins render as washed-out white flags that
 // look detached from the body.
 
-interface BirdInstanceSet {
+interface BoidRenderBatch {
   body: THREE.InstancedMesh;
   wingLeft: THREE.InstancedMesh;
   wingRight: THREE.InstancedMesh;
@@ -406,100 +306,7 @@ interface BirdInstanceSet {
   beak?: THREE.InstancedMesh;
 }
 
-/** Per-species rendering config: which population param drives its count,
- * which colors/geometry it uses, and whether it gets the 'normal' species'
- * shrunken geometry, the 'multicolor' species' dedicated parrot-style geometry,
- * or the shared "reference" small-bird geometry (gold/red/blue).
- * Non-'normal' multi-colored species use either a static `colors` set or
- * a per-creature `getColors` function ('multicolor' only, for its multi-pattern
- * flock) for distinct body/wing/tail plumage instead of one flat tint. */
-interface BoidSpeciesConfig {
-  species: BoidSpecies;
-  countParam: 'boidCount' | 'multicolorCount' | 'goldCount' | 'redCount' | 'blueCount';
-  arcadeEmissive: THREE.Color;
-  arcadeBase: THREE.Color;
-  natureBase: THREE.Color;
-  colors?: SpeciesColorSet;
-  getColors?: (creature: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
-  useSmallGeometry: boolean;
-  useParrotGeometry?: boolean;
-  /** Small-bird species only (nature style): the beak's own instance
-   * color, distinct from the body — see CreatureGeometries.beak's doc
-   * comment on why this can't just be baked into the shared body
-   * geometry's vertex colors the way parrot/hawk beaks are. */
-  beakColor?: THREE.Color;
-  /** Small-bird species only (nature style): fixed leg/foot color baked into
-   * the shared legs geometry. Defaults to SMALL_BIRD_DEFAULT_LEGS_COLOR when
-   * not set. Override per-species to give e.g. a cardinal its orange-red legs. */
-  legsColor?: THREE.Color;
-  /** Small-bird species only (nature style): per-species baked vertex colour
-   * palette for body/wing/tail gradients. When set, createRealisticBirdGeometries
-   * is called with this palette and the species gets its own dedicated geometry
-   * instance in Renderer3D (rather than sharing natureBoidGeometries). */
-  natureSmallBirdPalette?: SmallBirdPalette;
-  /** Nature-style local-Y tail joint pivot for tail sway compensation. */
-  tailSwayPivotY?: number;
-}
-
-const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
-  {
-    species: BoidSpecies.Normal,
-    countParam: 'boidCount',
-    arcadeEmissive: ARCADE_BOID_EMISSIVE,
-    arcadeBase: ARCADE_BOID_BASE,
-    natureBase: NATURE_BOID_BASE,
-    useSmallGeometry: true,
-    beakColor: new THREE.Color(0x6b5a4a), // dark brownish-gray, typical sparrow beak
-    legsColor: new THREE.Color(0x7a6450), // brownish-gray, typical sparrow leg
-    natureSmallBirdPalette: SPARROW_NATURE_PALETTE,
-  },
-  {
-    species: BoidSpecies.Multicolor,
-    countParam: 'multicolorCount',
-    arcadeEmissive: ARCADE_PARROT_EMISSIVE,
-    arcadeBase: ARCADE_PARROT_BASE,
-    natureBase: PARROT_NATURE_VARIANTS[0].colors.body,
-    useSmallGeometry: false,
-    useParrotGeometry: true,
-    tailSwayPivotY: PARROT_TAIL_SWAY_PIVOT_Y,
-  },
-  {
-    species: BoidSpecies.Gold,
-    countParam: 'goldCount',
-    arcadeEmissive: ARCADE_GOLDFINCH_EMISSIVE,
-    arcadeBase: ARCADE_GOLDFINCH_BASE,
-    natureBase: GOLDFINCH_BODY_BASE,
-    colors: { body: GOLDFINCH_BODY_BASE, wing: GOLDFINCH_WING_BASE, tail: GOLDFINCH_TAIL_BASE },
-    useSmallGeometry: false,
-    beakColor: new THREE.Color(0xf07820), // vivid orange, goldfinch's distinctive beak
-    legsColor: new THREE.Color(0x8a7060), // warm brownish-gray
-    natureSmallBirdPalette: GOLDFINCH_NATURE_PALETTE,
-  },
-  {
-    species: BoidSpecies.Red,
-    countParam: 'redCount',
-    arcadeEmissive: ARCADE_CARDINAL_EMISSIVE,
-    arcadeBase: ARCADE_CARDINAL_BASE,
-    natureBase: CARDINAL_BODY_BASE,
-    colors: { body: CARDINAL_BODY_BASE, wing: CARDINAL_WING_BASE, tail: CARDINAL_TAIL_BASE },
-    useSmallGeometry: false,
-    beakColor: new THREE.Color(0xe84040), // lighter red, cardinal's signature beak
-    legsColor: new THREE.Color(0x8a6a5a), // brownish-gray with slight warm tint
-    natureSmallBirdPalette: CARDINAL_NATURE_PALETTE,
-  },
-  {
-    species: BoidSpecies.Blue,
-    countParam: 'blueCount',
-    arcadeEmissive: ARCADE_BLUEJAY_EMISSIVE,
-    arcadeBase: ARCADE_BLUEJAY_BASE,
-    natureBase: BLUEJAY_BODY_BASE,
-    colors: { body: BLUEJAY_BODY_BASE, wing: BLUEJAY_WING_BASE, tail: BLUEJAY_TAIL_BASE },
-    useSmallGeometry: false,
-    beakColor: new THREE.Color(0x8c8c8c), // medium-light gray, blue jay beak
-    legsColor: new THREE.Color(0x7a7060), // neutral brownish-gray
-    natureSmallBirdPalette: BLUEJAY_NATURE_PALETTE,
-  },
-];
+type BoidSpeciesConfig = RendererBoidSpeciesConfig;
 
 export class Renderer3D {
   private renderer: THREE.WebGLRenderer;
@@ -512,49 +319,18 @@ export class Renderer3D {
 
   private ambientLight: THREE.AmbientLight;
   private keyLight: THREE.DirectionalLight;
-  private natureEnv: NatureEnvironment;
-  private fishtankEnv: FishtankEnvironment;
-  private driftingClouds: DriftingClouds;
-  private bloodEffects: BloodEffects;
-  private fireBreathEffects: FireBreathEffects;
-  private ufoVisuals: UFOVisual[];
+  private sceneAssets!: RendererSceneAssets;
 
-  private arcadeBoidGeometries: CreatureGeometries;
-  private arcadeSparrowGeometries: CreatureGeometries;
-  private arcadeParrotGeometries: CreatureGeometries;
-  private arcadePredatorGeometries: CreatureGeometries;
-  private natureBoidGeometries: CreatureGeometries;
-  private natureSparrowGeometries: CreatureGeometries;
-  private natureGoldfinchGeometries: CreatureGeometries;
-  private natureCardinalGeometries: CreatureGeometries;
-  private natureBluejayGeometries: CreatureGeometries;
-  /** Quick-lookup map from BoidSpecies → per-species nature geometry for non-sparrow small birds. */
-  private readonly natureSmallSpeciesGeometries = new Map<BoidSpecies, CreatureGeometries>();
-  private natureParrotGeometries: CreatureGeometries;
-  private natureParrotBlueGoldGeometries: CreatureGeometries;
-  private natureParrotScarletGeometries: CreatureGeometries;
-  private natureParrotPurpleLavenderGeometries: CreatureGeometries;
-  private natureParrotNeutralGeometries: CreatureGeometries;
-  private naturePredatorGeometries: CreatureGeometries;
-  private dragonPredatorGeometries: CreatureGeometries;
-  private unicornPredatorGeometries: CreatureGeometries;
-  private fishtankBoidGeometries: CreatureGeometries;
-  private fishtankSparrowGeometries: CreatureGeometries;
-  private fishtankButterflyfishGeometries: CreatureGeometries;
-  private fishtankPredatorGeometries: CreatureGeometries;
-  private fishtankSharkPredatorGeometries: CreatureGeometries;
-  private fishtankUnicornPredatorGeometries: CreatureGeometries;
-
-  private speciesInstances = new Map<BoidSpecies, BirdInstanceSet | null>();
+  private speciesInstances = new Map<BoidSpecies, BoidRenderBatch | null>();
   private speciesInstanceKeys = new Map<BoidSpecies, string | null>();
-  private parrotProfileInstances = new Map<string, BirdInstanceSet | null>();
-  private parrotProfileKeys = new Map<string, string | null>();
+  private profiledSpeciesInstances = new Map<string, BoidRenderBatch | null>();
+  private profiledSpeciesKeys = new Map<string, string | null>();
   /**
    * Predator instances are split by species (mirrors speciesInstances above)
    * so hawks/dragons and unicorns can coexist as independent populations
    * with entirely different geometries/materials — see Predator.species.
    */
-  private predatorInstances = new Map<PredatorSpecies, BirdInstanceSet | null>();
+  private predatorInstances = new Map<PredatorSpecies, BoidRenderBatch | null>();
   private predatorInstanceKeys = new Map<PredatorSpecies, string | null>();
   /**
    * Persisted, per-dragon *displayed* orientation — see the keepUpright
@@ -570,7 +346,7 @@ export class Renderer3D {
    * turn rate this way makes any remaining glitch show up as, at worst,
    * a brief pause before the model continues turning smoothly, never a
    * visible instant flip or flattening snap. Cleared whenever the
-   * predator instance set is rebuilt (species/count/dragon-mode change).
+   * predator render batch is rebuilt (species/count/dragon-mode change).
    */
   private dragonDisplayQuats = new Map<number, THREE.Quaternion>();
   /** Turn-rate-limited display orientation state for non-dragon upright styles. */
@@ -586,7 +362,7 @@ export class Renderer3D {
   private pendingShaderWarmupStyles = new Set<VisualStyle>();
 
   private lastSeenCatchId = 0;
-  private nextFireBreathTime = new WeakMap<Predator, number>();
+  private dragonFireBreathController!: DragonFireBreathController;
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
@@ -602,10 +378,6 @@ export class Renderer3D {
   private tmpVec3 = new THREE.Vector3();
   private tmpSpawnPosition = new THREE.Vector3();
   private tmpSpawnDirection = new THREE.Vector3();
-  private tmpFireOrigin = new THREE.Vector3();
-  private tmpFireDirection = new THREE.Vector3();
-  private tmpFireOffset = new THREE.Vector3();
-  private tmpFireEmitterVelocity = new THREE.Vector3();
   // Sim world center, recomputed once per frame in render() while
   // fishtank style is active — used to "grow" fishtank's boid positions
   // symmetrically around the tank's true center (see TANK_VISUAL_SCALE's
@@ -677,69 +449,12 @@ export class Renderer3D {
     this.keyLight.shadow.radius = 3;
     this.scene.add(this.ambientLight, this.keyLight);
 
-    this.natureEnv = createNatureEnvironment(this.scene, this.renderer);
-    this.fishtankEnv = createFishtankEnvironment(this.scene);
-    this.driftingClouds = createDriftingClouds(this.scene);
-    this.bloodEffects = createBloodEffects(this.scene);
-    this.fireBreathEffects = createFireBreathEffects(this.scene);
-    this.ufoVisuals = Array.from({ length: MAX_CONCURRENT_UFOS }, () => createUFOVisual(this.scene));
-
-    this.arcadeBoidGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
-    this.arcadeSparrowGeometries = createBirdGeometries(BOID_LENGTH * SPARROW_SIZE_SCALE, BOID_WIDTH * SPARROW_SIZE_SCALE);
-    this.arcadeParrotGeometries = createBirdGeometries(BOID_LENGTH, BOID_WIDTH);
-    this.arcadePredatorGeometries = createBirdGeometries(PREDATOR_LENGTH, PREDATOR_WIDTH);
-    // The lathed "nature" body/wings have noticeably less surface area per
-    // unit width/length than the arcade octahedron+flat-triangle shapes, so
-    // scale them up to read clearly at the same viewing distance.
-    this.natureBoidGeometries = createRealisticBirdGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
-    this.natureSparrowGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE * SPARROW_SIZE_SCALE,
-      BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH * SPARROW_SIZE_SCALE,
-      new THREE.Color(0x7a6450),
-      SPARROW_NATURE_PALETTE,
-    );
-    // Per-species geometry for goldfinch/cardinal/bluejay — each bakes its
-    // own gradient palette into the vertex colours so the flock doesn't need
-    // a flat per-instance tint (and gains the body/wing/tail gradient look).
-    this.natureGoldfinchGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x8a7060), GOLDFINCH_NATURE_PALETTE,
-    );
-    this.natureCardinalGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x8a6a5a), CARDINAL_NATURE_PALETTE,
-    );
-    this.natureBluejayGeometries = createRealisticBirdGeometries(
-      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x7a7060), BLUEJAY_NATURE_PALETTE,
-    );
-    this.natureSmallSpeciesGeometries.set(BoidSpecies.Gold, this.natureGoldfinchGeometries);
-    this.natureSmallSpeciesGeometries.set(BoidSpecies.Red,  this.natureCardinalGeometries);
-    this.natureSmallSpeciesGeometries.set(BoidSpecies.Blue,  this.natureBluejayGeometries);
-    // Parrot's dedicated macaw-style geometry (curved beak, rounder body,
-    // long tail streamers) — only used in nature style; arcade style still
-    // shares the simple flat-diamond silhouette with every other species
-    // (arcade's whole aesthetic is bloom-glow blobs, not anatomical detail).
-    this.natureParrotGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'green-focus');
-    this.natureParrotBlueGoldGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'blue-gold-focus');
-    this.natureParrotScarletGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'scarlet-focus');
-    this.natureParrotPurpleLavenderGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'purple-lavender-focus');
-    this.natureParrotNeutralGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, NEUTRAL_PARROT_PROFILE);
-    this.naturePredatorGeometries = createHawkGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 1.7);
-    this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
-    this.unicornPredatorGeometries = createUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
-
-    // Fish tank style geometries: independent duplicates of the nature
-    // ones above (see src/render/styles/fishtank/), built with the exact
-    // same sizing so they slot into the same instancing code paths — a
-    // future reskinning pass can freely change proportions/shapes here
-    // without touching nature's geometry at all.
-    this.fishtankBoidGeometries = createFishtankFishGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
-    this.fishtankSparrowGeometries = createFishtankFishGeometries(
-      BOID_LENGTH * NATURE_SMALL_BIRD_SIZE * SPARROW_SIZE_SCALE,
-      BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH * SPARROW_SIZE_SCALE,
-    );
-    this.fishtankButterflyfishGeometries = createButterflyfishGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4);
-    this.fishtankPredatorGeometries = createFishtankFishGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 2.4);
-    this.fishtankSharkPredatorGeometries = createFishtankSharkGeometries(SHARK_LENGTH, SHARK_WIDTH);
-    this.fishtankUnicornPredatorGeometries = createFishtankSeaHorseGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
+    this.sceneAssets = createRendererSceneAssets(this.scene, this.renderer);
+    this.dragonFireBreathController = new DragonFireBreathController({
+      fireBreathEffects: this.sceneAssets.fireBreathEffects,
+      dragonMouth: NATURE_DRAGON_MOUTH,
+      dragonLength: NATURE_CREATURE_SIZES.dragon.length,
+    });
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -753,51 +468,12 @@ export class Renderer3D {
   }
 
   private initializeSceneRenderers(): void {
-    this.sceneRenderers = createSceneRendererHooks({
-      nature: new NatureSceneRenderer3D({
-        camera: this.camera,
-        controls: this.controls,
-        driftingClouds: this.driftingClouds,
-        fishtankEnv: this.fishtankEnv,
-        natureEnv: this.natureEnv,
-        updateTransientEffects: (sim, elapsed) => this.spawnFireFromDragons(sim, elapsed),
-        natureSparrowGeometries: this.natureSparrowGeometries,
-        natureParrotGeometries: this.natureParrotGeometries,
-        natureParrotBlueGoldGeometries: this.natureParrotBlueGoldGeometries,
-        natureParrotScarletGeometries: this.natureParrotScarletGeometries,
-        natureParrotPurpleLavenderGeometries: this.natureParrotPurpleLavenderGeometries,
-        natureParrotNeutralGeometries: this.natureParrotNeutralGeometries,
-        natureBoidGeometries: this.natureBoidGeometries,
-        natureSmallSpeciesGeometries: this.natureSmallSpeciesGeometries,
-        naturePredatorGeometries: this.naturePredatorGeometries,
-        dragonPredatorGeometries: this.dragonPredatorGeometries,
-        unicornPredatorGeometries: this.unicornPredatorGeometries,
-      }),
-      fishtank: new FishtankSceneRenderer3D({
-        camera: this.camera,
-        controls: this.controls,
-        driftingClouds: this.driftingClouds,
-        fishtankCenter: this.fishtankCenter,
-        fishtankEnv: this.fishtankEnv,
-        natureEnv: this.natureEnv,
-        fishtankSparrowGeometries: this.fishtankSparrowGeometries,
-        fishtankButterflyfishGeometries: this.fishtankButterflyfishGeometries,
-        fishtankBoidGeometries: this.fishtankBoidGeometries,
-        fishtankPredatorGeometries: this.fishtankPredatorGeometries,
-        fishtankSharkPredatorGeometries: this.fishtankSharkPredatorGeometries,
-        fishtankUnicornPredatorGeometries: this.fishtankUnicornPredatorGeometries,
-      }),
-      arcade: new ArcadeSceneRenderer3D({
-        camera: this.camera,
-        controls: this.controls,
-        driftingClouds: this.driftingClouds,
-        fishtankEnv: this.fishtankEnv,
-        natureEnv: this.natureEnv,
-        arcadeSparrowGeometries: this.arcadeSparrowGeometries,
-        arcadeParrotGeometries: this.arcadeParrotGeometries,
-        arcadeBoidGeometries: this.arcadeBoidGeometries,
-        arcadePredatorGeometries: this.arcadePredatorGeometries,
-      }),
+    this.sceneRenderers = createRendererSceneRenderers({
+      camera: this.camera,
+      controls: this.controls,
+      fishtankCenter: this.fishtankCenter,
+      sceneAssets: this.sceneAssets,
+      onUpdateTransientEffects: (sim, elapsed) => this.spawnFireFromDragons(sim, elapsed),
     });
   }
 
@@ -815,7 +491,7 @@ export class Renderer3D {
     }
   }
 
-  private buildInstanceSet(
+  private buildRenderBatch(
     geometries: CreatureGeometries,
     style: VisualStyle,
     count: number,
@@ -823,7 +499,7 @@ export class Renderer3D {
     rainbowWings: boolean = false,
     bodyVertexColors: boolean = false,
     bodyEmissiveOverride?: THREE.Color,
-  ): BirdInstanceSet {
+  ): BoidRenderBatch {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
     const sceneRenderer = this.getSceneRenderer(style);
@@ -981,7 +657,7 @@ export class Renderer3D {
     target.setHSL(h, s, l);
   }
 
-  private disposeInstanceSet(set: BirdInstanceSet | null): void {
+  private disposeRenderBatch(set: BoidRenderBatch | null): void {
     if (!set) return;
     const meshes = [
       set.body,
@@ -1033,8 +709,7 @@ export class Renderer3D {
     // (a table + room) around the tank that's worth seeing when zoomed
     // out further, so it gets a much looser clamp than nature.
     const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-    sceneRenderer.applyStyleTransition(sim, maxDim, fishtankBounds, wasFishtank);
+    sceneRenderer.applyStyleTransition(sim, maxDim, wasFishtank);
   }
 
   private updateEnvironmentParameterToggles(): void {
@@ -1099,45 +774,44 @@ export class Renderer3D {
 
     const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
     const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
-    sceneRenderer.configureInitialFraming(sim, maxDim, fishtankBounds);
+    sceneRenderer.configureInitialFraming(sim, maxDim);
 
     this.configureSceneEnvironmentAnchors(sim, center, maxDim);
 
     this.controls.minDistance = maxDim * 0.05;
-    sceneRenderer.applyStyleTransition(sim, maxDim, fishtankBounds, false);
+    sceneRenderer.applyStyleTransition(sim, maxDim, false);
   }
 
-  private reconcileBoidInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+  private reconcileBoidRenderBatches(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const sceneRenderer = this.getSceneRenderer(style);
-    const parrotProfileNames = this.getProfileNamesForSpecies(PARROT_SPECIES, sceneRenderer, flags);
-    const hasParrotProfiles = parrotProfileNames.length > 0;
+    const profileNames = this.getProfileNamesForSpecies(PROFILED_BOID_SPECIES, sceneRenderer, flags);
+    const hasProfiledSpecies = profileNames.length > 0;
     const countsBySpecies = this.getBoidCountsBySpecies(sim.boids);
-    const parrotProfileCounts = hasParrotProfiles
-      ? this.getProfileCountsForSpecies(sim.boids, PARROT_SPECIES, sceneRenderer, flags)
+    const profileCounts = hasProfiledSpecies
+      ? this.getProfileCountsForSpecies(sim.boids, PROFILED_BOID_SPECIES, sceneRenderer, flags)
       : new Map<string, number>();
-    if (!hasParrotProfiles) this.clearParrotProfileInstances();
+    if (!hasProfiledSpecies) this.clearProfiledSpeciesInstances();
 
-    for (const config of BOID_SPECIES_CONFIGS) {
+    for (const config of RENDERER_BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
-      if (this.isProfiledSpecies(config.species) && hasParrotProfiles) {
-        this.reconcileProfiledParrotInstanceSets(
+      if (this.isProfiledSpecies(config.species) && hasProfiledSpecies) {
+        this.reconcileProfiledSpeciesRenderBatches(
           count,
           style,
           flags,
-          parrotProfileNames,
-          parrotProfileCounts,
+          profileNames,
+          profileCounts,
           sceneRenderer,
         );
         continue;
       }
       const key = `${count}:${style}`;
       if (this.speciesInstanceKeys.get(config.species) !== key) {
-        this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
+        this.disposeRenderBatch(this.speciesInstances.get(config.species) ?? null);
         const { geometries, bodyVertexColors, bodyEmissiveOverride } = sceneRenderer.getBoidInstanceConfig(config.species, config, flags);
         this.speciesInstances.set(
           config.species,
-          this.buildInstanceSet(geometries, style, count, false, false, bodyVertexColors, bodyEmissiveOverride),
+          this.buildRenderBatch(geometries, style, count, false, false, bodyVertexColors, bodyEmissiveOverride),
         );
         this.speciesInstanceKeys.set(config.species, key);
       }
@@ -1162,7 +836,7 @@ export class Renderer3D {
   }
 
   private isProfiledSpecies(species: BoidSpecies): boolean {
-    return species === PARROT_SPECIES;
+    return species === PROFILED_BOID_SPECIES;
   }
 
   private getProfileCountsForSpecies(
@@ -1181,32 +855,32 @@ export class Renderer3D {
     return profileCounts;
   }
 
-  private clearParrotProfileInstances(): void {
-    for (const profile of this.parrotProfileInstances.keys()) {
-      this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
-      this.parrotProfileInstances.set(profile, null);
-      this.parrotProfileKeys.set(profile, null);
+  private clearProfiledSpeciesInstances(): void {
+    for (const profile of this.profiledSpeciesInstances.keys()) {
+      this.disposeRenderBatch(this.profiledSpeciesInstances.get(profile) ?? null);
+      this.profiledSpeciesInstances.set(profile, null);
+      this.profiledSpeciesKeys.set(profile, null);
     }
   }
 
-  private reconcileProfiledParrotInstanceSets(
-    totalParrotCount: number,
+  private reconcileProfiledSpeciesRenderBatches(
+    totalProfiledSpeciesCount: number,
     style: VisualStyle,
     flags: StyleFlags,
-    parrotProfileNames: readonly string[],
-    parrotProfileCounts: ReadonlyMap<string, number>,
+    profileNames: readonly string[],
+    profileCounts: ReadonlyMap<string, number>,
     sceneRenderer: SceneRendererHooks,
   ): void {
-    const nonNeutralCount = parrotProfileNames
-      .reduce((sum, profile) => sum + (parrotProfileCounts.get(profile) ?? 0), 0);
-    const neutralCount = Math.max(0, totalParrotCount - nonNeutralCount);
-    const neutralKey = `${neutralCount}:${style}:${NEUTRAL_PARROT_PROFILE}`;
-    if (this.speciesInstanceKeys.get(PARROT_SPECIES) !== neutralKey) {
-      this.disposeInstanceSet(this.speciesInstances.get(PARROT_SPECIES) ?? null);
-      const neutralConfig = sceneRenderer.getParrotProfileInstanceConfig(NEUTRAL_PARROT_PROFILE, flags);
+    const nonNeutralCount = profileNames
+      .reduce((sum, profile) => sum + (profileCounts.get(profile) ?? 0), 0);
+    const neutralCount = Math.max(0, totalProfiledSpeciesCount - nonNeutralCount);
+    const neutralKey = `${neutralCount}:${style}:${PROFILED_BOID_NEUTRAL_PROFILE}`;
+    if (this.speciesInstanceKeys.get(PROFILED_BOID_SPECIES) !== neutralKey) {
+      this.disposeRenderBatch(this.speciesInstances.get(PROFILED_BOID_SPECIES) ?? null);
+      const neutralConfig = sceneRenderer.getParrotProfileInstanceConfig(PROFILED_BOID_NEUTRAL_PROFILE, flags);
       this.speciesInstances.set(
-        PARROT_SPECIES,
-        this.buildInstanceSet(
+        PROFILED_BOID_SPECIES,
+        this.buildRenderBatch(
           neutralConfig.geometries,
           style,
           neutralCount,
@@ -1215,17 +889,17 @@ export class Renderer3D {
           neutralConfig.bodyVertexColors,
         ),
       );
-      this.speciesInstanceKeys.set(PARROT_SPECIES, neutralKey);
+      this.speciesInstanceKeys.set(PROFILED_BOID_SPECIES, neutralKey);
     }
-    for (const profile of parrotProfileNames) {
-      const profileCount = parrotProfileCounts.get(profile) ?? 0;
+    for (const profile of profileNames) {
+      const profileCount = profileCounts.get(profile) ?? 0;
       const profileKey = `${profileCount}:${style}:${profile}`;
-      if (this.parrotProfileKeys.get(profile) !== profileKey) {
-        this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
+      if (this.profiledSpeciesKeys.get(profile) !== profileKey) {
+        this.disposeRenderBatch(this.profiledSpeciesInstances.get(profile) ?? null);
         const profileConfig = sceneRenderer.getParrotProfileInstanceConfig(profile, flags);
-        this.parrotProfileInstances.set(
+        this.profiledSpeciesInstances.set(
           profile,
-          this.buildInstanceSet(
+          this.buildRenderBatch(
             profileConfig.geometries,
             style,
             profileCount,
@@ -1234,12 +908,12 @@ export class Renderer3D {
             profileConfig.bodyVertexColors,
           ),
         );
-        this.parrotProfileKeys.set(profile, profileKey);
+        this.profiledSpeciesKeys.set(profile, profileKey);
       }
     }
   }
 
-  private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
+  private reconcilePredatorRenderBatches(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const sceneRenderer = this.getSceneRenderer(style);
     const countsBySpecies = this.getPredatorCountsBySpecies(sim.predators);
     for (const species of SCENE_PREDATOR_SPECIES) {
@@ -1247,11 +921,11 @@ export class Renderer3D {
       const speciesRenderFlags = createPredatorRenderFlags(species, flags);
       const instanceKey = createPredatorInstanceKey(species, count, style);
       if (this.predatorInstanceKeys.get(species) !== instanceKey) {
-        this.disposeInstanceSet(this.predatorInstances.get(species) ?? null);
+        this.disposeRenderBatch(this.predatorInstances.get(species) ?? null);
         const config = sceneRenderer.getPredatorInstanceConfig(species, flags, speciesRenderFlags);
         this.predatorInstances.set(
           species,
-          this.buildInstanceSet(
+          this.buildRenderBatch(
             config.geometries,
             style,
             count,
@@ -1292,9 +966,9 @@ export class Renderer3D {
 
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
   private ensureScene(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
-    this.reconcileBoidInstanceSets(sim, style, flags);
+    this.reconcileBoidRenderBatches(sim, style, flags);
 
-    this.reconcilePredatorInstanceSets(sim, style, flags);
+    this.reconcilePredatorRenderBatches(sim, style, flags);
 
     this.applyStyleTransitionOnStyleChange(sim, style);
 
@@ -1500,7 +1174,7 @@ export class Renderer3D {
   }
 
   private getBakedColorAttributeFlags(
-    set: BirdInstanceSet,
+    set: BoidRenderBatch,
     bakedBodyGradient: boolean,
   ): {
     hasBakedBodyVertexColors: boolean;
@@ -1667,7 +1341,7 @@ export class Renderer3D {
     }
   }
 
-  private markInstanceSetNeedsUpdate(set: BirdInstanceSet): void {
+  private markRenderBatchNeedsUpdate(set: BoidRenderBatch): void {
     set.body.instanceMatrix.needsUpdate = true;
     set.wingLeft.instanceMatrix.needsUpdate = true;
     set.wingRight.instanceMatrix.needsUpdate = true;
@@ -1756,7 +1430,7 @@ export class Renderer3D {
   }
 
   private applyCreatureBodyMatrices(
-    set: BirdInstanceSet,
+    set: BoidRenderBatch,
     i: number,
     pos: { x: number; y: number; z: number },
     entityScale: number,
@@ -1834,7 +1508,7 @@ export class Renderer3D {
     return amplitude * Math.sin(phase) + finRestBiasRad;
   }
 
-  private applyWingFlapMatrices(set: BirdInstanceSet, i: number, flapAngle: number): void {
+  private applyWingFlapMatrices(set: BoidRenderBatch, i: number, flapAngle: number): void {
     this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
     this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
     this.dummy.updateMatrix();
@@ -1847,7 +1521,7 @@ export class Renderer3D {
   }
 
   private applyCreatureTailSwayMatrix(
-    set: BirdInstanceSet,
+    set: BoidRenderBatch,
     i: number,
     creature: Boid | Predator,
     elapsed: number,
@@ -1926,16 +1600,16 @@ export class Renderer3D {
 
   private resolveMotionConfig(motion: MotionConfig): ResolvedMotionConfig {
     const {
-      flapFrequency = FLAP_FREQUENCY,
-      flapIdleAmplitude = FLAP_IDLE_AMPLITUDE,
-      flapSpeedAmplitude = FLAP_SPEED_AMPLITUDE,
+      flapFrequency,
+      flapIdleAmplitude,
+      flapSpeedAmplitude,
       getScale = () => 1,
       keepUpright = false,
       uprightStyle = 'dragon' as const,
       bankScale = 1,
       finRestBiasRad = 0,
       tailSwayAxis = MODEL_RIGHT_AXIS,
-      tailSwayAmplitude = DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayAmplitude = 0,
       tailSwayFrequency,
       tailSwayPivotY = 0,
       worldScale = 1,
@@ -2112,13 +1786,13 @@ export class Renderer3D {
   }
 
   private updateInstances(
-    set: BirdInstanceSet,
+    set: BoidRenderBatch,
     creatures: (Boid | Predator)[],
     maxSpeed: number,
     elapsed: number,
     dt: number,
     colours: ColourStrategy,
-    motion: MotionConfig = {},
+    motion: MotionConfig,
   ): void {
     const {
       baseColor,
@@ -2196,103 +1870,28 @@ export class Renderer3D {
       preferUpright,
     });
 
-    this.markInstanceSetNeedsUpdate(set);
+    this.markRenderBatchNeedsUpdate(set);
   }
 
   /** Spawns a 3D blood-splatter burst for every not-yet-seen Simulation.catchEvent. */
-  private spawnBloodFromCatches(sim: Simulation): void {
+  private spawnBloodFromCatches(sim: Simulation, sceneRenderer: SceneRendererHooks): void {
+    const bloodSplatterScale = sceneRenderer.getBloodSplatterScale();
     for (const catchEvent of sim.catchEvents) {
       if (catchEvent.id <= this.lastSeenCatchId) continue;
       this.lastSeenCatchId = catchEvent.id;
       this.tmpSpawnPosition.set(catchEvent.position.x, catchEvent.position.y, catchEvent.position.z);
       this.tmpSpawnDirection.set(catchEvent.direction.x, catchEvent.direction.y, catchEvent.direction.z);
-      this.bloodEffects.spawn(this.tmpSpawnPosition, this.tmpSpawnDirection, BOID_LENGTH * 0.9);
+      this.sceneAssets.bloodEffects.spawn(this.tmpSpawnPosition, this.tmpSpawnDirection, bloodSplatterScale);
     }
   }
 
-  private getOrSeedNextFireBreathTime(predator: Predator, elapsed: number): number {
-    let nextTime = this.nextFireBreathTime.get(predator);
-    if (nextTime === undefined) {
-      nextTime = elapsed + 1 + Math.random() * 2.5;
-      this.nextFireBreathTime.set(predator, nextTime);
-    }
-    return nextTime;
-  }
-
-  private computeDragonFirePose(predator: Predator): void {
-    // Anchor the flame to the dragon's actual *displayed* orientation
-    // (dragonDisplayQuats — the same turn-rate-limited quaternion used
-    // to draw the body mesh this frame) rather than the raw, unsmoothed
-    // predator.renderHeading. During a hard turn mid-hunt (exactly when
-    // fire is most likely to trigger), the raw target heading can point
-    // well away from where the model is actually currently drawn facing
-    // — using it made the flame appear to erupt from the dragon's back
-    // and shoot off in an unrelated direction (reported as "shooting
-    // upward like a whale spouting water") instead of out of the mouth
-    // in the direction the visible snout is pointing. Falling back to
-    // the raw heading only matters for a single early frame before any
-    // display quaternion has been computed yet.
-    const displayQuat = this.dragonDisplayQuats.get(predator.id);
-    if (displayQuat) {
-      this.tmpFireDirection.set(0, DRAGON_MOUTH.dirForward, DRAGON_MOUTH.dirUp).applyQuaternion(displayQuat).normalize();
-      this.tmpFireOffset.set(0, DRAGON_MOUTH.offsetForward, DRAGON_MOUTH.offsetUp).applyQuaternion(displayQuat);
-      this.tmpFireOrigin.set(predator.position.x, predator.position.y, predator.position.z).add(this.tmpFireOffset);
-      return;
-    }
-    const dir = predator.renderHeading;
-    this.tmpFireDirection.set(dir.x, dir.y, dir.z);
-    this.tmpFireOrigin.set(
-      predator.position.x + dir.x * DRAGON_LENGTH * 0.55,
-      predator.position.y + dir.y * DRAGON_LENGTH * 0.55,
-      predator.position.z + dir.z * DRAGON_LENGTH * 0.55,
-    );
-  }
-
-  private spawnDragonFireBreath(predator: Predator): void {
-    // Scale the flame's reach by how fast the dragon is actually
-    // flying right now — a hovering/slow dragon gets a short puff close
-    // to its mouth, while one at full speed gets a stream that stretches
-    // well out ahead of it (see fireBreath.spawn's reach/emitterVelocity
-    // doc comment) so it doesn't visually fly through its own fire.
-    const vel = predator.velocity;
-    const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
-    const speedFraction = THREE.MathUtils.clamp(speed / Math.max(params.predatorMaxSpeed, 1e-6), 0, 1);
-    this.tmpFireEmitterVelocity.set(vel.x, vel.y, vel.z);
-
-    this.fireBreathEffects.spawn(
-      this.tmpFireOrigin,
-      this.tmpFireDirection,
-      DRAGON_LENGTH * 0.5,
-      this.tmpFireEmitterVelocity,
-      speedFraction,
-    );
-  }
-
-  /**
-   * Periodically breathes fire from each actively-hunting dragon. Each
-   * dragon keeps its own randomized next-trigger time (desynced so a pack
-   * of dragons doesn't all breathe fire in unison), only fires while
-   * actually pursuing prey (huntIntensity above a threshold) and never
-   * while digesting/resting.
-   */
   private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
-    for (const predator of sim.predators) {
-      // Only Monster predators (dragons) breathe fire.
-      if (predator.species !== PredatorSpecies.Monster) continue;
-      if (predator.digesting) continue;
-      const nextTime = this.getOrSeedNextFireBreathTime(predator, elapsed);
-      if (elapsed < nextTime) continue;
-      if (predator.huntIntensity < 0.45) {
-        // Not excited enough to breathe fire right now — check again soon
-        // rather than firing the instant intensity crosses the threshold.
-        this.nextFireBreathTime.set(predator, elapsed + 0.5);
-        continue;
-      }
-
-      this.computeDragonFirePose(predator);
-      this.spawnDragonFireBreath(predator);
-      this.nextFireBreathTime.set(predator, elapsed + 2 + Math.random() * 2.5);
-    }
+    this.dragonFireBreathController.update(
+      sim.predators,
+      elapsed,
+      this.dragonDisplayQuats,
+      params.predatorMaxSpeed,
+    );
   }
 
   resize(width: number, height: number): void {
@@ -2370,7 +1969,7 @@ export class Renderer3D {
    * be tuned against — every other species, being a very different
    * physical size (a sparrow vs. a dragon, say), ended up looking
    * comparatively tiny/zoomed-out at that same distance. Falls back to
-   * `fallbackDistance` if the instance set for `species` doesn't exist yet
+   * `fallbackDistance` if the render batch for `species` doesn't exist yet
    * (e.g. called before the gallery creature has spawned on this frame).
    */
   getGalleryFramingDistance(species: PredatorSpecies | BoidSpecies, fallbackDistance = 220): number {
@@ -2484,7 +2083,7 @@ export class Renderer3D {
     return boidsBySpecies;
   }
 
-  private partitionParrotCreatures(
+  private partitionProfiledSpeciesCreatures(
     creatures: Boid[],
     sceneRenderer: SceneRendererHooks,
     flags: StyleFlags,
@@ -2496,7 +2095,7 @@ export class Renderer3D {
     const neutralCreatures: Boid[] = [];
     for (const creature of creatures) {
       const profile = sceneRenderer.getParrotGeometryProfile(creature, flags);
-      if (profile === NEUTRAL_PARROT_PROFILE) neutralCreatures.push(creature);
+      if (profile === PROFILED_BOID_NEUTRAL_PROFILE) neutralCreatures.push(creature);
       else {
         const bucket = profileCreatures.get(profile);
         if (bucket) bucket.push(creature);
@@ -2526,16 +2125,16 @@ export class Renderer3D {
 
 
   private hasAnyBoidSpeciesInstances(): boolean {
-    return BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
+    return RENDERER_BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
   }
 
   private hasAnyPredatorInstances(): boolean {
     return SCENE_PREDATOR_SPECIES.some((species) => this.predatorInstances.get(species) !== undefined);
   }
 
-  private updateProfiledParrotInstances(
+  private updateProfiledSpeciesInstances(
     config: BoidSpeciesConfig,
-    instances: BirdInstanceSet,
+    instances: BoidRenderBatch,
     creatures: Boid[],
     elapsed: number,
     dt: number,
@@ -2543,7 +2142,7 @@ export class Renderer3D {
     sceneRenderer: SceneRendererHooks,
     profileNames: readonly string[],
   ): void {
-    const { neutralCreatures, profileCreatures } = this.partitionParrotCreatures(creatures, sceneRenderer, flags);
+    const { neutralCreatures, profileCreatures } = this.partitionProfiledSpeciesCreatures(creatures, sceneRenderer, flags);
     const boidMotionFlags: BoidMotionStyleFlags = { isProfiledParrot: true };
     this.updateInstances(
       instances,
@@ -2555,7 +2154,7 @@ export class Renderer3D {
       sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
     );
     for (const profile of profileNames) {
-      const profileSet = this.parrotProfileInstances.get(profile);
+      const profileSet = this.profiledSpeciesInstances.get(profile);
       if (!profileSet) continue;
       this.updateInstances(
         profileSet,
@@ -2571,7 +2170,7 @@ export class Renderer3D {
 
   private updateStandardBoidSpeciesInstances(
     config: BoidSpeciesConfig,
-    instances: BirdInstanceSet,
+    instances: BoidRenderBatch,
     creatures: Boid[],
     elapsed: number,
     dt: number,
@@ -2604,10 +2203,10 @@ export class Renderer3D {
     const instances = this.speciesInstances.get(config.species);
     if (!instances) return;
     const creatures = this.getBoidCreaturesForSpecies(boidsBySpecies, config.species);
-    const parrotProfileNames = this.getProfileNamesForSpecies(config.species, sceneRenderer, flags);
-    const isProfiledParrot = parrotProfileNames.length > 0;
+    const profileNames = this.getProfileNamesForSpecies(config.species, sceneRenderer, flags);
+    const isProfiledParrot = profileNames.length > 0;
     if (isProfiledParrot) {
-      this.updateProfiledParrotInstances(config, instances, creatures, elapsed, dt, flags, sceneRenderer, parrotProfileNames);
+      this.updateProfiledSpeciesInstances(config, instances, creatures, elapsed, dt, flags, sceneRenderer, profileNames);
       return;
     }
     this.updateStandardBoidSpeciesInstances(
@@ -2633,7 +2232,7 @@ export class Renderer3D {
 
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
-    for (const config of BOID_SPECIES_CONFIGS) {
+    for (const config of RENDERER_BOID_SPECIES_CONFIGS) {
       this.updateBoidSpeciesConfig(config, boidsBySpecies, elapsed, dt, flags, sceneRenderer);
     }
   }
@@ -2683,7 +2282,7 @@ export class Renderer3D {
   }
 
   private applyUfoVisualState(
-    visual: UFOVisual,
+    visual: RendererSceneAssets['ufoVisuals'][number],
     ufo: Simulation['ufos'][number] | undefined,
     sceneRenderer: SceneRendererHooks,
     ufoWorldScale: number,
@@ -2707,8 +2306,8 @@ export class Renderer3D {
     // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
     // slots beyond the current active count are simply hidden.
     const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(sceneRenderer);
-    for (let i = 0; i < this.ufoVisuals.length; i++) {
-      const visual = this.ufoVisuals[i];
+    for (let i = 0; i < this.sceneAssets.ufoVisuals.length; i++) {
+      const visual = this.sceneAssets.ufoVisuals[i];
       this.applyUfoVisualState(visual, sim.ufos[i], sceneRenderer, ufoWorldScale, ufoBeamLength);
       visual.update(dt);
     }
@@ -2734,7 +2333,7 @@ export class Renderer3D {
     this.afterimagePass.uniforms.damp.value = Math.max(0, Math.min(0.96, params.trailAmount));
     sceneRenderer.updateEnvironment(elapsed);
     this.renderer.toneMappingExposure = this.getToneMappingExposureForTimeOfDay(params.timeOfDay);
-    this.driftingClouds.update(dt);
+    this.sceneAssets.driftingClouds.update(dt);
   }
 
   private updateTransientSceneEffects(
@@ -2743,10 +2342,10 @@ export class Renderer3D {
     dt: number,
     sceneRenderer: SceneRendererHooks,
   ): void {
-    this.spawnBloodFromCatches(sim);
-    this.bloodEffects.update(dt);
+    this.spawnBloodFromCatches(sim, sceneRenderer);
+    this.sceneAssets.bloodEffects.update(dt);
     sceneRenderer.updateTransientEffects(sim, elapsed);
-    this.fireBreathEffects.update(dt);
+    this.sceneAssets.fireBreathEffects.update(dt);
     this.updateUfoVisuals(sim, dt, sceneRenderer);
   }
 
@@ -2806,69 +2405,34 @@ export class Renderer3D {
     this.renderFrame(sim, sceneRenderer, elapsed, dt, flags);
   }
 
-  private disposeBoidInstanceSets(): void {
-    for (const config of BOID_SPECIES_CONFIGS) {
-      this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
+  private disposeBoidRenderBatches(): void {
+    for (const config of RENDERER_BOID_SPECIES_CONFIGS) {
+      this.disposeRenderBatch(this.speciesInstances.get(config.species) ?? null);
     }
   }
 
-  private disposeParrotProfileInstanceSets(): void {
-    for (const profile of this.parrotProfileInstances.keys()) {
-      this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
-      this.parrotProfileInstances.set(profile, null);
-      this.parrotProfileKeys.set(profile, null);
+  private disposeProfiledSpeciesRenderBatches(): void {
+    for (const profile of this.profiledSpeciesInstances.keys()) {
+      this.disposeRenderBatch(this.profiledSpeciesInstances.get(profile) ?? null);
+      this.profiledSpeciesInstances.set(profile, null);
+      this.profiledSpeciesKeys.set(profile, null);
     }
   }
 
-  private disposePredatorInstanceSets(): void {
+  private disposePredatorRenderBatches(): void {
     for (const species of this.predatorInstances.keys()) {
-      this.disposeInstanceSet(this.predatorInstances.get(species) ?? null);
-    }
-  }
-
-  private disposeCreatureGeometries(geometries: CreatureGeometries): void {
-    geometries.body.dispose();
-    geometries.wingLeft.dispose();
-    geometries.wingRight.dispose();
-    geometries.tail?.dispose();
-    geometries.legs?.dispose();
-  }
-
-  private disposeAllCreatureGeometrySets(): void {
-    for (const geometries of [
-      this.arcadeBoidGeometries,
-      this.arcadeSparrowGeometries,
-      this.arcadeParrotGeometries,
-      this.arcadePredatorGeometries,
-      this.natureBoidGeometries,
-      this.natureSparrowGeometries,
-      this.natureGoldfinchGeometries,
-      this.natureCardinalGeometries,
-      this.natureBluejayGeometries,
-      this.natureParrotGeometries,
-      this.natureParrotBlueGoldGeometries,
-      this.natureParrotScarletGeometries,
-      this.natureParrotPurpleLavenderGeometries,
-      this.natureParrotNeutralGeometries,
-      this.naturePredatorGeometries,
-      this.dragonPredatorGeometries,
-      this.unicornPredatorGeometries,
-    ]) {
-      this.disposeCreatureGeometries(geometries);
+      this.disposeRenderBatch(this.predatorInstances.get(species) ?? null);
     }
   }
 
   dispose(): void {
-    this.disposeBoidInstanceSets();
-    this.disposeParrotProfileInstanceSets();
-    this.disposePredatorInstanceSets();
-    this.disposeAllCreatureGeometrySets();
+    this.disposeBoidRenderBatches();
+    this.disposeProfiledSpeciesRenderBatches();
+    this.disposePredatorRenderBatches();
+    disposeRendererSceneAssets(this.sceneAssets);
     for (const style of SCENE_STYLES) {
       this.sceneRenderers[style].dispose();
     }
-    this.bloodEffects.dispose();
-    this.fireBreathEffects.dispose();
-    this.ufoVisuals.forEach((visual) => visual.dispose());
     this.controls.dispose();
     this.composer.dispose();
     this.renderer.dispose();

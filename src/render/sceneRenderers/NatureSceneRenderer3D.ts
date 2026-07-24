@@ -7,9 +7,15 @@ import { type Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import { placeNatureEnvironment, type NatureEnvironment } from '../styles/nature/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
+import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
+import { computeDragonMouthTransform, createDragonGeometries } from '../styles/nature/geometry/dragonGeometry';
+import { createHawkGeometries } from '../styles/nature/geometry/hawkGeometry';
+import { createParrotGeometries } from '../styles/nature/geometry/parrotGeometry';
+import { createRealisticBirdGeometries } from '../styles/nature/geometry/smallBirdGeometry';
+import { createUnicornGeometries } from '../styles/nature/geometry/unicornGeometry';
+import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
-  type FishtankBounds,
   type SceneCreatureMaterialDefaults,
   type SceneEnvironmentToggles,
   type ScenePresentationSettings,
@@ -25,6 +31,36 @@ import {
   type SpeciesColorSet,
   type CreatureLabels,
 } from './createSceneRendererHooks';
+
+// --- Nature creature sizing: every nature creature is a factor of this
+// single base creature size (the standard songbird/boid). No nature creature
+// is sized relative to another creature or to another scene.
+const NATURE_BASE_CREATURE: CreatureSize = { length: 9.1, width: 6.24 };
+const natureSize = createCreatureSizer(NATURE_BASE_CREATURE);
+
+export const NATURE_CREATURE_SIZES = {
+  boid: natureSize(1),
+  parrot: natureSize(1),
+  // Small songbirds (goldfinch/cardinal/bluejay) read as noticeably smaller.
+  smallBird: natureSize(0.75),
+  // Sparrow — smaller still.
+  sparrow: natureSize(0.525),
+  // Hawk predator — 15.6 x 7.48 world units.
+  hawk: natureSize(15.6 / NATURE_BASE_CREATURE.length, 7.48 / NATURE_BASE_CREATURE.width),
+  // Dragon — a dramatically large beast, 45 x 19.8 world units.
+  dragon: natureSize(45 / NATURE_BASE_CREATURE.length, 19.8 / NATURE_BASE_CREATURE.width),
+  // Unicorn — a large, substantial creature, 36 x 14.85 world units.
+  unicorn: natureSize(36 / NATURE_BASE_CREATURE.length, 14.85 / NATURE_BASE_CREATURE.width),
+} as const;
+
+// Blood-splatter burst world size for nature catches. Owned per-scene so it
+// can be tuned independently of the other scenes.
+const NATURE_BLOOD_SPLATTER_SCALE = 6.3;
+
+/** Dragon mouth transform (fire-breath emit point), derived from the nature
+ * dragon's own length — kept here so the fire-breath origin stays in sync
+ * with the nature dragon geometry regardless of what that size is. */
+export const NATURE_DRAGON_MOUTH = computeDragonMouthTransform(NATURE_CREATURE_SIZES.dragon.length);
 
 // --- Nature style color constants: matte, earth-toned plumage with realistic gradients
 const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrasts against green ground
@@ -47,6 +83,10 @@ const DRAGON_FLAP_FREQUENCY = 2.15;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
 const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22;
+// Hawks sway their tail like the other nature birds. This was previously
+// inherited implicitly from Renderer3D's shared tail-sway default; it is now
+// owned here so the hawk's motion is fully self-described.
+const HAWK_TAIL_SWAY_AMPLITUDE = 0.22;
 const _UNICORN_FLAP_FREQUENCY = 3.2;
 const _UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
 const _UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
@@ -180,6 +220,14 @@ const BLUEJAY_BODY_BASE = new THREE.Color(0x3b6fa0); // jay blue back
 const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
 const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
 
+// Small-bird leg colors, baked into the small-bird geometry at construction
+// time (see createRealisticBirdGeometries). Owned here because leg color is a
+// nature small-bird geometry input, not a shared/runtime tint.
+const SPARROW_LEGS_COLOR = new THREE.Color(0x7a6450);
+const GOLDFINCH_LEGS_COLOR = new THREE.Color(0x8a7060);
+const CARDINAL_LEGS_COLOR = new THREE.Color(0x8a6a5a);
+const BLUEJAY_LEGS_COLOR = new THREE.Color(0x7a7060);
+
 // Utility function for deterministic per-creature hashing (used for variant selection)
 function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
@@ -208,24 +256,69 @@ interface NatureSceneRendererDependencies {
   fishtankEnv: { setVisible: (visible: boolean) => void };
   natureEnv: NatureEnvironment;
   updateTransientEffects: (sim: Simulation, elapsed: number) => void;
-  natureSparrowGeometries: CreatureGeometries;
-  natureParrotGeometries: CreatureGeometries;
-  natureParrotBlueGoldGeometries: CreatureGeometries;
-  natureParrotScarletGeometries: CreatureGeometries;
-  natureParrotPurpleLavenderGeometries: CreatureGeometries;
-  natureParrotNeutralGeometries: CreatureGeometries;
-  natureBoidGeometries: CreatureGeometries;
-  natureSmallSpeciesGeometries: Map<BoidSpecies, CreatureGeometries>;
-  naturePredatorGeometries: CreatureGeometries;
-  dragonPredatorGeometries: CreatureGeometries;
-  unicornPredatorGeometries: CreatureGeometries;
 }
 
 export class NatureSceneRenderer3D implements SceneRendererHooks {
   private readonly deps: NatureSceneRendererDependencies;
 
+  // Nature owns and disposes its own creature geometries, sized from
+  // NATURE_CREATURE_SIZES and colored from nature-local palettes/leg colors.
+  // No other scene knows about these.
+  private readonly boidGeometries: CreatureGeometries;
+  private readonly sparrowGeometries: CreatureGeometries;
+  private readonly smallSpeciesGeometries: Map<BoidSpecies, CreatureGeometries>;
+  private readonly parrotGeometries: CreatureGeometries;
+  private readonly parrotBlueGoldGeometries: CreatureGeometries;
+  private readonly parrotScarletGeometries: CreatureGeometries;
+  private readonly parrotPurpleLavenderGeometries: CreatureGeometries;
+  private readonly parrotNeutralGeometries: CreatureGeometries;
+  private readonly predatorGeometries: CreatureGeometries;
+  private readonly dragonPredatorGeometries: CreatureGeometries;
+  private readonly unicornPredatorGeometries: CreatureGeometries;
+
   constructor(deps: NatureSceneRendererDependencies) {
     this.deps = deps;
+
+    this.boidGeometries = createRealisticBirdGeometries(NATURE_CREATURE_SIZES.boid.length, NATURE_CREATURE_SIZES.boid.width);
+    this.sparrowGeometries = createRealisticBirdGeometries(
+      NATURE_CREATURE_SIZES.sparrow.length,
+      NATURE_CREATURE_SIZES.sparrow.width,
+      SPARROW_LEGS_COLOR,
+      SPARROW_NATURE_PALETTE,
+    );
+    const goldfinchGeometries = createRealisticBirdGeometries(
+      NATURE_CREATURE_SIZES.smallBird.length,
+      NATURE_CREATURE_SIZES.smallBird.width,
+      GOLDFINCH_LEGS_COLOR,
+      GOLDFINCH_NATURE_PALETTE,
+    );
+    const cardinalGeometries = createRealisticBirdGeometries(
+      NATURE_CREATURE_SIZES.smallBird.length,
+      NATURE_CREATURE_SIZES.smallBird.width,
+      CARDINAL_LEGS_COLOR,
+      CARDINAL_NATURE_PALETTE,
+    );
+    const bluejayGeometries = createRealisticBirdGeometries(
+      NATURE_CREATURE_SIZES.smallBird.length,
+      NATURE_CREATURE_SIZES.smallBird.width,
+      BLUEJAY_LEGS_COLOR,
+      BLUEJAY_NATURE_PALETTE,
+    );
+    this.smallSpeciesGeometries = new Map<BoidSpecies, CreatureGeometries>([
+      [BoidSpecies.Gold, goldfinchGeometries],
+      [BoidSpecies.Red, cardinalGeometries],
+      [BoidSpecies.Blue, bluejayGeometries],
+    ]);
+
+    this.parrotGeometries = createParrotGeometries(NATURE_CREATURE_SIZES.parrot.length, NATURE_CREATURE_SIZES.parrot.width, 'green-focus');
+    this.parrotBlueGoldGeometries = createParrotGeometries(NATURE_CREATURE_SIZES.parrot.length, NATURE_CREATURE_SIZES.parrot.width, 'blue-gold-focus');
+    this.parrotScarletGeometries = createParrotGeometries(NATURE_CREATURE_SIZES.parrot.length, NATURE_CREATURE_SIZES.parrot.width, 'scarlet-focus');
+    this.parrotPurpleLavenderGeometries = createParrotGeometries(NATURE_CREATURE_SIZES.parrot.length, NATURE_CREATURE_SIZES.parrot.width, 'purple-lavender-focus');
+    this.parrotNeutralGeometries = createParrotGeometries(NATURE_CREATURE_SIZES.parrot.length, NATURE_CREATURE_SIZES.parrot.width, 'neutral');
+
+    this.predatorGeometries = createHawkGeometries(NATURE_CREATURE_SIZES.hawk.length, NATURE_CREATURE_SIZES.hawk.width);
+    this.dragonPredatorGeometries = createDragonGeometries(NATURE_CREATURE_SIZES.dragon.length, NATURE_CREATURE_SIZES.dragon.width);
+    this.unicornPredatorGeometries = createUnicornGeometries(NATURE_CREATURE_SIZES.unicorn.length, NATURE_CREATURE_SIZES.unicorn.width);
   }
 
   setStyleVisibility(): void {
@@ -237,7 +330,6 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   configureInitialFraming(
     sim: Simulation,
     maxDim: number,
-    _fishtankBounds: FishtankBounds,
   ): void {
     const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
     this.deps.camera.position.set(
@@ -252,7 +344,6 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   applyStyleTransition(
     sim: Simulation,
     maxDim: number,
-    _fishtankBounds: FishtankBounds,
     wasFishtank: boolean,
   ): void {
     this.deps.controls.maxDistance = maxDim * 5.5;
@@ -310,6 +401,10 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
 
   getWorldScale(): number {
     return 1;
+  }
+
+  getBloodSplatterScale(): number {
+    return NATURE_BLOOD_SPLATTER_SCALE;
   }
 
   mapPositionToRenderSpace(x: number, y: number, z: number, target: THREE.Vector3): void {
@@ -393,6 +488,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapIdleAmplitude: FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: FLAP_SPEED_AMPLITUDE,
           keepUpright: false,
+          tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
+          tailSwayAmplitude: HAWK_TAIL_SWAY_AMPLITUDE,
           worldScale: 1,
           meshScaleBoost: 1,
         };
@@ -470,15 +567,15 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   getParrotProfileInstanceConfig(profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
     switch (profile) {
       case 'green-focus':
-        return { geometries: this.deps.natureParrotGeometries, bodyVertexColors: true };
+        return { geometries: this.parrotGeometries, bodyVertexColors: true };
       case 'blue-gold-focus':
-        return { geometries: this.deps.natureParrotBlueGoldGeometries, bodyVertexColors: true };
+        return { geometries: this.parrotBlueGoldGeometries, bodyVertexColors: true };
       case 'scarlet-focus':
-        return { geometries: this.deps.natureParrotScarletGeometries, bodyVertexColors: true };
+        return { geometries: this.parrotScarletGeometries, bodyVertexColors: true };
       case 'purple-lavender-focus':
-        return { geometries: this.deps.natureParrotPurpleLavenderGeometries, bodyVertexColors: true };
+        return { geometries: this.parrotPurpleLavenderGeometries, bodyVertexColors: true };
       case 'neutral':
-        return { geometries: this.deps.natureParrotNeutralGeometries, bodyVertexColors: true };
+        return { geometries: this.parrotNeutralGeometries, bodyVertexColors: true };
       default:
         throw new Error(`Unknown parrot profile: ${profile}`);
     }
@@ -486,13 +583,13 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
 
   getBoidInstanceConfig(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
     if (config.useSmallGeometry) {
-      return { geometries: this.deps.natureSparrowGeometries, bodyVertexColors: true };
+      return { geometries: this.sparrowGeometries, bodyVertexColors: true };
     }
     if (config.useParrotGeometry) {
-      return { geometries: this.deps.natureParrotGeometries, bodyVertexColors: true };
+      return { geometries: this.parrotGeometries, bodyVertexColors: true };
     }
     return {
-      geometries: this.deps.natureSmallSpeciesGeometries.get(species) ?? this.deps.natureBoidGeometries,
+      geometries: this.smallSpeciesGeometries.get(species) ?? this.boidGeometries,
       bodyVertexColors: true,
     };
   }
@@ -505,19 +602,19 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     switch (species) {
       case PredatorSpecies.Normal:
         return {
-          geometries: this.deps.naturePredatorGeometries,
+          geometries: this.predatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
       case PredatorSpecies.Monster:
         return {
-          geometries: this.deps.dragonPredatorGeometries,
+          geometries: this.dragonPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
       case PredatorSpecies.Horse:
         return {
-          geometries: this.deps.unicornPredatorGeometries,
+          geometries: this.unicornPredatorGeometries,
           rainbowWings: true,
           bodyVertexColors: true,
         };
@@ -546,6 +643,19 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   dispose(): void {
     this.deps.natureEnv.dispose();
     this.deps.driftingClouds.dispose();
+    disposeCreatureGeometries(this.boidGeometries);
+    disposeCreatureGeometries(this.sparrowGeometries);
+    for (const geometries of this.smallSpeciesGeometries.values()) {
+      disposeCreatureGeometries(geometries);
+    }
+    disposeCreatureGeometries(this.parrotGeometries);
+    disposeCreatureGeometries(this.parrotBlueGoldGeometries);
+    disposeCreatureGeometries(this.parrotScarletGeometries);
+    disposeCreatureGeometries(this.parrotPurpleLavenderGeometries);
+    disposeCreatureGeometries(this.parrotNeutralGeometries);
+    disposeCreatureGeometries(this.predatorGeometries);
+    disposeCreatureGeometries(this.dragonPredatorGeometries);
+    disposeCreatureGeometries(this.unicornPredatorGeometries);
   }
 }
 
@@ -559,10 +669,6 @@ export {
   PARROT_NATURE_VARIANTS,
   NON_NEUTRAL_PARROT_PROFILES,
   PARROT_FOCUS_PATTERN_INDEX,
-  SPARROW_NATURE_PALETTE,
-  GOLDFINCH_NATURE_PALETTE,
-  CARDINAL_NATURE_PALETTE,
-  BLUEJAY_NATURE_PALETTE,
   DRAGON_PREDATOR_BASE,
   DRAGON_PREDATOR_HUNT,
   NATURE_UNICORN_BODY,
@@ -580,5 +686,4 @@ export {
   type ParrotGeometryProfile,
   type NatureParrotVariant,
   type SpeciesColorSet,
-  type SmallBirdPalette,
 };

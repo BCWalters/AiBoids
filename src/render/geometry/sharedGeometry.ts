@@ -28,6 +28,18 @@ export interface CreatureGeometries {
   beak?: THREE.BufferGeometry;
 }
 
+/** Disposes every GPU buffer owned by a CreatureGeometries bundle. Each scene
+ * renderer owns and disposes its own creature geometries, so this shared
+ * helper lets them do that without duplicating the part list. */
+export function disposeCreatureGeometries(geometries: CreatureGeometries): void {
+  geometries.body.dispose();
+  geometries.wingLeft.dispose();
+  geometries.wingRight.dispose();
+  geometries.tail?.dispose();
+  geometries.legs?.dispose();
+  geometries.beak?.dispose();
+}
+
 /**
  * A minimal geometry merge that only cares about vertex positions
  * (adequate here since these are flat-colored MeshStandardMaterials with

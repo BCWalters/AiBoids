@@ -5,13 +5,17 @@ import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
 import { type Boid, BoidSpecies } from '../../sim/Boid';
 import { computeFishtankRoomBounds, placeFishtankEnvironment, TANK_VISUAL_SCALE } from '../styles/fishtank/environment';
-import { getSharkTailPivotY } from '../styles/fishtank/geometry/sharkGeometry';
+import { getSharkTailPivotY, createSharkGeometries } from '../styles/fishtank/geometry/sharkGeometry';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
+import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
+import { createButterflyfishGeometries } from '../styles/fishtank/geometry/butterflyfishGeometry';
+import { createSeaHorseGeometries } from '../styles/fishtank/geometry/seaHorseGeometry';
+import { createFishGeometries } from '../styles/fishtank/geometry/smallFishGeometry';
+import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
-  type FishtankBounds,
   type SceneCreatureMaterialDefaults,
   type SceneEnvironmentToggles,
   type ScenePresentationSettings,
@@ -27,6 +31,27 @@ import {
   type SpeciesColorSet,
   type CreatureLabels,
 } from './createSceneRendererHooks';
+
+// --- Fishtank creature sizing: every fishtank creature is a factor of this
+// single base creature size (the standard fish/boid). No fishtank creature is
+// sized relative to another creature or to another scene.
+const FISHTANK_BASE_CREATURE: CreatureSize = { length: 9.1, width: 6.24 };
+const fishtankSize = createCreatureSizer(FISHTANK_BASE_CREATURE);
+
+export const FISHTANK_CREATURE_SIZES = {
+  fish: fishtankSize(1),
+  butterflyfish: fishtankSize(1),
+  // Sparrow reskin — smaller darting fish.
+  sparrow: fishtankSize(0.525),
+  // Shark — a large torpedo-shaped hunter, 36 x 15.84 world units.
+  shark: fishtankSize(36 / FISHTANK_BASE_CREATURE.length, 15.84 / FISHTANK_BASE_CREATURE.width),
+  // Sea horse (unicorn reskin) — 36 x 14.85 world units.
+  seahorse: fishtankSize(36 / FISHTANK_BASE_CREATURE.length, 14.85 / FISHTANK_BASE_CREATURE.width),
+} as const;
+
+// Blood-splatter burst world size for fishtank catches. Owned per-scene so it
+// can be tuned independently of the other scenes.
+const FISHTANK_BLOOD_SPLATTER_SCALE = 6.3;
 
 // --- Fishtank style color constants
 // Butterflyfish (parrot reskin) color patterns: real-world butterflyfish often use
@@ -57,7 +82,10 @@ const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — 
 const SHARK_FIN_REST_TILT_RAD = 0.4;
 const FISHTANK_FISH_MESH_BOOST = 2.2;
 const FISHTANK_SHARK_MESH_BOOST = 0.55;
-const SHARK_LENGTH = 4.0; // approximate length for tail pivot calculation
+// Reference length fed to getSharkTailPivotY for the tail-sway pivot. This is
+// an independent motion-tuning value, intentionally NOT the shark's geometry
+// length (see FISHTANK_CREATURE_SIZES.shark) — preserved as-is.
+const SHARK_TAIL_PIVOT_REFERENCE_LENGTH = 4.0;
 
 // Utility function for deterministic per-creature hashing (used for variant selection)
 function idHash(id: number, salt: number): number {
@@ -72,19 +100,26 @@ interface FishtankSceneRendererDependencies {
   fishtankCenter: THREE.Vector3;
   fishtankEnv: FishtankEnvironment;
   natureEnv: { setVisible: (visible: boolean) => void };
-  fishtankSparrowGeometries: CreatureGeometries;
-  fishtankButterflyfishGeometries: CreatureGeometries;
-  fishtankBoidGeometries: CreatureGeometries;
-  fishtankPredatorGeometries: CreatureGeometries;
-  fishtankSharkPredatorGeometries: CreatureGeometries;
-  fishtankUnicornPredatorGeometries: CreatureGeometries;
 }
 
 export class FishtankSceneRenderer3D implements SceneRendererHooks {
   private readonly deps: FishtankSceneRendererDependencies;
 
+  // Fishtank owns and disposes its own creature geometries, sized from
+  // FISHTANK_CREATURE_SIZES. No other scene knows about these.
+  private readonly boidGeometries: CreatureGeometries;
+  private readonly sparrowGeometries: CreatureGeometries;
+  private readonly butterflyfishGeometries: CreatureGeometries;
+  private readonly sharkPredatorGeometries: CreatureGeometries;
+  private readonly unicornPredatorGeometries: CreatureGeometries;
+
   constructor(deps: FishtankSceneRendererDependencies) {
     this.deps = deps;
+    this.boidGeometries = createFishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
+    this.sparrowGeometries = createFishGeometries(FISHTANK_CREATURE_SIZES.sparrow.length, FISHTANK_CREATURE_SIZES.sparrow.width);
+    this.butterflyfishGeometries = createButterflyfishGeometries(FISHTANK_CREATURE_SIZES.butterflyfish.length, FISHTANK_CREATURE_SIZES.butterflyfish.width);
+    this.sharkPredatorGeometries = createSharkGeometries(FISHTANK_CREATURE_SIZES.shark.length, FISHTANK_CREATURE_SIZES.shark.width);
+    this.unicornPredatorGeometries = createSeaHorseGeometries(FISHTANK_CREATURE_SIZES.seahorse.length, FISHTANK_CREATURE_SIZES.seahorse.width);
   }
 
   setStyleVisibility(): void {
@@ -96,8 +131,8 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   configureInitialFraming(
     sim: Simulation,
     maxDim: number,
-    fishtankBounds: FishtankBounds,
   ): void {
+    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
     const center = new THREE.Vector3(sim.width / 2, fishtankBounds.tankCenterY, params.worldDepth / 2);
     this.deps.camera.position.set(
       center.x + maxDim * 0.6 * TANK_VISUAL_SCALE,
@@ -111,9 +146,9 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   applyStyleTransition(
     sim: Simulation,
     maxDim: number,
-    fishtankBounds: FishtankBounds,
     wasFishtank: boolean,
   ): void {
+    const fishtankBounds = computeFishtankRoomBounds(sim.width, sim.height, params.worldDepth);
     this.deps.controls.maxDistance = fishtankBounds.maxCameraDistance;
     this.deps.controls.minPolarAngle = Math.PI / 2 - fishtankBounds.cameraTiltUpRad;
     this.deps.controls.maxPolarAngle = Math.PI / 2 + fishtankBounds.cameraTiltDownRad;
@@ -186,6 +221,10 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   getWorldScale(): number {
     return TANK_VISUAL_SCALE;
+  }
+
+  getBloodSplatterScale(): number {
+    return FISHTANK_BLOOD_SPLATTER_SCALE;
   }
 
   mapPositionToRenderSpace(x: number, y: number, z: number, target: THREE.Vector3): void {
@@ -262,7 +301,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
           tailSwayAmplitude: SHARK_TAIL_SWAY_AMPLITUDE,
           tailSwayFrequency: SHARK_TAIL_SWAY_FREQUENCY,
-          tailSwayPivotY: getSharkTailPivotY(SHARK_LENGTH),
+          tailSwayPivotY: getSharkTailPivotY(SHARK_TAIL_PIVOT_REFERENCE_LENGTH),
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
         };
@@ -340,17 +379,17 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getParrotProfileInstanceConfig(_profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
-    return { geometries: this.deps.fishtankButterflyfishGeometries, bodyVertexColors: true };
+    return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
   }
 
   getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
     if (config.useSmallGeometry) {
-      return { geometries: this.deps.fishtankSparrowGeometries, bodyVertexColors: true };
+      return { geometries: this.sparrowGeometries, bodyVertexColors: true };
     }
     if (config.useParrotGeometry) {
-      return { geometries: this.deps.fishtankButterflyfishGeometries, bodyVertexColors: true };
+      return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
     }
-    return { geometries: this.deps.fishtankBoidGeometries, bodyVertexColors: true };
+    return { geometries: this.boidGeometries, bodyVertexColors: true };
   }
 
   getPredatorInstanceConfig(
@@ -363,13 +402,13 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       case PredatorSpecies.Normal:
         // Both map to shark geometry in the fishtank
         return {
-          geometries: this.deps.fishtankSharkPredatorGeometries,
+          geometries: this.sharkPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
       case PredatorSpecies.Horse:
         return {
-          geometries: this.deps.fishtankUnicornPredatorGeometries,
+          geometries: this.unicornPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
@@ -397,6 +436,11 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   dispose(): void {
     this.deps.fishtankEnv.dispose();
+    disposeCreatureGeometries(this.boidGeometries);
+    disposeCreatureGeometries(this.sparrowGeometries);
+    disposeCreatureGeometries(this.butterflyfishGeometries);
+    disposeCreatureGeometries(this.sharkPredatorGeometries);
+    disposeCreatureGeometries(this.unicornPredatorGeometries);
   }
 }
 
