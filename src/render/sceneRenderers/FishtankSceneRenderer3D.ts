@@ -312,6 +312,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           baseColor: SHARK_PREDATOR_BASE,
           highlightColor: SHARK_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
+          colorMode: 'flat',
         };
       
       default:
@@ -369,7 +370,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         ? (creature) => this.getButterflyfishColorVariant(creature)
         : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
-      colorMode: (isParrot || config.colors) ? 'speciesTint' : undefined,
+      colorMode: (isParrot || config.colors) ? 'speciesTint' : 'flat',
     };
   }
 

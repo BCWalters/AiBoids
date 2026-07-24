@@ -8,6 +8,8 @@ import { ParrotColorApplicator } from './parrotColorApplication';
 import { SmallBirdColorApplicator } from './smallBirdColorApplication';
 import { DragonColorApplicator } from './dragonColorApplication';
 import { SpeciesTintColorApplicator } from './speciesTintColorApplication';
+import { SongbirdColorApplicator } from './songbirdColorApplication';
+import { FlatColorApplicator } from './flatColorApplication';
 
 /**
  * All inputs needed to color one creature instance for a single frame. The
@@ -48,6 +50,8 @@ export class CreatureColorApplicator {
   private smallBird = new SmallBirdColorApplicator();
   private dragon = new DragonColorApplicator();
   private speciesTint = new SpeciesTintColorApplicator();
+  private songbird = new SongbirdColorApplicator();
+  private flat = new FlatColorApplicator();
   private stateColor = new THREE.Color();
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
@@ -91,6 +95,14 @@ export class CreatureColorApplicator {
     }
     if (args.colorMode === 'speciesTint') {
       this.speciesTint.apply(args);
+      return;
+    }
+    if (args.colorMode === 'songbird') {
+      this.songbird.apply(args);
+      return;
+    }
+    if (args.colorMode === 'flat') {
+      this.flat.apply(args);
       return;
     }
     const {

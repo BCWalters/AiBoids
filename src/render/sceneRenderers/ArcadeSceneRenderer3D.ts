@@ -263,6 +263,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           baseColor: ARCADE_UNICORN_BASE,
           highlightColor: ARCADE_UNICORN_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
+          colorMode: 'flat',
         };
       
       case PredatorSpecies.Monster:
@@ -271,6 +272,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           baseColor: ARCADE_PREDATOR_BASE,
           highlightColor: ARCADE_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
+          colorMode: 'flat',
         };
       
       default:
@@ -325,7 +327,11 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           }
         : undefined,
       beakColor: config.beakColor,
-      colorMode: species === BoidSpecies.Multicolor ? 'speciesTint' : undefined,
+      colorMode: species === BoidSpecies.Multicolor
+        ? 'speciesTint'
+        : config.individualVariation
+          ? 'songbird'
+          : 'flat',
     };
   }
 
@@ -354,6 +360,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       individualVariation: false, // Arcade parrots are uniform
       getSpeciesColors: undefined, // All arcade parrots use the base color
       beakColor: ARCADE_SPECIES_CONFIG[BoidSpecies.Multicolor].beakColor,
+      colorMode: 'flat',
     };
   }
 
@@ -423,4 +430,3 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     disposeCreatureGeometries(this.predatorGeometries);
   }
 }
-
