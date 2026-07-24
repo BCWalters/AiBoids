@@ -725,7 +725,7 @@ export class Renderer3D {
     this.natureParrotBlueGoldGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'blue-gold-focus');
     this.natureParrotScarletGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'scarlet-focus');
     this.natureParrotPurpleLavenderGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'purple-lavender-focus');
-    this.natureParrotNeutralGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, 'neutral');
+    this.natureParrotNeutralGeometries = createParrotGeometries(BOID_LENGTH * 1.3, BOID_WIDTH * 2.4, NEUTRAL_PARROT_PROFILE);
     this.naturePredatorGeometries = createHawkGeometries(PREDATOR_LENGTH * 1.3, PREDATOR_WIDTH * 1.7);
     this.dragonPredatorGeometries = createDragonGeometries(DRAGON_LENGTH, DRAGON_WIDTH);
     this.unicornPredatorGeometries = createUnicornGeometries(UNICORN_LENGTH, UNICORN_WIDTH);
@@ -2473,7 +2473,7 @@ export class Renderer3D {
     const neutralEntities: Boid[] = [];
     for (const entity of entities) {
       const profile = sceneRenderer.getParrotGeometryProfile(entity, flags);
-      if (profile === 'neutral') neutralEntities.push(entity);
+      if (profile === NEUTRAL_PARROT_PROFILE) neutralEntities.push(entity);
       else {
         const bucket = profileEntities.get(profile);
         if (bucket) bucket.push(entity);
@@ -2606,7 +2606,7 @@ export class Renderer3D {
     const instances = this.speciesInstances.get(config.species);
     if (!instances) return;
     const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
-    const parrotProfileNames = config.species === 'parrot' ? sceneRenderer.getParrotProfileNames(flags) : [];
+    const parrotProfileNames = config.species === PARROT_SPECIES ? sceneRenderer.getParrotProfileNames(flags) : [];
     const isProfiledParrot = parrotProfileNames.length > 0;
     if (isProfiledParrot) {
       this.updateProfiledParrotInstances(config, instances, entities, elapsed, dt, flags, sceneRenderer, parrotProfileNames);
