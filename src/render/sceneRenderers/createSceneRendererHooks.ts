@@ -18,7 +18,7 @@ export interface SpeciesColorSet {
 /** Selects a dedicated per-family creature color path in the color applicator.
  * When omitted, the generic conditional color path is used. Each value routes
  * to that family's own straight-line applicator (see src/render/color/). */
-export type CreatureColorMode = 'parrot' | 'smallBird' | 'dragon';
+export type CreatureColorMode = 'parrot' | 'smallBird' | 'dragon' | 'speciesTint';
 
 /** All colour-related parameters for one `updateInstances` call.
  * Bundled as a named-field object so call sites are self-documenting and

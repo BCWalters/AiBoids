@@ -7,6 +7,7 @@ import { idHash, jitterHSL } from './colorJitter';
 import { ParrotColorApplicator } from './parrotColorApplication';
 import { SmallBirdColorApplicator } from './smallBirdColorApplication';
 import { DragonColorApplicator } from './dragonColorApplication';
+import { SpeciesTintColorApplicator } from './speciesTintColorApplication';
 
 /**
  * All inputs needed to color one creature instance for a single frame. The
@@ -46,6 +47,7 @@ export class CreatureColorApplicator {
   private parrot = new ParrotColorApplicator();
   private smallBird = new SmallBirdColorApplicator();
   private dragon = new DragonColorApplicator();
+  private speciesTint = new SpeciesTintColorApplicator();
   private stateColor = new THREE.Color();
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
@@ -85,6 +87,10 @@ export class CreatureColorApplicator {
     }
     if (args.colorMode === 'dragon') {
       this.dragon.apply(args);
+      return;
+    }
+    if (args.colorMode === 'speciesTint') {
+      this.speciesTint.apply(args);
       return;
     }
     const {

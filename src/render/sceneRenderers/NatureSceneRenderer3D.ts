@@ -496,6 +496,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           highlightColor: NATURE_UNICORN_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => NATURE_UNICORN_COLORS,
+          colorMode: 'speciesTint',
         };
       
       case PredatorSpecies.Monster:
@@ -512,6 +513,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           highlightColor: NATURE_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => NATURE_HAWK_COLORS,
+          colorMode: 'speciesTint',
         };
       
       default:
