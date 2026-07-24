@@ -388,11 +388,6 @@ interface PredatorUpdateContext {
   renderFlags: PredatorRenderFlags;
 }
 
-interface PredatorCounts {
-  hawkCount: number;
-  unicornCount: number;
-}
-
 // Unicorns reuse the same body/wing/tail split (lavender body+tail, near-
 // white wings so the baked rainbow vertex gradient shows through) in nature
 // style — see NATURE_UNICORN_WING's doc comment above. The fishtank seahorse
@@ -1254,60 +1249,65 @@ export class Renderer3D {
   }
 
   private reconcilePredatorInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
-    const { isOrganic } = flags;
     const sceneRenderer = this.getSceneRenderer(style);
-    const { hawkCount, unicornCount } = this.getPredatorCounts(sim.predators);
- 
-    const isDragon = isOrganic && params.dragonPredators;
+    const countsByKind = this.getPredatorCountsByKind(sim.predators);
     const renderFlags = this.getPredatorRenderFlags(flags);
-    const hawkKey = `${hawkCount}:${style}:${isDragon}`;
-    if (this.predatorInstanceKeys.get(HAWK_PREDATOR_KIND) !== hawkKey) {
-      this.disposeInstanceSet(this.predatorInstances.get(HAWK_PREDATOR_KIND) ?? null);
-      const hawkConfig = sceneRenderer.getPredatorInstanceConfig(HAWK_PREDATOR_KIND, flags, renderFlags);
-      this.predatorInstances.set(
-        HAWK_PREDATOR_KIND,
-        this.buildInstanceSet(
-          hawkConfig.geometries,
-          style,
-          hawkCount,
-          isDragon,
-          hawkConfig.rainbowWings,
-          hawkConfig.bodyVertexColors,
-        ),
-      );
-      this.predatorInstanceKeys.set(HAWK_PREDATOR_KIND, hawkKey);
-      this.dragonDisplayQuats.clear();
-      this.sharkDisplayQuats.clear();
-    }
-
-    const unicornKey = `${unicornCount}:${style}`;
-    if (this.predatorInstanceKeys.get(UNICORN_PREDATOR_KIND) !== unicornKey) {
-      this.disposeInstanceSet(this.predatorInstances.get(UNICORN_PREDATOR_KIND) ?? null);
-      const unicornConfig = sceneRenderer.getPredatorInstanceConfig(UNICORN_PREDATOR_KIND, flags, renderFlags);
-      this.predatorInstances.set(
-        UNICORN_PREDATOR_KIND,
-        this.buildInstanceSet(
-          unicornConfig.geometries,
-          style,
-          unicornCount,
-          false,
-          unicornConfig.rainbowWings,
-          unicornConfig.bodyVertexColors,
-        ),
-      );
-      this.predatorInstanceKeys.set(UNICORN_PREDATOR_KIND, unicornKey);
-      this.unicornDisplayQuats.clear();
+    for (const kind of SCENE_PREDATOR_KINDS) {
+      const count = countsByKind.get(kind) ?? 0;
+      const kindRenderFlags = this.getPredatorRenderFlagsForKind(kind, renderFlags);
+      const instanceKey = this.getPredatorInstanceKey(kind, count, style, kindRenderFlags);
+      if (this.predatorInstanceKeys.get(kind) !== instanceKey) {
+        this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
+        const config = sceneRenderer.getPredatorInstanceConfig(kind, flags, kindRenderFlags);
+        this.predatorInstances.set(
+          kind,
+          this.buildInstanceSet(
+            config.geometries,
+            style,
+            count,
+            kindRenderFlags.isDragon,
+            config.rainbowWings,
+            config.bodyVertexColors,
+          ),
+        );
+        this.predatorInstanceKeys.set(kind, instanceKey);
+        this.resetPredatorOrientationCaches(kind, kindRenderFlags);
+      }
     }
   }
 
-  private getPredatorCounts(predators: Predator[]): PredatorCounts {
-    let hawkCount = 0;
-    let unicornCount = 0;
-    for (const predator of predators) {
-      if (predator.kind === UNICORN_PREDATOR_KIND) unicornCount++;
-      else hawkCount++;
+  private getPredatorCountsByKind(predators: Predator[]): Map<PredatorKind, number> {
+    const countsByKind = new Map<PredatorKind, number>();
+    for (const kind of SCENE_PREDATOR_KINDS) {
+      countsByKind.set(kind, 0);
     }
-    return { hawkCount, unicornCount };
+    for (const predator of predators) {
+      countsByKind.set(predator.kind, (countsByKind.get(predator.kind) ?? 0) + 1);
+    }
+    return countsByKind;
+  }
+
+  private getPredatorInstanceKey(
+    kind: PredatorKind,
+    count: number,
+    style: VisualStyle,
+    renderFlags: PredatorRenderFlags,
+  ): string {
+    return kind === HAWK_PREDATOR_KIND
+      ? `${count}:${style}:${renderFlags.isDragon}`
+      : `${count}:${style}`;
+  }
+
+  private resetPredatorOrientationCaches(
+    kind: PredatorKind,
+    _renderFlags: PredatorRenderFlags,
+  ): void {
+    if (kind === UNICORN_PREDATOR_KIND) {
+      this.unicornDisplayQuats.clear();
+      return;
+    }
+    this.dragonDisplayQuats.clear();
+    this.sharkDisplayQuats.clear();
   }
 
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
