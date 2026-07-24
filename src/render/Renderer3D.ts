@@ -577,27 +577,11 @@ export class Renderer3D {
    * predator instance set is rebuilt (species/count/dragon-mode change).
    */
   private dragonDisplayQuats = new Map<number, THREE.Quaternion>();
-  /**
-   * Same turn-rate-limiting safety net as dragonDisplayQuats, but kept
-   * as its own map/constant (UNICORN_MAX_TURN_RADIANS_PER_SEC) rather
-   * than shared with dragons — unicorns have an entirely different
-   * upright/pitch model (see updateInstances' uprightStyle === 'unicorn'
-   * branch) and shouldn't inherit dragon-tuned behavior just because the
-   * final turn-rate clamp happens to be structurally similar.
-   */
-  private unicornDisplayQuats = new Map<number, THREE.Quaternion>();
-  /**
-   * Same turn-rate-limiting safety net again, this time for fishtank
-   * sharks (uprightStyle === 'shark') — kept as its own map/constant
-   * (SHARK_MAX_TURN_RADIANS_PER_SEC) rather than reusing dragonDisplayQuats
-   * even though sharks and dragons are the very same predator entities
-   * (see isShark above): the two styles clamp pitch completely
-   * differently, so sharing a display-quaternion map would let a stale
-   * dragon-style orientation (or vice versa) leak in as the rotateTowards
-   * starting point on a style switch. Cleared alongside dragonDisplayQuats
-   * whenever the shared hawk/dragon/shark instance set is rebuilt.
-   */
-  private sharkDisplayQuats = new Map<number, THREE.Quaternion>();
+  /** Turn-rate-limited display orientation state for non-dragon upright styles. */
+  private clampedUprightDisplayQuats: Record<Exclude<UprightStyle, 'dragon'>, Map<number, THREE.Quaternion>> = {
+    unicorn: new Map<number, THREE.Quaternion>(),
+    shark: new Map<number, THREE.Quaternion>(),
+  };
   /** Per-entity accumulated flap phase (radians), integrated every frame. */
   private flapPhase = new WeakMap<Boid | Predator, number>();
   private boundsHelper: THREE.LineSegments | null = null;
@@ -1261,7 +1245,7 @@ export class Renderer3D {
           ),
         );
         this.predatorInstanceKeys.set(kind, instanceKey);
-        this.resetPredatorOrientationCaches(kind, kindRenderFlags);
+        this.resetPredatorOrientationCaches(kind);
       }
     }
   }
@@ -1288,16 +1272,13 @@ export class Renderer3D {
       : `${count}:${style}`;
   }
 
-  private resetPredatorOrientationCaches(
-    kind: PredatorKind,
-    _renderFlags: PredatorRenderFlags,
-  ): void {
+  private resetPredatorOrientationCaches(kind: PredatorKind): void {
     if (kind === UNICORN_PREDATOR_KIND) {
-      this.unicornDisplayQuats.clear();
+      this.clampedUprightDisplayQuats.unicorn.clear();
       return;
     }
     this.dragonDisplayQuats.clear();
-    this.sharkDisplayQuats.clear();
+    this.clampedUprightDisplayQuats.shark.clear();
   }
 
   /** Recreates instanced meshes, environment, and world-bounds wireframe as population/world/style change. */
@@ -1420,7 +1401,7 @@ export class Renderer3D {
       return;
     }
 
-    const displayQuatMap = uprightStyle === 'unicorn' ? this.unicornDisplayQuats : this.sharkDisplayQuats;
+    const displayQuatMap = this.getClampedUprightDisplayQuatMap(uprightStyle);
     let displayQuat = displayQuatMap.get(entity.id);
     if (!displayQuat) {
       displayQuat = this.bodyQuat.clone();
@@ -1433,6 +1414,12 @@ export class Renderer3D {
       this.clampDisplayUpTilt(displayQuat, maxUpTilt);
     }
     this.bodyQuat.copy(displayQuat);
+  }
+
+  private getClampedUprightDisplayQuatMap(
+    uprightStyle: Exclude<UprightStyle, 'dragon'>,
+  ): Map<number, THREE.Quaternion> {
+    return this.clampedUprightDisplayQuats[uprightStyle];
   }
 
   private applyBodyOrientationBasis(
