@@ -46,11 +46,10 @@ import {
   RENDERER_BOID_SPECIES_CONFIGS,
   type RendererBoidSpeciesConfig,
 } from './boidSpeciesRegistry';
-import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';
-import { createRendererSceneRenderers } from './sceneRendererFactory';
+import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';import { createRendererSceneRenderers } from './sceneRendererFactory';
 import { NATURE_CREATURE_SIZES, NATURE_DRAGON_MOUTH } from './sceneRenderers/NatureSceneRenderer3D';
 import { DragonFireBreathController } from './dragonFireBreathController';
-import { UFO_BEAM_REACH } from '../sim/UFO';
+import { UfoRenderer } from './UfoRenderer';
 
 // Wing-flap tuning. NOTE: the actual flap frequency/amplitude values are owned
 // per-scene (each scene's MotionConfig provides them); only the shared
@@ -237,7 +236,7 @@ interface ResolvedMotionConfig {
   preferUpright: boolean;
 }
 
-interface ResolvedColourStrategy {
+interface ResolvedColorStrategy {
   baseColor: THREE.Color;
   highlightColor: THREE.Color;
   getIntensity: (creature: Boid | Predator) => number;
@@ -320,6 +319,7 @@ export class Renderer3D {
   private ambientLight: THREE.AmbientLight;
   private keyLight: THREE.DirectionalLight;
   private sceneAssets!: RendererSceneAssets;
+  private ufoRenderer!: UfoRenderer;
 
   private speciesInstances = new Map<BoidSpecies, BoidRenderBatch | null>();
   private speciesInstanceKeys = new Map<BoidSpecies, string | null>();
@@ -375,7 +375,6 @@ export class Renderer3D {
   private tailPivotToOrigin = new THREE.Matrix4();
   private tailOriginToPivot = new THREE.Matrix4();
   private rollQuat = new THREE.Quaternion();
-  private tmpVec3 = new THREE.Vector3();
   private tmpSpawnPosition = new THREE.Vector3();
   private tmpSpawnDirection = new THREE.Vector3();
   // Sim world center, recomputed once per frame in render() while
@@ -450,6 +449,7 @@ export class Renderer3D {
     this.scene.add(this.ambientLight, this.keyLight);
 
     this.sceneAssets = createRendererSceneAssets(this.scene, this.renderer);
+    this.ufoRenderer = new UfoRenderer(this.sceneAssets.ufoVisuals);
     this.dragonFireBreathController = new DragonFireBreathController({
       fireBreathEffects: this.sceneAssets.fireBreathEffects,
       dragonMouth: NATURE_DRAGON_MOUTH,
@@ -1636,7 +1636,7 @@ export class Renderer3D {
     };
   }
 
-  private resolveColourStrategy(colours: ColourStrategy): ResolvedColourStrategy {
+  private resolveColourStrategy(colours: ColourStrategy): ResolvedColorStrategy {
     const {
       baseColor,
       highlightColor,
@@ -2281,38 +2281,6 @@ export class Renderer3D {
     );
   }
 
-  private applyUfoVisualState(
-    visual: RendererSceneAssets['ufoVisuals'][number],
-    ufo: Simulation['ufos'][number] | undefined,
-    sceneRenderer: SceneRendererHooks,
-    ufoWorldScale: number,
-    ufoBeamLength: number,
-  ): void {
-    if (ufo) {
-      sceneRenderer.mapPositionToRenderSpace(ufo.position.x, ufo.position.y, ufo.position.z, this.tmpVec3);
-      visual.setState(true, this.tmpVec3, ufo.beamStrength, ufoBeamLength, ufoWorldScale);
-      return;
-    }
-    visual.setState(false, this.tmpVec3, 0, 0);
-  }
-
-  private getUfoRenderScaleParams(sceneRenderer: SceneRendererHooks): { ufoWorldScale: number; ufoBeamLength: number } {
-    const ufoWorldScale = sceneRenderer.getWorldScale();
-    const ufoBeamLength = UFO_BEAM_REACH * ufoWorldScale;
-    return { ufoWorldScale, ufoBeamLength };
-  }
-
-  private updateUfoVisuals(sim: Simulation, dt: number, sceneRenderer: SceneRendererHooks): void {
-    // Each UFOVisual slot maps 1:1 by index to an active sim.ufos entry;
-    // slots beyond the current active count are simply hidden.
-    const { ufoWorldScale, ufoBeamLength } = this.getUfoRenderScaleParams(sceneRenderer);
-    for (let i = 0; i < this.sceneAssets.ufoVisuals.length; i++) {
-      const visual = this.sceneAssets.ufoVisuals[i];
-      this.applyUfoVisualState(visual, sim.ufos[i], sceneRenderer, ufoWorldScale, ufoBeamLength);
-      visual.update(dt);
-    }
-  }
-
   private getToneMappingExposureForTimeOfDay(timeOfDay: typeof params.timeOfDay): number {
     const exposureByTime = {
       dawn: 0.62,
@@ -2346,7 +2314,7 @@ export class Renderer3D {
     this.sceneAssets.bloodEffects.update(dt);
     sceneRenderer.updateTransientEffects(sim, elapsed);
     this.sceneAssets.fireBreathEffects.update(dt);
-    this.updateUfoVisuals(sim, dt, sceneRenderer);
+    this.ufoRenderer.update(sim, dt, sceneRenderer);
   }
 
   private updateSceneEffects(
