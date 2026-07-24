@@ -166,6 +166,8 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // Parrot tail sway: moved to scene renderers for boid rendering
 // const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
 const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
+const PARROT_SPECIES: BoidSpecies = 'parrot';
+const NEUTRAL_PARROT_PROFILE = 'neutral';
 
 // Dragon tail sway: on-screen references (movies/TV) almost always show a
 // dragon's tail undulating up and down as it flies, driven by the same
@@ -1138,69 +1140,23 @@ export class Renderer3D {
     const sceneRenderer = this.getSceneRenderer(style);
     const parrotProfileNames = sceneRenderer.getParrotProfileNames(flags);
     const hasParrotProfiles = parrotProfileNames.length > 0;
-    const countsBySpecies = new Map<BoidSpecies, number>();
-    for (const boid of sim.boids) {
-      countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
-    }
-    const parrotProfileCounts = new Map<string, number>();
-    if (hasParrotProfiles) {
-      for (const boid of sim.boids) {
-        if (boid.species !== 'parrot') continue;
-        const profile = sceneRenderer.getParrotGeometryProfile(boid, flags);
-        parrotProfileCounts.set(profile, (parrotProfileCounts.get(profile) ?? 0) + 1);
-      }
-    }
-    if (!hasParrotProfiles) {
-      for (const profile of this.parrotProfileInstances.keys()) {
-        this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
-        this.parrotProfileInstances.set(profile, null);
-        this.parrotProfileKeys.set(profile, null);
-      }
-    }
+    const countsBySpecies = this.getBoidCountsBySpecies(sim.boids);
+    const parrotProfileCounts = hasParrotProfiles
+      ? this.getParrotProfileCounts(sim.boids, sceneRenderer, flags)
+      : new Map<string, number>();
+    if (!hasParrotProfiles) this.clearParrotProfileInstances();
 
     for (const config of BOID_SPECIES_CONFIGS) {
       const count = countsBySpecies.get(config.species) ?? 0;
-      if (config.species === 'parrot' && hasParrotProfiles) {
-        const nonNeutralCount = parrotProfileNames
-          .reduce((sum, profile) => sum + (parrotProfileCounts.get(profile) ?? 0), 0);
-        const neutralCount = Math.max(0, count - nonNeutralCount);
-        const neutralKey = `${neutralCount}:${style}:neutral`;
-        if (this.speciesInstanceKeys.get('parrot') !== neutralKey) {
-          this.disposeInstanceSet(this.speciesInstances.get('parrot') ?? null);
-          const neutralConfig = sceneRenderer.getParrotProfileInstanceConfig('neutral', flags);
-          this.speciesInstances.set(
-            'parrot',
-            this.buildInstanceSet(
-              neutralConfig.geometries,
-              style,
-              neutralCount,
-              false,
-              false,
-              neutralConfig.bodyVertexColors,
-            ),
-          );
-          this.speciesInstanceKeys.set('parrot', neutralKey);
-        }
-        for (const profile of parrotProfileNames) {
-          const profileCount = parrotProfileCounts.get(profile) ?? 0;
-          const profileKey = `${profileCount}:${style}:${profile}`;
-          if (this.parrotProfileKeys.get(profile) !== profileKey) {
-            this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
-            const profileConfig = sceneRenderer.getParrotProfileInstanceConfig(profile, flags);
-            this.parrotProfileInstances.set(
-              profile,
-              this.buildInstanceSet(
-                profileConfig.geometries,
-                style,
-                profileCount,
-                false,
-                false,
-                profileConfig.bodyVertexColors,
-              ),
-            );
-            this.parrotProfileKeys.set(profile, profileKey);
-          }
-        }
+      if (config.species === PARROT_SPECIES && hasParrotProfiles) {
+        this.reconcileProfiledParrotInstanceSets(
+          count,
+          style,
+          flags,
+          parrotProfileNames,
+          parrotProfileCounts,
+          sceneRenderer,
+        );
         continue;
       }
       const key = `${count}:${style}`;
@@ -1212,6 +1168,86 @@ export class Renderer3D {
           this.buildInstanceSet(geometries, style, count, false, false, bodyVertexColors),
         );
         this.speciesInstanceKeys.set(config.species, key);
+      }
+    }
+  }
+
+  private getBoidCountsBySpecies(boids: Boid[]): Map<BoidSpecies, number> {
+    const countsBySpecies = new Map<BoidSpecies, number>();
+    for (const boid of boids) {
+      countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
+    }
+    return countsBySpecies;
+  }
+
+  private getParrotProfileCounts(
+    boids: Boid[],
+    sceneRenderer: SceneRendererHooks,
+    flags: StyleFlags,
+  ): Map<string, number> {
+    const parrotProfileCounts = new Map<string, number>();
+    for (const boid of boids) {
+      if (boid.species !== PARROT_SPECIES) continue;
+      const profile = sceneRenderer.getParrotGeometryProfile(boid, flags);
+      parrotProfileCounts.set(profile, (parrotProfileCounts.get(profile) ?? 0) + 1);
+    }
+    return parrotProfileCounts;
+  }
+
+  private clearParrotProfileInstances(): void {
+    for (const profile of this.parrotProfileInstances.keys()) {
+      this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
+      this.parrotProfileInstances.set(profile, null);
+      this.parrotProfileKeys.set(profile, null);
+    }
+  }
+
+  private reconcileProfiledParrotInstanceSets(
+    totalParrotCount: number,
+    style: VisualStyle,
+    flags: StyleFlags,
+    parrotProfileNames: readonly string[],
+    parrotProfileCounts: ReadonlyMap<string, number>,
+    sceneRenderer: SceneRendererHooks,
+  ): void {
+    const nonNeutralCount = parrotProfileNames
+      .reduce((sum, profile) => sum + (parrotProfileCounts.get(profile) ?? 0), 0);
+    const neutralCount = Math.max(0, totalParrotCount - nonNeutralCount);
+    const neutralKey = `${neutralCount}:${style}:${NEUTRAL_PARROT_PROFILE}`;
+    if (this.speciesInstanceKeys.get(PARROT_SPECIES) !== neutralKey) {
+      this.disposeInstanceSet(this.speciesInstances.get(PARROT_SPECIES) ?? null);
+      const neutralConfig = sceneRenderer.getParrotProfileInstanceConfig(NEUTRAL_PARROT_PROFILE, flags);
+      this.speciesInstances.set(
+        PARROT_SPECIES,
+        this.buildInstanceSet(
+          neutralConfig.geometries,
+          style,
+          neutralCount,
+          false,
+          false,
+          neutralConfig.bodyVertexColors,
+        ),
+      );
+      this.speciesInstanceKeys.set(PARROT_SPECIES, neutralKey);
+    }
+    for (const profile of parrotProfileNames) {
+      const profileCount = parrotProfileCounts.get(profile) ?? 0;
+      const profileKey = `${profileCount}:${style}:${profile}`;
+      if (this.parrotProfileKeys.get(profile) !== profileKey) {
+        this.disposeInstanceSet(this.parrotProfileInstances.get(profile) ?? null);
+        const profileConfig = sceneRenderer.getParrotProfileInstanceConfig(profile, flags);
+        this.parrotProfileInstances.set(
+          profile,
+          this.buildInstanceSet(
+            profileConfig.geometries,
+            style,
+            profileCount,
+            false,
+            false,
+            profileConfig.bodyVertexColors,
+          ),
+        );
+        this.parrotProfileKeys.set(profile, profileKey);
       }
     }
   }
