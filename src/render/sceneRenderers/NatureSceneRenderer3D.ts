@@ -27,7 +27,6 @@ import {
   type PredatorRenderFlags,
   type StyleFlags,
   type BoidMotionStyleFlags,
-  type BoidSpeciesConfig,
   type SceneBoidInstanceConfig,
   type ScenePredatorInstanceConfig,
   type SpeciesColorSet,
@@ -221,6 +220,49 @@ const CARDINAL_TAIL_BASE = new THREE.Color(0x3d0f14); // near-black red tail
 const BLUEJAY_BODY_BASE = new THREE.Color(0x3b6fa0); // jay blue back
 const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
 const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
+
+// Per-species nature boid config. Owned by this scene so nature plumage, beaks
+// and geometry selection can be tuned without touching other scenes.
+interface NatureSpeciesConfig {
+  natureBase: THREE.Color;
+  colors?: SpeciesColorSet;
+  beakColor?: THREE.Color;
+  tailSwayPivotY?: number;
+  useSmallGeometry: boolean;
+  useParrotGeometry?: boolean;
+}
+
+const NATURE_SPECIES_CONFIG: Record<BoidSpecies, NatureSpeciesConfig> = {
+  [BoidSpecies.Normal]: {
+    natureBase: NATURE_BOID_BASE,
+    beakColor: new THREE.Color(0x6b5a4a),
+    useSmallGeometry: true,
+  },
+  [BoidSpecies.Multicolor]: {
+    natureBase: PARROT_NATURE_VARIANTS[0].colors.body,
+    useParrotGeometry: true,
+    tailSwayPivotY: -4.186,
+    useSmallGeometry: false,
+  },
+  [BoidSpecies.Gold]: {
+    natureBase: GOLDFINCH_BODY_BASE,
+    colors: { body: GOLDFINCH_BODY_BASE, wing: GOLDFINCH_WING_BASE, tail: GOLDFINCH_TAIL_BASE },
+    beakColor: new THREE.Color(0xf07820),
+    useSmallGeometry: false,
+  },
+  [BoidSpecies.Red]: {
+    natureBase: CARDINAL_BODY_BASE,
+    colors: { body: CARDINAL_BODY_BASE, wing: CARDINAL_WING_BASE, tail: CARDINAL_TAIL_BASE },
+    beakColor: new THREE.Color(0xe84040),
+    useSmallGeometry: false,
+  },
+  [BoidSpecies.Blue]: {
+    natureBase: BLUEJAY_BODY_BASE,
+    colors: { body: BLUEJAY_BODY_BASE, wing: BLUEJAY_WING_BASE, tail: BLUEJAY_TAIL_BASE },
+    beakColor: new THREE.Color(0x8c8c8c),
+    useSmallGeometry: false,
+  },
+};
 
 // Small-bird leg colors, baked into the small-bird geometry at construction
 // time (see createRealisticBirdGeometries). Owned here because leg color is a
@@ -521,28 +563,28 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
-    const { isOrganic, isNature } = flags;
-    const getColors = config.getColors;
+  getBoidColourStrategy(species: BoidSpecies, _flags: StyleFlags): ColourStrategy {
+    // Nature scene is always organic — baseColor uses each species' nature
+    // plumage, songbirds get individual HSL variation, and the small-bird
+    // species render through a baked body/wing/tail vertex gradient.
+    const config = NATURE_SPECIES_CONFIG[species];
     return {
-      baseColor: isOrganic ? config.natureBase : config.arcadeBase,
-      highlightColor: isOrganic ? NATURE_BOID_PANIC : new THREE.Color(0xffcc00), // arcade panic placeholder
+      baseColor: config.natureBase,
+      highlightColor: NATURE_BOID_PANIC,
       getIntensity: (creature) => (creature as Boid).panicLevel,
-      individualVariation: config.colors || config.getColors ? true : isOrganic,
-      getSpeciesColors: getColors
-        ? (creature) => getColors(creature, flags)
-        : (config.colors ? () => config.colors! : undefined),
+      individualVariation: true,
+      getSpeciesColors: config.colors ? () => config.colors! : undefined,
       beakColor: config.beakColor,
       bakedWingPalette: true,
-      bakedBodyGradient: isNature && (species === BoidSpecies.Normal || species === BoidSpecies.Gold || species === BoidSpecies.Red || species === BoidSpecies.Blue),
+      bakedBodyGradient: species === BoidSpecies.Normal || species === BoidSpecies.Gold || species === BoidSpecies.Red || species === BoidSpecies.Blue,
     };
   }
 
-  getBoidMotionConfig(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+  getBoidMotionConfig(species: BoidSpecies, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
     const { isProfiledParrot } = boidMotionFlags;
     const isParrot = species === BoidSpecies.Multicolor;
-    const tailSwayPivot = config.tailSwayPivotY ?? 0;
-    
+    const tailSwayPivot = NATURE_SPECIES_CONFIG[species].tailSwayPivotY ?? 0;
+
     return {
       flapFrequency: isParrot && isProfiledParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
       flapIdleAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
@@ -560,14 +602,15 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(config: BoidSpeciesConfig, _flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+  getParrotColourStrategy(_flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+    const parrotConfig = NATURE_SPECIES_CONFIG[BoidSpecies.Multicolor];
     return {
-      baseColor: config.natureBase,
+      baseColor: parrotConfig.natureBase,
       highlightColor: NATURE_BOID_PANIC,
       getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: true,
       getSpeciesColors: (creature) => this.getParrotColorVariant(creature),
-      beakColor: config.beakColor,
+      beakColor: parrotConfig.beakColor,
       bakedWingPalette,
       useNatureParrotPalette: true, // Always use nature parrot palette in nature renderer
       lockSpeciesPalette: PARROT_FOCUS_PATTERN_INDEX !== null,
@@ -603,7 +646,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidInstanceConfig(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+  getBoidInstanceConfig(species: BoidSpecies, _flags: StyleFlags): SceneBoidInstanceConfig {
+    const config = NATURE_SPECIES_CONFIG[species];
     if (config.useSmallGeometry) {
       return { geometries: this.sparrowGeometries, bodyVertexColors: true };
     }
@@ -681,18 +725,5 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 }
 
-// Export nature-style color constants and types for use in Renderer3D
-export {
-  NATURE_BOID_BASE,
-  NATURE_HAWK_COLORS,
-  PARROT_NATURE_VARIANTS,
-  GOLDFINCH_BODY_BASE,
-  GOLDFINCH_WING_BASE,
-  GOLDFINCH_TAIL_BASE,
-  CARDINAL_BODY_BASE,
-  CARDINAL_WING_BASE,
-  CARDINAL_TAIL_BASE,
-  BLUEJAY_BODY_BASE,
-  BLUEJAY_WING_BASE,
-  BLUEJAY_TAIL_BASE,
-};
+// NATURE_HAWK_COLORS is consumed by the hawk geometry builder.
+export { NATURE_HAWK_COLORS };

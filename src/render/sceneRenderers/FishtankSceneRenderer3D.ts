@@ -25,7 +25,6 @@ import {
   type PredatorRenderFlags,
   type StyleFlags,
   type BoidMotionStyleFlags,
-  type BoidSpeciesConfig,
   type SceneBoidInstanceConfig,
   type ScenePredatorInstanceConfig,
   type SpeciesColorSet,
@@ -72,6 +71,51 @@ const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
 // Shark predator (fishtank dragon-geometry variant): medium gray hide
 const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
 const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
+
+// Per-species fishtank boid config. Owned by this scene so the aquatic-variant
+// colors, beaks and geometry selection can be tuned independently of the other
+// scenes (these base colors happen to match the nature plumage today, but are
+// duplicated here so the fishtank can diverge without touching nature).
+interface FishtankSpeciesConfig {
+  baseColor: THREE.Color;
+  colors?: SpeciesColorSet;
+  beakColor?: THREE.Color;
+  tailSwayPivotY?: number;
+  useSmallGeometry: boolean;
+  useParrotGeometry?: boolean;
+}
+
+const FISHTANK_SPECIES_CONFIG: Record<BoidSpecies, FishtankSpeciesConfig> = {
+  [BoidSpecies.Normal]: {
+    baseColor: new THREE.Color(0xab8f68),
+    beakColor: new THREE.Color(0x6b5a4a),
+    useSmallGeometry: true,
+  },
+  [BoidSpecies.Multicolor]: {
+    baseColor: new THREE.Color(0xffffff),
+    useParrotGeometry: true,
+    tailSwayPivotY: -4.186,
+    useSmallGeometry: false,
+  },
+  [BoidSpecies.Gold]: {
+    baseColor: new THREE.Color(0xf5d327),
+    colors: { body: new THREE.Color(0xf5d327), wing: new THREE.Color(0x1c1c1c), tail: new THREE.Color(0x1c1c1c) },
+    beakColor: new THREE.Color(0xf07820),
+    useSmallGeometry: false,
+  },
+  [BoidSpecies.Red]: {
+    baseColor: new THREE.Color(0xcc2936),
+    colors: { body: new THREE.Color(0xcc2936), wing: new THREE.Color(0x8f1f28), tail: new THREE.Color(0x3d0f14) },
+    beakColor: new THREE.Color(0xe84040),
+    useSmallGeometry: false,
+  },
+  [BoidSpecies.Blue]: {
+    baseColor: new THREE.Color(0x3b6fa0),
+    colors: { body: new THREE.Color(0x3b6fa0), wing: new THREE.Color(0xdfe8ef), tail: new THREE.Color(0x1c3350) },
+    beakColor: new THREE.Color(0x8c8c8c),
+    useSmallGeometry: false,
+  },
+};
 
 // Shark-specific motion constants
 const SHARK_FLAP_FREQUENCY = 2.2;
@@ -311,28 +355,26 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+  getBoidColourStrategy(species: BoidSpecies, _flags: StyleFlags): ColourStrategy {
     // Fishtank boids have simpler coloring than nature (no panic jitter)
-    const getColors = config.getColors;
+    const config = FISHTANK_SPECIES_CONFIG[species];
     const isParrot = species === BoidSpecies.Multicolor;
     return {
-      baseColor: config.natureBase, // Use nature base in fishtank (they're aquatic variants)
+      baseColor: config.baseColor,
       highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
       getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: false, // Fishtank fish have consistent coloring
       getSpeciesColors: isParrot
         ? (creature) => this.getButterflyfishColorVariant(creature)
-        : getColors
-          ? (creature) => getColors(creature, _flags)
-          : (config.colors ? () => config.colors! : undefined),
+        : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       bakedWingPalette: true,
     };
   }
 
-  getBoidMotionConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
-    const tailSwayPivot = config.tailSwayPivotY ?? 0;
-    
+  getBoidMotionConfig(species: BoidSpecies, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+    const tailSwayPivot = FISHTANK_SPECIES_CONFIG[species].tailSwayPivotY ?? 0;
+
     return {
       flapFrequency: 3.0, // Fishtank fish flap a bit slower
       flapIdleAmplitude: 0.15,
@@ -348,14 +390,15 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(config: BoidSpeciesConfig, _flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+  getParrotColourStrategy(_flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+    const parrotConfig = FISHTANK_SPECIES_CONFIG[BoidSpecies.Multicolor];
     return {
-      baseColor: config.natureBase,
+      baseColor: parrotConfig.baseColor,
       highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
       getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: true,
       getSpeciesColors: (creature) => this.getButterflyfishColorVariant(creature),
-      beakColor: config.beakColor,
+      beakColor: parrotConfig.beakColor,
       bakedWingPalette,
       useNatureParrotPalette: false,
     };
@@ -382,7 +425,8 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
   }
 
-  getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+  getBoidInstanceConfig(species: BoidSpecies, _flags: StyleFlags): SceneBoidInstanceConfig {
+    const config = FISHTANK_SPECIES_CONFIG[species];
     if (config.useSmallGeometry) {
       return { geometries: this.sparrowGeometries, bodyVertexColors: true };
     }

@@ -43,8 +43,7 @@ import {
 import {
   PROFILED_BOID_NEUTRAL_PROFILE,
   PROFILED_BOID_SPECIES,
-  RENDERER_BOID_SPECIES_CONFIGS,
-  type RendererBoidSpeciesConfig,
+  RENDERER_BOID_SPECIES,
 } from './boidSpeciesRegistry';
 import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';import { createRendererSceneRenderers } from './sceneRendererFactory';
 import { UfoRenderer } from './UfoRenderer';
@@ -249,8 +248,6 @@ interface BoidRenderBatch {
   /** Small-bird-only: see CreatureGeometries.beak's doc comment. */
   beak?: THREE.InstancedMesh;
 }
-
-type BoidSpeciesConfig = RendererBoidSpeciesConfig;
 
 export class Renderer3D {
   private renderer: THREE.WebGLRenderer;
@@ -685,9 +682,9 @@ export class Renderer3D {
       : new Map<string, number>();
     if (!hasProfiledSpecies) this.clearProfiledSpeciesInstances();
 
-    for (const config of RENDERER_BOID_SPECIES_CONFIGS) {
-      const count = countsBySpecies.get(config.species) ?? 0;
-      if (this.isProfiledSpecies(config.species) && hasProfiledSpecies) {
+    for (const species of RENDERER_BOID_SPECIES) {
+      const count = countsBySpecies.get(species) ?? 0;
+      if (this.isProfiledSpecies(species) && hasProfiledSpecies) {
         this.reconcileProfiledSpeciesRenderBatches(
           count,
           style,
@@ -699,14 +696,14 @@ export class Renderer3D {
         continue;
       }
       const key = `${count}:${style}`;
-      if (this.speciesInstanceKeys.get(config.species) !== key) {
-        this.disposeRenderBatch(this.speciesInstances.get(config.species) ?? null);
-        const { geometries, bodyVertexColors, bodyEmissiveOverride } = sceneRenderer.getBoidInstanceConfig(config.species, config, flags);
+      if (this.speciesInstanceKeys.get(species) !== key) {
+        this.disposeRenderBatch(this.speciesInstances.get(species) ?? null);
+        const { geometries, bodyVertexColors, bodyEmissiveOverride } = sceneRenderer.getBoidInstanceConfig(species, flags);
         this.speciesInstances.set(
-          config.species,
+          species,
           this.buildRenderBatch(geometries, style, count, false, false, bodyVertexColors, bodyEmissiveOverride),
         );
-        this.speciesInstanceKeys.set(config.species, key);
+        this.speciesInstanceKeys.set(species, key);
       }
     }
   }
@@ -1906,7 +1903,7 @@ export class Renderer3D {
 
 
   private hasAnyBoidSpeciesInstances(): boolean {
-    return RENDERER_BOID_SPECIES_CONFIGS.some((config) => this.speciesInstances.get(config.species));
+    return RENDERER_BOID_SPECIES.some((species) => this.speciesInstances.get(species));
   }
 
   private hasAnyPredatorInstances(): boolean {
@@ -1914,7 +1911,7 @@ export class Renderer3D {
   }
 
   private updateProfiledSpeciesInstances(
-    config: BoidSpeciesConfig,
+    species: BoidSpecies,
     instances: BoidRenderBatch,
     creatures: Boid[],
     elapsed: number,
@@ -1931,8 +1928,8 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getParrotColourStrategy(config, flags, false),
-      sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
+      sceneRenderer.getParrotColourStrategy(flags, false),
+      sceneRenderer.getBoidMotionConfig(species, flags, boidMotionFlags),
     );
     for (const profile of profileNames) {
       const profileSet = this.profiledSpeciesInstances.get(profile);
@@ -1943,14 +1940,14 @@ export class Renderer3D {
         params.boidMaxSpeed,
         elapsed,
         dt,
-        sceneRenderer.getParrotColourStrategy(config, flags, true),
-        sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
+        sceneRenderer.getParrotColourStrategy(flags, true),
+        sceneRenderer.getBoidMotionConfig(species, flags, boidMotionFlags),
       );
     }
   }
 
   private updateStandardBoidSpeciesInstances(
-    config: BoidSpeciesConfig,
+    species: BoidSpecies,
     instances: BoidRenderBatch,
     creatures: Boid[],
     elapsed: number,
@@ -1968,30 +1965,30 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getBoidColourStrategy(config.species, config, flags),
-      sceneRenderer.getBoidMotionConfig(config.species, config, flags, boidMotionFlags),
+      sceneRenderer.getBoidColourStrategy(species, flags),
+      sceneRenderer.getBoidMotionConfig(species, flags, boidMotionFlags),
     );
   }
 
   private updateBoidSpeciesConfig(
-    config: BoidSpeciesConfig,
+    species: BoidSpecies,
     boidsBySpecies: Map<BoidSpecies, Boid[]>,
     elapsed: number,
     dt: number,
     flags: StyleFlags,
     sceneRenderer: SceneRendererHooks,
   ): void {
-    const instances = this.speciesInstances.get(config.species);
+    const instances = this.speciesInstances.get(species);
     if (!instances) return;
-    const creatures = this.getBoidCreaturesForSpecies(boidsBySpecies, config.species);
-    const profileNames = this.getProfileNamesForSpecies(config.species, sceneRenderer, flags);
+    const creatures = this.getBoidCreaturesForSpecies(boidsBySpecies, species);
+    const profileNames = this.getProfileNamesForSpecies(species, sceneRenderer, flags);
     const isProfiledParrot = profileNames.length > 0;
     if (isProfiledParrot) {
-      this.updateProfiledSpeciesInstances(config, instances, creatures, elapsed, dt, flags, sceneRenderer, profileNames);
+      this.updateProfiledSpeciesInstances(species, instances, creatures, elapsed, dt, flags, sceneRenderer, profileNames);
       return;
     }
     this.updateStandardBoidSpeciesInstances(
-      config,
+      species,
       instances,
       creatures,
       elapsed,
@@ -2013,8 +2010,8 @@ export class Renderer3D {
 
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
-    for (const config of RENDERER_BOID_SPECIES_CONFIGS) {
-      this.updateBoidSpeciesConfig(config, boidsBySpecies, elapsed, dt, flags, sceneRenderer);
+    for (const species of RENDERER_BOID_SPECIES) {
+      this.updateBoidSpeciesConfig(species, boidsBySpecies, elapsed, dt, flags, sceneRenderer);
     }
   }
 
@@ -2155,8 +2152,8 @@ export class Renderer3D {
   }
 
   private disposeBoidRenderBatches(): void {
-    for (const config of RENDERER_BOID_SPECIES_CONFIGS) {
-      this.disposeRenderBatch(this.speciesInstances.get(config.species) ?? null);
+    for (const species of RENDERER_BOID_SPECIES) {
+      this.disposeRenderBatch(this.speciesInstances.get(species) ?? null);
     }
   }
 
