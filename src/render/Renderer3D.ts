@@ -86,7 +86,7 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // mirroring it exactly. The per-scene tail-sway *amplitude* and axis are
 // owned by each scene's MotionConfig; only this shared phase relationship
 // lives here.
-const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
+const TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
 
 // Dragons additionally low-pass filter their heading direction (not just
 // their bank angle) before it's used for orientation — see the
@@ -1529,7 +1529,7 @@ export class Renderer3D {
     // Tail sway (dragons/sharks only).
     if (!set.tail) return;
     if (!usesTailSwayMatrix(uprightStyle)) return;
-    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + creature.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
+    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + creature.id * 1.7 + TAIL_SWAY_PHASE_OFFSET;
     const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
     this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
     this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
