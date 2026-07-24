@@ -4,7 +4,7 @@ import { params } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 
 /**
- * Owns the Model Gallery / deep-link camera-framing helpers. These all
+ * Owns the Creature Gallery / deep-link camera-framing helpers. These all
  * operate purely on the shared perspective camera + OrbitControls (held by
  * reference, not owned — Renderer3D creates them and still drives the
  * per-scene auto-framing), so grouping them here keeps that self-contained
@@ -20,10 +20,10 @@ export class CameraController {
   }
 
   /**
-   * Model Gallery / debug-QA helper: point the camera at a fixed
+   * Creature Gallery / debug-QA helper: point the camera at a fixed
    * world-space position from a pleasant, fixed elevated 3/4 angle
    * (roughly matching a typical reference-photo framing of a flying
-   * creature) and hold it there. Used by main.ts's Model Gallery feature
+   * creature) and hold it there. Used by main.ts's Creature Gallery feature
    * (`params.galleryCreature`, also drivable via the `?galleryCreature=`
    * URL param) which isolates a single creature, freezes the sim, and
    * poses it at a known position — the combination gives a clean,
@@ -60,7 +60,7 @@ export class CameraController {
   /**
    * Restores the default whole-world camera framing (same computation
    * ensureScene applies the first time it sees a given world size) —
-   * used when exiting the Model Gallery to put the camera back where a
+   * used when exiting the Creature Gallery to put the camera back where a
    * normal, non-isolated simulation view expects it, since
    * debugFrameCamera's close-up framing would otherwise persist
    * (ensureScene only re-frames automatically when world dimensions

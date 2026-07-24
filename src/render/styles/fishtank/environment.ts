@@ -86,7 +86,7 @@ export interface FishtankEnvironment {
   /**
    * Independently hides/shows just the surrounding room (floor,
    * ceiling, walls, doors, art, lamps) without touching the tank
-   * itself (glass/water/tank lighting) — used by the Model Gallery so a
+   * itself (glass/water/tank lighting) — used by the Creature Gallery so a
    * close-up, creature-relative camera distance can sit *inside* the
    * tank/water volume without the room being visible (nonsensically)
    * through the transparent glass behind the creature.

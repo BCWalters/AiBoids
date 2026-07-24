@@ -6,7 +6,7 @@ import {
 } from '../../../geometry/sharedGeometry';
 import { buildFingeredWingGeometry } from './birdSharedGeometry';
 
-// Rainbow vertex-colour gradients used only by the unicorn's pegasus
+// Rainbow vertex-color gradients used only by the unicorn's pegasus
 // wings and rainbow tail (violet at the root, red at the tip), read by a
 // vertexColors-enabled material — see Renderer3D's buildRenderBatch
 // rainbowWings handling. Kept local to this file since the unicorn is
@@ -910,4 +910,3 @@ function buildUnicornManeGeometry(
   geometry.computeVertexNormals();
   return geometry;
 }
-

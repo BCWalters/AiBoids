@@ -80,8 +80,8 @@ const en = {
   diagnosticsDownloadFailed: 'Diagnostics download failed ❌',
   diagnosticsCleared: 'Diagnostics cleared ({count})',
 
-  sectionModelGallery: 'Model Gallery',
-  galleryLabel: 'Inspect a single model',
+  sectionCreatureGallery: 'Creature Gallery',
+  galleryLabel: 'Inspect a single creature',
   galleryNone: 'None (normal simulation)',
   galleryHorse: 'Horse',
   galleryMonster: 'Monster',
@@ -195,8 +195,8 @@ const es: TranslationDict = {
   diagnosticsDownloadFailed: 'Falló la descarga de diagnósticos ❌',
   diagnosticsCleared: 'Diagnósticos borrados ({count})',
 
-  sectionModelGallery: 'Galería de modelos',
-  galleryLabel: 'Inspeccionar un solo modelo',
+  sectionCreatureGallery: 'Galería de criaturas',
+  galleryLabel: 'Inspeccionar una sola criatura',
   galleryNone: 'Ninguno (simulación normal)',
   galleryHorse: 'Caballo',
   galleryMonster: 'Monstruo',
@@ -302,8 +302,8 @@ const fr: TranslationDict = {
   diagnosticsDownloadFailed: 'Échec du téléchargement des diagnostics ❌',
   diagnosticsCleared: 'Diagnostics effacés ({count})',
 
-  sectionModelGallery: 'Galerie de modèles',
-  galleryLabel: 'Inspecter un seul modèle',
+  sectionCreatureGallery: 'Galerie des créatures',
+  galleryLabel: 'Inspecter une seule créature',
   galleryNone: 'Aucun (simulation normale)',
   galleryHorse: 'Cheval',
   galleryMonster: 'Monstre',

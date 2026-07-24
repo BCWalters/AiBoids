@@ -22,7 +22,7 @@ import {
   type SceneEnvironmentToggles,
   type ScenePresentationSettings,
   type SceneRendererHooks,
-  type ColourStrategy,
+  type ColorStrategy,
   type MotionConfig,
   type PredatorRenderFlags,
   type StyleFlags,
@@ -125,7 +125,7 @@ const NON_NEUTRAL_PARROT_PROFILES: ParrotGeometryProfile[] = ['green-focus', 'bl
 // nature variants. Set to an index temporarily only during palette tuning.
 const PARROT_FOCUS_PATTERN_INDEX: number | null = null;
 
-// Small songbird nature-style vertex colour palettes (baked into geometry)
+// Small songbird nature-style vertex color palettes (baked into geometry)
 interface SmallBirdPalette {
   headBack: THREE.Color;
   tailBack: THREE.Color;
@@ -159,7 +159,7 @@ const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
   tailBack:  new THREE.Color(0x1c1c1c), // black at rump
   headBelly: new THREE.Color(0xf5d327), // yellow near the breast
   tailBelly: new THREE.Color(0xf8ec80), // lighter/paler yellow toward lower belly
-  wing:    new THREE.Color(0xf5d327), // gold at wing root (matches back/belly colour)
+  wing:    new THREE.Color(0xf5d327), // gold at wing root (matches back/belly color)
   wingTip: new THREE.Color(0x151505), // near-black at wing tip
   tail:    new THREE.Color(0x3a3a3a), // dark gray tail base (not pure black)
   tailTip: new THREE.Color(0x0d0d0d), // near-black tail tip
@@ -487,7 +487,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getPredatorColourStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColourStrategy {
+  getPredatorColorStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColorStrategy {
     
     switch (species) {
       case PredatorSpecies.Horse:
@@ -566,7 +566,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(species: BoidSpecies, _flags: StyleFlags): ColourStrategy {
+  getBoidColorStrategy(species: BoidSpecies, _flags: StyleFlags): ColorStrategy {
     // Nature scene is always organic — baseColor uses each species' nature
     // plumage, songbirds get individual HSL variation, and the small-bird
     // species render through a baked body/wing/tail vertex gradient.
@@ -611,7 +611,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(_flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+  getParrotColorStrategy(_flags: StyleFlags, bakedWingPalette: boolean): ColorStrategy {
     const parrotConfig = NATURE_SPECIES_CONFIG[BoidSpecies.Multicolor];
     return {
       baseColor: parrotConfig.natureBase,

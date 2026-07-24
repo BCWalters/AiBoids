@@ -20,7 +20,7 @@ import {
   type SceneEnvironmentToggles,
   type ScenePresentationSettings,
   type SceneRendererHooks,
-  type ColourStrategy,
+  type ColorStrategy,
   type MotionConfig,
   type PredatorRenderFlags,
   type StyleFlags,
@@ -293,7 +293,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getPredatorColourStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColourStrategy {
+  getPredatorColorStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColorStrategy {
     switch (species) {
       case PredatorSpecies.Horse: {
         const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
@@ -357,7 +357,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(species: BoidSpecies, _flags: StyleFlags): ColourStrategy {
+  getBoidColorStrategy(species: BoidSpecies, _flags: StyleFlags): ColorStrategy {
     // Fishtank boids have simpler coloring than nature (no panic jitter)
     const config = FISHTANK_SPECIES_CONFIG[species];
     const isParrot = species === BoidSpecies.Multicolor;
@@ -392,7 +392,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(_flags: StyleFlags, _bakedWingPalette: boolean): ColourStrategy {
+  getParrotColorStrategy(_flags: StyleFlags, _bakedWingPalette: boolean): ColorStrategy {
     const parrotConfig = FISHTANK_SPECIES_CONFIG[BoidSpecies.Multicolor];
     return {
       baseColor: parrotConfig.baseColor,

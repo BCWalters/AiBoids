@@ -122,10 +122,10 @@ export class ControlPanel {
   // (keyed by a stable section id, not the translated title — titles
   // change with language). Without this, buildSection's `defaultOpen`
   // was re-applied on every single render() call, so any change that
-  // triggers a full re-render (e.g. selecting a Model Gallery creature,
+  // triggers a full re-render (e.g. selecting a Creature Gallery creature,
   // which calls refresh() from main.ts) would snap every section back to
   // its default state, closing sections the user had deliberately opened
-  // — most noticeably the Model Gallery section itself right after
+  // — most noticeably the Creature Gallery section itself right after
   // picking a creature from its own dropdown.
   private sectionOpenState = new Map<string, boolean>();
 
@@ -160,7 +160,7 @@ export class ControlPanel {
   /**
    * Public re-render, for callers outside the panel (main.ts) that
    * change params in ways the panel needs to reflect immediately — e.g.
-   * entering/exiting the Model Gallery, which rewrites several
+   * entering/exiting the Creature Gallery, which rewrites several
    * population/mode/style params at once outside of any control the
    * panel itself owns.
    */
@@ -177,10 +177,10 @@ export class ControlPanel {
 
     if (params.mode === '3d') {
       this.container.appendChild(this.buildVisualStyleToggle());
-      this.container.appendChild(this.buildSection('modelGallery', t('sectionModelGallery'), [this.buildGalleryDropdown()], false));
+      this.container.appendChild(this.buildSection('creatureGallery', t('sectionCreatureGallery'), [this.buildCreatureGalleryDropdown()], false));
     }
 
-    // Population sliders are greyed out (not removed) while the Model
+    // Population sliders are greyed out (not removed) while the Creature
     // Gallery has isolated a single creature — main.ts zeroes these
     // params itself while active, so a live slider drag would otherwise
     // silently fight the isolation until Gallery is exited.
@@ -376,7 +376,7 @@ export class ControlPanel {
   }
 
   /**
-   * Model Gallery: isolates a single creature front-and-center (all
+   * Creature Gallery: isolates a single creature front-and-center (all
    * other populations temporarily zeroed, sim frozen, camera framed on
    * it), for inspecting/orbiting/screenshotting one model's geometry
    * cleanly — reused across creature kinds so any future addition (e.g.
@@ -384,7 +384,7 @@ export class ControlPanel {
    * "None" restores exactly the population/mode/style params that were
    * active before entering (see main.ts's enterGallery/exitGallery).
    */
-  private buildGalleryDropdown(): HTMLElement {
+  private buildCreatureGalleryDropdown(): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-row';
 

@@ -20,11 +20,11 @@ export interface SpeciesColorSet {
  * to that family's own straight-line applicator (see src/render/color/). */
 export type CreatureColorMode = 'parrot' | 'smallBird' | 'dragon' | 'speciesTint' | 'songbird' | 'flat';
 
-/** All colour-related parameters for one `updateInstances` call.
+/** All color-related parameters for one `updateInstances` call.
  * Bundled as a named-field object so call sites are self-documenting and
  * immune to positional-parameter order bugs.
  */
-export interface ColourStrategy {
+export interface ColorStrategy {
   baseColor: THREE.Color;
   highlightColor: THREE.Color;
   getIntensity: (creature: Predator | Boid) => number;
@@ -219,11 +219,11 @@ export interface SceneRendererHooks {
   getBloodSplatterScale: () => number;
   mapPositionToRenderSpace: (x: number, y: number, z: number, target: Vector3) => void;
   getCreatureMaterialDefaults: () => SceneCreatureMaterialDefaults;
-  getPredatorColourStrategy: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => ColourStrategy;
+  getPredatorColorStrategy: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => ColorStrategy;
   getPredatorMotionConfig: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => MotionConfig;
-  getBoidColourStrategy: (species: BoidSpecies, flags: StyleFlags) => ColourStrategy;
+  getBoidColorStrategy: (species: BoidSpecies, flags: StyleFlags) => ColorStrategy;
   getBoidMotionConfig: (species: BoidSpecies, flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags) => MotionConfig;
-  getParrotColourStrategy: (flags: StyleFlags, bakedWingPalette: boolean) => ColourStrategy;
+  getParrotColorStrategy: (flags: StyleFlags, bakedWingPalette: boolean) => ColorStrategy;
   getParrotGeometryProfile: (creature: Boid | Predator, flags: StyleFlags) => string;
   getParrotProfileNames: (flags: StyleFlags) => string[];
   getParrotProfileInstanceConfig: (profile: string, flags: StyleFlags) => SceneBoidInstanceConfig;

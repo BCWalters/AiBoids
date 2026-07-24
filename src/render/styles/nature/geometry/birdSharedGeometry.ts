@@ -12,7 +12,7 @@ import { extrudeRingGeometry } from '../../../geometry/sharedGeometry';
  */
 
 /**
- * Root→tip gradient colours for a tail fan. Kept as a tiny standalone
+ * Root→tip gradient colors for a tail fan. Kept as a tiny standalone
  * interface (rather than taking the small-bird SmallBirdPalette) so this
  * shared helper has no dependency back on any one species' palette type.
  */
@@ -199,8 +199,8 @@ export function buildHookedBeakGeometry(
  *    default tail half-width lines up with the body it trails (small birds
  *    pass their BODY_NARROW_SCALE); defaults to 1 when a `halfWidth` is
  *    supplied directly and the scale is irrelevant.
- *  - `gradient` bakes a root→tip vertex-colour gradient; omit for a flat
- *    tail that takes its colour from the per-instance body tint instead.
+ *  - `gradient` bakes a root→tip vertex-color gradient; omit for a flat
+ *    tail that takes its color from the per-instance body tint instead.
  */
 export function buildTailGeometry(
   length: number,
