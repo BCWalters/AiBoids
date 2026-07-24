@@ -12,7 +12,12 @@ import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
 import { createButterflyfishGeometries } from '../styles/fishtank/geometry/butterflyfishGeometry';
 import { createSeaHorseGeometries } from '../styles/fishtank/geometry/seaHorseGeometry';
-import { createFishGeometries } from '../styles/fishtank/geometry/smallFishGeometry';
+import {
+  createPlainFishGeometries,
+  createGoldfishGeometries,
+  createClownfishGeometries,
+  createBlueTangGeometries,
+} from '../styles/fishtank/geometry/smallFishGeometry';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -78,42 +83,30 @@ const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray
 // duplicated here so the fishtank can diverge without touching nature).
 interface FishtankSpeciesConfig {
   baseColor: THREE.Color;
-  colors?: SpeciesColorSet;
   beakColor?: THREE.Color;
   tailSwayPivotY?: number;
-  useSmallGeometry: boolean;
-  useParrotGeometry?: boolean;
 }
 
 const FISHTANK_SPECIES_CONFIG: Record<BoidSpecies, FishtankSpeciesConfig> = {
   [BoidSpecies.Normal]: {
     baseColor: new THREE.Color(0xab8f68),
     beakColor: new THREE.Color(0x6b5a4a),
-    useSmallGeometry: true,
   },
   [BoidSpecies.Multicolor]: {
     baseColor: new THREE.Color(0xffffff),
-    useParrotGeometry: true,
     tailSwayPivotY: -4.186,
-    useSmallGeometry: false,
   },
   [BoidSpecies.Gold]: {
     baseColor: new THREE.Color(0xf5d327),
-    colors: { body: new THREE.Color(0xf5d327), wing: new THREE.Color(0x1c1c1c), tail: new THREE.Color(0x1c1c1c) },
     beakColor: new THREE.Color(0xf07820),
-    useSmallGeometry: false,
   },
   [BoidSpecies.Red]: {
     baseColor: new THREE.Color(0xcc2936),
-    colors: { body: new THREE.Color(0xcc2936), wing: new THREE.Color(0x8f1f28), tail: new THREE.Color(0x3d0f14) },
     beakColor: new THREE.Color(0xe84040),
-    useSmallGeometry: false,
   },
   [BoidSpecies.Blue]: {
     baseColor: new THREE.Color(0x3b6fa0),
-    colors: { body: new THREE.Color(0x3b6fa0), wing: new THREE.Color(0xdfe8ef), tail: new THREE.Color(0x1c3350) },
     beakColor: new THREE.Color(0x8c8c8c),
-    useSmallGeometry: false,
   },
 };
 
@@ -150,17 +143,25 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   private readonly deps: FishtankSceneRendererDependencies;
 
   // Fishtank owns and disposes its own creature geometries, sized from
-  // FISHTANK_CREATURE_SIZES. No other scene knows about these.
-  private readonly boidGeometries: CreatureGeometries;
-  private readonly sparrowGeometries: CreatureGeometries;
+  // FISHTANK_CREATURE_SIZES. No other scene knows about these. Each small-fish
+  // species has its own fully color-baked geometry so it reads as that real
+  // fish (see smallFishGeometry.ts).
+  private readonly plainFishGeometries: CreatureGeometries;
+  private readonly goldfishGeometries: CreatureGeometries;
+  private readonly clownfishGeometries: CreatureGeometries;
+  private readonly blueTangGeometries: CreatureGeometries;
   private readonly butterflyfishGeometries: CreatureGeometries;
   private readonly sharkPredatorGeometries: CreatureGeometries;
   private readonly unicornPredatorGeometries: CreatureGeometries;
 
   constructor(deps: FishtankSceneRendererDependencies) {
     this.deps = deps;
-    this.boidGeometries = createFishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
-    this.sparrowGeometries = createFishGeometries(FISHTANK_CREATURE_SIZES.sparrow.length, FISHTANK_CREATURE_SIZES.sparrow.width);
+    // Plain "Fish" stays small/darting (sparrow size); the named aquarium
+    // species use the standard fish size.
+    this.plainFishGeometries = createPlainFishGeometries(FISHTANK_CREATURE_SIZES.sparrow.length, FISHTANK_CREATURE_SIZES.sparrow.width);
+    this.goldfishGeometries = createGoldfishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
+    this.clownfishGeometries = createClownfishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
+    this.blueTangGeometries = createBlueTangGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
     this.butterflyfishGeometries = createButterflyfishGeometries(FISHTANK_CREATURE_SIZES.butterflyfish.length, FISHTANK_CREATURE_SIZES.butterflyfish.width);
     this.sharkPredatorGeometries = createSharkGeometries(FISHTANK_CREATURE_SIZES.shark.length, FISHTANK_CREATURE_SIZES.shark.width);
     this.unicornPredatorGeometries = createSeaHorseGeometries(FISHTANK_CREATURE_SIZES.seahorse.length, FISHTANK_CREATURE_SIZES.seahorse.width);
@@ -358,19 +359,33 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getBoidColorStrategy(species: BoidSpecies, _flags: StyleFlags): ColorStrategy {
-    // Fishtank boids have simpler coloring than nature (no panic jitter)
+    // Fishtank boids have simpler coloring than nature (no panic jitter).
     const config = FISHTANK_SPECIES_CONFIG[species];
     const isParrot = species === BoidSpecies.Multicolor;
+    if (isParrot) {
+      // Butterflyfish: per-variant striped tint over the baked stripe geometry.
+      return {
+        baseColor: config.baseColor,
+        highlightColor: new THREE.Color(0xffff00),
+        getIntensity: (creature) => (creature as Boid).panicLevel,
+        individualVariation: false,
+        getSpeciesColors: (creature) => this.getButterflyfishColorVariant(creature),
+        beakColor: config.beakColor,
+        colorMode: 'speciesTint',
+      };
+    }
+    // The four small fish (Fish / Goldfish / Clownfish / Blue Tang) bake their
+    // full multi-hue colors into their geometry, so the instance color just
+    // passes white through (small-bird color path) to show the baked pattern.
     return {
       baseColor: config.baseColor,
-      highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
+      highlightColor: new THREE.Color(0xffff00),
       getIntensity: (creature) => (creature as Boid).panicLevel,
-      individualVariation: false, // Fishtank fish have consistent coloring
-      getSpeciesColors: isParrot
-        ? (creature) => this.getButterflyfishColorVariant(creature)
-        : (config.colors ? () => config.colors! : undefined),
+      individualVariation: false,
+      getSpeciesColors: undefined,
       beakColor: config.beakColor,
-      colorMode: (isParrot || config.colors) ? 'speciesTint' : 'flat',
+      bakedBodyGradient: true,
+      colorMode: 'smallBird',
     };
   }
 
@@ -427,14 +442,18 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getBoidInstanceConfig(species: BoidSpecies, _flags: StyleFlags): SceneBoidInstanceConfig {
-    const config = FISHTANK_SPECIES_CONFIG[species];
-    if (config.useSmallGeometry) {
-      return { geometries: this.sparrowGeometries, bodyVertexColors: true };
+    switch (species) {
+      case BoidSpecies.Gold:
+        return { geometries: this.goldfishGeometries, bodyVertexColors: true };
+      case BoidSpecies.Red:
+        return { geometries: this.clownfishGeometries, bodyVertexColors: true };
+      case BoidSpecies.Blue:
+        return { geometries: this.blueTangGeometries, bodyVertexColors: true };
+      case BoidSpecies.Multicolor:
+        return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
+      default:
+        return { geometries: this.plainFishGeometries, bodyVertexColors: true };
     }
-    if (config.useParrotGeometry) {
-      return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
-    }
-    return { geometries: this.boidGeometries, bodyVertexColors: true };
   }
 
   getPredatorInstanceConfig(
@@ -481,8 +500,10 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   dispose(): void {
     this.deps.fishtankEnv.dispose();
-    disposeCreatureGeometries(this.boidGeometries);
-    disposeCreatureGeometries(this.sparrowGeometries);
+    disposeCreatureGeometries(this.plainFishGeometries);
+    disposeCreatureGeometries(this.goldfishGeometries);
+    disposeCreatureGeometries(this.clownfishGeometries);
+    disposeCreatureGeometries(this.blueTangGeometries);
     disposeCreatureGeometries(this.butterflyfishGeometries);
     disposeCreatureGeometries(this.sharkPredatorGeometries);
     disposeCreatureGeometries(this.unicornPredatorGeometries);
