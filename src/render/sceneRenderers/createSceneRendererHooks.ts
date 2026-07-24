@@ -209,7 +209,18 @@ export interface SceneRendererHooks {
     wasFishtank: boolean,
   ) => void;
   updateEnvironment: (elapsed: number) => void;
-  updateTransientEffects: (sim: Simulation, elapsed: number) => void;
+  /**
+   * Per-frame hook for scene-specific special creature effects (e.g. nature
+   * dragons breathing fire). `dragonDisplayQuats` carries the smoothed
+   * display orientations Renderer3D computes for 'dragon'-upright creatures
+   * during instance update, which effect emitters can pose against. Scenes
+   * without special creature effects (arcade/fishtank) implement a no-op.
+   */
+  updateSpecialCreatureEffects: (
+    sim: Simulation,
+    elapsed: number,
+    dragonDisplayQuats: Map<number, THREE.Quaternion>,
+  ) => void;
   configureEnvironmentAnchors: (sim: Simulation, center: Vector3, maxDim: number) => void;
   updateFrameAnchors: (sim: Simulation) => void;
   updateCameraClamp: (sim: Simulation) => void;

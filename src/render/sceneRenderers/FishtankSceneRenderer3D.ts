@@ -167,7 +167,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     this.deps.fishtankEnv.update(elapsed);
   }
 
-  updateTransientEffects(_sim: Simulation, _elapsed: number): void {}
+  updateSpecialCreatureEffects(_sim: Simulation, _elapsed: number, _dragonDisplayQuats: Map<number, THREE.Quaternion>): void {}
 
   configureEnvironmentAnchors(sim: Simulation, _center: THREE.Vector3, _maxDim: number): void {
     placeFishtankEnvironment(this.deps.fishtankEnv, sim.width, sim.height, params.worldDepth);

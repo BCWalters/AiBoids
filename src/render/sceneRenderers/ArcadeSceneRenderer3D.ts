@@ -157,7 +157,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 
   updateEnvironment(_elapsed: number): void {}
 
-  updateTransientEffects(_sim: Simulation, _elapsed: number): void {}
+  updateSpecialCreatureEffects(_sim: Simulation, _elapsed: number, _dragonDisplayQuats: Map<number, THREE.Quaternion>): void {}
 
   configureEnvironmentAnchors(_sim: Simulation, _center: THREE.Vector3, _maxDim: number): void {}
 

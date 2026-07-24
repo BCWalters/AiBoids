@@ -13,6 +13,8 @@ import { createHawkGeometries } from '../styles/nature/geometry/hawkGeometry';
 import { createParrotGeometries } from '../styles/nature/geometry/parrotGeometry';
 import { createRealisticBirdGeometries } from '../styles/nature/geometry/smallBirdGeometry';
 import { createUnicornGeometries } from '../styles/nature/geometry/unicornGeometry';
+import { DragonFireBreathController } from '../dragonFireBreathController';
+import type { FireBreathEffects } from '../styles/nature/fireBreath';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -255,7 +257,7 @@ interface NatureSceneRendererDependencies {
   driftingClouds: DriftingClouds;
   fishtankEnv: { setVisible: (visible: boolean) => void };
   natureEnv: NatureEnvironment;
-  updateTransientEffects: (sim: Simulation, elapsed: number) => void;
+  fireBreathEffects: FireBreathEffects;
 }
 
 export class NatureSceneRenderer3D implements SceneRendererHooks {
@@ -276,8 +278,19 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   private readonly dragonPredatorGeometries: CreatureGeometries;
   private readonly unicornPredatorGeometries: CreatureGeometries;
 
+  // Nature owns its dragon fire-breath effect: the scene knows its creatures
+  // breathe fire, so Renderer3D doesn't have to. Built from nature's own
+  // dragon size + mouth transform and the shared fire-breath effect pool.
+  private readonly dragonFireBreathController: DragonFireBreathController;
+
   constructor(deps: NatureSceneRendererDependencies) {
     this.deps = deps;
+
+    this.dragonFireBreathController = new DragonFireBreathController({
+      fireBreathEffects: deps.fireBreathEffects,
+      dragonMouth: NATURE_DRAGON_MOUTH,
+      dragonLength: NATURE_CREATURE_SIZES.dragon.length,
+    });
 
     this.boidGeometries = createRealisticBirdGeometries(NATURE_CREATURE_SIZES.boid.length, NATURE_CREATURE_SIZES.boid.width);
     this.sparrowGeometries = createRealisticBirdGeometries(
@@ -364,8 +377,17 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     this.deps.natureEnv.update(elapsed);
   }
 
-  updateTransientEffects(sim: Simulation, elapsed: number): void {
-    this.deps.updateTransientEffects(sim, elapsed);
+  updateSpecialCreatureEffects(
+    sim: Simulation,
+    elapsed: number,
+    dragonDisplayQuats: Map<number, THREE.Quaternion>,
+  ): void {
+    this.dragonFireBreathController.update(
+      sim.predators,
+      elapsed,
+      dragonDisplayQuats,
+      params.predatorMaxSpeed,
+    );
   }
 
   configureEnvironmentAnchors(_sim: Simulation, center: THREE.Vector3, maxDim: number): void {

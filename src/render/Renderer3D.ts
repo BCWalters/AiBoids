@@ -47,8 +47,6 @@ import {
   type RendererBoidSpeciesConfig,
 } from './boidSpeciesRegistry';
 import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';import { createRendererSceneRenderers } from './sceneRendererFactory';
-import { NATURE_CREATURE_SIZES, NATURE_DRAGON_MOUTH } from './sceneRenderers/NatureSceneRenderer3D';
-import { DragonFireBreathController } from './dragonFireBreathController';
 import { UfoRenderer } from './UfoRenderer';
 
 // Wing-flap tuning. NOTE: the actual flap frequency/amplitude values are owned
@@ -362,7 +360,6 @@ export class Renderer3D {
   private pendingShaderWarmupStyles = new Set<VisualStyle>();
 
   private lastSeenCatchId = 0;
-  private dragonFireBreathController!: DragonFireBreathController;
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
   private flapQuat = new THREE.Quaternion();
@@ -450,11 +447,6 @@ export class Renderer3D {
 
     this.sceneAssets = createRendererSceneAssets(this.scene, this.renderer);
     this.ufoRenderer = new UfoRenderer(this.sceneAssets.ufoVisuals);
-    this.dragonFireBreathController = new DragonFireBreathController({
-      fireBreathEffects: this.sceneAssets.fireBreathEffects,
-      dragonMouth: NATURE_DRAGON_MOUTH,
-      dragonLength: NATURE_CREATURE_SIZES.dragon.length,
-    });
 
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -473,7 +465,6 @@ export class Renderer3D {
       controls: this.controls,
       fishtankCenter: this.fishtankCenter,
       sceneAssets: this.sceneAssets,
-      onUpdateTransientEffects: (sim, elapsed) => this.spawnFireFromDragons(sim, elapsed),
     });
   }
 
@@ -1885,15 +1876,6 @@ export class Renderer3D {
     }
   }
 
-  private spawnFireFromDragons(sim: Simulation, elapsed: number): void {
-    this.dragonFireBreathController.update(
-      sim.predators,
-      elapsed,
-      this.dragonDisplayQuats,
-      params.predatorMaxSpeed,
-    );
-  }
-
   resize(width: number, height: number): void {
     this.renderer.setSize(width, height, false);
     this.composer.setSize(width, height);
@@ -2312,7 +2294,7 @@ export class Renderer3D {
   ): void {
     this.spawnBloodFromCatches(sim, sceneRenderer);
     this.sceneAssets.bloodEffects.update(dt);
-    sceneRenderer.updateTransientEffects(sim, elapsed);
+    sceneRenderer.updateSpecialCreatureEffects(sim, elapsed, this.dragonDisplayQuats);
     this.sceneAssets.fireBreathEffects.update(dt);
     this.ufoRenderer.update(sim, dt, sceneRenderer);
   }
