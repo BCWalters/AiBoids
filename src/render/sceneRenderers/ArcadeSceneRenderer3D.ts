@@ -3,27 +3,28 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
-import type { Boid, BoidSpecies } from '../../sim/Boid';
+import { type Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { NatureEnvironment } from '../styles/nature/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
-import type { SpeciesColorSet } from './createSceneRendererHooks';
-import type {
-  FishtankBounds,
-  SceneCreatureMaterialDefaults,
-  SceneEnvironmentToggles,
-  ScenePresentationSettings,
-  SceneRendererHooks,
-  ColourStrategy,
-  MotionConfig,
-  PredatorRenderFlags,
-  StyleFlags,
-  BoidMotionStyleFlags,
-  BoidSpeciesConfig,
-  SceneBoidInstanceConfig,
-  ScenePredatorInstanceConfig,
-  CreatureLabels,
+import {
+  PredatorSpecies,
+  type SpeciesColorSet,
+  type FishtankBounds,
+  type SceneCreatureMaterialDefaults,
+  type SceneEnvironmentToggles,
+  type ScenePresentationSettings,
+  type SceneRendererHooks,
+  type ColourStrategy,
+  type MotionConfig,
+  type PredatorRenderFlags,
+  type StyleFlags,
+  type BoidMotionStyleFlags,
+  type BoidSpeciesConfig,
+  type SceneBoidInstanceConfig,
+  type ScenePredatorInstanceConfig,
+  type CreatureLabels,
 } from './createSceneRendererHooks';
 
 // --- Arcade style color constants: bright, saturated emissive colors for bloom effect
@@ -175,16 +176,16 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getPredatorColourStrategy(kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
-    switch (kind) {
-      case 'horse':
+  getPredatorColourStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColourStrategy {
+    switch (species) {
+      case PredatorSpecies.Horse:
         return {
           baseColor: ARCADE_UNICORN_BASE,
           highlightColor: ARCADE_UNICORN_HUNT,
           getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
         };
       
-      case 'normal':
+      case PredatorSpecies.Normal:
         return {
           baseColor: ARCADE_PREDATOR_BASE,
           highlightColor: ARCADE_PREDATOR_HUNT,
@@ -192,13 +193,13 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
         };
       
       default:
-        throw new Error(`Unknown predator kind: ${kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
-  getPredatorMotionConfig(kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
-    switch (kind) {
-      case 'horse':
+  getPredatorMotionConfig(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): MotionConfig {
+    switch (species) {
+      case PredatorSpecies.Horse:
         return {
           flapFrequency: ARCADE_UNICORN_FLAP_FREQUENCY,
           flapIdleAmplitude: ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE,
@@ -210,7 +211,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: 1,
         };
       
-      case 'normal':
+      case PredatorSpecies.Normal:
         return {
           flapFrequency: ARCADE_FLAP_FREQUENCY,
           flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
@@ -222,11 +223,11 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
         };
       
       default:
-        throw new Error(`Unknown predator kind: ${kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
-  getBoidColourStrategy(species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+  getBoidColourStrategy(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
     // Arcade has bright, simple coloring. Each species uses its arcadeBase color.
     // Multicolor ("Rainbow") boids get a per-entity neon variant for visual variety.
     // config.colors is nature-specific plumage and must NOT be used here.
@@ -234,8 +235,8 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       baseColor: config.arcadeBase,
       highlightColor: ARCADE_BOID_PANIC,
       getIntensity: (entity) => (entity as Boid).panicLevel,
-      individualVariation: species !== 'multicolor' && !!config.colors,
-      getSpeciesColors: species === 'multicolor'
+      individualVariation: species !== BoidSpecies.Multicolor && !!config.colors,
+      getSpeciesColors: species === BoidSpecies.Multicolor
         ? (entity) => {
             const idx = Math.floor(arcadeIdHash(entity.id, 42) * ARCADE_MULTICOLOR_VARIANTS.length) % ARCADE_MULTICOLOR_VARIANTS.length;
             return ARCADE_MULTICOLOR_VARIANTS[idx];
@@ -246,7 +247,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getBoidMotionConfig(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+  getBoidMotionConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
     const tailSwayPivot = config.tailSwayPivotY ?? 0;
     
     return {
@@ -299,20 +300,20 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   }
 
   getPredatorInstanceConfig(
-    kind: 'normal' | 'horse',
+    species: PredatorSpecies,
     _flags: StyleFlags,
     _renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
-    switch (kind) {
-      case 'normal':
-      case 'horse':
+    switch (species) {
+      case PredatorSpecies.Normal:
+      case PredatorSpecies.Horse:
         return {
           geometries: this.deps.arcadePredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: false,
         };
       default:
-        throw new Error(`Unknown predator kind: ${kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 

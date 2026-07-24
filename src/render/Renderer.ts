@@ -1,5 +1,6 @@
 import { params } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
+import { PredatorSpecies } from '../sim/Predator';
 
 const BOID_LENGTH = 9;
 const BOID_WIDTH = 5;
@@ -162,7 +163,7 @@ export class Renderer {
     }
 
     for (const predator of sim.predators) {
-      const isHorse = predator.kind === 'horse';
+      const isHorse = predator.species === PredatorSpecies.Horse;
       this.drawTriangle(
         predator.position.x,
         predator.position.y,

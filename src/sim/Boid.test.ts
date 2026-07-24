@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { Boid, DYING_DURATION } from './Boid';
-import { Predator } from './Predator';
+import { Boid, DYING_DURATION, BoidSpecies } from './Boid';
+import { Predator, PredatorSpecies } from './Predator';
 import { params, resetParams } from './params';
 import { create, distance } from './vector';
 import type { WorldBounds } from './boundary';
@@ -55,18 +55,18 @@ describe('Boid.update', () => {
   });
 
   it('a different-species neighbor does not contribute to alignment/cohesion', () => {
-    const a = new Boid(create(0, 0, 0), create(0, 0, 0), 'normal');
+    const a = new Boid(create(0, 0, 0), create(0, 0, 0), BoidSpecies.Normal);
     // Far enough to be outside interspeciesAvoidRadius (default 45) so
     // only alignment/cohesion could move it, and those must be skipped
     // for a different species.
-    const other = new Boid(create(60, 0, 0), create(0, 50, 0), 'multicolor');
+    const other = new Boid(create(60, 0, 0), create(0, 50, 0), BoidSpecies.Multicolor);
     a.update(1 / 60, [a, other], [], bounds);
     expect(a.velocity).toEqual({ x: 0, y: 0, z: 0 });
   });
 
   it('a nearby predator triggers a flee force away from it', () => {
     const a = new Boid(create(0, 0, 0), create(0, 0, 0));
-    const predator = new Predator(create(20, 0, 0), create(0, 0, 0), 'normal');
+    const predator = new Predator(create(20, 0, 0), create(0, 0, 0), PredatorSpecies.Normal);
     a.update(1 / 60, [a], [predator], bounds);
     expect(a.velocity.x).toBeLessThan(0);
     expect(a.panicLevel).toBeGreaterThan(0);
@@ -74,11 +74,11 @@ describe('Boid.update', () => {
 
   it('a horse "predator" nearby raises panicLevel far less than a normal predator would', () => {
     const a1 = new Boid(create(0, 0, 0), create(0, 0, 0));
-    const normalPred = new Predator(create(20, 0, 0), create(0, 0, 0), 'normal');
+    const normalPred = new Predator(create(20, 0, 0), create(0, 0, 0), PredatorSpecies.Normal);
     a1.update(1 / 60, [a1], [normalPred], bounds);
 
     const a2 = new Boid(create(0, 0, 0), create(0, 0, 0));
-    const horse = new Predator(create(20, 0, 0), create(0, 0, 0), 'horse');
+    const horse = new Predator(create(20, 0, 0), create(0, 0, 0), PredatorSpecies.Horse);
     a2.update(1 / 60, [a2], [horse], bounds);
 
     expect(a2.panicLevel).toBeLessThan(a1.panicLevel);
@@ -86,7 +86,7 @@ describe('Boid.update', () => {
 
   it('a predator outside panicRadius has no effect', () => {
     const a = new Boid(create(0, 0, 0), create(1, 0, 0));
-    const predator = new Predator(create(10000, 0, 0), create(0, 0, 0), 'normal');
+    const predator = new Predator(create(10000, 0, 0), create(0, 0, 0), PredatorSpecies.Normal);
     a.update(1 / 60, [a], [predator], bounds);
     expect(a.panicLevel).toBe(0);
   });

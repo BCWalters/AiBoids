@@ -3,28 +3,29 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
-import type { Boid, BoidSpecies } from '../../sim/Boid';
+import { type Boid, BoidSpecies } from '../../sim/Boid';
 import { computeFishtankRoomBounds, placeFishtankEnvironment, TANK_VISUAL_SCALE } from '../styles/fishtank/environment';
 import { getSharkTailPivotY } from '../styles/fishtank/geometry/sharkGeometry';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
-import type {
-  FishtankBounds,
-  SceneCreatureMaterialDefaults,
-  SceneEnvironmentToggles,
-  ScenePresentationSettings,
-  SceneRendererHooks,
-  ColourStrategy,
-  MotionConfig,
-  PredatorRenderFlags,
-  StyleFlags,
-  BoidMotionStyleFlags,
-  BoidSpeciesConfig,
-  SceneBoidInstanceConfig,
-  ScenePredatorInstanceConfig,
-  SpeciesColorSet,
-  CreatureLabels,
+import {
+  PredatorSpecies,
+  type FishtankBounds,
+  type SceneCreatureMaterialDefaults,
+  type SceneEnvironmentToggles,
+  type ScenePresentationSettings,
+  type SceneRendererHooks,
+  type ColourStrategy,
+  type MotionConfig,
+  type PredatorRenderFlags,
+  type StyleFlags,
+  type BoidMotionStyleFlags,
+  type BoidSpeciesConfig,
+  type SceneBoidInstanceConfig,
+  type ScenePredatorInstanceConfig,
+  type SpeciesColorSet,
+  type CreatureLabels,
 } from './createSceneRendererHooks';
 
 // --- Fishtank style color constants
@@ -209,9 +210,9 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getPredatorColourStrategy(_kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
-    switch (_kind) {
-      case 'horse': {
+  getPredatorColourStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColourStrategy {
+    switch (species) {
+      case PredatorSpecies.Horse: {
         const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
         return {
           baseColor: new THREE.Color(0xf0d070),
@@ -221,7 +222,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         };
       }
       
-      case 'normal':
+      case PredatorSpecies.Normal:
         return {
           baseColor: SHARK_PREDATOR_BASE,
           highlightColor: SHARK_PREDATOR_HUNT,
@@ -229,13 +230,13 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         };
       
       default:
-        throw new Error(`Unknown predator kind: ${_kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
-  getPredatorMotionConfig(_kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
-    switch (_kind) {
-      case 'horse':
+  getPredatorMotionConfig(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): MotionConfig {
+    switch (species) {
+      case PredatorSpecies.Horse:
         return {
           flapFrequency: 3.2,
           flapIdleAmplitude: 0.22,
@@ -247,7 +248,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
         };
       
-      case 'normal':
+      case PredatorSpecies.Normal:
         // Sharks use distinct tail/fin motion
         return {
           flapFrequency: SHARK_FLAP_FREQUENCY,
@@ -265,14 +266,14 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         };
       
       default:
-        throw new Error(`Unknown predator kind: ${_kind}`);
+        throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
-  getBoidColourStrategy(species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+  getBoidColourStrategy(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
     // Fishtank boids have simpler coloring than nature (no panic jitter)
     const getColors = config.getColors;
-    const isParrot = species === 'multicolor';
+    const isParrot = species === BoidSpecies.Multicolor;
     return {
       baseColor: config.natureBase, // Use nature base in fishtank (they're aquatic variants)
       highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
@@ -288,7 +289,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getBoidMotionConfig(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+  getBoidMotionConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
     const tailSwayPivot = config.tailSwayPivotY ?? 0;
     
     return {
