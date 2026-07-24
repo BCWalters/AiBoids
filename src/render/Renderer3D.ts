@@ -1107,7 +1107,7 @@ export class Renderer3D {
 
   private reconcileBoidInstanceSets(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const sceneRenderer = this.getSceneRenderer(style);
-    const parrotProfileNames = sceneRenderer.getParrotProfileNames(flags);
+    const parrotProfileNames = this.getProfileNamesForSpecies(PARROT_SPECIES, sceneRenderer, flags);
     const hasParrotProfiles = parrotProfileNames.length > 0;
     const countsBySpecies = this.getBoidCountsBySpecies(sim.boids);
     const parrotProfileCounts = hasParrotProfiles
@@ -1147,6 +1147,15 @@ export class Renderer3D {
       countsBySpecies.set(boid.species, (countsBySpecies.get(boid.species) ?? 0) + 1);
     }
     return countsBySpecies;
+  }
+
+  private getProfileNamesForSpecies(
+    species: BoidSpecies,
+    sceneRenderer: SceneRendererHooks,
+    flags: StyleFlags,
+  ): readonly string[] {
+    if (species !== PARROT_SPECIES) return [];
+    return sceneRenderer.getParrotProfileNames(flags);
   }
 
   private getParrotProfileCounts(
@@ -2599,7 +2608,7 @@ export class Renderer3D {
     const instances = this.speciesInstances.get(config.species);
     if (!instances) return;
     const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
-    const parrotProfileNames = config.species === PARROT_SPECIES ? sceneRenderer.getParrotProfileNames(flags) : [];
+    const parrotProfileNames = this.getProfileNamesForSpecies(config.species, sceneRenderer, flags);
     const isProfiledParrot = parrotProfileNames.length > 0;
     if (isProfiledParrot) {
       this.updateProfiledParrotInstances(config, instances, entities, elapsed, dt, flags, sceneRenderer, parrotProfileNames);
