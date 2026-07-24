@@ -503,6 +503,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           baseColor: DRAGON_PREDATOR_BASE,
           highlightColor: DRAGON_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
+          colorMode: 'dragon',
         };
       
       case PredatorSpecies.Normal:
