@@ -217,16 +217,16 @@ export class Simulation {
     }
   }
 
-  /** Adds/removes boids and predators to match params.<species>Count / predatorCount / unicornCount. */
+  /** Adds/removes boids and predators to match params.<species>Count / predatorCount / horseCount. */
   syncPopulation(): void {
-    this.syncSpecies('sparrow', params.boidCount);
-    this.syncSpecies('parrot', params.parrotCount);
-    this.syncSpecies('goldfinch', params.goldfinchCount);
-    this.syncSpecies('cardinal', params.cardinalCount);
-    this.syncSpecies('bluejay', params.bluejayCount);
+    this.syncSpecies('normal', params.boidCount);
+    this.syncSpecies('multicolor', params.multicolorCount);
+    this.syncSpecies('gold', params.goldCount);
+    this.syncSpecies('red', params.redCount);
+    this.syncSpecies('blue', params.blueCount);
 
-    this.syncPredatorKind('hawk', params.predatorCount);
-    this.syncPredatorKind('unicorn', params.unicornCount);
+    this.syncPredatorKind('normal', params.predatorCount);
+    this.syncPredatorKind('horse', params.horseCount);
   }
 
   /** Resets all entities to fresh random positions (used by the Reset button). */
@@ -275,9 +275,9 @@ export class Simulation {
     if (!params.predatorCatchEnabled) return;
 
     for (const predator of this.predators) {
-      // Unicorns gently chase boids but never catch them — see
+      // Horse-kind predators gently chase boids but never catch them — see
       // Predator.kind's doc comment.
-      if (predator.kind === 'unicorn') continue;
+      if (predator.kind === 'horse') continue;
       if (predator.digesting) continue;
       for (const boid of this.boids) {
         if (boid.dying) continue;

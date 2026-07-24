@@ -58,6 +58,7 @@ import {
   type SceneRendererHooks,
   type StyleFlags,
   UNICORN_PREDATOR_KIND,
+  type CreatureLabels,
 } from './sceneRenderers/createSceneRendererHooks';
 import {
   NatureSceneRenderer3D,
@@ -171,7 +172,7 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // Parrot tail sway: moved to scene renderers for boid rendering
 // const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
 const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
-const PARROT_SPECIES: BoidSpecies = 'parrot';
+const PARROT_SPECIES: BoidSpecies = 'multicolor';
 const NEUTRAL_PARROT_PROFILE = 'neutral';
 
 // Dragon tail sway: on-screen references (movies/TV) almost always show a
@@ -406,15 +407,15 @@ interface BirdInstanceSet {
 }
 
 /** Per-species rendering config: which population param drives its count,
- * which colors/geometry it uses, and whether it gets the sparrow's
- * shrunken geometry, the parrot's dedicated macaw-style geometry, or the
- * shared "reference" small-bird geometry (goldfinch/cardinal/bluejay).
- * Non-'sparrow' multi-colored species use either a static `colors` set or
- * a per-entity `getColors` function (parrot only, for its multi-pattern
+ * which colors/geometry it uses, and whether it gets the 'normal' species'
+ * shrunken geometry, the 'multicolor' species' dedicated parrot-style geometry,
+ * or the shared "reference" small-bird geometry (gold/red/blue).
+ * Non-'normal' multi-colored species use either a static `colors` set or
+ * a per-entity `getColors` function ('multicolor' only, for its multi-pattern
  * flock) for distinct body/wing/tail plumage instead of one flat tint. */
 interface BoidSpeciesConfig {
   species: BoidSpecies;
-  countParam: 'boidCount' | 'parrotCount' | 'goldfinchCount' | 'cardinalCount' | 'bluejayCount';
+  countParam: 'boidCount' | 'multicolorCount' | 'goldCount' | 'redCount' | 'blueCount';
   arcadeEmissive: THREE.Color;
   arcadeBase: THREE.Color;
   natureBase: THREE.Color;
@@ -442,7 +443,7 @@ interface BoidSpeciesConfig {
 
 const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
   {
-    species: 'sparrow',
+    species: 'normal',
     countParam: 'boidCount',
     arcadeEmissive: ARCADE_BOID_EMISSIVE,
     arcadeBase: ARCADE_BOID_BASE,
@@ -453,8 +454,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureSmallBirdPalette: SPARROW_NATURE_PALETTE,
   },
   {
-    species: 'parrot',
-    countParam: 'parrotCount',
+    species: 'multicolor',
+    countParam: 'multicolorCount',
     arcadeEmissive: ARCADE_PARROT_EMISSIVE,
     arcadeBase: ARCADE_PARROT_BASE,
     natureBase: PARROT_NATURE_VARIANTS[0].colors.body,
@@ -463,8 +464,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     tailSwayPivotY: PARROT_TAIL_SWAY_PIVOT_Y,
   },
   {
-    species: 'goldfinch',
-    countParam: 'goldfinchCount',
+    species: 'gold',
+    countParam: 'goldCount',
     arcadeEmissive: ARCADE_GOLDFINCH_EMISSIVE,
     arcadeBase: ARCADE_GOLDFINCH_BASE,
     natureBase: GOLDFINCH_BODY_BASE,
@@ -475,8 +476,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureSmallBirdPalette: GOLDFINCH_NATURE_PALETTE,
   },
   {
-    species: 'cardinal',
-    countParam: 'cardinalCount',
+    species: 'red',
+    countParam: 'redCount',
     arcadeEmissive: ARCADE_CARDINAL_EMISSIVE,
     arcadeBase: ARCADE_CARDINAL_BASE,
     natureBase: CARDINAL_BODY_BASE,
@@ -487,8 +488,8 @@ const BOID_SPECIES_CONFIGS: BoidSpeciesConfig[] = [
     natureSmallBirdPalette: CARDINAL_NATURE_PALETTE,
   },
   {
-    species: 'bluejay',
-    countParam: 'bluejayCount',
+    species: 'blue',
+    countParam: 'blueCount',
     arcadeEmissive: ARCADE_BLUEJAY_EMISSIVE,
     arcadeBase: ARCADE_BLUEJAY_BASE,
     natureBase: BLUEJAY_BODY_BASE,
@@ -709,9 +710,9 @@ export class Renderer3D {
     this.natureBluejayGeometries = createRealisticBirdGeometries(
       BOID_LENGTH * NATURE_SMALL_BIRD_SIZE, BOID_WIDTH * NATURE_SMALL_BIRD_WIDTH, new THREE.Color(0x7a7060), BLUEJAY_NATURE_PALETTE,
     );
-    this.natureSmallSpeciesGeometries.set('goldfinch', this.natureGoldfinchGeometries);
-    this.natureSmallSpeciesGeometries.set('cardinal',  this.natureCardinalGeometries);
-    this.natureSmallSpeciesGeometries.set('bluejay',   this.natureBluejayGeometries);
+    this.natureSmallSpeciesGeometries.set('gold', this.natureGoldfinchGeometries);
+    this.natureSmallSpeciesGeometries.set('red',  this.natureCardinalGeometries);
+    this.natureSmallSpeciesGeometries.set('blue',  this.natureBluejayGeometries);
     // Parrot's dedicated macaw-style geometry (curved beak, rounder body,
     // long tail streamers) — only used in nature style; arcade style still
     // shares the simple flat-diamond silhouette with every other species
@@ -821,15 +822,17 @@ export class Renderer3D {
     isDragon: boolean = false,
     rainbowWings: boolean = false,
     bodyVertexColors: boolean = false,
+    bodyEmissiveOverride?: THREE.Color,
   ): BirdInstanceSet {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
     const sceneRenderer = this.getSceneRenderer(style);
     const materialDefaults = sceneRenderer.getCreatureMaterialDefaults();
     const { isFishtank } = createStyleFlags(style);
+    const bodyEmissive = bodyEmissiveOverride ?? new THREE.Color(materialDefaults.bodyEmissive);
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      emissive: materialDefaults.bodyEmissive,
+      emissive: bodyEmissive,
       emissiveIntensity: materialDefaults.bodyEmissiveIntensity,
       // Dragons get a slightly glossier (lower-roughness) finish than the
       // fully matte default nature/fishtank look — with the dark scale
@@ -1131,10 +1134,10 @@ export class Renderer3D {
       const key = `${count}:${style}`;
       if (this.speciesInstanceKeys.get(config.species) !== key) {
         this.disposeInstanceSet(this.speciesInstances.get(config.species) ?? null);
-        const { geometries, bodyVertexColors } = sceneRenderer.getBoidInstanceConfig(config.species, config, flags);
+        const { geometries, bodyVertexColors, bodyEmissiveOverride } = sceneRenderer.getBoidInstanceConfig(config.species, config, flags);
         this.speciesInstances.set(
           config.species,
-          this.buildInstanceSet(geometries, style, count, false, false, bodyVertexColors),
+          this.buildInstanceSet(geometries, style, count, false, false, bodyVertexColors, bodyEmissiveOverride),
         );
         this.speciesInstanceKeys.set(config.species, key);
       }
@@ -2409,6 +2412,11 @@ export class Renderer3D {
     // bounding sphere fill the viewport height.
     const effectiveRadius = radius * 1.15;
     return effectiveRadius / Math.tan(verticalFovRad / 2) / offsetMagnitude;
+  }
+
+  /** Returns the scene-specific creature display labels for the active visual style. */
+  getCreatureLabels(): CreatureLabels {
+    return this.getActiveSceneRenderer().getCreatureLabels();
   }
 
   /**

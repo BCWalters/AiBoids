@@ -64,9 +64,9 @@ export interface MotionConfig {
   preferUpright?: boolean;
 }
 
-export type PredatorKind = 'hawk' | 'unicorn';
-export const HAWK_PREDATOR_KIND: PredatorKind = 'hawk';
-export const UNICORN_PREDATOR_KIND: PredatorKind = 'unicorn';
+export type PredatorKind = 'normal' | 'horse';
+export const HAWK_PREDATOR_KIND: PredatorKind = 'normal';
+export const UNICORN_PREDATOR_KIND: PredatorKind = 'horse';
 export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
 export const SCENE_PREDATOR_KINDS: readonly PredatorKind[] = [HAWK_PREDATOR_KIND, UNICORN_PREDATOR_KIND];
 
@@ -140,6 +140,7 @@ export interface BoidSpeciesConfig {
   species: BoidSpecies;
   natureBase: THREE.Color;
   arcadeBase: THREE.Color;
+  arcadeEmissive: THREE.Color;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
   getColors?: (entity: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
@@ -176,12 +177,22 @@ export interface SceneCreatureMaterialDefaults {
 export interface SceneBoidInstanceConfig {
   geometries: CreatureGeometries;
   bodyVertexColors: boolean;
+  /** Optional per-species emissive color override (used by arcade for neon glow). */
+  bodyEmissiveOverride?: THREE.Color;
 }
 
 export interface ScenePredatorInstanceConfig {
   geometries: CreatureGeometries;
   rainbowWings: boolean;
   bodyVertexColors: boolean;
+}
+
+/** Scene-specific display names for all canonical sim entity types.
+ * Boid species use their canonical sim keys; predator kinds use their
+ * canonical sim keys plus 'dragon' as a visual variant of 'normal'. */
+export interface CreatureLabels {
+  boid: Record<BoidSpecies, string>;
+  predator: Record<PredatorKind | 'dragon', string>;
 }
 
 export interface SceneRendererHooks {
@@ -219,6 +230,11 @@ export interface SceneRendererHooks {
   getParrotProfileInstanceConfig: (profile: string, flags: StyleFlags) => SceneBoidInstanceConfig;
   getBoidInstanceConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => SceneBoidInstanceConfig;
   getPredatorInstanceConfig: (kind: PredatorKind, flags: StyleFlags, renderFlags: PredatorRenderFlags) => ScenePredatorInstanceConfig;
+  /** Scene-specific display labels for each canonical sim entity type.
+   * Used by the UI to show creature names appropriate to the current scene
+   * (e.g. 'normal' boid → "Sparrow" in nature, "Fish" in fishtank, "Boid" in arcade).
+   */
+  getCreatureLabels: () => CreatureLabels;
   dispose: () => void;
 }
 

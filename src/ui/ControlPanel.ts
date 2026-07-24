@@ -3,6 +3,7 @@ import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES, type Language } from '../i18n/language';
 import { t, type TranslationKey } from '../i18n/translations';
+import type { CreatureLabels } from '../render/sceneRenderers/createSceneRendererHooks';
 
 interface SliderSpec {
   key: keyof SimParams;
@@ -17,12 +18,12 @@ interface SliderSpec {
 // section) rather than folded away with everything else.
 const populationSpeedSpecs: SliderSpec[] = [
   { key: 'boidCount', labelKey: 'boidCount', min: 0, max: 500, step: 1 },
-  { key: 'parrotCount', labelKey: 'parrotCount', min: 0, max: 300, step: 1 },
-  { key: 'goldfinchCount', labelKey: 'goldfinchCount', min: 0, max: 300, step: 1 },
-  { key: 'cardinalCount', labelKey: 'cardinalCount', min: 0, max: 300, step: 1 },
-  { key: 'bluejayCount', labelKey: 'bluejayCount', min: 0, max: 300, step: 1 },
+  { key: 'multicolorCount', labelKey: 'multicolorCount', min: 0, max: 300, step: 1 },
+  { key: 'goldCount', labelKey: 'goldCount', min: 0, max: 300, step: 1 },
+  { key: 'redCount', labelKey: 'redCount', min: 0, max: 300, step: 1 },
+  { key: 'blueCount', labelKey: 'blueCount', min: 0, max: 300, step: 1 },
   { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 25, step: 1 },
-  { key: 'unicornCount', labelKey: 'unicornCount', min: 0, max: 25, step: 1 },
+  { key: 'horseCount', labelKey: 'horseCount', min: 0, max: 25, step: 1 },
   { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
   { key: 'predatorMaxSpeed', labelKey: 'predatorMaxSpeed', min: 20, max: 350, step: 5 },
 ];
@@ -70,25 +71,25 @@ const animationBlendSliderSpec: SliderSpec = { key: 'animationBlendStrength', la
 // "outdoor" default counts must stay exactly as they were).
 type PopulationSnapshot = Pick<
   SimParams,
-  'boidCount' | 'parrotCount' | 'goldfinchCount' | 'cardinalCount' | 'bluejayCount' | 'predatorCount' | 'unicornCount'
+  'boidCount' | 'multicolorCount' | 'goldCount' | 'redCount' | 'blueCount' | 'predatorCount' | 'horseCount'
 >;
 const POPULATION_KEYS: (keyof PopulationSnapshot)[] = [
   'boidCount',
-  'parrotCount',
-  'goldfinchCount',
-  'cardinalCount',
-  'bluejayCount',
+  'multicolorCount',
+  'goldCount',
+  'redCount',
+  'blueCount',
   'predatorCount',
-  'unicornCount',
+  'horseCount',
 ];
 const FISHTANK_DEFAULT_POPULATION: PopulationSnapshot = {
   boidCount: 40,
-  parrotCount: 20,
-  goldfinchCount: 20,
-  cardinalCount: 20,
-  bluejayCount: 20,
+  multicolorCount: 20,
+  goldCount: 20,
+  redCount: 20,
+  blueCount: 20,
   predatorCount: 1,
-  unicornCount: 2,
+  horseCount: 2,
 };
 let savedOutdoorPopulation: PopulationSnapshot | null = null;
 let savedFishtankPopulation: PopulationSnapshot | null = null;
@@ -106,6 +107,7 @@ export class ControlPanel {
   private getDeepLinkURL: () => string;
   private onDownloadDiagnostics: () => 'downloaded' | 'no_data' | 'error';
   private onClearDiagnostics: () => number;
+  private getCreatureLabels: () => CreatureLabels | null;
   private alienButton: HTMLButtonElement | null = null;
   private respawnButton: HTMLButtonElement | null = null;
   private unsubscribeLanguage: () => void;
@@ -129,6 +131,7 @@ export class ControlPanel {
     getDeepLinkURL: () => string,
     onDownloadDiagnostics: () => 'downloaded' | 'no_data' | 'error',
     onClearDiagnostics: () => number,
+    getCreatureLabels: () => CreatureLabels | null = () => null,
   ) {
     this.container = container;
     this.sim = sim;
@@ -136,6 +139,7 @@ export class ControlPanel {
     this.getDeepLinkURL = getDeepLinkURL;
     this.onDownloadDiagnostics = onDownloadDiagnostics;
     this.onClearDiagnostics = onClearDiagnostics;
+    this.getCreatureLabels = getCreatureLabels;
     // Full re-render on language change — simplest way to refresh every
     // label/title in the panel, consistent with how other setting
     // changes (mode, visual style) already trigger a re-render.
@@ -176,11 +180,12 @@ export class ControlPanel {
     // params itself while active, so a live slider drag would otherwise
     // silently fight the isolation until Gallery is exited.
     const galleryActive = params.galleryCreature !== null;
+    const creatureLabels = this.getCreatureLabels();
     this.container.appendChild(
       this.buildSection(
         'populationSpeed',
         t('sectionPopulationSpeed'),
-        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec, galleryActive)), this.buildAlienInvasionButton()],
+        [...populationSpeedSpecs.map((spec) => this.buildSlider(spec, galleryActive, this.resolvePopulationSliderLabel(spec, creatureLabels))), this.buildAlienInvasionButton()],
         true,
       ),
     );
@@ -202,8 +207,10 @@ export class ControlPanel {
     if (params.mode === '3d' && params.visualStyle !== 'arcade') {
       visualSettingsChildren.push(this.buildTimeOfDayToggle());
       visualSettingsChildren.push(this.buildSoftShadowsToggle());
-      visualSettingsChildren.push(this.buildDragonPredatorsToggle());
-      if (params.visualStyle === 'nature') visualSettingsChildren.push(this.buildParrotReviewHoverToggle());
+      if (params.visualStyle === 'nature') {
+        visualSettingsChildren.push(this.buildDragonPredatorsToggle());
+        visualSettingsChildren.push(this.buildParrotReviewHoverToggle());
+      }
       visualSettingsChildren.push(this.buildLightShaftsToggle());
       visualSettingsChildren.push(this.buildFogToggle());
       visualSettingsChildren.push(this.buildSlider(animationBlendSliderSpec));
@@ -376,21 +383,33 @@ export class ControlPanel {
 
     const select = document.createElement('select');
     select.id = 'param-gallery-creature';
+    const sceneLabels = this.getCreatureLabels();
+    const galleryLabel = (key: GalleryCreature | 'none', textKey: TranslationKey): string => {
+      if (!sceneLabels || key === 'none' || key === 'dragon') return t(textKey);
+      if (key === 'predator')    return sceneLabels.predator.normal;
+      if (key === 'horse')       return sceneLabels.predator.horse;
+      if (key === 'normal')      return sceneLabels.boid.normal;
+      if (key === 'multicolor')  return sceneLabels.boid.multicolor;
+      if (key === 'gold')        return sceneLabels.boid.gold;
+      if (key === 'red')         return sceneLabels.boid.red;
+      if (key === 'blue')        return sceneLabels.boid.blue;
+      return t(textKey);
+    };
     const options: { value: GalleryCreature | 'none'; textKey: TranslationKey }[] = [
       { value: 'none', textKey: 'galleryNone' },
-      { value: 'unicorn', textKey: 'galleryUnicorn' },
-      { value: 'dragon', textKey: 'galleryDragon' },
-      { value: 'hawk', textKey: 'galleryHawk' },
-      { value: 'sparrow', textKey: 'gallerySparrow' },
-      { value: 'parrot', textKey: 'galleryParrot' },
-      { value: 'goldfinch', textKey: 'galleryGoldfinch' },
-      { value: 'cardinal', textKey: 'galleryCardinal' },
-      { value: 'bluejay', textKey: 'galleryBluejay' },
+      { value: 'horse', textKey: 'galleryHorse' },
+      ...(params.visualStyle === 'nature' ? [{ value: 'dragon' as const, textKey: 'galleryDragon' as TranslationKey }] : []),
+      { value: 'predator', textKey: 'galleryPredator' },
+      { value: 'normal', textKey: 'galleryNormal' },
+      { value: 'multicolor', textKey: 'galleryMulticolor' },
+      { value: 'gold', textKey: 'galleryGold' },
+      { value: 'red', textKey: 'galleryRed' },
+      { value: 'blue', textKey: 'galleryBlue' },
     ];
     for (const opt of options) {
       const option = document.createElement('option');
       option.value = opt.value;
-      option.textContent = t(opt.textKey);
+      option.textContent = galleryLabel(opt.value, opt.textKey);
       if (opt.value === (params.galleryCreature ?? 'none')) option.selected = true;
       select.appendChild(option);
     }
@@ -431,16 +450,16 @@ export class ControlPanel {
     wrapper.className = 'control-row control-checkbox-row';
 
     const label = document.createElement('label');
-    label.textContent = t('parrotReviewHoverLabel');
-    label.htmlFor = 'param-parrot-review-hover';
+    label.textContent = t('multicolorReviewHoverLabel');
+    label.htmlFor = 'param-multicolor-review-hover';
 
     const input = document.createElement('input');
     input.type = 'checkbox';
-    input.id = 'param-parrot-review-hover';
-    input.checked = params.galleryCreature === 'parrot';
+    input.id = 'param-multicolor-review-hover';
+    input.checked = params.galleryCreature === 'multicolor';
     input.addEventListener('change', () => {
-      if (input.checked) params.galleryCreature = 'parrot';
-      else if (params.galleryCreature === 'parrot') params.galleryCreature = null;
+      if (input.checked) params.galleryCreature = 'multicolor';
+      else if (params.galleryCreature === 'multicolor') params.galleryCreature = null;
     });
 
     wrapper.appendChild(input);
@@ -701,7 +720,23 @@ export class ControlPanel {
     return details;
   }
 
-  private buildSlider(spec: SliderSpec, disabled: boolean = false): HTMLElement {
+  /** Maps a population slider's param key to a scene-specific creature label when available. */
+  private resolvePopulationSliderLabel(spec: SliderSpec, labels: CreatureLabels | null): string | undefined {
+    if (!labels) return undefined;
+    const count = (text: string) => `${text} count`;
+    switch (spec.key) {
+      case 'boidCount':        return count(labels.boid.normal);
+      case 'multicolorCount':  return count(labels.boid.multicolor);
+      case 'goldCount':        return count(labels.boid.gold);
+      case 'redCount':         return count(labels.boid.red);
+      case 'blueCount':        return count(labels.boid.blue);
+      case 'predatorCount':    return count(labels.predator.normal);
+      case 'horseCount':       return count(labels.predator.horse);
+      default:                 return undefined;
+    }
+  }
+
+  private buildSlider(spec: SliderSpec, disabled: boolean = false, labelOverride?: string): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-row';
     if (disabled) wrapper.classList.add('control-row-disabled');
@@ -710,7 +745,7 @@ export class ControlPanel {
     labelRow.className = 'control-label-row';
 
     const label = document.createElement('label');
-    label.textContent = t(spec.labelKey);
+    label.textContent = labelOverride ?? t(spec.labelKey);
     label.htmlFor = `param-${spec.key}`;
 
     const valueOut = document.createElement('span');

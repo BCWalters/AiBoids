@@ -7,16 +7,19 @@ import { boundarySteer, nearWallAxisCount, type WorldBounds } from './boundary';
 let nextId = 1;
 
 /**
- * Which kind of predator this is. 'hawk' is the default chase-and-catch
- * predator (its geometry is further swapped to a "dragon" look by the
- * cosmetic params.dragonPredators toggle — that toggle never changes
- * behavior, only rendering). 'unicorn' is a separate, independent
- * population that chases boids the same way but never catches them (see
- * Simulation.checkCatches, which skips unicorns entirely) and only
+ * Which kind of predator this is. 'normal' is the default chase-and-catch
+ * predator (its geometry is further swapped to a "dragon" or "shark" look
+ * by the cosmetic params.dragonPredators toggle — that toggle never changes
+ * behavior, only rendering). 'horse' is a separate, independent population
+ * that chases boids the same way but never catches them (see
+ * Simulation.checkCatches, which skips horse-kind entirely) and only
  * triggers a much weaker flee response in boids (see Boid.update's flee
- * loop) — a gentle, playful pursuit rather than a real threat.
+ * loop) — a gentle, playful pursuit rather than a real threat. Scene
+ * renderers map these canonical names to creature-specific display labels
+ * (e.g. 'normal' → "Hawk" in nature, "Shark" in fishtank;
+ *  'horse' → "Unicorn" in nature, "Sea Horse" in fishtank).
  */
-export type PredatorKind = 'hawk' | 'unicorn';
+export type PredatorKind = 'normal' | 'horse';
 
 // How long (seconds) a predator takes to glide to a full stop after
 // catching prey, and how long it then rests in place "digesting" before
@@ -121,7 +124,7 @@ export class Predator {
    */
   private cornerStuckTime = 0;
 
-  constructor(position: Vec3, velocity: Vec3, kind: PredatorKind = 'hawk') {
+  constructor(position: Vec3, velocity: Vec3, kind: PredatorKind = 'normal') {
     this.id = nextId++;
     this.kind = kind;
     this.position = position;

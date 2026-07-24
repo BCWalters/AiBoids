@@ -22,6 +22,7 @@ import type {
   SceneBoidInstanceConfig,
   ScenePredatorInstanceConfig,
   SpeciesColorSet,
+  CreatureLabels,
 } from './createSceneRendererHooks';
 
 // --- Nature style color constants: matte, earth-toned plumage with realistic gradients
@@ -192,7 +193,7 @@ function getNatureParrotVariants(): NatureParrotVariant[] {
 function getNatureParrotVariant(entity: Boid | Predator): NatureParrotVariant {
   const variants = getNatureParrotVariants();
   const baseIndex = Math.floor(idHash(entity.id, 42) * variants.length) % variants.length;
-  if (params.galleryCreature === 'parrot') {
+  if (params.galleryCreature === 'multicolor') {
     const cycleStep = Math.floor(performance.now() / 3200);
     return variants[(baseIndex + cycleStep) % variants.length];
   }
@@ -330,7 +331,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     const { isDragon } = renderFlags;
     
     switch (kind) {
-      case 'unicorn':
+      case 'horse':
         return {
           baseColor: NATURE_UNICORN_BODY,
           highlightColor: NATURE_UNICORN_HUNT,
@@ -338,7 +339,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           getSpeciesColors: () => NATURE_UNICORN_COLORS,
         };
       
-      case 'hawk':
+      case 'normal':
         return {
           baseColor: isDragon ? DRAGON_PREDATOR_BASE : NATURE_PREDATOR_BASE,
           highlightColor: isDragon ? DRAGON_PREDATOR_HUNT : NATURE_PREDATOR_HUNT,
@@ -356,7 +357,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     const { isDragon } = renderFlags;
     
     switch (kind) {
-      case 'unicorn':
+      case 'horse':
         return {
           flapFrequency: _UNICORN_FLAP_FREQUENCY,
           flapIdleAmplitude: _UNICORN_FLAP_IDLE_AMPLITUDE,
@@ -368,7 +369,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: 1,
         };
       
-      case 'hawk':
+      case 'normal':
         return {
           flapFrequency: isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
           flapIdleAmplitude: isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
@@ -399,13 +400,13 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
         : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       bakedWingPalette: true,
-      bakedBodyGradient: isNature && (species === 'sparrow' || species === 'goldfinch' || species === 'cardinal' || species === 'bluejay'),
+      bakedBodyGradient: isNature && (species === 'normal' || species === 'gold' || species === 'red' || species === 'blue'),
     };
   }
 
   getBoidMotionConfig(species: string, config: BoidSpeciesConfig, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
     const { isProfiledParrot } = boidMotionFlags;
-    const isParrot = species === 'parrot';
+    const isParrot = species === 'multicolor';
     const tailSwayPivot = config.tailSwayPivotY ?? 0;
     
     return {
@@ -482,18 +483,18 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 
   getPredatorInstanceConfig(
-    kind: 'hawk' | 'unicorn',
+    kind: 'normal' | 'horse',
     _flags: StyleFlags,
     renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
     switch (kind) {
-      case 'hawk':
+      case 'normal':
         return {
           geometries: renderFlags.isDragon ? this.deps.dragonPredatorGeometries : this.deps.naturePredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
-      case 'unicorn':
+      case 'horse':
         return {
           geometries: this.deps.unicornPredatorGeometries,
           rainbowWings: true,
@@ -502,6 +503,23 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       default:
         throw new Error(`Unknown predator kind: ${kind}`);
     }
+  }
+
+  getCreatureLabels(): CreatureLabels {
+    return {
+      boid: {
+        normal: 'Sparrow',
+        multicolor: 'Parrot',
+        gold: 'Goldfinch',
+        red: 'Cardinal',
+        blue: 'Blue Jay',
+      },
+      predator: {
+        normal: 'Hawk',
+        horse: 'Unicorn',
+        dragon: 'Dragon',
+      },
+    };
   }
 
   dispose(): void {

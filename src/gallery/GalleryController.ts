@@ -41,8 +41,8 @@ interface DeepLinkState {
   camera: { position: [number, number, number]; target: [number, number, number] } | null;
 }
 
-const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['unicorn', 'dragon', 'hawk']);
-const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['sparrow', 'parrot', 'goldfinch', 'cardinal', 'bluejay']);
+const GALLERY_PREDATOR_KINDS = new Set<GalleryCreature>(['horse', 'dragon', 'predator']);
+const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['normal', 'multicolor', 'gold', 'red', 'blue']);
 
 function readGalleryCreatureFromURL(): { kind: GalleryCreature; distance: number | null } | null {
   const searchParams = new URLSearchParams(window.location.search);
@@ -152,12 +152,12 @@ export class GalleryController {
     | 'mode'
     | 'visualStyle'
     | 'boidCount'
-    | 'parrotCount'
-    | 'goldfinchCount'
-    | 'cardinalCount'
-    | 'bluejayCount'
+    | 'multicolorCount'
+    | 'goldCount'
+    | 'redCount'
+    | 'blueCount'
     | 'predatorCount'
-    | 'unicornCount'
+    | 'horseCount'
     | 'dragonPredators'
     | 'running'
   > | null = null;
@@ -282,36 +282,36 @@ export class GalleryController {
       // arcade without ever leaving gallery mode.
       visualStyle: params.visualStyle,
       boidCount: params.boidCount,
-      parrotCount: params.parrotCount,
-      goldfinchCount: params.goldfinchCount,
-      cardinalCount: params.cardinalCount,
-      bluejayCount: params.bluejayCount,
+      multicolorCount: params.multicolorCount,
+      goldCount: params.goldCount,
+      redCount: params.redCount,
+      blueCount: params.blueCount,
       predatorCount: params.predatorCount,
-      unicornCount: params.unicornCount,
+      horseCount: params.horseCount,
       dragonPredators: params.dragonPredators,
       running: params.running,
     };
 
     params.mode = '3d';
     params.boidCount = 0;
-    params.parrotCount = 0;
-    params.goldfinchCount = 0;
-    params.cardinalCount = 0;
-    params.bluejayCount = 0;
+    params.multicolorCount = 0;
+    params.goldCount = 0;
+    params.redCount = 0;
+    params.blueCount = 0;
     params.predatorCount = 0;
-    params.unicornCount = 0;
+    params.horseCount = 0;
     params.dragonPredators = false;
 
-    if (kind === 'unicorn') params.unicornCount = 1;
+    if (kind === 'horse') params.horseCount = 1;
     else if (kind === 'dragon') {
       params.predatorCount = 1;
       params.dragonPredators = true;
-    } else if (kind === 'hawk') params.predatorCount = 1;
-    else if (kind === 'sparrow') params.boidCount = 1;
-    else if (kind === 'parrot') params.parrotCount = 1;
-    else if (kind === 'goldfinch') params.goldfinchCount = 1;
-    else if (kind === 'cardinal') params.cardinalCount = 1;
-    else if (kind === 'bluejay') params.bluejayCount = 1;
+    } else if (kind === 'predator') params.predatorCount = 1;
+    else if (kind === 'normal') params.boidCount = 1;
+    else if (kind === 'multicolor') params.multicolorCount = 1;
+    else if (kind === 'gold') params.goldCount = 1;
+    else if (kind === 'red') params.redCount = 1;
+    else if (kind === 'blue') params.blueCount = 1;
 
     this.galleryPosed = false;
     this.previousGalleryVisualStyle = null;
@@ -365,23 +365,9 @@ export class GalleryController {
     this.galleryPosed = true;
     this.previousGalleryVisualStyle = params.visualStyle;
 
-    // Unlike normal (non-gallery) fishtank browsing — which frames the
-    // camera outside the tank looking in — the gallery keeps the same
-    // close, creature-relative distance across all styles so the model
-    // stays large and inspectable regardless of the (much bigger) tank/
-    // world scale. This puts the camera inside the tank/water volume for
-    // fishtank style; Renderer3D.setRoomVisible(false) (see ensureScene)
-    // hides the surrounding room while gallery is active so the
-    // transparent glass/water doesn't show the room incongruously right
-    // behind the creature.
-    //
-    // Distance is per-creature (tightest zoom that fits its actual
-    // rendered size) unless the URL explicitly overrode it — see
-    // getGalleryFramingDistance for why a single flat distance doesn't
-    // work across wildly different creature sizes. Dragons render through
-    // the 'hawk' predator instance slot (see Predator.kind/dragonPredators),
-    // so they key off 'hawk' here too.
-    const instanceKind = kind === 'dragon' ? 'hawk' : kind;
+    // Dragons render through the 'normal' predator instance slot (see Predator.kind/dragonPredators),
+    // and 'predator' gallery kind also maps to the 'normal' predator slot.
+    const instanceKind = (kind === 'dragon' || kind === 'predator') ? 'normal' : kind;
     const distance = this.galleryDistanceOverride ?? renderer3D.getGalleryFramingDistance(instanceKind);
     // The camera must target where the creature actually *renders*, not
     // its raw sim-space position — fishtank style inflates every fish/
