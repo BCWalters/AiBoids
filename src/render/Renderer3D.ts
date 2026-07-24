@@ -41,6 +41,7 @@ import {
   type UprightStyle,
 } from './creatureUprightTuning';
 import {
+  createStyleFlags,
   createSceneRendererHooks,
   type BoidMotionStyleFlags,
   type ColourStrategy,
@@ -840,7 +841,7 @@ export class Renderer3D {
     // per-instance via setColorAt in updateInstances (base <-> state color).
     const sceneRenderer = this.getSceneRenderer(style);
     const materialDefaults = sceneRenderer.getCreatureMaterialDefaults();
-    const { isFishtank } = this.getStyleFlags(style);
+    const { isFishtank } = createStyleFlags(style);
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: materialDefaults.bodyEmissive,
@@ -1018,19 +1019,6 @@ export class Renderer3D {
       this.renderer.compile(this.scene, this.camera);
       this.warmedShaderStyles.add(style);
     }, 0);
-  }
-
-  private getStyleFlags(style: VisualStyle): StyleFlags {
-    const isNature = style === 'nature';
-    const isFishtank = style === 'fishtank';
-    return {
-      isNature,
-      isFishtank,
-      // Both "organic" styles (nature/fishtank) use the same instancing
-      // pattern (realistic/lathed geometry, vertex-colored variants, etc.)
-      // — only which concrete geometry set/environment is picked differs.
-      isOrganic: isNature || isFishtank,
-    };
   }
 
   private applyStyleTransitionOnStyleChange(sim: Simulation, style: VisualStyle): void {
@@ -2841,7 +2829,7 @@ export class Renderer3D {
 
   render(sim: Simulation): void {
     const style = params.visualStyle;
-    const flags = this.getStyleFlags(style);
+    const flags = createStyleFlags(style);
     const sceneRenderer = this.getSceneRenderer(style);
     this.ensureScene(sim, style, flags);
     const { elapsed, dt } = this.getRenderTiming();

@@ -81,6 +81,16 @@ export interface StyleFlags {
   isOrganic: boolean;
 }
 
+export function createStyleFlags(style: VisualStyle): StyleFlags {
+  const isNature = style === 'nature';
+  const isFishtank = style === 'fishtank';
+  return {
+    isNature,
+    isFishtank,
+    isOrganic: isNature || isFishtank,
+  };
+}
+
 export interface BoidMotionStyleFlags {
   isProfiledParrot: boolean;
 }
