@@ -11,34 +11,33 @@ const BG_COLOR: [number, number, number] = [13, 17, 23]; // #0d1117
 // Base (calm) vs. highlight (state) colors, lerped by panicLevel/huntIntensity.
 const BOID_BASE: [number, number, number] = [90, 209, 255]; // #5ad1ff
 const BOID_PANIC: [number, number, number] = [255, 224, 102]; // warm alarm yellow
-// Each additional species gets its own vivid base color (echoing real
-// plumage) so mixed-species scenes read as visually distinct sub-flocks —
-// same panic-alarm highlight lerp so the "fleeing" cue reads consistently
-// across every species.
-const PARROT_BASE: [number, number, number] = [45, 189, 156]; // teal-turquoise (macaw chest)
-const GOLDFINCH_BASE: [number, number, number] = [245, 211, 39]; // bright yellow
-const CARDINAL_BASE: [number, number, number] = [204, 41, 54]; // vivid red
-const BLUEJAY_BASE: [number, number, number] = [74, 128, 192]; // blue jay blue
+// Each additional species gets its own vivid base color so mixed-species
+// scenes read as visually distinct sub-flocks — same panic-alarm highlight
+// lerp so the "fleeing" cue reads consistently across every species.
+const MULTICOLOR_BASE: [number, number, number] = [45, 189, 156]; // teal-turquoise (macaw chest)
+const GOLD_BASE: [number, number, number] = [245, 211, 39]; // bright yellow
+const RED_BASE: [number, number, number] = [204, 41, 54]; // vivid red
+const BLUE_BASE: [number, number, number] = [74, 128, 192]; // blue jay blue
 const SPECIES_BASE: Record<string, [number, number, number]> = {
-  sparrow: BOID_BASE,
-  parrot: PARROT_BASE,
-  goldfinch: GOLDFINCH_BASE,
-  cardinal: CARDINAL_BASE,
-  bluejay: BLUEJAY_BASE,
+  normal: BOID_BASE,
+  multicolor: MULTICOLOR_BASE,
+  gold: GOLD_BASE,
+  red: RED_BASE,
+  blue: BLUE_BASE,
 };
-// Sparrows render a bit smaller than the other species (matching
-// SPARROW_SIZE_SCALE in Renderer3D.ts) — everything else stays at the
+// 'normal' boids render a bit smaller than the other species (matching
+// NORMAL_SIZE_SCALE in Renderer3D.ts) — everything else stays at the
 // "reference" boid size.
 const SPECIES_SIZE_SCALE: Record<string, number> = {
-  sparrow: 0.7,
+  normal: 0.7,
 };
 const PREDATOR_BASE: [number, number, number] = [255, 90, 90]; // #ff5a5a
 const PREDATOR_HUNT: [number, number, number] = [255, 255, 255]; // hot white lock-on flash
-// Unicorns (see Predator.kind): light lavender, brightening slightly when
-// actively chasing — distinct from the hawk's red "danger" palette since
-// unicorns are a gentle, non-lethal chaser, not a real threat.
-const UNICORN_BASE: [number, number, number] = [201, 160, 240]; // #c9a0f0
-const UNICORN_HUNT: [number, number, number] = [232, 201, 255]; // #e8c9ff
+// Horse-kind predators (see Predator.kind): light lavender, brightening
+// slightly when actively chasing — distinct from the normal predator's
+// red "danger" palette since horse-kind is a gentle, non-lethal chaser.
+const HORSE_BASE: [number, number, number] = [201, 160, 240]; // #c9a0f0
+const HORSE_HUNT: [number, number, number] = [232, 201, 255]; // #e8c9ff
 
 // Cartoony blood-splatter particle burst spawned wherever a predator
 // catches a boid (see Simulation.catchEvents). Purely a client-side
@@ -163,15 +162,15 @@ export class Renderer {
     }
 
     for (const predator of sim.predators) {
-      const isUnicorn = predator.kind === 'unicorn';
+      const isHorse = predator.kind === 'horse';
       this.drawTriangle(
         predator.position.x,
         predator.position.y,
         predator.headingAngle,
         PREDATOR_LENGTH,
         PREDATOR_WIDTH,
-        isUnicorn
-          ? lerpColor(UNICORN_BASE, UNICORN_HUNT, predator.huntIntensity)
+        isHorse
+          ? lerpColor(HORSE_BASE, HORSE_HUNT, predator.huntIntensity)
           : lerpColor(PREDATOR_BASE, PREDATOR_HUNT, predator.huntIntensity),
       );
     }

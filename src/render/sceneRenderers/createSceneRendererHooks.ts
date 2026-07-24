@@ -64,9 +64,9 @@ export interface MotionConfig {
   preferUpright?: boolean;
 }
 
-export type PredatorKind = 'hawk' | 'unicorn';
-export const HAWK_PREDATOR_KIND: PredatorKind = 'hawk';
-export const UNICORN_PREDATOR_KIND: PredatorKind = 'unicorn';
+export type PredatorKind = 'normal' | 'horse';
+export const HAWK_PREDATOR_KIND: PredatorKind = 'normal';
+export const UNICORN_PREDATOR_KIND: PredatorKind = 'horse';
 export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
 export const SCENE_PREDATOR_KINDS: readonly PredatorKind[] = [HAWK_PREDATOR_KIND, UNICORN_PREDATOR_KIND];
 

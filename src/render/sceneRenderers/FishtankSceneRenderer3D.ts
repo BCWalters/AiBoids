@@ -210,7 +210,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   getPredatorColourStrategy(_kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
     switch (_kind) {
-      case 'unicorn': {
+      case 'horse': {
         const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
         return {
           baseColor: new THREE.Color(0xf0d070),
@@ -220,7 +220,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         };
       }
       
-      case 'hawk':
+      case 'normal':
         return {
           baseColor: SHARK_PREDATOR_BASE,
           highlightColor: SHARK_PREDATOR_HUNT,
@@ -234,8 +234,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   getPredatorMotionConfig(_kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
     switch (_kind) {
-      case 'unicorn':
-        // Seahorse motion
+      case 'horse':
         return {
           flapFrequency: 3.2,
           flapIdleAmplitude: 0.22,
@@ -247,7 +246,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
         };
       
-      case 'hawk':
+      case 'normal':
         // Sharks use distinct tail/fin motion
         return {
           flapFrequency: SHARK_FLAP_FREQUENCY,
@@ -272,7 +271,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   getBoidColourStrategy(species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
     // Fishtank boids have simpler coloring than nature (no panic jitter)
     const getColors = config.getColors;
-    const isParrot = species === 'parrot';
+    const isParrot = species === 'multicolor';
     return {
       baseColor: config.natureBase, // Use nature base in fishtank (they're aquatic variants)
       highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
@@ -321,7 +320,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   private getButterflyfishColorVariant(entity: Boid | Predator): SpeciesColorSet {
     const baseIndex = Math.floor(idHash(entity.id, 42) * BUTTERFLYFISH_COLOR_PATTERNS.length) % BUTTERFLYFISH_COLOR_PATTERNS.length;
-    if (params.galleryCreature === 'parrot') {
+    if (params.galleryCreature === 'multicolor') {
       const cycleStep = Math.floor(performance.now() / 3200);
       return BUTTERFLYFISH_COLOR_PATTERNS[(baseIndex + cycleStep) % BUTTERFLYFISH_COLOR_PATTERNS.length];
     }
@@ -351,18 +350,18 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getPredatorInstanceConfig(
-    kind: 'hawk' | 'unicorn',
+    kind: 'normal' | 'horse',
     _flags: StyleFlags,
     renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
     switch (kind) {
-      case 'hawk':
+      case 'normal':
         return {
           geometries: renderFlags.isDragon ? this.deps.fishtankSharkPredatorGeometries : this.deps.fishtankPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
-      case 'unicorn':
+      case 'horse':
         return {
           geometries: this.deps.fishtankUnicornPredatorGeometries,
           rainbowWings: false,

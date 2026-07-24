@@ -158,14 +158,14 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 
   getPredatorColourStrategy(kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
     switch (kind) {
-      case 'unicorn':
+      case 'horse':
         return {
           baseColor: ARCADE_UNICORN_BASE,
           highlightColor: ARCADE_UNICORN_HUNT,
           getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
         };
       
-      case 'hawk':
+      case 'normal':
         return {
           baseColor: ARCADE_PREDATOR_BASE,
           highlightColor: ARCADE_PREDATOR_HUNT,
@@ -179,7 +179,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 
   getPredatorMotionConfig(kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
     switch (kind) {
-      case 'unicorn':
+      case 'horse':
         return {
           flapFrequency: ARCADE_UNICORN_FLAP_FREQUENCY,
           flapIdleAmplitude: ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE,
@@ -191,7 +191,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           meshScaleBoost: 1,
         };
       
-      case 'hawk':
+      case 'normal':
         return {
           flapFrequency: ARCADE_FLAP_FREQUENCY,
           flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
@@ -276,13 +276,13 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   }
 
   getPredatorInstanceConfig(
-    kind: 'hawk' | 'unicorn',
+    kind: 'normal' | 'horse',
     _flags: StyleFlags,
     _renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
     switch (kind) {
-      case 'hawk':
-      case 'unicorn':
+      case 'normal':
+      case 'horse':
         return {
           geometries: this.deps.arcadePredatorGeometries,
           rainbowWings: false,

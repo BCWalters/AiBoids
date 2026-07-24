@@ -22,12 +22,12 @@ export interface SimParams {
 
   // Population
   boidCount: number;
-  parrotCount: number;
-  goldfinchCount: number;
-  cardinalCount: number;
-  bluejayCount: number;
+  multicolorCount: number;
+  goldCount: number;
+  redCount: number;
+  blueCount: number;
   predatorCount: number;
-  unicornCount: number;
+  horseCount: number;
 
   // Movement
   boidMaxSpeed: number;
@@ -132,21 +132,21 @@ export interface SimParams {
   galleryCreature: GalleryCreature | null;
 }
 
-export type GalleryCreature = 'unicorn' | 'dragon' | 'hawk' | 'sparrow' | 'parrot' | 'goldfinch' | 'cardinal' | 'bluejay';
+export type GalleryCreature = 'horse' | 'dragon' | 'predator' | 'normal' | 'multicolor' | 'gold' | 'red' | 'blue';
 
 export const defaultParams: SimParams = {
   mode: '3d',
 
   boidCount: 150,
-  parrotCount: 75,
-  goldfinchCount: 75,
-  cardinalCount: 75,
-  bluejayCount: 75,
+  multicolorCount: 75,
+  goldCount: 75,
+  redCount: 75,
+  blueCount: 75,
   predatorCount: 5,
-  // Independent from predatorCount — unicorns are a separate predator
-  // "kind" (see Predator.kind) that coexists with hawks/dragons, so
-  // default to a visible little herd rather than 0 (visible out of the box).
-  unicornCount: 5,
+  // Independent from predatorCount — horse-kind predators are a separate
+  // population that coexists with normal/dragon predators, so default to
+  // a visible little herd rather than 0 (visible out of the box).
+  horseCount: 5,
 
   boidMaxSpeed: 120,
   predatorMaxSpeed: 150,
