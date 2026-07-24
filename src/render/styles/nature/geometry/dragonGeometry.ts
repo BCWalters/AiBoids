@@ -559,11 +559,12 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
 
-  // Bake a root→tip color gradient: body purple at the rump attachment
-  // fading to a deep dark purple at the tip. The renderer detects the
-  // presence of this 'color' attribute and passes white as the instance
-  // color so the gradient shows through unchanged.
-  const rootColor = new THREE.Color(0xa060e8); // bright/light purple at the rump
+  // Bake a root→tip color gradient: the tail root matches the dragon
+  // body color (DRAGON_PREDATOR_BASE, 0x502a7f) at the rump attachment,
+  // then darkens to almost black at the tip (per issue #73). The renderer
+  // detects the presence of this 'color' attribute and passes white as
+  // the instance color so the gradient shows through unchanged.
+  const rootColor = new THREE.Color(0x502a7f); // matches the dragon body base at the rump
   const tipColor  = new THREE.Color(0x080314); // near-black at the tip
   const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(posAttr.count * 3);
