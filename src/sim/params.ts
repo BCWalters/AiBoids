@@ -119,7 +119,7 @@ export interface SimParams {
   running: boolean;
   showDebugOverlay: boolean;
 
-  // Model Gallery: when set, isolates a single instance of the chosen
+  // Creature Gallery: when set, isolates a single instance of the chosen
   // creature kind front-and-center (all other populations zeroed, sim
   // frozen so it holds a steady flying pose while wings/tail still
   // animate) so it can be inspected/orbited/screenshotted cleanly. Also

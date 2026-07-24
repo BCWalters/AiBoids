@@ -4,7 +4,7 @@ import { Renderer } from './render/Renderer';
 import { Renderer3D } from './render/Renderer3D';
 import { ControlPanel } from './ui/ControlPanel';
 import { Diagnostics } from './diagnostics/Diagnostics';
-import { GalleryController } from './gallery/GalleryController';
+import { CreatureGalleryController } from './gallery/CreatureGalleryController';
 import { params, type SimMode } from './sim/params';
 import { onLanguageChange } from './i18n/language';
 import { t } from './i18n/translations';
@@ -49,14 +49,14 @@ const diagnostics = new Diagnostics(sim, canvasStack);
 let renderer2D: Renderer | null = null;
 let renderer3D: Renderer3D | null = null;
 
-// Model Gallery + "Copy deep link" subsystem (see gallery/GalleryController).
+// Creature Gallery + "Copy deep link" subsystem (see gallery/CreatureGalleryController).
 // Constructed here — before ControlPanel and the initial applyMode below —
 // so its constructor can apply any `?state=` deep-link params (and the
 // `?galleryCreature=` shortcut) up front, letting the panel render the
 // restored state. renderer3D is passed as a getter because applyMode
 // creates/reassigns it lazily; controlPanel.refresh is wrapped in a
 // closure since controlPanel is constructed further below.
-const gallery = new GalleryController({
+const creatureGallery = new CreatureGalleryController({
   sim,
   getRenderer3D: () => renderer3D,
   applyMode,
@@ -130,7 +130,7 @@ const controlPanel = new ControlPanel(
   controlPanelBody,
   sim,
   applyMode,
-  () => gallery.buildDeepLinkURL(),
+  () => creatureGallery.buildDeepLinkURL(),
   () => diagnostics.downloadDiagnostics(),
   () => diagnostics.clearRecords(),
   () => renderer3D?.getCreatureLabels() ?? null,
@@ -140,7 +140,7 @@ applyMode(params.mode);
 // so scene-specific creature labels are available on first render.
 if (renderer3D) controlPanel.refresh();
 
-if (gallery.launchedFromURL) {
+if (creatureGallery.launchedFromURL) {
   // Collapsing the panel gives a clean, unobstructed shot and a wider
   // canvas for the debugFrameCamera framing — done after applyMode so
   // resizeCanvases (called by setPanelCollapsed) sees the final,
@@ -165,11 +165,11 @@ function loop(now: number): void {
   lastTime = now;
   diagnostics.beginFrame(now, rawFrameMs);
 
-  // Detect Model Gallery selection/mode/style changes and snapshot,
+  // Detect Creature Gallery selection/mode/style changes and snapshot,
   // isolate, or restore population params accordingly (see
-  // gallery/GalleryController). Runs before sim.update so the isolated
+  // gallery/CreatureGalleryController). Runs before sim.update so the isolated
   // population is in place for this frame.
-  gallery.applySelectionChanges();
+  creatureGallery.applySelectionChanges();
 
   const simStart = performance.now();
   sim.update(dt);
@@ -188,8 +188,8 @@ function loop(now: number): void {
   // Pose the isolated gallery creature and apply any pending `?state=`
   // deep-link camera — must run *after* this frame's render() call so
   // render()'s one-time initial auto-frame doesn't clobber the gallery/
-  // deep-link framing (see GalleryController.poseAndRestoreCameraIfReady).
-  gallery.poseAndRestoreCameraIfReady();
+  // deep-link framing (see CreatureGalleryController.poseAndRestoreCameraIfReady).
+  creatureGallery.poseAndRestoreCameraIfReady();
   const postEnd = performance.now();
   const simMs = simEnd - simStart;
   const uiMs = uiEnd - simEnd;

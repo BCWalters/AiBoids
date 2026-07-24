@@ -18,7 +18,7 @@ import type { BoidSpecies } from '../sim/Boid';
  *    would, without this module depending on ControlPanel or the canvas
  *    plumbing directly.
  */
-export interface GalleryControllerDeps {
+export interface CreatureGalleryControllerDeps {
   sim: Simulation;
   getRenderer3D: () => Renderer3D | null;
   applyMode: (mode: SimMode) => void;
@@ -81,9 +81,9 @@ function readStateFromURL(): DeepLinkState | null {
 }
 
 /**
- * Model Gallery + "Copy deep link" controller.
+ * Creature Gallery + "Copy deep link" controller.
  *
- * Model Gallery isolates a single creature (zeroing every other
+ * Creature Gallery isolates a single creature (zeroing every other
  * population), freezes it mid-flight at the world center with a fixed
  * pose, and frames the 3D camera on it — makes it trivial to inspect,
  * orbit (OrbitControls stays fully interactive), or screenshot a single
@@ -95,7 +95,7 @@ function readStateFromURL(): DeepLinkState | null {
  *
  * Driven by `params.galleryCreature` (see sim/params.ts), settable two
  * ways:
- *  - Interactively, via the "Model Gallery" dropdown in the control
+ *  - Interactively, via the "Creature Gallery" dropdown in the control
  *    panel (see ui/ControlPanel.ts) — pick a creature, inspect it, pick
  *    "None" to return to the normal simulation.
  *  - Via the `?galleryCreature=<creatureSpecies>` URL param (optionally paired with
@@ -115,7 +115,7 @@ function readStateFromURL(): DeepLinkState | null {
  * `applySelectionChanges()` (before sim.update) and
  * `poseAndRestoreCameraIfReady()` (after render) drive the rest.
  */
-export class GalleryController {
+export class CreatureGalleryController {
   private readonly sim: Simulation;
   private readonly getRenderer3D: () => Renderer3D | null;
   private readonly applyMode: (mode: SimMode) => void;
@@ -164,7 +164,7 @@ export class GalleryController {
     | 'running'
   > | null = null;
 
-  constructor(deps: GalleryControllerDeps) {
+  constructor(deps: CreatureGalleryControllerDeps) {
     this.sim = deps.sim;
     this.getRenderer3D = deps.getRenderer3D;
     this.applyMode = deps.applyMode;
@@ -212,7 +212,7 @@ export class GalleryController {
   }
 
   /**
-   * Per-frame hook to run *before* sim.update. Detects Model Gallery
+   * Per-frame hook to run *before* sim.update. Detects Creature Gallery
    * selection changes (from the control panel dropdown or the initial
    * `?galleryCreature=` URL param) and snapshots/isolates or restores
    * population params accordingly. Polled here rather than via a params
@@ -261,7 +261,7 @@ export class GalleryController {
    * debugFrameCamera's framing if the pose ran first on the same frame
    * render() first initializes things. The deep-link camera restore runs
    * *after* the gallery pose so a restored `?state=` deep link's exact
-   * camera wins over the Model Gallery's own auto-framing when both apply
+   * camera wins over the Creature Gallery's own auto-framing when both apply
    * on the same load (e.g. a deep link captured while the gallery was
    * isolating a creature) — both are one-shot (each clears its own
    * "already applied" flag), so this ordering only matters on the very

@@ -573,7 +573,7 @@ export class Renderer3D {
 
     this.updateEnvironmentParameterToggles();
 
-    // Model Gallery poses the fishtank camera inside the tank/water volume
+    // Creature Gallery poses the fishtank camera inside the tank/water volume
     // (see main.ts's poseGalleryCreatureIfReady) — hide the surrounding room
     // while active so the glass/water doesn't show the room behind the creature.
     const galleryCreatureActive = params.galleryCreature !== null;
@@ -606,7 +606,7 @@ export class Renderer3D {
   }
 
   /**
-   * Model Gallery: converts a sim-space position into the world-space position
+   * Creature Gallery: converts a sim-space position into the world-space position
    * it actually renders at. No-op for nature/arcade, but fishtank inflates
    * positions by TANK_VISUAL_SCALE from fishtankCenter — gallery framing must
    * target this position, not the raw sim-space one.
@@ -617,13 +617,13 @@ export class Renderer3D {
     return rendered;
   }
 
-  /** Model Gallery / debug-QA camera framing — see CameraController.debugFrameCamera. */
+  /** Creature Gallery / debug-QA camera framing — see CameraController.debugFrameCamera. */
   debugFrameCamera(x: number, y: number, z: number, distance: number): void {
     this.cameraController.debugFrameCamera(x, y, z, distance);
   }
 
   /**
-   * Model Gallery: computes a debugFrameCamera distance that frames the
+   * Creature Gallery: computes a debugFrameCamera distance that frames the
    * currently-instanced creature as tightly as the FOV allows, from the union
    * of its part geometries (a wingspan/tail reaches past the body alone).
    * Falls back to `fallbackDistance` if the batch for `species` doesn't exist
