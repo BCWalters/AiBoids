@@ -804,6 +804,10 @@ export class Renderer3D {
     return this.sceneRenderers[style];
   }
 
+  private getActiveSceneRenderer(): SceneRendererHooks {
+    return this.getSceneRenderer(params.visualStyle);
+  }
+
   private configureSceneEnvironmentAnchors(sim: Simulation, center: THREE.Vector3, maxDim: number): void {
     for (const style of SCENE_STYLES) {
       this.sceneRenderers[style].configureEnvironmentAnchors(sim, center, maxDim);
@@ -2295,7 +2299,7 @@ export class Renderer3D {
    */
   toRenderedPosition(x: number, y: number, z: number): THREE.Vector3 {
     const rendered = new THREE.Vector3();
-    this.getSceneRenderer(params.visualStyle).mapPositionToRenderSpace(x, y, z, rendered);
+    this.getActiveSceneRenderer().mapPositionToRenderSpace(x, y, z, rendered);
     return rendered;
   }
 
@@ -2376,7 +2380,7 @@ export class Renderer3D {
     // param) — the geometry's own local bounding box doesn't reflect that,
     // so without this the fishtank creature would actually render larger
     // than this distance was solved for and clip out of frame.
-    const worldScale = this.getSceneRenderer(params.visualStyle).getWorldScale();
+    const worldScale = this.getActiveSceneRenderer().getWorldScale();
     const radius = sphere.radius * worldScale;
     if (!radius) return fallbackDistance;
 
