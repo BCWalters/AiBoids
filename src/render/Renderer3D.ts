@@ -386,11 +386,6 @@ interface UpdateEntityInstanceArgs {
 }
 type UpdateEntitySharedArgs = Omit<UpdateEntityInstanceArgs, 'index' | 'entity'>;
 
-interface PredatorUpdateContext {
-  predatorsByKind: Map<PredatorKind, Predator[]>;
-  renderFlags: PredatorRenderFlags;
-}
-
 // Unicorns reuse the same body/wing/tail split (lavender body+tail, near-
 // white wings so the baked rainbow vertex gradient shows through) in nature
 // style — see NATURE_UNICORN_WING's doc comment above. The fishtank seahorse
@@ -2510,27 +2505,21 @@ export class Renderer3D {
     return SCENE_PREDATOR_KINDS.some((kind) => this.predatorInstances.get(kind) !== undefined);
   }
 
-  private getPredatorUpdateContext(
-    sim: Simulation,
-    flags: StyleFlags,
-  ): PredatorUpdateContext {
-    const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
-    const predatorsByKind = this.partitionPredatorsByKind(sim.predators);
-    return { predatorsByKind, renderFlags };
-  }
-
   private updatePredatorInstanceSets(
-    context: PredatorUpdateContext,
+    predatorsByKind: ReadonlyMap<PredatorKind, Predator[]>,
+    renderFlags: PredatorRenderFlags,
     elapsed: number,
     dt: number,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     for (const kind of SCENE_PREDATOR_KINDS) {
       this.updatePredatorKindInstances(
         kind,
-        context.predatorsByKind.get(kind) ?? [],
+        predatorsByKind.get(kind) ?? [],
         elapsed,
         dt,
-        resolvePredatorRenderFlagsForKind(kind, context.renderFlags),
+        sceneRenderer,
+        resolvePredatorRenderFlagsForKind(kind, renderFlags),
       );
     }
   }
@@ -2645,10 +2634,12 @@ export class Renderer3D {
     elapsed: number,
     dt: number,
     flags: StyleFlags,
+    sceneRenderer: SceneRendererHooks,
   ): void {
     if (!this.hasAnyPredatorInstances()) return;
-    const context = this.getPredatorUpdateContext(sim, flags);
-    this.updatePredatorInstanceSets(context, elapsed, dt);
+    const renderFlags = createPredatorRenderFlags(flags, params.dragonPredators);
+    const predatorsByKind = this.partitionPredatorsByKind(sim.predators);
+    this.updatePredatorInstanceSets(predatorsByKind, renderFlags, elapsed, dt, sceneRenderer);
   }
 
   private updatePredatorKindInstances(
@@ -2656,12 +2647,12 @@ export class Renderer3D {
     predators: Predator[],
     elapsed: number,
     dt: number,
+    sceneRenderer: SceneRendererHooks,
     renderFlags: PredatorRenderFlags,
   ): void {
     const instances = this.predatorInstances.get(kind);
     if (!instances) return;
     if (predators.length === 0) return;
-    const sceneRenderer = this.getSceneRenderer(params.visualStyle);
     this.updateInstances(
       instances,
       predators,
@@ -2759,7 +2750,7 @@ export class Renderer3D {
     sceneRenderer: SceneRendererHooks,
   ): void {
     this.updateBoidSpeciesInstances(sim, elapsed, dt, flags, sceneRenderer);
-    this.updatePredatorInstances(sim, elapsed, dt, flags);
+    this.updatePredatorInstances(sim, elapsed, dt, flags, sceneRenderer);
   }
 
   private getRenderTiming(): { elapsed: number; dt: number } {
