@@ -207,8 +207,10 @@ export class ControlPanel {
     if (params.mode === '3d' && params.visualStyle !== 'arcade') {
       visualSettingsChildren.push(this.buildTimeOfDayToggle());
       visualSettingsChildren.push(this.buildSoftShadowsToggle());
-      visualSettingsChildren.push(this.buildDragonPredatorsToggle());
-      if (params.visualStyle === 'nature') visualSettingsChildren.push(this.buildParrotReviewHoverToggle());
+      if (params.visualStyle === 'nature') {
+        visualSettingsChildren.push(this.buildDragonPredatorsToggle());
+        visualSettingsChildren.push(this.buildParrotReviewHoverToggle());
+      }
       visualSettingsChildren.push(this.buildLightShaftsToggle());
       visualSettingsChildren.push(this.buildFogToggle());
       visualSettingsChildren.push(this.buildSlider(animationBlendSliderSpec));
@@ -396,7 +398,7 @@ export class ControlPanel {
     const options: { value: GalleryCreature | 'none'; textKey: TranslationKey }[] = [
       { value: 'none', textKey: 'galleryNone' },
       { value: 'horse', textKey: 'galleryHorse' },
-      { value: 'dragon', textKey: 'galleryDragon' },
+      ...(params.visualStyle === 'nature' ? [{ value: 'dragon' as const, textKey: 'galleryDragon' as TranslationKey }] : []),
       { value: 'predator', textKey: 'galleryPredator' },
       { value: 'normal', textKey: 'galleryNormal' },
       { value: 'multicolor', textKey: 'galleryMulticolor' },

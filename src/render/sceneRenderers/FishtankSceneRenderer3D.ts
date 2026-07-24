@@ -353,12 +353,13 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   getPredatorInstanceConfig(
     kind: 'normal' | 'horse',
     _flags: StyleFlags,
-    renderFlags: PredatorRenderFlags,
+    _renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
     switch (kind) {
       case 'normal':
+        // Predators in the fishtank are always sharks — the dragonPredators flag has no meaning here.
         return {
-          geometries: renderFlags.isDragon ? this.deps.fishtankSharkPredatorGeometries : this.deps.fishtankPredatorGeometries,
+          geometries: this.deps.fishtankSharkPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
         };
