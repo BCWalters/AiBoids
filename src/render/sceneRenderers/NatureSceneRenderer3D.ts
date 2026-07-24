@@ -2,14 +2,26 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
+import type { Predator } from '../../sim/Predator';
+import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import { placeNatureEnvironment, type NatureEnvironment } from '../styles/nature/environment';
+import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import type {
   FishtankBounds,
   SceneCreatureMaterialDefaults,
   SceneEnvironmentToggles,
   ScenePresentationSettings,
   SceneRendererHooks,
+  ColourStrategy,
+  MotionConfig,
+  PredatorRenderFlags,
+  StyleFlags,
+  BoidMotionStyleFlags,
+  BoidSpeciesConfig,
+  SceneBoidInstanceConfig,
+  ScenePredatorInstanceConfig,
+  SpeciesColorSet,
 } from './createSceneRendererHooks';
 
 // --- Nature style color constants: matte, earth-toned plumage with realistic gradients
@@ -23,15 +35,26 @@ const NATURE_HAWK_HEAD_TINT = new THREE.Color(0xefece2); // near-white so baked 
 const NATURE_HAWK_WING = new THREE.Color(0x2a2018); // dark blackish-brown, matches the baked torso color
 const NATURE_HAWK_TAIL = new THREE.Color(0xf2efe6); // genuinely white, matches the baked head color
 
-interface SpeciesColorSet {
-  body: THREE.Color;
-  wing: THREE.Color;
-  tail: THREE.Color;
-}
-
 const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing: NATURE_HAWK_WING, tail: NATURE_HAWK_TAIL };
 
-// Parrot boid species: vivid multi-hued macaw-style plumage
+// Nature-style motion constants for predators and boids
+const FLAP_FREQUENCY = 7.6; // radians/sec-ish; controls flap speed
+const FLAP_IDLE_AMPLITUDE = 0.25;
+const FLAP_SPEED_AMPLITUDE = 0.9;
+const DRAGON_FLAP_FREQUENCY = 2.15;
+const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
+const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
+const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22;
+const _UNICORN_FLAP_FREQUENCY = 3.2;
+const _UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
+const _UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
+const _UNICORN_BANK_SCALE = 0.35;
+// Motion constants for boid/creature configuration
+const _PARROT_FLAP_FREQUENCY = 5.4;
+const _PARROT_FLAP_IDLE_AMPLITUDE = 0.4;
+const _PARROT_FLAP_SPEED_AMPLITUDE = 0.95;
+const _PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
+
 type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus';
 
 interface NatureParrotVariant {
@@ -139,6 +162,9 @@ const NATURE_UNICORN_BODY = new THREE.Color(0xc9a8f0); // light lavender
 const NATURE_UNICORN_HUNT = new THREE.Color(0xe8c9ff); // brighter pale lavender-pink when locked on
 const NATURE_UNICORN_WING = new THREE.Color(0xf3ecff); // near-white so the rainbow vertex gradient reads clearly
 
+// Nature-style unicorn predator colors
+const NATURE_UNICORN_COLORS: SpeciesColorSet = { body: NATURE_UNICORN_BODY, wing: NATURE_UNICORN_WING, tail: NATURE_UNICORN_BODY };
+
 // Small songbird base colors (used in species configs)
 const GOLDFINCH_BODY_BASE = new THREE.Color(0xf5d327); // bright yellow chest/back
 const GOLDFINCH_WING_BASE = new THREE.Color(0x1c1c1c); // black wings with contrast
@@ -152,6 +178,27 @@ const BLUEJAY_BODY_BASE = new THREE.Color(0x3b6fa0); // jay blue back
 const BLUEJAY_WING_BASE = new THREE.Color(0xdfe8ef); // pale/white wing bars
 const BLUEJAY_TAIL_BASE = new THREE.Color(0x1c3350); // navy tail
 
+// Utility function for deterministic per-entity hashing (used for variant selection)
+function idHash(id: number, salt: number): number {
+  const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function getNatureParrotVariants(): NatureParrotVariant[] {
+  if (PARROT_FOCUS_PATTERN_INDEX === null) return PARROT_NATURE_VARIANTS;
+  return [PARROT_NATURE_VARIANTS[THREE.MathUtils.clamp(PARROT_FOCUS_PATTERN_INDEX, 0, PARROT_NATURE_VARIANTS.length - 1)]];
+}
+
+function getNatureParrotVariant(entity: Boid | Predator): NatureParrotVariant {
+  const variants = getNatureParrotVariants();
+  const baseIndex = Math.floor(idHash(entity.id, 42) * variants.length) % variants.length;
+  if (params.galleryCreature === 'parrot') {
+    const cycleStep = Math.floor(performance.now() / 3200);
+    return variants[(baseIndex + cycleStep) % variants.length];
+  }
+  return variants[baseIndex];
+}
+
 interface NatureSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
@@ -159,6 +206,17 @@ interface NatureSceneRendererDependencies {
   fishtankEnv: { setVisible: (visible: boolean) => void };
   natureEnv: NatureEnvironment;
   updateTransientEffects: (sim: Simulation, elapsed: number) => void;
+  natureSparrowGeometries: CreatureGeometries;
+  natureParrotGeometries: CreatureGeometries;
+  natureParrotBlueGoldGeometries: CreatureGeometries;
+  natureParrotScarletGeometries: CreatureGeometries;
+  natureParrotPurpleLavenderGeometries: CreatureGeometries;
+  natureParrotNeutralGeometries: CreatureGeometries;
+  natureBoidGeometries: CreatureGeometries;
+  natureSmallSpeciesGeometries: Map<BoidSpecies, CreatureGeometries>;
+  naturePredatorGeometries: CreatureGeometries;
+  dragonPredatorGeometries: CreatureGeometries;
+  unicornPredatorGeometries: CreatureGeometries;
 }
 
 export class NatureSceneRenderer3D implements SceneRendererHooks {
@@ -266,6 +324,186 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       wingRoughness: (isDragon: boolean) => isDragon ? 0.65 : 0.9,
       wingColor: (_isDragon: boolean, _isFishtank: boolean) => 0xffffff,
     };
+  }
+
+  getPredatorColourStrategy(kind: string, renderFlags: PredatorRenderFlags): ColourStrategy {
+    const { isDragon } = renderFlags;
+    
+    switch (kind) {
+      case 'unicorn':
+        return {
+          baseColor: NATURE_UNICORN_BODY,
+          highlightColor: NATURE_UNICORN_HUNT,
+          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          getSpeciesColors: () => NATURE_UNICORN_COLORS,
+        };
+      
+      case 'hawk':
+        return {
+          baseColor: isDragon ? DRAGON_PREDATOR_BASE : NATURE_PREDATOR_BASE,
+          highlightColor: isDragon ? DRAGON_PREDATOR_HUNT : NATURE_PREDATOR_HUNT,
+          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+          // Plain nature hawks (not dragon) get the bald-eagle body/wing/tail colour split.
+          getSpeciesColors: !isDragon ? () => NATURE_HAWK_COLORS : undefined,
+        };
+      
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
+  }
+
+  getPredatorMotionConfig(kind: string, renderFlags: PredatorRenderFlags): MotionConfig {
+    const { isDragon } = renderFlags;
+    
+    switch (kind) {
+      case 'unicorn':
+        return {
+          flapFrequency: _UNICORN_FLAP_FREQUENCY,
+          flapIdleAmplitude: _UNICORN_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: _UNICORN_FLAP_SPEED_AMPLITUDE,
+          keepUpright: true,
+          uprightStyle: 'unicorn',
+          bankScale: _UNICORN_BANK_SCALE,
+          worldScale: 1,
+          meshScaleBoost: 1,
+        };
+      
+      case 'hawk':
+        return {
+          flapFrequency: isDragon ? DRAGON_FLAP_FREQUENCY : FLAP_FREQUENCY,
+          flapIdleAmplitude: isDragon ? DRAGON_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: isDragon ? DRAGON_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+          keepUpright: isDragon,
+          uprightStyle: 'dragon',
+          tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
+          tailSwayAmplitude: isDragon ? DRAGON_TAIL_SWAY_AMPLITUDE : 0,
+          worldScale: 1,
+          meshScaleBoost: 1,
+        };
+      
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
+  }
+
+  getBoidColourStrategy(species: string, config: BoidSpeciesConfig, flags: StyleFlags): ColourStrategy {
+    const { isOrganic, isNature } = flags;
+    const getColors = config.getColors;
+    return {
+      baseColor: isOrganic ? config.natureBase : config.arcadeBase,
+      highlightColor: isOrganic ? NATURE_BOID_PANIC : new THREE.Color(0xffcc00), // arcade panic placeholder
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: config.colors || config.getColors ? true : isOrganic,
+      getSpeciesColors: getColors
+        ? (entity) => getColors(entity, flags)
+        : (config.colors ? () => config.colors! : undefined),
+      beakColor: config.beakColor,
+      bakedWingPalette: true,
+      bakedBodyGradient: isNature && (species === 'sparrow' || species === 'goldfinch' || species === 'cardinal' || species === 'bluejay'),
+    };
+  }
+
+  getBoidMotionConfig(species: string, config: BoidSpeciesConfig, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+    const { isFishTail, isNatureParrot } = boidMotionFlags;
+    const isParrot = species === 'parrot';
+    const tailSwayPivot = config.tailSwayPivotY ?? 0;
+    
+    return {
+      flapFrequency: isParrot && isNatureParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
+      flapIdleAmplitude: isParrot && isNatureParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: isParrot && isNatureParrot ? _PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+      getScale: (entity) => (entity as Boid).scale,
+      tailSwayAxis: isFishTail ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0), // MODEL_UP_AXIS : MODEL_RIGHT_AXIS
+      tailSwayAmplitude: isFishTail
+        ? 0.06 // FISH_TAIL_SWAY_AMPLITUDE placeholder
+        : isParrot && isNatureParrot
+          ? _PARROT_TAIL_SWAY_AMPLITUDE
+          : DRAGON_TAIL_SWAY_AMPLITUDE,
+      tailSwayFrequency: isFishTail ? 2.2 : undefined, // FISH_TAIL_SWAY_FREQUENCY placeholder
+      tailSwayPivotY: isFishTail ? 0 : tailSwayPivot,
+      worldScale: 1,
+      meshScaleBoost: 1,
+      preferUpright: true,
+    };
+  }
+
+  getParrotColourStrategy(config: BoidSpeciesConfig, _flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+    return {
+      baseColor: config.natureBase,
+      highlightColor: NATURE_BOID_PANIC,
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: true,
+      getSpeciesColors: (entity) => this.getParrotColorVariant(entity),
+      beakColor: config.beakColor,
+      bakedWingPalette,
+      useNatureParrotPalette: true, // Always use nature parrot palette in nature renderer
+      lockSpeciesPalette: PARROT_FOCUS_PATTERN_INDEX !== null,
+    };
+  }
+
+  private getParrotColorVariant(entity: Boid | Predator): SpeciesColorSet {
+    return getNatureParrotVariant(entity).colors;
+  }
+
+  getParrotGeometryProfile(entity: Boid | Predator, _flags: StyleFlags): string {
+    return getNatureParrotVariant(entity).geometryProfile;
+  }
+
+  getParrotProfileNames(_flags: StyleFlags): string[] {
+    return NON_NEUTRAL_PARROT_PROFILES;
+  }
+
+  getParrotProfileInstanceConfig(profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
+    switch (profile) {
+      case 'green-focus':
+        return { geometries: this.deps.natureParrotGeometries, bodyVertexColors: true };
+      case 'blue-gold-focus':
+        return { geometries: this.deps.natureParrotBlueGoldGeometries, bodyVertexColors: true };
+      case 'scarlet-focus':
+        return { geometries: this.deps.natureParrotScarletGeometries, bodyVertexColors: true };
+      case 'purple-lavender-focus':
+        return { geometries: this.deps.natureParrotPurpleLavenderGeometries, bodyVertexColors: true };
+      case 'neutral':
+        return { geometries: this.deps.natureParrotNeutralGeometries, bodyVertexColors: true };
+      default:
+        throw new Error(`Unknown parrot profile: ${profile}`);
+    }
+  }
+
+  getBoidInstanceConfig(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+    if (config.useSmallGeometry) {
+      return { geometries: this.deps.natureSparrowGeometries, bodyVertexColors: true };
+    }
+    if (config.useParrotGeometry) {
+      return { geometries: this.deps.natureParrotGeometries, bodyVertexColors: true };
+    }
+    return {
+      geometries: this.deps.natureSmallSpeciesGeometries.get(species) ?? this.deps.natureBoidGeometries,
+      bodyVertexColors: true,
+    };
+  }
+
+  getPredatorInstanceConfig(
+    kind: 'hawk' | 'unicorn',
+    _flags: StyleFlags,
+    renderFlags: PredatorRenderFlags,
+  ): ScenePredatorInstanceConfig {
+    switch (kind) {
+      case 'hawk':
+        return {
+          geometries: renderFlags.isDragon ? this.deps.dragonPredatorGeometries : this.deps.naturePredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: true,
+        };
+      case 'unicorn':
+        return {
+          geometries: this.deps.unicornPredatorGeometries,
+          rainbowWings: true,
+          bodyVertexColors: true,
+        };
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
   }
 
   dispose(): void {

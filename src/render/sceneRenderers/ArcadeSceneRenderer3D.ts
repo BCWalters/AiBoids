@@ -2,15 +2,26 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { params } from '../../sim/params';
 import type { Simulation } from '../../sim/Simulation';
+import type { Predator } from '../../sim/Predator';
+import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { NatureEnvironment } from '../styles/nature/environment';
+import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import type {
   FishtankBounds,
   SceneCreatureMaterialDefaults,
   SceneEnvironmentToggles,
   ScenePresentationSettings,
   SceneRendererHooks,
+  ColourStrategy,
+  MotionConfig,
+  PredatorRenderFlags,
+  StyleFlags,
+  BoidMotionStyleFlags,
+  BoidSpeciesConfig,
+  SceneBoidInstanceConfig,
+  ScenePredatorInstanceConfig,
 } from './createSceneRendererHooks';
 
 // --- Arcade style color constants: bright, saturated emissive colors for bloom effect
@@ -30,12 +41,25 @@ const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
 const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
 
+// Arcade motion constants (simplified, no exotic variants)
+const ARCADE_FLAP_FREQUENCY = 7.6;
+const ARCADE_FLAP_IDLE_AMPLITUDE = 0.25;
+const ARCADE_FLAP_SPEED_AMPLITUDE = 0.9;
+const ARCADE_UNICORN_FLAP_FREQUENCY = 3.2;
+const ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
+const ARCADE_UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
+const ARCADE_UNICORN_BANK_SCALE = 0.35;
+
 interface ArcadeSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   driftingClouds: DriftingClouds;
   fishtankEnv: FishtankEnvironment;
   natureEnv: NatureEnvironment;
+  arcadeSparrowGeometries: CreatureGeometries;
+  arcadeParrotGeometries: CreatureGeometries;
+  arcadeBoidGeometries: CreatureGeometries;
+  arcadePredatorGeometries: CreatureGeometries;
 }
 
 export class ArcadeSceneRenderer3D implements SceneRendererHooks {
@@ -130,6 +154,143 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       wingRoughness: (_isDragon: boolean) => 0.5,
       wingColor: (_isDragon: boolean, _isFishtank: boolean) => 0xffffff,
     };
+  }
+
+  getPredatorColourStrategy(kind: string, _renderFlags: PredatorRenderFlags): ColourStrategy {
+    switch (kind) {
+      case 'unicorn':
+        return {
+          baseColor: ARCADE_UNICORN_BASE,
+          highlightColor: ARCADE_UNICORN_HUNT,
+          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+        };
+      
+      case 'hawk':
+        return {
+          baseColor: ARCADE_PREDATOR_BASE,
+          highlightColor: ARCADE_PREDATOR_HUNT,
+          getIntensity: (entity: Predator | Boid) => (entity as Predator).huntIntensity,
+        };
+      
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
+  }
+
+  getPredatorMotionConfig(kind: string, _renderFlags: PredatorRenderFlags): MotionConfig {
+    switch (kind) {
+      case 'unicorn':
+        return {
+          flapFrequency: ARCADE_UNICORN_FLAP_FREQUENCY,
+          flapIdleAmplitude: ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: ARCADE_UNICORN_FLAP_SPEED_AMPLITUDE,
+          keepUpright: true,
+          uprightStyle: 'unicorn',
+          bankScale: ARCADE_UNICORN_BANK_SCALE,
+          worldScale: 1,
+          meshScaleBoost: 1,
+        };
+      
+      case 'hawk':
+        return {
+          flapFrequency: ARCADE_FLAP_FREQUENCY,
+          flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: ARCADE_FLAP_SPEED_AMPLITUDE,
+          keepUpright: false,
+          uprightStyle: undefined,
+          worldScale: 1,
+          meshScaleBoost: 1,
+        };
+      
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
+  }
+
+  getBoidColourStrategy(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+    // Arcade has bright, simple coloring with no panic variations
+    const getColors = config.getColors;
+    return {
+      baseColor: config.arcadeBase,
+      highlightColor: ARCADE_BOID_PANIC,
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: false, // Arcade boids have uniform coloring per species
+      getSpeciesColors: getColors
+        ? (entity) => getColors(entity, _flags)
+        : (config.colors ? () => config.colors! : undefined),
+      beakColor: config.beakColor,
+      bakedWingPalette: true,
+    };
+  }
+
+  getBoidMotionConfig(_species: string, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+    const tailSwayPivot = config.tailSwayPivotY ?? 0;
+    
+    return {
+      flapFrequency: ARCADE_FLAP_FREQUENCY,
+      flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
+      flapSpeedAmplitude: ARCADE_FLAP_SPEED_AMPLITUDE,
+      getScale: (entity) => (entity as Boid).scale,
+      tailSwayAxis: new THREE.Vector3(1, 0, 0), // Right axis
+      tailSwayAmplitude: 0,
+      tailSwayPivotY: tailSwayPivot,
+      worldScale: 1,
+      meshScaleBoost: 1,
+      preferUpright: true,
+    };
+  }
+
+  getParrotColourStrategy(config: BoidSpeciesConfig, _flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+    return {
+      baseColor: ARCADE_PARROT_BASE,
+      highlightColor: ARCADE_BOID_PANIC,
+      getIntensity: (entity) => (entity as Boid).panicLevel,
+      individualVariation: false, // Arcade parrots are uniform
+      getSpeciesColors: undefined, // All arcade parrots use the base color
+      beakColor: config.beakColor,
+      bakedWingPalette,
+      useNatureParrotPalette: false,
+    };
+  }
+
+  getParrotGeometryProfile(_entity: Boid | Predator, _flags: StyleFlags): string {
+    return 'neutral';
+  }
+
+  getParrotProfileNames(_flags: StyleFlags): string[] {
+    return [];
+  }
+
+  getParrotProfileInstanceConfig(_profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
+    return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false };
+  }
+
+  getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+    if (config.useSmallGeometry) {
+      return { geometries: this.deps.arcadeSparrowGeometries, bodyVertexColors: false };
+    }
+    if (config.useParrotGeometry) {
+      return { geometries: this.deps.arcadeParrotGeometries, bodyVertexColors: false };
+    }
+    return { geometries: this.deps.arcadeBoidGeometries, bodyVertexColors: false };
+  }
+
+  getPredatorInstanceConfig(
+    kind: 'hawk' | 'unicorn',
+    _flags: StyleFlags,
+    _renderFlags: PredatorRenderFlags,
+  ): ScenePredatorInstanceConfig {
+    switch (kind) {
+      case 'hawk':
+      case 'unicorn':
+        return {
+          geometries: this.deps.arcadePredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: false,
+        };
+      default:
+        throw new Error(`Unknown predator kind: ${kind}`);
+    }
   }
 
   dispose(): void {}
