@@ -226,6 +226,7 @@ export class Simulation {
     this.syncSpecies(BoidSpecies.Blue, params.blueCount);
 
     this.syncPredatorSpecies(PredatorSpecies.Normal, params.predatorCount);
+    this.syncPredatorSpecies(PredatorSpecies.Monster, params.monsterCount);
     this.syncPredatorSpecies(PredatorSpecies.Horse, params.horseCount);
   }
 

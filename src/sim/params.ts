@@ -27,6 +27,7 @@ export interface SimParams {
   redCount: number;
   blueCount: number;
   predatorCount: number;
+  monsterCount: number;
   horseCount: number;
 
   // Movement
@@ -87,11 +88,6 @@ export interface SimParams {
   // no effect on simulation behavior.
   visualStyle: VisualStyle;
 
-  // Nature-style only: render predators as large purple dragons (bat-like
-  // membrane wings, long whip tail) instead of the default hawk geometry.
-  // Purely cosmetic.
-  dragonPredators: boolean;
-
   // Nature-style only: whether distance fog is applied in the 3D nature
   // scene. Fog hides seams at the world's edge (ground/mountains/ocean
   // fading into the sky), but disabling it is useful for inspecting
@@ -132,7 +128,7 @@ export interface SimParams {
   galleryCreature: GalleryCreature | null;
 }
 
-export type GalleryCreature = 'horse' | 'dragon' | 'predator' | 'normal' | 'multicolor' | 'gold' | 'red' | 'blue';
+export type GalleryCreature = 'horse' | 'monster' | 'predator' | 'normal' | 'multicolor' | 'gold' | 'red' | 'blue';
 
 export const defaultParams: SimParams = {
   mode: '3d',
@@ -142,9 +138,12 @@ export const defaultParams: SimParams = {
   goldCount: 75,
   redCount: 75,
   blueCount: 75,
-  predatorCount: 5,
-  // Independent from predatorCount — horse-kind predators are a separate
-  // population that coexists with normal/dragon predators, so default to
+  // Default to 0 hawks — dragons and unicorns are the out-of-the-box
+  // nature-scene experience. Players can add hawks via the slider.
+  predatorCount: 0,
+  monsterCount: 5,
+  // Independent from predatorCount/monsterCount — horse-kind predators are
+  // a separate population that coexists with hawks/dragons, so default to
   // a visible little herd rather than 0 (visible out of the box).
   horseCount: 5,
 
@@ -175,7 +174,6 @@ export const defaultParams: SimParams = {
   trailAmount: 0.82,
 
   visualStyle: 'nature',
-  dragonPredators: true,
   fogEnabled: true,
   timeOfDay: 'noon',
   softShadowsEnabled: true,
