@@ -31,6 +31,14 @@ import { createBloodEffects, type BloodEffects } from './bloodEffects';
 import { createFireBreathEffects, type FireBreathEffects } from './styles/nature/fireBreath';
 import { createUFOVisual, type UFOVisual } from './ufoEffects';
 import {
+  getUprightFlapFrequencyMultiplier,
+  getUprightHeadingSmoothingRate,
+  getUprightMaxUpTilt,
+  getUprightPitchLimits,
+  getUprightTurnRate,
+  type UprightStyle,
+} from './creatureUprightTuning';
+import {
   createSceneRendererHooks,
   type BoidMotionStyleFlags,
   type ColourStrategy,
@@ -151,36 +159,6 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 // - Descending: pitch is allowed a small nose-down droop, capped well
 //   below the overall tilt ceiling below, so sinking reads as a gentle
 //   "floating down" rather than either a flat glide or a diving swoop.
-const UNICORN_ASCEND_PITCH_RADIANS = 0;
-const UNICORN_DESCEND_PITCH_RADIANS = THREE.MathUtils.degToRad(10);
-// Hard ceiling on how far the model's up/legs axis is ever allowed to
-// tilt away from true vertical — "legs toward the ground, no more than
-// 30 degrees from vertical" — enforced as a final safety clamp after
-// pitch *and* bank are both baked into the orientation (see
-// clampUpTilt), so it holds regardless of how those two combine. The
-// pitch/bank constants here are tuned to stay comfortably under it on
-// their own; this is the hard guarantee behind that tuning.
-const UNICORN_MAX_UP_TILT_RADIANS = THREE.MathUtils.degToRad(30);
-// Unicorns smooth their heading direction before use, same idea as
-// DRAGON_HEADING_SMOOTHING_RATE (removes per-frame jitter at the
-// source) but with its own rate constant — kept separate rather than
-// shared so each creature's feel can be tuned independently, and
-// because unicorns don't need the dragon's near-pole instability fix at
-// all (their pitch is hard-clamped small, so it never gets anywhere
-// near vertical to begin with).
-const UNICORN_HEADING_SMOOTHING_RATE = 5;
-// Final safety-net turn-rate cap, same purpose as
-// DRAGON_MAX_TURN_RADIANS_PER_SEC (see its doc comment) but tracked in
-// its own per-unicorn map (unicornDisplayQuats) with its own constant,
-// rather than sharing the dragon's.
-const UNICORN_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(540);
-// Flap speed scales with vertical velocity instead of horizontal speed
-// — "flap faster as they go up, slower as they descend". climbFrac is
-// vel.y / maxSpeed clamped to [-1, 1]; frequency scales up while
-// climbing and down while sinking, independent of horizontal speed.
-const UNICORN_CLIMB_FLAP_BOOST = 0.9; // up to +90% frequency at full climb
-const UNICORN_DESCEND_FLAP_CUT = 0.55; // down to -55% frequency at full descent
-
 // Parrot tail sway: moved to scene renderers for boid rendering
 // const PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
 const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
@@ -211,54 +189,6 @@ const DRAGON_TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather
 // itself removes this jitter at its source rather than just downstream.
 // Non-dragon entities intentionally skip this (see keepUpright) since
 // they don't anchor to world-up and so have no equivalent instability.
-const DRAGON_HEADING_SMOOTHING_RATE = 6;
-// Final safety net: caps how fast a dragon's *displayed* orientation can
-// rotate per second, regardless of how the target orientation for this
-// frame was computed — see dragonDisplayQuats' doc comment for why this
-// structurally prevents any visible instant flip/flatten. Generous
-// enough that legitimate sharp turns/dives still look immediate (a
-// 180-degree reversal completes in a small fraction of a second), but
-// bounded so a computational glitch can only ever show up as a brief,
-// smooth correction rather than a snap.
-const DRAGON_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(720);
-
-// Fishtank sharks reuse the dragon's keepUpright entity/animation plumbing
-// (same predator, same instance set — see isShark above) but get their
-// own "stay upright" orientation model instead of the dragon's free-pitch
-// one: real sharks (and the "shark" archetype generally) read as wrong
-// when they point steeply up or down for the swoop/dive dragons are
-// allowed, so — similar to unicorns — pitch is hard-clamped to a shallow
-// range around level. Unlike unicorns, sharks are allowed a small amount
-// of both nose-up and nose-down tilt (symmetric), since a shark gently
-// angling up/down while cruising still reads as natural, just never the
-// steep near-vertical dive/climb a dragon can do.
-const SHARK_ASCEND_PITCH_RADIANS = THREE.MathUtils.degToRad(15);
-const SHARK_DESCEND_PITCH_RADIANS = THREE.MathUtils.degToRad(15);
-// Same purpose as UNICORN_MAX_UP_TILT_RADIANS: a final hard ceiling on
-// how far the dorsal/up axis is ever allowed to tilt from true vertical,
-// applied after pitch and bank are both baked in.
-const SHARK_MAX_UP_TILT_RADIANS = THREE.MathUtils.degToRad(30);
-// Own heading-smoothing rate, same idea as DRAGON_HEADING_SMOOTHING_RATE/
-// UNICORN_HEADING_SMOOTHING_RATE but tuned separately rather than shared,
-// and noticeably faster than either: the fishtank is a small, cramped
-// space compared to the open sky dragons/unicorns fly in, so sharks
-// bounce off the boundary and reverse course far more often. A slow
-// heading-smoothing rate combined with a slow turn-rate cap (below) made
-// the displayed body lag well behind the sim's actual (unsmoothed)
-// position for a noticeable stretch after every reversal — reported as
-// the shark appearing to "swim backwards", nose still pointing the old
-// way while it visibly slides off in the new direction. Speeding both up
-// keeps the visible facing glued much more tightly to the actual
-// direction of travel.
-const SHARK_HEADING_SMOOTHING_RATE = 14;
-// Final safety-net turn-rate cap, tracked in its own per-shark map
-// (sharkDisplayQuats) — see dragonDisplayQuats'/unicornDisplayQuats' doc
-// comments for why this is kept independent rather than shared. Set
-// higher than the dragon's — see SHARK_HEADING_SMOOTHING_RATE's doc
-// comment for why sharks need to snap around faster than a large dragon
-// in open sky.
-const SHARK_MAX_TURN_RADIANS_PER_SEC = THREE.MathUtils.degToRad(1080);
-
 // Three.js cones/octahedra/lathes point along +Y by default; that's the
 // "forward" direction we rotate onto each entity's velocity vector.
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
@@ -328,8 +258,6 @@ function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
   return x - Math.floor(x);
 }
-
-type UprightStyle = NonNullable<MotionConfig['uprightStyle']>;
 
 interface EntityInstanceMatrixArgs {
   set: BirdInstanceSet;
@@ -1367,12 +1295,6 @@ export class Renderer3D {
     this.scheduleShaderWarmup(style);
   }
 
-  private getUprightHeadingSmoothingRate(style: UprightStyle): number {
-    if (style === 'unicorn') return UNICORN_HEADING_SMOOTHING_RATE;
-    if (style === 'shark') return SHARK_HEADING_SMOOTHING_RATE;
-    return DRAGON_HEADING_SMOOTHING_RATE;
-  }
-
   private updateEntityRenderHeading(
     entity: Boid | Predator,
     speed: number,
@@ -1386,7 +1308,7 @@ export class Renderer3D {
     const targetY = entity.velocity.y * invSpeed;
     const targetZ = entity.velocity.z * invSpeed;
     if (keepUpright) {
-      const rate = 1 - Math.exp(-dt * this.getUprightHeadingSmoothingRate(uprightStyle));
+      const rate = 1 - Math.exp(-dt * getUprightHeadingSmoothingRate(uprightStyle));
       let hx = entity.renderHeading.x + (targetX - entity.renderHeading.x) * rate;
       let hy = entity.renderHeading.y + (targetY - entity.renderHeading.y) * rate;
       let hz = entity.renderHeading.z + (targetZ - entity.renderHeading.z) * rate;
@@ -1402,14 +1324,14 @@ export class Renderer3D {
   }
 
   private clampForwardPitchForUprightStyle(uprightStyle: UprightStyle): void {
+    const pitchLimits = getUprightPitchLimits(uprightStyle);
+    if (!pitchLimits) return;
     this.tmpUnicornHorizontal.set(this.tmpForward.x, 0, this.tmpForward.z);
     const horizontalLen = this.tmpUnicornHorizontal.length();
     if (horizontalLen <= 1e-6) return;
     this.tmpUnicornHorizontal.divideScalar(horizontalLen);
     const rawPitch = Math.atan2(this.tmpForward.y, horizontalLen);
-    const ascendLimit = uprightStyle === 'shark' ? SHARK_ASCEND_PITCH_RADIANS : UNICORN_ASCEND_PITCH_RADIANS;
-    const descendLimit = uprightStyle === 'shark' ? SHARK_DESCEND_PITCH_RADIANS : UNICORN_DESCEND_PITCH_RADIANS;
-    const clampedPitch = THREE.MathUtils.clamp(rawPitch, -descendLimit, ascendLimit);
+    const clampedPitch = THREE.MathUtils.clamp(rawPitch, -pitchLimits.descend, pitchLimits.ascend);
     this.tmpForward.copy(this.tmpUnicornHorizontal).multiplyScalar(Math.cos(clampedPitch));
     this.tmpForward.y = Math.sin(clampedPitch);
   }
@@ -1461,33 +1383,24 @@ export class Renderer3D {
         displayQuat = this.bodyQuat.clone();
         this.dragonDisplayQuats.set(entity.id, displayQuat);
       } else {
-        displayQuat.rotateTowards(this.bodyQuat, DRAGON_MAX_TURN_RADIANS_PER_SEC * dt);
+        displayQuat.rotateTowards(this.bodyQuat, getUprightTurnRate(uprightStyle) * dt);
       }
       this.bodyQuat.copy(displayQuat);
       return;
     }
 
-    if (uprightStyle === 'unicorn') {
-      let displayQuat = this.unicornDisplayQuats.get(entity.id);
-      if (!displayQuat) {
-        displayQuat = this.bodyQuat.clone();
-        this.unicornDisplayQuats.set(entity.id, displayQuat);
-      } else {
-        displayQuat.rotateTowards(this.bodyQuat, UNICORN_MAX_TURN_RADIANS_PER_SEC * dt);
-      }
-      this.clampDisplayUpTilt(displayQuat, UNICORN_MAX_UP_TILT_RADIANS);
-      this.bodyQuat.copy(displayQuat);
-      return;
-    }
-
-    let displayQuat = this.sharkDisplayQuats.get(entity.id);
+    const displayQuatMap = uprightStyle === 'unicorn' ? this.unicornDisplayQuats : this.sharkDisplayQuats;
+    let displayQuat = displayQuatMap.get(entity.id);
     if (!displayQuat) {
       displayQuat = this.bodyQuat.clone();
-      this.sharkDisplayQuats.set(entity.id, displayQuat);
+      displayQuatMap.set(entity.id, displayQuat);
     } else {
-      displayQuat.rotateTowards(this.bodyQuat, SHARK_MAX_TURN_RADIANS_PER_SEC * dt);
+      displayQuat.rotateTowards(this.bodyQuat, getUprightTurnRate(uprightStyle) * dt);
     }
-    this.clampDisplayUpTilt(displayQuat, SHARK_MAX_UP_TILT_RADIANS);
+    const maxUpTilt = getUprightMaxUpTilt(uprightStyle);
+    if (maxUpTilt !== null) {
+      this.clampDisplayUpTilt(displayQuat, maxUpTilt);
+    }
     this.bodyQuat.copy(displayQuat);
   }
 
@@ -1885,14 +1798,9 @@ export class Renderer3D {
     const stateFrequencyMult = THREE.MathUtils.clamp(stateFrequencyMultRaw, 0.8, 1.18);
     const stateAmplitudeMult = THREE.MathUtils.clamp(stateAmplitudeMultRaw, 0.82, 1.24);
     const amplitude = amplitudeBase * stateAmplitudeMult;
-    let effectiveFrequency = flapFrequency * stateFrequencyMult;
-    if (uprightStyle === 'unicorn') {
-      const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
-      const freqMultiplier = climbFrac >= 0
-        ? 1 + UNICORN_CLIMB_FLAP_BOOST * climbFrac
-        : 1 - UNICORN_DESCEND_FLAP_CUT * -climbFrac;
-      effectiveFrequency = flapFrequency * freqMultiplier * stateFrequencyMult;
-    }
+    const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
+    const uprightFrequencyMultiplier = getUprightFlapFrequencyMultiplier(uprightStyle, climbFrac);
+    const effectiveFrequency = flapFrequency * stateFrequencyMult * uprightFrequencyMultiplier;
     const prevPhase = this.flapPhase.get(entity) ?? entity.id * 1.7;
     const phase = prevPhase + effectiveFrequency * dt;
     this.flapPhase.set(entity, phase);
