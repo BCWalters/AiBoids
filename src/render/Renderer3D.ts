@@ -65,104 +65,53 @@ const PANIC_FLAP_AMP_BOOST = 0.12;
 const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 
 // Unicorns get their own dedicated "stay upright" orientation model in
-// updateInstances (uprightStyle === 'unicorn'), deliberately NOT a
-// smaller-numbers reuse of the dragon's keepUpright path (see
-// DRAGON_HEADING_SMOOTHING_RATE / near-pole handling below) — a
-// pegasus/unicorn should never pitch its nose up/down or roll far
-// enough to need that machinery at all; it's a fundamentally flatter,
-// gentler flight style, not the same math dialed down.
+// updateInstances (uprightStyle === 'unicorn'), not a scaled-down reuse of
+// the dragon keepUpright path: pitch is hard-clamped asymmetrically (0 while
+// climbing, a small nose-down droop while sinking) for a flatter, gentler
+// flight style.
 //
-// Pitch (nose up/down) is hard-clamped, asymmetrically, based on
-// whether the creature is climbing or sinking:
-// - Ascending: pitch is clamped to exactly 0 — "they stay flat rather
-//   than turning upward", no nose-up tilt at all while climbing.
-// - Descending: pitch is allowed a small nose-down droop, capped well
-//   below the overall tilt ceiling below, so sinking reads as a gentle
-//   "floating down" rather than either a flat glide or a diving swoop.
-//
-// Shared tail-sway phase offset: creatures with a swaying tail (dragons,
-// sharks — see usesTailSwayMatrix) drive the tail from the wing's flap
-// phase but offset it so the tail lags/leads the wingbeat rather than
-// mirroring it exactly. The per-scene tail-sway *amplitude* and axis are
-// owned by each scene's MotionConfig; only this shared phase relationship
-// lives here.
+// Tail-sway phase offset: creatures with a swaying tail (dragons, sharks —
+// see usesTailSwayMatrix) drive the tail from the wing flap phase, offset so
+// it lags/leads rather than mirroring it. Amplitude/axis are per-scene
+// (MotionConfig); only this shared phase relationship lives here.
 const TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
 
-// Dragons additionally low-pass filter their heading direction (not just
-// their bank angle) before it's used for orientation — see the
-// keepUpright branch in updateInstances for why: near a near-vertical
-// heading, the *raw* per-frame velocity direction itself is unstable
-// (tiny, essentially-noise-level sideways velocity components swing the
-// horizontal/azimuthal component of the direction wildly, the same way a
-// compass spins wildly near the magnetic pole), independent of how
-// robustly "right"/"up" are then derived from it. Smoothing the heading
-// itself removes this jitter at its source rather than just downstream.
-// Non-dragon creatures intentionally skip this (see keepUpright) since
-// they don't anchor to world-up and so have no equivalent instability.
-// Three.js cones/octahedra/lathes point along +Y by default; that's the
-// "forward" direction we rotate onto each creature's velocity vector.
+// Dragons low-pass filter their heading direction (not just bank) before
+// orientation — near a vertical heading the raw velocity direction is
+// unstable (noise-level sideways components swing the azimuth wildly, like a
+// compass near the pole). Non-dragons skip this since they don't anchor to
+// world-up.
+// Three.js cones/octahedra/lathes point along +Y by default; that's "forward".
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
-// The bodies' wings lie flat in the local Z=0 plane (see geometry/birdGeometry.ts, geometry/dragonGeometry.ts, geometry/unicornGeometry.ts)
-// — local +Z is therefore the model's own "dorsal/up" direction when
-// level, used below to build an orientation that stays right-side-up
-// rather than picking an arbitrary roll.
+// Wings lie flat in the local Z=0 plane, so local +Z is the model's "dorsal/up"
+// direction when level — used to keep orientation right-side-up.
 const MODEL_UP_AXIS = new THREE.Vector3(0, 0, 1);
-// Local "right" — used to pitch the tail up/down for the dragon tail-sway
-// animation (a rotation around the model's own left-right axis tilts its
-// forward/up plane, i.e. swings the tail, which trails behind along -Y).
+// Local "right" — axis the dragon tail-sway pitches around.
 const MODEL_RIGHT_AXIS = new THREE.Vector3(1, 0, 0);
 const WORLD_UP_AXIS = new THREE.Vector3(0, 1, 0);
-// When a creature's heading points anywhere near straight up/down,
-// world-up stops being a good reference for "which way is level": the
-// cross product used to derive "right" (cross(WORLD_UP_AXIS, forward))
-// shrinks toward zero as forward approaches parallel to WORLD_UP_AXIS.
-// The earlier fix here only special-cased the *exact* zero-length case
-// (a literal, single-point singularity essentially never hit by a real
-// heading) and otherwise always normalized whatever tiny cross product
-// resulted — but normalizing an already-tiny vector amplifies ordinary
-// per-frame floating-point noise into a visibly different direction each
-// frame, which reads as boids/predators flattening/flickering between
-// 2D/3D any time a heading spent a while within roughly this many
-// degrees of vertical, not just at the literal pole. A prior attempt to
-// smooth this out by blending WORLD_UP_AXIS with a fallback axis across
-// this whole range reintroduced its own, differently-located version of
-// the same problem (see git history) since the blended reference could
-// itself land parallel to forward for various headings inside the range.
-//
-// Fixed instead by keeping a per-creature persisted "right" vector
-// (Boid/Predator.renderRight): outside this cone, it's discarded and
-// freshly recomputed straight from WORLD_UP_AXIS every single frame (no
-// blending, no drift). Only *inside* the cone does the renderer reuse
-// last frame's right vector (re-orthogonalized against the current
-// forward via Gram-Schmidt) rather than recomputing a numerically
-// unstable one from scratch — a form of parallel transport, but one
-// that's safe against the long-term roll drift that sank the earlier
-// persisted-state attempt, since it only ever runs for the brief stretch
-// a creature's heading actually stays inside this narrow near-vertical
-// cone, immediately re-anchoring to WORLD_UP_AXIS the instant it exits.
+// Near a vertical heading, world-up is a poor "level" reference: cross(WORLD_UP,
+// forward) shrinks toward zero and normalizing it amplifies per-frame noise into
+// a flickering direction. Fix: persist a per-creature "right" vector
+// (Boid/Predator.renderRight). Outside a narrow near-vertical cone it's
+// recomputed fresh from WORLD_UP every frame; only inside the cone do we reuse
+// last frame's right (re-orthogonalized against forward via Gram-Schmidt),
+// re-anchoring to WORLD_UP the instant the heading exits.
 const NEAR_POLE_RIGHT_LENGTH_THRESHOLD = 0.15; // ~= sin(8.6°) from vertical
 const NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ = NEAR_POLE_RIGHT_LENGTH_THRESHOLD * NEAR_POLE_RIGHT_LENGTH_THRESHOLD;
-// Only used as a last-ditch fallback when even the re-orthogonalized
-// persisted right vector has collapsed (forward changed so much frame to
-// frame that it's no longer even approximately valid) — vanishingly rare
-// in practice, but keeps the math well-defined in all cases.
+// Last-ditch fallback when even the re-orthogonalized right vector has collapsed
+// (forward changed too much frame to frame) — vanishingly rare, keeps the math
+// well-defined.
 const UP_REFERENCE_FALLBACK_AXIS = new THREE.Vector3(0, 0, 1);
-// Roll (bank) applied when turning is smoothed and clamped well short of
-// fully inverted — a dramatic-but-still-clearly-banking lean, not a
-// literal flip, per the "prefer to be right-side up" request.
+// Roll (bank) when turning: smoothed and clamped well short of inverted — a
+// clear banking lean, not a flip.
 const MAX_BANK_RADIANS = THREE.MathUtils.degToRad(42);
 const BANK_GAIN = 2.6;
 const BANK_SMOOTHING_RATE = 5;
 
 /**
- * Cheap deterministic pseudo-random hash from an integer id + a small
- * "salt" (so multiple independent random-ish values can be derived from
- * the same id) into [0, 1). Used to give each boid a *stable* (no
- * per-frame flicker, no extra state to track) individual color variation
- * derived purely from its id — real flocks aren't perfectly uniform in
- * plumage, and a small per-individual jitter plus occasional distinct
- * "morphs" reads as much more natural than one flat color repeated
- * hundreds of times.
+ * Cheap deterministic pseudo-random hash from an integer id + a small "salt"
+ * into [0, 1). Gives each boid a stable (no per-frame flicker) individual
+ * color variation derived purely from its id.
  */
 function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
@@ -285,14 +234,11 @@ interface UpdateCreatureInstanceArgs {
 }
 type UpdateCreatureSharedArgs = Omit<UpdateCreatureInstanceArgs, 'index' | 'creature'>;
 
-// Unicorns reuse the same body/wing/tail split (lavender body+tail, near-
-// white wings so the baked rainbow vertex gradient shows through) in nature
-// style — see NATURE_UNICORN_WING's doc comment above. The fishtank seahorse
-// reuses this same predator-species/color pipeline but its "wing" slot is
-// repurposed as solid-colored pectoral fins (no rainbow gradient baked in),
-// so its wing/tail tint should match the body instead of the near-white
-// rainbow-reading tint, or the fins render as washed-out white flags that
-// look detached from the body.
+// Unicorns reuse the body/wing/tail split (lavender body+tail, near-white
+// wings so the baked rainbow gradient shows through) in nature style. The
+// fishtank seahorse reuses this same pipeline but repurposes its "wing" slot
+// as solid-colored pectoral fins (no baked gradient), so its wing/tail tint
+// should match the body rather than the near-white rainbow-reading tint.
 
 interface BoidRenderBatch {
   body: THREE.InstancedMesh;
@@ -333,20 +279,11 @@ export class Renderer3D {
   private predatorInstances = new Map<PredatorSpecies, BoidRenderBatch | null>();
   private predatorInstanceKeys = new Map<PredatorSpecies, string | null>();
   /**
-   * Persisted, per-dragon *displayed* orientation — see the keepUpright
-   * branch in updateInstances for why this exists as a final safety net
-   * on top of the heading smoothing / near-pole "right" vector logic:
-   * no matter how the ideal target orientation for a given frame was
-   * computed (and no matter what instability that computation might
-   * still have in some edge case we haven't found yet), the mesh is
-   * only ever allowed to rotate toward it at a bounded angular rate, via
-   * THREE.Quaternion.rotateTowards. A valid unit quaternion can't
-   * represent a "flattened" orientation, and interpolating between two
-   * valid quaternions can't pass through one either — so bounding the
-   * turn rate this way makes any remaining glitch show up as, at worst,
-   * a brief pause before the model continues turning smoothly, never a
-   * visible instant flip or flattening snap. Cleared whenever the
-   * predator render batch is rebuilt (species/count/dragon-mode change).
+   * Persisted, per-dragon displayed orientation — a final safety net on top
+   * of the heading smoothing / near-pole "right" logic: the mesh only ever
+   * rotates toward its target at a bounded rate (Quaternion.rotateTowards), so
+   * any remaining glitch shows up as at worst a brief pause, never an instant
+   * flip or flatten. Cleared when the predator batch is rebuilt.
    */
   private dragonDisplayQuats = new Map<number, THREE.Quaternion>();
   /** Turn-rate-limited display orientation state for non-dragon upright styles. */
@@ -376,12 +313,9 @@ export class Renderer3D {
   private rollQuat = new THREE.Quaternion();
   private tmpSpawnPosition = new THREE.Vector3();
   private tmpSpawnDirection = new THREE.Vector3();
-  // Sim world center, recomputed once per frame in render() while
-  // fishtank style is active — used to "grow" fishtank's boid positions
-  // symmetrically around the tank's true center (see TANK_VISUAL_SCALE's
-  // doc comment / updateInstances' worldScale param) rather than around
-  // the coordinate origin, which would shift the whole flock away from
-  // where the tank/camera actually are.
+  // Sim world center, recomputed per frame while fishtank style is active —
+  // used to "grow" fishtank boid positions symmetrically around the tank's
+  // true center (see worldScale) rather than the coordinate origin.
   private fishtankCenter = new THREE.Vector3();
   private tmpForward = new THREE.Vector3();
   private tmpRight = new THREE.Vector3();
@@ -413,14 +347,11 @@ export class Renderer3D {
   private sceneRenderers!: Record<VisualStyle, SceneRendererHooks>;
 
   constructor(canvas: HTMLCanvasElement) {
-    // logarithmicDepthBuffer: the camera's near/far planes span a huge
-    // ratio (1 to 30000, for the nature sky dome) — with a standard
-    // depth buffer that leaves almost no precision at typical fishtank
-    // viewing distances, causing z-fighting on any thin, closely-stacked
-    // surfaces (e.g. the tank windows' frame/backdrop/glass layers),
-    // which shows up as flickering/jumping that gets worse the farther
-    // the camera zooms or orbits. A logarithmic depth buffer distributes
-    // precision far more evenly across that whole range.
+    // logarithmicDepthBuffer: the near/far planes span a huge ratio (1 to
+    // 30000 for the nature sky dome); a standard depth buffer leaves too
+    // little precision at fishtank distances, causing z-fighting on thin
+    // stacked surfaces (tank window layers). Log depth spreads precision
+    // evenly across the range.
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     // ACES tone mapping keeps the physically-based Sky shader from blowing
@@ -504,46 +435,30 @@ export class Renderer3D {
       color: 0xffffff,
       emissive: bodyEmissive,
       emissiveIntensity: materialDefaults.bodyEmissiveIntensity,
-      // Monster predators (dragons/sharks) get a slightly glossier (lower-roughness)
-      // finish than the fully matte default nature/fishtank look — with the dark scale
-      // color, a fully matte 0.9 roughness barely differentiates facets
-      // under the key light, so faceted geometry (frill spikes, neck bend,
-      // leg joints) reads as flat black regardless of angle. A touch of
-      // sheen gives visible specular highlights that vary with facet normal.
+      // Monster predators (dragons/sharks) get a slightly glossier finish than
+      // the matte default — with the dark scale color, fully matte roughness
+      // barely differentiates facets (frill spikes, joints) under the key light.
       roughness: materialDefaults.bodyRoughness(isMonster),
       metalness: 0,
-      // Unicorns only: the body geometry bakes a gold vertex color onto
-      // just the horn (see creatureGeometry's mergeGeometriesWithColor) so it
-      // stands out from the rest of the (white-vertex-colored, so
-      // unaffected) body — this just tells the material to actually read
-      // and multiply by that per-vertex 'color' attribute.
+      // Unicorns only: the body geometry bakes a gold vertex color onto just
+      // the horn; this tells the material to read that per-vertex 'color'.
       vertexColors: bodyVertexColors,
     });
     const wingMaterial = new THREE.MeshStandardMaterial({
-      // Monster predators: tint the membrane/tail material itself darker (multiplies
-      // against the per-instance purple state color set in updateInstances)
-      // so the leathery wings/tail read visibly darker than the scaly body
-      // — a classic bat-wing-on-dragon cue — for free, with no extra
-      // per-instance color bookkeeping. Kept much lighter than the earlier
-      // 0x554466: that value, multiplied against the (also dark) dragon
-      // body color, crushed the wings to near-solid black regardless of
-      // facet angle or lighting, hiding the scallop/bone-tube geometry
-      // detail — this stays visibly darker than the body without losing
-      // all lit-surface contrast. Fish tank sharks get their own neutral
-      // light-gray tint instead: 0x9c86ab is a lavender tuned to sit well
-      // against the dragon's purple body, and multiplying it against the
-      // shark's gray body would leak a visible purple/pink cast into the
-      // fins/tail instead of the intended plain gray.
+      // Monster predators: tint the membrane/tail material darker (multiplies
+      // against the per-instance body color) so leathery wings/tail read darker
+      // than the scaly body — a bat-wing-on-dragon cue. Fishtank sharks instead
+      // get a neutral lavender-gray (0x9c86ab), since multiplying a purple tint
+      // against the gray shark body would leak pink into the fins.
       color: materialDefaults.wingColor(isMonster, isFishtank),
       emissive: materialDefaults.wingEmissive,
       emissiveIntensity: materialDefaults.wingEmissiveIntensity,
       roughness: materialDefaults.wingRoughness(isMonster),
       metalness: 0,
       side: THREE.DoubleSide,
-      // Enable wing vertex colors whenever that geometry actually carries
-      // a baked 'color' attribute (e.g. unicorn rainbow wings or parrot
-      // underside/front-back wing gradients). Keep it off otherwise, since
-      // enabling vertexColors on color-less geometry renders black.
+      // Enable wing vertex colors only when the geometry carries a baked 'color'
+      // attribute (unicorn rainbow wings, parrot gradients) — enabling it on
+      // color-less geometry renders black.
       vertexColors: rainbowWings || !!geometries.wingLeft.getAttribute('color'),
     });
 
@@ -553,18 +468,10 @@ export class Renderer3D {
     body.count = count;
     wingLeft.count = count;
     wingRight.count = count;
-    // InstancedMesh's default frustum culling tests the *mesh's own*
-    // (identity/near-origin) transform + geometry.boundingSphere against
-    // the view frustum — it has no idea individual instances are
-    // scattered all over the world via per-instance matrices. Since our
-    // instances can be anywhere in a large world box, that culling sphere
-    // essentially never lines up with where the creatures actually are,
-    // so the whole population can wrongly vanish depending on camera
-    // angle/framing (most obvious with a tightly-framed camera, e.g. the
-    // Model Gallery, but the same wrong culling can affect the normal
-    // orbit camera too). Disable it — with population counts this small
-    // (at most a few hundred instances total), per-instance culling
-    // isn't worth the complexity/risk of getting it wrong again.
+    // InstancedMesh frustum culling tests the mesh's own (near-origin) transform
+    // against the frustum, ignoring per-instance matrices scattered across the
+    // world — so the whole population can wrongly vanish at some camera angles.
+    // Disable it; counts are small (a few hundred at most).
     body.frustumCulled = false;
     wingLeft.frustumCulled = false;
     wingRight.frustumCulled = false;
@@ -579,11 +486,8 @@ export class Renderer3D {
     let tail: THREE.InstancedMesh | undefined;
     if (geometries.tail) {
       const tailMaterial = wingMaterial.clone();
-      // Only the unicorn tail bakes its own rainbow 'color' attribute
-      // (see buildUnicornTailGeometry); other tails (e.g. none currently
-      // used elsewhere) have no color data, and a vertexColors-enabled
-      // material with no 'color' attribute on its geometry would render
-      // solid black, so only enable it when the geometry actually has one.
+      // Only the unicorn tail bakes a rainbow 'color' attribute; enabling
+      // vertexColors on a color-less tail would render solid black.
       tailMaterial.vertexColors = !!geometries.tail.getAttribute('color');
       tailMaterial.needsUpdate = true;
       tail = new THREE.InstancedMesh(geometries.tail, tailMaterial, Math.max(count, 1));
@@ -629,10 +533,8 @@ export class Renderer3D {
 
   /**
    * Nudges `target` to a small, stable-per-id HSL jitter around `base`
-   * (mutates `target` in place so callers can reuse a scratch THREE.Color
-   * without allocating). Shared by the sparrow-type "shades of brown"
-   * individual variation and the parrot species' per-individual jitter —
-   * only the base color and jitter magnitudes differ between the two.
+   * (mutates in place so callers can reuse a scratch Color). Shared by the
+   * sparrow "shades of brown" variation and the parrot per-individual jitter.
    */
   private jitterHSL(
     target: THREE.Color,
@@ -686,12 +588,9 @@ export class Renderer3D {
     const sceneRenderer = this.getSceneRenderer(style);
     const presentation = sceneRenderer.getPresentationSettings();
     this.bloomPass.enabled = presentation.bloomEnabled;
-    // The screen-space afterimage/motion-trail effect persists whole
-    // previous frames — great for arcade neon trails, but when the
-    // camera pans in an organic (fog-using) style it drags a ghost
-    // trail of the bright sky/water (especially the sun disc in nature)
-    // across the frame, looking like a smeary lens flare and leaving
-    // "hovering circle" afterimages.
+    // The afterimage/motion-trail effect persists whole previous frames —
+    // great for arcade neon trails, but in organic (fog-using) styles a camera
+    // pan drags a smeary ghost trail of the bright sky/water across the frame.
     this.afterimagePass.enabled = presentation.afterimageEnabled;
     sceneRenderer.setStyleVisibility();
     if (this.boundsHelper) this.boundsHelper.visible = presentation.boundsHelperVisible;
@@ -968,12 +867,9 @@ export class Renderer3D {
 
     this.updateEnvironmentParameterToggles();
 
-    // Model Gallery uses a close, creature-relative camera distance that
-    // sits *inside* the tank/water volume (see main.ts's
-    // poseGalleryCreatureIfReady) rather than the far-outside "view the
-    // whole tank" distance normal fishtank browsing uses — hide the
-    // surrounding room while it's active so the transparent glass/water
-    // doesn't show the room incongruously right behind the creature.
+    // Model Gallery poses the fishtank camera inside the tank/water volume
+    // (see main.ts's poseGalleryCreatureIfReady) — hide the surrounding room
+    // while active so the glass/water doesn't show the room behind the creature.
     const galleryCreatureActive = params.galleryCreature !== null;
     for (const sceneStyle of SCENE_STYLES) {
       this.sceneRenderers[sceneStyle].setGalleryCreatureActive(galleryCreatureActive);
@@ -1566,13 +1462,10 @@ export class Renderer3D {
     panicWeight: number;
     cruiseWeight: number;
   } {
-    // Each creature keeps its own last-known heading (renderHeading)
-    // rather than relying on this.bodyQuat carrying over between loop
-    // iterations — otherwise a creature whose speed drops near zero
-    // (e.g. a predator gliding to a stop / digesting) would silently
-    // inherit whichever heading the *previous* creature in the array had
-    // that frame, causing it to visually snap to an unrelated
-    // direction instead of holding its own last heading.
+    // Each creature keeps its own last-known heading (renderHeading) rather
+    // than relying on this.bodyQuat carrying over between loop iterations —
+    // otherwise a near-stopped creature would inherit the previous creature's
+    // heading and snap to an unrelated direction.
     this.tmpPrevDir.set(creature.renderHeading.x, creature.renderHeading.y, creature.renderHeading.z);
     this.updateCreatureRenderHeading(creature, speed, dt, keepUpright, uprightStyle);
     const dir = creature.renderHeading;
@@ -1818,13 +1711,10 @@ export class Renderer3D {
       preferUpright,
     } = this.resolveMotionConfig(motion);
 
-    // Small songbirds (nature style) bake a SmallBirdPalette gradient into
-    // their geometry. When bakedBodyGradient is true, pass white as the
-    // instance colour so the vertex colours show through unchanged —
-    // identical to the parrot wing-palette passthrough logic.
-    // Note: we can't infer this from geometry.getAttribute('color') alone
-    // because dragon/hawk geometry also carries vertex colours and would
-    // incorrectly trigger the white-passthrough branch.
+    // Small songbirds (nature) bake a gradient into their geometry. When
+    // bakedBodyGradient is true, pass white as the instance color so the vertex
+    // colors show through unchanged. We can't infer this from a 'color'
+    // attribute alone, since dragon/hawk geometry also carries vertex colors.
     const {
       hasBakedBodyVertexColors,
       hasBakedWingVertexColors,
@@ -1887,18 +1777,10 @@ export class Renderer3D {
   }
 
   /**
-   * Model Gallery: converts a *sim-space* position (e.g. a creature's raw
-   * `creature.position`, in the same coordinate space as `sim.width` /
-   * `sim.height` / `params.worldDepth`) into the actual rendered
-   * world-space position it appears at. For nature/arcade styles this is
-   * a no-op (identity), but fishtank style inflates both the tank and
-   * every fish/predator's rendered position by TANK_VISUAL_SCALE, grown
-   * outward from `fishtankCenter` (see updateInstances' `worldScale`
-   * param and TANK_VISUAL_SCALE's doc comment) — so a creature posed at
-   * the sim's raw center can render well away from that same point in
-   * fishtank style. debugFrameCamera must target *this* position, not
-   * the raw sim-space one, or the close-up gallery framing aims at empty
-   * space next to the creature instead of the creature itself.
+   * Model Gallery: converts a sim-space position into the world-space position
+   * it actually renders at. No-op for nature/arcade, but fishtank inflates
+   * positions by TANK_VISUAL_SCALE from fishtankCenter — gallery framing must
+   * target this position, not the raw sim-space one.
    */
   toRenderedPosition(x: number, y: number, z: number): THREE.Vector3 {
     const rendered = new THREE.Vector3();
@@ -1912,17 +1794,11 @@ export class Renderer3D {
   }
 
   /**
-   * Model Gallery: computes a `debugFrameCamera` distance that frames the
-   * *currently instanced* creature as tightly as the camera's field of
-   * view allows (small margin so the silhouette doesn't clip), based on
-   * the union of that creature's part geometries (body, wings, tail,
-   * legs, beak). A single flat distance (the old approach) only ever
-   * looked "maximally zoomed in" for whichever creature it happened to
-   * be tuned against — every other species, being a very different
-   * physical size (a sparrow vs. a dragon, say), ended up looking
-   * comparatively tiny/zoomed-out at that same distance. Falls back to
-   * `fallbackDistance` if the render batch for `species` doesn't exist yet
-   * (e.g. called before the gallery creature has spawned on this frame).
+   * Model Gallery: computes a debugFrameCamera distance that frames the
+   * currently-instanced creature as tightly as the FOV allows, from the union
+   * of its part geometries (a wingspan/tail reaches past the body alone).
+   * Falls back to `fallbackDistance` if the batch for `species` doesn't exist
+   * yet.
    */
   getGalleryFramingDistance(species: PredatorSpecies | BoidSpecies, fallbackDistance = 220): number {
     const set = isPredatorSpecies(species)
@@ -1930,12 +1806,9 @@ export class Renderer3D {
       : this.speciesInstances.get(species);
     if (!set) return fallbackDistance;
 
-    // Union the bounding boxes of every part (body, wings, tail, legs,
-    // beak) rather than just the body — a hawk/sparrow's wingspan or a
-    // unicorn's tail reaches well past the body mesh alone, and using
-    // only the body underestimates how large the creature actually
-    // reads on screen. All parts share the same single-instance local
-    // coordinate space, so their geometries combine directly.
+    // Union every part's bounding box (a wingspan/tail reaches past the body).
+    // All parts share the same single-instance local space, so they combine
+    // directly.
     const box = new THREE.Box3();
     for (const mesh of [set.body, set.wingLeft, set.wingRight, set.tail, set.legs, set.beak]) {
       if (!mesh) continue;
@@ -1945,23 +1818,18 @@ export class Renderer3D {
     }
     if (box.isEmpty()) return fallbackDistance;
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    // Fishtank style additionally scales every instance's mesh (not just
-    // its position) by TANK_VISUAL_SCALE (see updateInstances' worldScale
-    // param) — the geometry's own local bounding box doesn't reflect that,
-    // so without this the fishtank creature would actually render larger
-    // than this distance was solved for and clip out of frame.
+    // Fishtank scales the mesh itself (not just position) by TANK_VISUAL_SCALE,
+    // which the local bounding box doesn't reflect — apply worldScale so the
+    // creature doesn't render larger than solved for and clip.
     const worldScale = this.getActiveSceneRenderer().getWorldScale();
     const radius = sphere.radius * worldScale;
     if (!radius) return fallbackDistance;
 
-    // Matches debugFrameCamera's (0.7, 0.35, 0.9) offset vector — the
-    // actual camera-to-target distance is `distance * offsetMagnitude`,
-    // not `distance` itself.
+    // Matches debugFrameCamera's (0.7, 0.35, 0.9) offset: the true
+    // camera-to-target distance is `distance * offsetMagnitude`.
     const offsetMagnitude = Math.sqrt(0.7 ** 2 + 0.35 ** 2 + 0.9 ** 2);
     const verticalFovRad = THREE.MathUtils.degToRad(this.camera.fov);
-    // Small margin (1.15x) so the silhouette doesn't clip against the
-    // frame edges when solving for the distance that makes the
-    // bounding sphere fill the viewport height.
+    // Small margin so the silhouette doesn't clip against the frame edges.
     const effectiveRadius = radius * 1.15;
     return effectiveRadius / Math.tan(verticalFovRad / 2) / offsetMagnitude;
   }
