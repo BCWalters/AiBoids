@@ -48,6 +48,7 @@ import {
 } from './boidSpeciesRegistry';
 import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';import { createRendererSceneRenderers } from './sceneRendererFactory';
 import { UfoRenderer } from './UfoRenderer';
+import { CameraController } from './CameraController';
 
 // Wing-flap tuning. NOTE: the actual flap frequency/amplitude values are owned
 // per-scene (each scene's MotionConfig provides them); only the shared
@@ -313,6 +314,7 @@ export class Renderer3D {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
+  private cameraController: CameraController;
 
   private ambientLight: THREE.AmbientLight;
   private keyLight: THREE.DirectionalLight;
@@ -436,6 +438,7 @@ export class Renderer3D {
 
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.enableDamping = true;
+    this.cameraController = new CameraController(this.camera, this.controls);
 
     this.ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
     this.keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -1903,42 +1906,9 @@ export class Renderer3D {
     return rendered;
   }
 
-  /**
-   * Model Gallery / debug-QA helper: point the camera at a fixed
-   * world-space position from a pleasant, fixed elevated 3/4 angle
-   * (roughly matching a typical reference-photo framing of a flying
-   * creature) and hold it there. Used by main.ts's Model Gallery feature
-   * (`params.galleryCreature`, also drivable via the `?galleryCreature=`
-   * URL param) which isolates a single creature, freezes the sim, and
-   * poses it at a known position — the combination gives a clean,
-   * well-framed view/screenshot for comparing a creature's geometry
-   * against a reference image, and for orbiting it with the mouse
-   * (OrbitControls stays enabled/interactive throughout).
-   *
-   * Safe to call any time: it has no effect on ensureScene's own camera
-   * auto-framing, which only runs once per distinct world size (not
-   * every frame), so a framing set here persists across subsequent
-   * render() calls as long as the world dimensions don't change. The
-   * user can still freely orbit/zoom from here via OrbitControls.
-   */
+  /** Model Gallery / debug-QA camera framing — see CameraController.debugFrameCamera. */
   debugFrameCamera(x: number, y: number, z: number, distance: number): void {
-    const target = new THREE.Vector3(x, y, z);
-    this.camera.position.set(target.x + distance * 0.7, target.y + distance * 0.35, target.z + distance * 0.9);
-    this.camera.updateProjectionMatrix();
-    this.controls.target.copy(target);
-    // ensureScene's world-scale zoom clamp (controls.minDistance =
-    // maxDim * 0.05) is tuned for the whole-world view and is often far
-    // larger than a small creature's tight gallery framing distance
-    // (e.g. a sparrow vs. a 1000-unit-deep world) — OrbitControls.update()
-    // would otherwise silently push the camera back out past that floor,
-    // undoing the close-up framing entirely. Relax the floor down to
-    // this call's own distance (never *raise* it, since that's still
-    // meaningful for normal, non-gallery browsing) so the requested
-    // distance actually sticks. resetCameraFraming restores the normal
-    // world-scale floor when the gallery closes.
-    const effectiveDistance = target.distanceTo(this.camera.position);
-    this.controls.minDistance = Math.min(this.controls.minDistance, effectiveDistance * 0.5);
-    this.controls.update();
+    this.cameraController.debugFrameCamera(x, y, z, distance);
   }
 
   /**
@@ -2001,58 +1971,19 @@ export class Renderer3D {
     return this.getActiveSceneRenderer().getCreatureLabels();
   }
 
-  /**
-   * Restores the default whole-world camera framing (same computation
-   * ensureScene applies the first time it sees a given world size) —
-   * used when exiting the Model Gallery to put the camera back where a
-   * normal, non-isolated simulation view expects it, since
-   * debugFrameCamera's close-up framing would otherwise persist
-   * (ensureScene only re-frames automatically when world dimensions
-   * change, which exiting the gallery doesn't do).
-   */
+  /** Restore default whole-world camera framing — see CameraController.resetCameraFraming. */
   resetCameraFraming(sim: Simulation): void {
-    const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
-    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
-    this.camera.position.set(center.x + maxDim * 0.6, center.y + maxDim * 0.4, center.z + maxDim * 0.9);
-    this.camera.updateProjectionMatrix();
-    this.controls.target.copy(center);
-    // Undo debugFrameCamera's possible relaxation of the zoom-in floor
-    // (see its comment) — restores the normal world-scale clamp so
-    // regular, non-gallery browsing can't zoom the camera through the
-    // ground/boundary box.
-    this.controls.minDistance = maxDim * 0.05;
-    this.controls.update();
+    this.cameraController.resetCameraFraming(sim);
   }
 
-  /**
-   * Snapshot of the exact current camera position + OrbitControls
-   * target, as plain [x, y, z] tuples — used by main.ts's "Copy deep
-   * link" feature to serialize the current view into a shareable URL
-   * (see setCameraState for the restore side). Deliberately returns
-   * plain tuples rather than THREE.Vector3 so the caller can JSON.stringify
-   * it directly without a custom serializer.
-   */
+  /** Snapshot current camera position + orbit target — see CameraController.getCameraState. */
   getCameraState(): { position: [number, number, number]; target: [number, number, number] } {
-    return {
-      position: [this.camera.position.x, this.camera.position.y, this.camera.position.z],
-      target: [this.controls.target.x, this.controls.target.y, this.controls.target.z],
-    };
+    return this.cameraController.getCameraState();
   }
 
-  /**
-   * Restores an exact camera position + orbit target previously captured
-   * via getCameraState — used when loading a "Copy deep link" URL, so
-   * the view on load matches exactly what was captured, not just an
-   * auto-framed approximation. Like debugFrameCamera, this is safe to
-   * call any time and doesn't fight ensureScene's one-time auto-framing
-   * as long as it's called after that first render() call has run (see
-   * main.ts's pendingCameraState handling).
-   */
+  /** Restore an exact camera position + orbit target — see CameraController.setCameraState. */
   setCameraState(position: [number, number, number], target: [number, number, number]): void {
-    this.camera.position.set(position[0], position[1], position[2]);
-    this.camera.updateProjectionMatrix();
-    this.controls.target.set(target[0], target[1], target[2]);
-    this.controls.update();
+    this.cameraController.setCameraState(position, target);
   }
 
   private groupBoidsBySpecies(boids: Boid[]): Map<BoidSpecies, Boid[]> {
