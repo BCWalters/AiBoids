@@ -19,6 +19,7 @@ import {
   type SpeciesColorSet,
   UNICORN_PREDATOR_SPECIES,
 } from './sceneRenderers/createSceneRendererHooks';
+import { CreatureColorApplicator } from './color/creatureColorApplication';
 
 /** One creature's instanced meshes: a body plus optional wing/tail/legs/beak parts. */
 export interface BoidRenderBatch {
@@ -78,16 +79,6 @@ const MAX_BANK_RADIANS = THREE.MathUtils.degToRad(42);
 const BANK_GAIN = 2.6;
 const BANK_SMOOTHING_RATE = 5;
 
-/**
- * Cheap deterministic pseudo-random hash from an integer id + a small "salt"
- * into [0, 1). Gives each boid a stable (no per-frame flicker) individual
- * color variation derived purely from its id.
- */
-function idHash(id: number, salt: number): number {
-  const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
-  return x - Math.floor(x);
-}
-
 interface CreatureInstanceMatrixArgs {
   set: BoidRenderBatch;
   index: number;
@@ -116,23 +107,6 @@ interface CreatureInstanceMatrixArgs {
   worldScale: number;
   meshScaleBoost: number;
   uprightStyle: UprightStyle;
-}
-
-interface CreatureInstanceColorArgs {
-  set: BoidRenderBatch;
-  index: number;
-  creature: Boid | Predator;
-  baseColor: THREE.Color;
-  highlightColor: THREE.Color;
-  getIntensity: (creature: Boid | Predator) => number;
-  individualVariation: boolean;
-  getSpeciesColors: ((creature: Boid | Predator) => SpeciesColorSet | null) | undefined;
-  preserveBakedPartPalette: boolean;
-  lockSpeciesPalette: boolean;
-  beakColor: THREE.Color | undefined;
-  hasBakedBodyVertexColors: boolean;
-  hasBakedWingVertexColors: boolean;
-  hasBakedTailVertexColors: boolean;
 }
 
 interface ResolvedMotionConfig {
@@ -236,13 +210,7 @@ export class CreatureInstanceRenderer {
   private tmpClampUpWorld = new THREE.Vector3();
   private tmpClampTiltAxis = new THREE.Vector3();
   private tiltCorrection = new THREE.Quaternion();
-  private stateColor = new THREE.Color();
-  private variantColor = new THREE.Color();
-  private wingColor = new THREE.Color();
-  private tailColor = new THREE.Color();
-  private legsColor = new THREE.Color();
-  private beakInstanceColor = new THREE.Color();
-  private hsl = { h: 0, s: 0, l: 0 };
+  private colorApplicator = new CreatureColorApplicator();
 
   /**
    * Persisted, per-dragon displayed orientation — a final safety net on top
@@ -476,191 +444,6 @@ export class CreatureInstanceRenderer {
       panicWeight,
       cruiseWeight,
     };
-  }
-
-  private getBakedColorAttributeFlags(
-    set: BoidRenderBatch,
-    bakedBodyGradient: boolean,
-  ): {
-    hasBakedBodyVertexColors: boolean;
-    hasBakedWingVertexColors: boolean;
-    hasBakedTailVertexColors: boolean;
-  } {
-    return {
-      hasBakedBodyVertexColors: bakedBodyGradient && !!set.body.geometry.getAttribute('color'),
-      hasBakedWingVertexColors: bakedBodyGradient && !!set.wingLeft.geometry.getAttribute('color'),
-      hasBakedTailVertexColors: bakedBodyGradient && !!set.tail?.geometry.getAttribute('color'),
-    };
-  }
-
-  private applyInstanceColorsForCreature(args: CreatureInstanceColorArgs): void {
-    const {
-      set,
-      index,
-      creature,
-      baseColor,
-      highlightColor,
-      getIntensity,
-      individualVariation,
-      getSpeciesColors,
-      preserveBakedPartPalette,
-      lockSpeciesPalette,
-      beakColor,
-      hasBakedBodyVertexColors,
-      hasBakedWingVertexColors,
-      hasBakedTailVertexColors,
-    } = args;
-    const speciesColors = getSpeciesColors?.(creature);
-    let effectiveBase = baseColor;
-    let effectiveWing: THREE.Color | null = null;
-    let effectiveTail: THREE.Color | null = null;
-    let preserveLegPalette = false;
-
-    if (speciesColors) {
-      if (lockSpeciesPalette) {
-        effectiveBase = speciesColors.body;
-        effectiveWing = speciesColors.wing;
-        effectiveTail = speciesColors.tail;
-      } else {
-        this.jitterHSL(this.variantColor, speciesColors.body, creature.id, 1, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.wingColor, speciesColors.wing, creature.id, 2, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.tailColor, speciesColors.tail, creature.id, 3, 0.05, 0.12, 0.1);
-        effectiveBase = this.variantColor;
-        effectiveWing = this.wingColor;
-        effectiveTail = this.tailColor;
-      }
-    } else if (individualVariation) {
-      baseColor.getHSL(this.hsl);
-      let { h, s, l } = this.hsl;
-      h = (h + (idHash(creature.id, 1) - 0.5) * 0.05 + 1) % 1;
-      s = Math.max(0, Math.min(1, s + (idHash(creature.id, 2) - 0.5) * 0.16));
-      l = Math.max(0, Math.min(1, l + (idHash(creature.id, 3) - 0.5) * 0.18));
-      const morphRoll = idHash(creature.id, 4);
-      if (morphRoll < 0.06) {
-        // Pale/leucistic-like morph: much lighter, slightly desaturated.
-        l = Math.max(0, Math.min(0.92, l + 0.28));
-        s *= 0.6;
-      } else if (morphRoll < 0.1) {
-        // Dark/melanistic-like morph: noticeably darker.
-        l = Math.max(0.05, l - 0.22);
-      } else if (morphRoll < 0.16) {
-        // Warmer, rustier-toned morph: shift hue toward red-orange.
-        h = (h + 0.03) % 1;
-        s = Math.min(1, s + 0.15);
-      }
-      this.variantColor.setHSL(h, s, l);
-      effectiveBase = this.variantColor;
-    }
-    if (hasBakedBodyVertexColors) {
-      // Baked gradient body — pass white so the vertex colours show through.
-      this.stateColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(creature));
-    } else {
-      this.stateColor.copy(effectiveBase).lerp(highlightColor, getIntensity(creature));
-    }
-    set.body.setColorAt(index, this.stateColor);
-    if (hasBakedWingVertexColors) {
-      // Baked gradient wings — white passthrough; same for tail if baked.
-      this.wingColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(creature));
-      set.wingLeft.setColorAt(index, this.wingColor);
-      set.wingRight.setColorAt(index, this.wingColor);
-      if (set.tail) {
-        if (hasBakedTailVertexColors) {
-          this.tailColor.setRGB(1, 1, 1).lerp(highlightColor, getIntensity(creature));
-        } else {
-          this.tailColor.copy(this.wingColor);
-        }
-        set.tail.setColorAt(index, this.tailColor);
-      }
-    } else if (effectiveWing) {
-      const preserveWingPalette = preserveBakedPartPalette
-        && !!set.wingLeft.geometry.getAttribute('color');
-      const preserveTailPalette = preserveWingPalette
-        && !!set.tail?.geometry.getAttribute('color');
-      preserveLegPalette = preserveWingPalette
-        && !!set.legs?.geometry.getAttribute('color');
-      // Species with their own distinct wing/tail base colors keep those
-      // hues rather than just darkening the body color.
-      if (preserveWingPalette) {
-        this.wingColor.setRGB(1, 1, 1);
-      } else {
-        this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(creature));
-      }
-      set.wingLeft.setColorAt(index, this.wingColor);
-      set.wingRight.setColorAt(index, this.wingColor);
-      if (set.tail) {
-        if (effectiveTail) {
-          if (preserveTailPalette) {
-            this.tailColor.setRGB(1, 1, 1);
-          } else {
-            this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(creature));
-          }
-          set.tail.setColorAt(index, this.tailColor);
-        } else {
-          set.tail.setColorAt(index, this.wingColor);
-        }
-      }
-    } else if (individualVariation) {
-      // Wings/tail render a touch darker than the body — real bird wing
-      // feathers are almost always a shade or two darker than the breast/
-      // body plumage, and this reads clearly even at a distance.
-      this.wingColor.copy(this.stateColor).multiplyScalar(0.82);
-      set.wingLeft.setColorAt(index, this.wingColor);
-      set.wingRight.setColorAt(index, this.wingColor);
-      if (set.tail) set.tail.setColorAt(index, this.wingColor);
-    } else {
-      set.wingLeft.setColorAt(index, this.stateColor);
-      set.wingRight.setColorAt(index, this.stateColor);
-      if (set.tail) {
-        // Auto-detect baked vertex colours on the tail (e.g. dragon gradient
-        // tail). Pass white so the gradient shows through; otherwise use
-        // stateColor like the wings.
-        if (set.tail.geometry.getAttribute('color')) {
-          this.tailColor.setRGB(1, 1, 1);
-        } else {
-          this.tailColor.copy(this.stateColor);
-        }
-        set.tail.setColorAt(index, this.tailColor);
-      }
-    }
-    if (set.legs) {
-      if (preserveLegPalette || set.legs.geometry.getAttribute('color')) {
-        // Parrot legs: baked palette feet color, pass through with white.
-        // Small-bird legs: baked species leg color, same white pass-through.
-        this.legsColor.setRGB(1, 1, 1);
-      } else {
-        this.legsColor.copy(this.stateColor);
-      }
-      set.legs.setColorAt(index, this.legsColor);
-    }
-    if (set.beak && beakColor) {
-      // Small per-individual jitter, same treatment as the other parts
-      // — keeps a flock of e.g. cardinals from looking like every
-      // single beak is the identical exact pixel color.
-      this.jitterHSL(this.beakInstanceColor, beakColor, creature.id, 5, 0.04, 0.1, 0.08);
-      set.beak.setColorAt(index, this.beakInstanceColor);
-    }
-  }
-
-  /**
-   * Nudges `target` to a small, stable-per-id HSL jitter around `base`
-   * (mutates in place so callers can reuse a scratch Color). Shared by the
-   * sparrow "shades of brown" variation and the parrot per-individual jitter.
-   */
-  private jitterHSL(
-    target: THREE.Color,
-    base: THREE.Color,
-    id: number,
-    salt: number,
-    hueAmt: number,
-    satAmt: number,
-    lightAmt: number,
-  ): void {
-    base.getHSL(this.hsl);
-    let { h, s, l } = this.hsl;
-    h = (h + (idHash(id, salt) - 0.5) * hueAmt + 1) % 1;
-    s = Math.max(0, Math.min(1, s + (idHash(id, salt + 10) - 0.5) * satAmt));
-    l = Math.max(0, Math.min(1, l + (idHash(id, salt + 20) - 0.5) * lightAmt));
-    target.setHSL(h, s, l);
   }
 
   private markRenderBatchNeedsUpdate(set: BoidRenderBatch): void {
@@ -1069,7 +852,7 @@ export class CreatureInstanceRenderer {
       uprightStyle,
     });
 
-    this.applyInstanceColorsForCreature({
+    this.colorApplicator.apply({
       set,
       index,
       creature,
@@ -1146,7 +929,7 @@ export class CreatureInstanceRenderer {
       hasBakedBodyVertexColors,
       hasBakedWingVertexColors,
       hasBakedTailVertexColors,
-    } = this.getBakedColorAttributeFlags(set, bakedBodyGradient);
+    } = this.colorApplicator.getBakedColorAttributeFlags(set, bakedBodyGradient);
     this.updateCreatureInstancesLoop(creatures, {
       set,
       maxSpeed,
