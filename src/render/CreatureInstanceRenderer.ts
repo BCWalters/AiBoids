@@ -138,7 +138,7 @@ interface ResolvedColorStrategy {
   bakedBodyGradient: boolean;
   lockSpeciesPalette: boolean;
   beakColor: THREE.Color | undefined;
-  colorMode: CreatureColorMode | undefined;
+  colorMode: CreatureColorMode;
 }
 
 interface UpdateCreatureInstanceArgs {
@@ -159,7 +159,7 @@ interface UpdateCreatureInstanceArgs {
   hasBakedBodyVertexColors: boolean;
   hasBakedWingVertexColors: boolean;
   hasBakedTailVertexColors: boolean;
-  colorMode: CreatureColorMode | undefined;
+  colorMode: CreatureColorMode;
   flapFrequency: number;
   flapIdleAmplitude: number;
   flapSpeedAmplitude: number;

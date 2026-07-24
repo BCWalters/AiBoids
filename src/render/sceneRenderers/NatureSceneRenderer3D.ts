@@ -580,10 +580,12 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       highlightColor: NATURE_BOID_PANIC,
       getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: true,
-      getSpeciesColors: config.colors ? () => config.colors! : undefined,
+      getSpeciesColors: species === BoidSpecies.Multicolor
+        ? (creature) => this.getParrotColorVariant(creature)
+        : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
       bakedBodyGradient: isBakedSmallBird,
-      colorMode: isBakedSmallBird ? 'smallBird' : undefined,
+      colorMode: isBakedSmallBird ? 'smallBird' : 'parrot',
     };
   }
 

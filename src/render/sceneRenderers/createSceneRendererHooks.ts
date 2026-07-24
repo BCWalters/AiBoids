@@ -45,7 +45,7 @@ export interface ColourStrategy {
   beakColor?: THREE.Color;
   /** Routes this strategy to a dedicated per-family color path (e.g. 'parrot')
    * instead of the generic conditional applicator. */
-  colorMode?: CreatureColorMode;
+  colorMode: CreatureColorMode;
 }
 
 /** Per-species animation/motion parameters for one `updateInstances` call.
