@@ -612,6 +612,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       beakColor: parrotConfig.beakColor,
       preserveBakedPartPalette: bakedWingPalette,
       lockSpeciesPalette: PARROT_FOCUS_PATTERN_INDEX !== null,
+      colorMode: 'parrot',
     };
   }
 

@@ -15,6 +15,11 @@ export interface SpeciesColorSet {
   tail: THREE.Color;
 }
 
+/** Selects a dedicated per-family creature color path in the color applicator.
+ * When omitted, the generic conditional color path is used. Each value routes
+ * to that family's own straight-line applicator (see src/render/color/). */
+export type CreatureColorMode = 'parrot';
+
 /** All colour-related parameters for one `updateInstances` call.
  * Bundled as a named-field object so call sites are self-documenting and
  * immune to positional-parameter order bugs.
@@ -38,6 +43,9 @@ export interface ColourStrategy {
   /** Disables per-creature species jitter and preserves exact species colors. */
   lockSpeciesPalette?: boolean;
   beakColor?: THREE.Color;
+  /** Routes this strategy to a dedicated per-family color path (e.g. 'parrot')
+   * instead of the generic conditional applicator. */
+  colorMode?: CreatureColorMode;
 }
 
 /** Per-species animation/motion parameters for one `updateInstances` call.

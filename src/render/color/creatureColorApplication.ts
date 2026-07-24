@@ -1,18 +1,10 @@
 import * as THREE from 'three';
 import type { Boid } from '../../sim/Boid';
 import type { Predator } from '../../sim/Predator';
-import type { SpeciesColorSet } from '../sceneRenderers/createSceneRendererHooks';
+import type { SpeciesColorSet, CreatureColorMode } from '../sceneRenderers/createSceneRendererHooks';
 import type { BoidRenderBatch } from '../CreatureInstanceRenderer';
-
-/**
- * Cheap deterministic pseudo-random hash from an integer id + a small "salt"
- * into [0, 1). Gives each boid a stable (no per-frame flicker) individual
- * color variation derived purely from its id.
- */
-function idHash(id: number, salt: number): number {
-  const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
-  return x - Math.floor(x);
-}
+import { idHash, jitterHSL } from './colorJitter';
+import { ParrotColorApplicator } from './parrotColorApplication';
 
 /**
  * All inputs needed to color one creature instance for a single frame. The
@@ -35,6 +27,9 @@ export interface CreatureInstanceColorArgs {
   hasBakedBodyVertexColors: boolean;
   hasBakedWingVertexColors: boolean;
   hasBakedTailVertexColors: boolean;
+  /** Selects a dedicated per-family color path. When set (e.g. 'parrot'), the
+   * generic conditional path is bypassed in favor of that family's applicator. */
+  colorMode?: CreatureColorMode;
 }
 
 /**
@@ -46,6 +41,7 @@ export interface CreatureInstanceColorArgs {
  * describes rather than in the frame loop.
  */
 export class CreatureColorApplicator {
+  private parrot = new ParrotColorApplicator();
   private stateColor = new THREE.Color();
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
@@ -75,6 +71,10 @@ export class CreatureColorApplicator {
   }
 
   apply(args: CreatureInstanceColorArgs): void {
+    if (args.colorMode === 'parrot') {
+      this.parrot.apply(args);
+      return;
+    }
     const {
       set,
       index,
@@ -103,9 +103,9 @@ export class CreatureColorApplicator {
         effectiveWing = speciesColors.wing;
         effectiveTail = speciesColors.tail;
       } else {
-        this.jitterHSL(this.variantColor, speciesColors.body, creature.id, 1, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.wingColor, speciesColors.wing, creature.id, 2, 0.05, 0.12, 0.1);
-        this.jitterHSL(this.tailColor, speciesColors.tail, creature.id, 3, 0.05, 0.12, 0.1);
+        jitterHSL(this.variantColor, speciesColors.body, creature.id, 1, 0.05, 0.12, 0.1);
+        jitterHSL(this.wingColor, speciesColors.wing, creature.id, 2, 0.05, 0.12, 0.1);
+        jitterHSL(this.tailColor, speciesColors.tail, creature.id, 3, 0.05, 0.12, 0.1);
         effectiveBase = this.variantColor;
         effectiveWing = this.wingColor;
         effectiveTail = this.tailColor;
@@ -217,30 +217,8 @@ export class CreatureColorApplicator {
       // Small per-individual jitter, same treatment as the other parts
       // — keeps a flock of e.g. cardinals from looking like every
       // single beak is the identical exact pixel color.
-      this.jitterHSL(this.beakInstanceColor, beakColor, creature.id, 5, 0.04, 0.1, 0.08);
+      jitterHSL(this.beakInstanceColor, beakColor, creature.id, 5, 0.04, 0.1, 0.08);
       set.beak.setColorAt(index, this.beakInstanceColor);
     }
-  }
-
-  /**
-   * Nudges `target` to a small, stable-per-id HSL jitter around `base`
-   * (mutates in place so callers can reuse a scratch Color). Shared by the
-   * sparrow "shades of brown" variation and the parrot per-individual jitter.
-   */
-  private jitterHSL(
-    target: THREE.Color,
-    base: THREE.Color,
-    id: number,
-    salt: number,
-    hueAmt: number,
-    satAmt: number,
-    lightAmt: number,
-  ): void {
-    base.getHSL(this.hsl);
-    let { h, s, l } = this.hsl;
-    h = (h + (idHash(id, salt) - 0.5) * hueAmt + 1) % 1;
-    s = Math.max(0, Math.min(1, s + (idHash(id, salt + 10) - 0.5) * satAmt));
-    l = Math.max(0, Math.min(1, l + (idHash(id, salt + 20) - 0.5) * lightAmt));
-    target.setHSL(h, s, l);
   }
 }
