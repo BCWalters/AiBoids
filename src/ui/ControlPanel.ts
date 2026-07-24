@@ -22,14 +22,12 @@ const boidPopulationSpecs: SliderSpec[] = [
   { key: 'goldCount', labelKey: 'goldCount', min: 0, max: 300, step: 1 },
   { key: 'redCount', labelKey: 'redCount', min: 0, max: 300, step: 1 },
   { key: 'blueCount', labelKey: 'blueCount', min: 0, max: 300, step: 1 },
+  { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
 ];
 const predatorPopulationSpecs: SliderSpec[] = [
   { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 25, step: 1 },
   { key: 'monsterCount', labelKey: 'monsterCount', min: 0, max: 25, step: 1 },
   { key: 'horseCount', labelKey: 'horseCount', min: 0, max: 25, step: 1 },
-];
-const speedSpecs: SliderSpec[] = [
-  { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
   { key: 'predatorMaxSpeed', labelKey: 'predatorMaxSpeed', min: 20, max: 350, step: 5 },
 ];
 
@@ -202,7 +200,7 @@ export class ControlPanel {
       this.buildSection(
         'populationSpeed',
         t('sectionPopulationSpeed'),
-        [boidGroup, predatorGroup, ...speedSpecs.map((spec) => this.buildSlider(spec)), this.buildAlienInvasionButton()],
+        [boidGroup, predatorGroup, this.buildAlienInvasionButton()],
         true,
       ),
     );
