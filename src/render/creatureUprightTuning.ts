@@ -74,3 +74,11 @@ export function getUprightFlapFrequencyMultiplier(
   }
   return 1 - tuning.descendCut * -climbFraction;
 }
+
+export function isClampedUprightStyle(style: UprightStyle): boolean {
+  return style !== 'dragon';
+}
+
+export function usesTailSwayMatrix(style: UprightStyle): boolean {
+  return style === 'dragon' || style === 'shark';
+}

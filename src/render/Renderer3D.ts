@@ -36,12 +36,15 @@ import {
   getUprightMaxUpTilt,
   getUprightPitchLimits,
   getUprightTurnRate,
+  isClampedUprightStyle,
+  usesTailSwayMatrix,
   type UprightStyle,
 } from './creatureUprightTuning';
 import {
   createSceneRendererHooks,
   type BoidMotionStyleFlags,
   type ColourStrategy,
+  HAWK_PREDATOR_KIND,
   type MotionConfig,
   type PredatorRenderFlags,
   SCENE_PREDATOR_KINDS,
@@ -49,6 +52,7 @@ import {
   type SceneEnvironmentToggles,
   type SceneRendererHooks,
   type StyleFlags,
+  UNICORN_PREDATOR_KIND,
 } from './sceneRenderers/createSceneRendererHooks';
 import {
   NatureSceneRenderer3D,
@@ -1220,11 +1224,11 @@ export class Renderer3D {
     const isDragon = isOrganic && params.dragonPredators;
     const renderFlags = this.getPredatorRenderFlags(flags);
     const hawkKey = `${hawkCount}:${style}:${isDragon}`;
-    if (this.predatorInstanceKeys.get('hawk') !== hawkKey) {
-      this.disposeInstanceSet(this.predatorInstances.get('hawk') ?? null);
-      const hawkConfig = sceneRenderer.getPredatorInstanceConfig('hawk', flags, renderFlags);
+    if (this.predatorInstanceKeys.get(HAWK_PREDATOR_KIND) !== hawkKey) {
+      this.disposeInstanceSet(this.predatorInstances.get(HAWK_PREDATOR_KIND) ?? null);
+      const hawkConfig = sceneRenderer.getPredatorInstanceConfig(HAWK_PREDATOR_KIND, flags, renderFlags);
       this.predatorInstances.set(
-        'hawk',
+        HAWK_PREDATOR_KIND,
         this.buildInstanceSet(
           hawkConfig.geometries,
           style,
@@ -1234,17 +1238,17 @@ export class Renderer3D {
           hawkConfig.bodyVertexColors,
         ),
       );
-      this.predatorInstanceKeys.set('hawk', hawkKey);
+      this.predatorInstanceKeys.set(HAWK_PREDATOR_KIND, hawkKey);
       this.dragonDisplayQuats.clear();
       this.sharkDisplayQuats.clear();
     }
 
     const unicornKey = `${unicornCount}:${style}`;
-    if (this.predatorInstanceKeys.get('unicorn') !== unicornKey) {
-      this.disposeInstanceSet(this.predatorInstances.get('unicorn') ?? null);
-      const unicornConfig = sceneRenderer.getPredatorInstanceConfig('unicorn', flags, renderFlags);
+    if (this.predatorInstanceKeys.get(UNICORN_PREDATOR_KIND) !== unicornKey) {
+      this.disposeInstanceSet(this.predatorInstances.get(UNICORN_PREDATOR_KIND) ?? null);
+      const unicornConfig = sceneRenderer.getPredatorInstanceConfig(UNICORN_PREDATOR_KIND, flags, renderFlags);
       this.predatorInstances.set(
-        'unicorn',
+        UNICORN_PREDATOR_KIND,
         this.buildInstanceSet(
           unicornConfig.geometries,
           style,
@@ -1254,7 +1258,7 @@ export class Renderer3D {
           unicornConfig.bodyVertexColors,
         ),
       );
-      this.predatorInstanceKeys.set('unicorn', unicornKey);
+      this.predatorInstanceKeys.set(UNICORN_PREDATOR_KIND, unicornKey);
       this.unicornDisplayQuats.clear();
     }
   }
@@ -1263,7 +1267,7 @@ export class Renderer3D {
     let hawkCount = 0;
     let unicornCount = 0;
     for (const predator of predators) {
-      if (predator.kind === 'unicorn') unicornCount++;
+      if (predator.kind === UNICORN_PREDATOR_KIND) unicornCount++;
       else hawkCount++;
     }
     return { hawkCount, unicornCount };
@@ -1410,13 +1414,13 @@ export class Renderer3D {
     uprightStyle: UprightStyle,
     preferUpright: boolean,
   ): void {
-    if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
+    if (keepUpright && isClampedUprightStyle(uprightStyle)) {
       this.clampForwardPitchForUprightStyle(uprightStyle);
     }
 
     if (keepUpright && uprightStyle === 'dragon') {
       this.setPersistedUprightBasis(entity);
-    } else if (keepUpright && (uprightStyle === 'unicorn' || uprightStyle === 'shark')) {
+    } else if (keepUpright && isClampedUprightStyle(uprightStyle)) {
       this.setSimpleUprightBasis(entity);
     } else if (preferUpright) {
       this.setPersistedUprightBasis(entity);
@@ -1753,7 +1757,7 @@ export class Renderer3D {
     set.body.setMatrixAt(i, this.dummy.matrix);
     if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
     if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
-    if (set.tail && uprightStyle !== 'dragon' && uprightStyle !== 'shark') set.tail.setMatrixAt(i, this.dummy.matrix);
+    if (set.tail && !usesTailSwayMatrix(uprightStyle)) set.tail.setMatrixAt(i, this.dummy.matrix);
   }
 
   private computeWingFlapAngle(
@@ -1776,7 +1780,7 @@ export class Renderer3D {
   ): number {
     const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
     const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
-    const stateResponse = (uprightStyle === 'dragon' || uprightStyle === 'unicorn' || uprightStyle === 'shark') ? 0.55 : 0.75;
+    const stateResponse = 0.55;
     const stateFrequencyMultRaw =
       1
       + blendStrength * stateResponse * (
@@ -1833,7 +1837,7 @@ export class Renderer3D {
   ): void {
     // Tail sway (dragons/sharks only).
     if (!set.tail) return;
-    if (!(uprightStyle === 'dragon' || uprightStyle === 'shark')) return;
+    if (!usesTailSwayMatrix(uprightStyle)) return;
     const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + entity.id * 1.7 + DRAGON_TAIL_SWAY_PHASE_OFFSET;
     const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
     this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
@@ -2253,7 +2257,7 @@ export class Renderer3D {
     for (const predator of sim.predators) {
       // Unicorns are never rendered as dragons (they have their own
       // geometry) and shouldn't breathe fire regardless.
-      if (predator.kind === 'unicorn') continue;
+      if (predator.kind === UNICORN_PREDATOR_KIND) continue;
       if (predator.digesting) continue;
       const nextTime = this.getOrSeedNextFireBreathTime(predator, elapsed);
       if (elapsed < nextTime) continue;
@@ -2494,7 +2498,7 @@ export class Renderer3D {
     const hawks: Predator[] = [];
     const unicorns: Predator[] = [];
     for (const predator of predators) {
-      if (predator.kind === 'unicorn') unicorns.push(predator);
+      if (predator.kind === UNICORN_PREDATOR_KIND) unicorns.push(predator);
       else hawks.push(predator);
     }
     return { hawks, unicorns };
@@ -2506,8 +2510,8 @@ export class Renderer3D {
   }
 
   private hasAnyPredatorInstances(): boolean {
-    return this.predatorInstances.get('hawk') !== undefined
-      || this.predatorInstances.get('unicorn') !== undefined;
+    return this.predatorInstances.get(HAWK_PREDATOR_KIND) !== undefined
+      || this.predatorInstances.get(UNICORN_PREDATOR_KIND) !== undefined;
   }
 
   private getPredatorUpdateContext(
@@ -2664,7 +2668,7 @@ export class Renderer3D {
     _flags: StyleFlags,
     renderFlags: PredatorRenderFlags,
   ): void {
-    const hawkInstances = this.predatorInstances.get('hawk');
+    const hawkInstances = this.predatorInstances.get(HAWK_PREDATOR_KIND);
     if (!hawkInstances) return;
     if (hawks.length === 0) return;
     const sceneRenderer = this.getSceneRenderer(params.visualStyle);
@@ -2674,8 +2678,8 @@ export class Renderer3D {
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getPredatorColourStrategy('hawk', renderFlags),
-      sceneRenderer.getPredatorMotionConfig('hawk', renderFlags),
+      sceneRenderer.getPredatorColourStrategy(HAWK_PREDATOR_KIND, renderFlags),
+      sceneRenderer.getPredatorMotionConfig(HAWK_PREDATOR_KIND, renderFlags),
     );
   }
 
@@ -2685,7 +2689,7 @@ export class Renderer3D {
     dt: number,
     _flags: StyleFlags,
   ): void {
-    const unicornInstances = this.predatorInstances.get('unicorn');
+    const unicornInstances = this.predatorInstances.get(UNICORN_PREDATOR_KIND);
     if (!unicornInstances) return;
     if (unicorns.length === 0) return;
     const sceneRenderer = this.getSceneRenderer(params.visualStyle);
@@ -2695,8 +2699,8 @@ export class Renderer3D {
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getPredatorColourStrategy('unicorn', { isDragon: false, isShark: false }),
-      sceneRenderer.getPredatorMotionConfig('unicorn', { isDragon: false, isShark: false }),
+      sceneRenderer.getPredatorColourStrategy(UNICORN_PREDATOR_KIND, { isDragon: false, isShark: false }),
+      sceneRenderer.getPredatorMotionConfig(UNICORN_PREDATOR_KIND, { isDragon: false, isShark: false }),
     );
   }
 
