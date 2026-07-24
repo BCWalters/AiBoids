@@ -129,23 +129,6 @@ export interface BoidMotionStyleFlags {
   isProfiledParrot: boolean;
 }
 
-/** Minimal boid species configuration type used by boid rendering hooks.
- * Contains only the fields needed by colour and motion configuration.
- * Full BoidSpeciesConfig is defined in Renderer3D.
- */
-export interface BoidSpeciesConfig {
-  species: BoidSpecies;
-  natureBase: THREE.Color;
-  arcadeBase: THREE.Color;
-  arcadeEmissive: THREE.Color;
-  useSmallGeometry: boolean;
-  useParrotGeometry?: boolean;
-  getColors?: (creature: Boid | Predator, flags: StyleFlags) => SpeciesColorSet;
-  colors?: SpeciesColorSet;
-  beakColor?: THREE.Color;
-  tailSwayPivotY?: number;
-}
-
 export interface SceneEnvironmentToggles {
   fogEnabled: boolean;
   timeOfDay: TimeOfDayPreset;
@@ -232,13 +215,13 @@ export interface SceneRendererHooks {
   getCreatureMaterialDefaults: () => SceneCreatureMaterialDefaults;
   getPredatorColourStrategy: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => ColourStrategy;
   getPredatorMotionConfig: (species: PredatorSpecies, renderFlags: PredatorRenderFlags) => MotionConfig;
-  getBoidColourStrategy: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => ColourStrategy;
-  getBoidMotionConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags) => MotionConfig;
-  getParrotColourStrategy: (config: BoidSpeciesConfig, flags: StyleFlags, bakedWingPalette: boolean) => ColourStrategy;
+  getBoidColourStrategy: (species: BoidSpecies, flags: StyleFlags) => ColourStrategy;
+  getBoidMotionConfig: (species: BoidSpecies, flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags) => MotionConfig;
+  getParrotColourStrategy: (flags: StyleFlags, bakedWingPalette: boolean) => ColourStrategy;
   getParrotGeometryProfile: (creature: Boid | Predator, flags: StyleFlags) => string;
   getParrotProfileNames: (flags: StyleFlags) => string[];
   getParrotProfileInstanceConfig: (profile: string, flags: StyleFlags) => SceneBoidInstanceConfig;
-  getBoidInstanceConfig: (species: BoidSpecies, config: BoidSpeciesConfig, flags: StyleFlags) => SceneBoidInstanceConfig;
+  getBoidInstanceConfig: (species: BoidSpecies, flags: StyleFlags) => SceneBoidInstanceConfig;
   getPredatorInstanceConfig: (species: PredatorSpecies, flags: StyleFlags, renderFlags: PredatorRenderFlags) => ScenePredatorInstanceConfig;
   /** Scene-specific display labels for each canonical sim creature type.
    * Used by the UI to show creature names appropriate to the current scene

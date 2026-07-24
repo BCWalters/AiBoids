@@ -23,7 +23,6 @@ import {
   type PredatorRenderFlags,
   type StyleFlags,
   type BoidMotionStyleFlags,
-  type BoidSpeciesConfig,
   type SceneBoidInstanceConfig,
   type ScenePredatorInstanceConfig,
   type CreatureLabels,
@@ -63,6 +62,58 @@ const ARCADE_BLUEJAY_EMISSIVE = new THREE.Color(0x3aa0ff);
 const ARCADE_BLUEJAY_BASE = new THREE.Color(0x2d6fb0);
 const ARCADE_UNICORN_BASE = new THREE.Color(0xc9a0f0);
 const ARCADE_UNICORN_HUNT = new THREE.Color(0xffffff);
+
+// Per-species arcade boid config. Owned by this scene so arcade coloring,
+// beaks and geometry selection can be tuned without touching other scenes.
+interface ArcadeSpeciesConfig {
+  arcadeBase: THREE.Color;
+  arcadeEmissive: THREE.Color;
+  beakColor?: THREE.Color;
+  tailSwayPivotY?: number;
+  useSmallGeometry: boolean;
+  useParrotGeometry?: boolean;
+  /** Per-creature HSL variation of the base color (songbird species only). */
+  individualVariation: boolean;
+}
+
+const ARCADE_SPECIES_CONFIG: Record<BoidSpecies, ArcadeSpeciesConfig> = {
+  [BoidSpecies.Normal]: {
+    arcadeBase: ARCADE_BOID_BASE,
+    arcadeEmissive: ARCADE_BOID_EMISSIVE,
+    beakColor: new THREE.Color(0x6b5a4a),
+    useSmallGeometry: true,
+    individualVariation: false,
+  },
+  [BoidSpecies.Multicolor]: {
+    arcadeBase: ARCADE_PARROT_BASE,
+    arcadeEmissive: ARCADE_PARROT_EMISSIVE,
+    useParrotGeometry: true,
+    tailSwayPivotY: -4.186,
+    useSmallGeometry: false,
+    individualVariation: false,
+  },
+  [BoidSpecies.Gold]: {
+    arcadeBase: ARCADE_GOLDFINCH_BASE,
+    arcadeEmissive: ARCADE_GOLDFINCH_EMISSIVE,
+    beakColor: new THREE.Color(0xf07820),
+    useSmallGeometry: false,
+    individualVariation: true,
+  },
+  [BoidSpecies.Red]: {
+    arcadeBase: ARCADE_CARDINAL_BASE,
+    arcadeEmissive: ARCADE_CARDINAL_EMISSIVE,
+    beakColor: new THREE.Color(0xe84040),
+    useSmallGeometry: false,
+    individualVariation: true,
+  },
+  [BoidSpecies.Blue]: {
+    arcadeBase: ARCADE_BLUEJAY_BASE,
+    arcadeEmissive: ARCADE_BLUEJAY_EMISSIVE,
+    beakColor: new THREE.Color(0x8c8c8c),
+    useSmallGeometry: false,
+    individualVariation: true,
+  },
+};
 
 // Neon rainbow palette for multicolor ("Rainbow") boids in arcade style.
 // Each entry gives body/wing/tail a vivid hue so the flock shows real variety.
@@ -258,15 +309,15 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): ColourStrategy {
+  getBoidColourStrategy(species: BoidSpecies, _flags: StyleFlags): ColourStrategy {
     // Arcade has bright, simple coloring. Each species uses its arcadeBase color.
-    // Multicolor ("Rainbow") boids get a per-creature neon variant for visual variety.
-    // config.colors is nature-specific plumage and must NOT be used here.
+    // Multicolor ("Rainbow") boids get a per-creature neon variant for variety.
+    const config = ARCADE_SPECIES_CONFIG[species];
     return {
       baseColor: config.arcadeBase,
       highlightColor: ARCADE_BOID_PANIC,
       getIntensity: (creature) => (creature as Boid).panicLevel,
-      individualVariation: species !== BoidSpecies.Multicolor && !!config.colors,
+      individualVariation: config.individualVariation,
       getSpeciesColors: species === BoidSpecies.Multicolor
         ? (creature) => {
             const idx = Math.floor(arcadeIdHash(creature.id, 42) * ARCADE_MULTICOLOR_VARIANTS.length) % ARCADE_MULTICOLOR_VARIANTS.length;
@@ -278,9 +329,9 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getBoidMotionConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
-    const tailSwayPivot = config.tailSwayPivotY ?? 0;
-    
+  getBoidMotionConfig(species: BoidSpecies, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
+    const tailSwayPivot = ARCADE_SPECIES_CONFIG[species].tailSwayPivotY ?? 0;
+
     return {
       flapFrequency: ARCADE_FLAP_FREQUENCY,
       flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
@@ -295,14 +346,14 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(config: BoidSpeciesConfig, _flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+  getParrotColourStrategy(_flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
     return {
       baseColor: ARCADE_PARROT_BASE,
       highlightColor: ARCADE_BOID_PANIC,
       getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: false, // Arcade parrots are uniform
       getSpeciesColors: undefined, // All arcade parrots use the base color
-      beakColor: config.beakColor,
+      beakColor: ARCADE_SPECIES_CONFIG[BoidSpecies.Multicolor].beakColor,
       bakedWingPalette,
       useNatureParrotPalette: false,
     };
@@ -320,7 +371,8 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     return { geometries: this.parrotGeometries, bodyVertexColors: false };
   }
 
-  getBoidInstanceConfig(_species: BoidSpecies, config: BoidSpeciesConfig, _flags: StyleFlags): SceneBoidInstanceConfig {
+  getBoidInstanceConfig(species: BoidSpecies, _flags: StyleFlags): SceneBoidInstanceConfig {
+    const config = ARCADE_SPECIES_CONFIG[species];
     if (config.useSmallGeometry) {
       return { geometries: this.sparrowGeometries, bodyVertexColors: false, bodyEmissiveOverride: config.arcadeEmissive };
     }
@@ -374,16 +426,3 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   }
 }
 
-// Export arcade-style color constants for use in Renderer3D
-export {
-  ARCADE_BOID_EMISSIVE,
-  ARCADE_BOID_BASE,
-  ARCADE_PARROT_EMISSIVE,
-  ARCADE_PARROT_BASE,
-  ARCADE_GOLDFINCH_EMISSIVE,
-  ARCADE_GOLDFINCH_BASE,
-  ARCADE_CARDINAL_EMISSIVE,
-  ARCADE_CARDINAL_BASE,
-  ARCADE_BLUEJAY_EMISSIVE,
-  ARCADE_BLUEJAY_BASE,
-};

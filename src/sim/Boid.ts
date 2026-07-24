@@ -35,6 +35,15 @@ export const BoidSpecies = {
 } as const;
 export type BoidSpecies = (typeof BoidSpecies)[keyof typeof BoidSpecies];
 
+/** All boid species, in canonical render/reconcile order. */
+export const BOID_SPECIES: readonly BoidSpecies[] = [
+  BoidSpecies.Normal,
+  BoidSpecies.Multicolor,
+  BoidSpecies.Gold,
+  BoidSpecies.Red,
+  BoidSpecies.Blue,
+];
+
 export class Boid {
   readonly id: number;
   readonly species: BoidSpecies;
