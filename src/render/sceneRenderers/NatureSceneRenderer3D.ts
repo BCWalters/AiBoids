@@ -496,6 +496,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           highlightColor: NATURE_UNICORN_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => NATURE_UNICORN_COLORS,
+          colorMode: 'speciesTint',
         };
       
       case PredatorSpecies.Monster:
@@ -503,6 +504,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           baseColor: DRAGON_PREDATOR_BASE,
           highlightColor: DRAGON_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
+          colorMode: 'dragon',
         };
       
       case PredatorSpecies.Normal:
@@ -511,6 +513,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           highlightColor: NATURE_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => NATURE_HAWK_COLORS,
+          colorMode: 'speciesTint',
         };
       
       default:
@@ -568,14 +571,21 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     // plumage, songbirds get individual HSL variation, and the small-bird
     // species render through a baked body/wing/tail vertex gradient.
     const config = NATURE_SPECIES_CONFIG[species];
+    const isBakedSmallBird = species === BoidSpecies.Normal
+      || species === BoidSpecies.Gold
+      || species === BoidSpecies.Red
+      || species === BoidSpecies.Blue;
     return {
       baseColor: config.natureBase,
       highlightColor: NATURE_BOID_PANIC,
       getIntensity: (creature) => (creature as Boid).panicLevel,
       individualVariation: true,
-      getSpeciesColors: config.colors ? () => config.colors! : undefined,
+      getSpeciesColors: species === BoidSpecies.Multicolor
+        ? (creature) => this.getParrotColorVariant(creature)
+        : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
-      bakedBodyGradient: species === BoidSpecies.Normal || species === BoidSpecies.Gold || species === BoidSpecies.Red || species === BoidSpecies.Blue,
+      bakedBodyGradient: isBakedSmallBird,
+      colorMode: isBakedSmallBird ? 'smallBird' : 'parrot',
     };
   }
 
@@ -612,6 +622,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       beakColor: parrotConfig.beakColor,
       preserveBakedPartPalette: bakedWingPalette,
       lockSpeciesPalette: PARROT_FOCUS_PATTERN_INDEX !== null,
+      colorMode: 'parrot',
     };
   }
 

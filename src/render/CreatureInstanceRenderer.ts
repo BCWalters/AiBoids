@@ -14,6 +14,7 @@ import {
 } from './creatureUprightTuning';
 import {
   type ColourStrategy,
+  type CreatureColorMode,
   type MotionConfig,
   PredatorSpecies,
   type SpeciesColorSet,
@@ -137,6 +138,7 @@ interface ResolvedColorStrategy {
   bakedBodyGradient: boolean;
   lockSpeciesPalette: boolean;
   beakColor: THREE.Color | undefined;
+  colorMode: CreatureColorMode;
 }
 
 interface UpdateCreatureInstanceArgs {
@@ -157,6 +159,7 @@ interface UpdateCreatureInstanceArgs {
   hasBakedBodyVertexColors: boolean;
   hasBakedWingVertexColors: boolean;
   hasBakedTailVertexColors: boolean;
+  colorMode: CreatureColorMode;
   flapFrequency: number;
   flapIdleAmplitude: number;
   flapSpeedAmplitude: number;
@@ -749,6 +752,7 @@ export class CreatureInstanceRenderer {
       bakedBodyGradient = false,
       lockSpeciesPalette = false,
       beakColor,
+      colorMode,
     } = colours;
 
     return {
@@ -761,6 +765,7 @@ export class CreatureInstanceRenderer {
       bakedBodyGradient,
       lockSpeciesPalette,
       beakColor,
+      colorMode,
     };
   }
 
@@ -798,6 +803,7 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       preferUpright,
+      colorMode,
     } = args;
     const pos = creature.position;
     const vel = creature.velocity;
@@ -867,6 +873,7 @@ export class CreatureInstanceRenderer {
       hasBakedBodyVertexColors,
       hasBakedWingVertexColors,
       hasBakedTailVertexColors,
+      colorMode,
     });
   }
 
@@ -902,6 +909,7 @@ export class CreatureInstanceRenderer {
       bakedBodyGradient,
       lockSpeciesPalette,
       beakColor,
+      colorMode,
     } = this.resolveColourStrategy(colours);
     const {
       flapFrequency,
@@ -961,6 +969,7 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       preferUpright,
+      colorMode,
     });
 
     this.markRenderBatchNeedsUpdate(set);
