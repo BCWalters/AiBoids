@@ -70,6 +70,10 @@ export const UNICORN_PREDATOR_KIND: PredatorKind = 'unicorn';
 export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
 export const SCENE_PREDATOR_KINDS: readonly PredatorKind[] = [HAWK_PREDATOR_KIND, UNICORN_PREDATOR_KIND];
 
+export function isPredatorKind(kind: string): kind is PredatorKind {
+  return SCENE_PREDATOR_KINDS.includes(kind as PredatorKind);
+}
+
 export interface PredatorRenderFlags {
   isDragon: boolean;
   isShark: boolean;

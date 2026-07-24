@@ -46,6 +46,7 @@ import {
   type BoidMotionStyleFlags,
   type ColourStrategy,
   HAWK_PREDATOR_KIND,
+  isPredatorKind,
   type MotionConfig,
   type PredatorKind,
   type PredatorRenderFlags,
@@ -2378,9 +2379,9 @@ export class Renderer3D {
    * (e.g. called before the gallery entity has spawned on this frame).
    */
   getGalleryFramingDistance(kind: PredatorKind | BoidSpecies, fallbackDistance = 220): number {
-    const set = SCENE_PREDATOR_KINDS.includes(kind as PredatorKind)
-      ? this.predatorInstances.get(kind as PredatorKind)
-      : this.speciesInstances.get(kind as BoidSpecies);
+    const set = isPredatorKind(kind)
+      ? this.predatorInstances.get(kind)
+      : this.speciesInstances.get(kind);
     if (!set) return fallbackDistance;
 
     // Union the bounding boxes of every part (body, wings, tail, legs,
@@ -2536,8 +2537,7 @@ export class Renderer3D {
   }
 
   private hasAnyPredatorInstances(): boolean {
-    return this.predatorInstances.get(HAWK_PREDATOR_KIND) !== undefined
-      || this.predatorInstances.get(UNICORN_PREDATOR_KIND) !== undefined;
+    return SCENE_PREDATOR_KINDS.some((kind) => this.predatorInstances.get(kind) !== undefined);
   }
 
   private getPredatorUpdateContext(
