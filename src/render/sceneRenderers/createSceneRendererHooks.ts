@@ -65,6 +65,8 @@ export interface MotionConfig {
 }
 
 export type PredatorKind = 'hawk' | 'unicorn';
+export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
+export const SCENE_PREDATOR_KINDS: readonly PredatorKind[] = ['hawk', 'unicorn'];
 
 export interface PredatorRenderFlags {
   isDragon: boolean;

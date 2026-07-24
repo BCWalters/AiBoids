@@ -36,6 +36,8 @@ import {
   type ColourStrategy,
   type MotionConfig,
   type PredatorRenderFlags,
+  SCENE_PREDATOR_KINDS,
+  SCENE_STYLES,
   type SceneEnvironmentToggles,
   type SceneRendererHooks,
   type StyleFlags,
@@ -891,7 +893,7 @@ export class Renderer3D {
   }
 
   private configureSceneEnvironmentAnchors(sim: Simulation, center: THREE.Vector3, maxDim: number): void {
-    for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+    for (const style of SCENE_STYLES) {
       this.sceneRenderers[style].configureEnvironmentAnchors(sim, center, maxDim);
     }
   }
@@ -1142,7 +1144,7 @@ export class Renderer3D {
       this.appliedLightShaftsEnabled !== params.lightShaftsEnabled ||
       this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled;
     if (togglesChanged) {
-      for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+      for (const style of SCENE_STYLES) {
         this.sceneRenderers[style].applyEnvironmentToggles(toggles);
       }
     }
@@ -1162,7 +1164,7 @@ export class Renderer3D {
     if (this.appliedShadowsEnabled !== shadowsEnabled) {
       this.renderer.shadowMap.enabled = shadowsEnabled;
       this.keyLight.castShadow = shadowsEnabled;
-      for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+      for (const style of SCENE_STYLES) {
         this.sceneRenderers[style].setShadowsEnabled(shadowsEnabled);
       }
       this.appliedShadowsEnabled = shadowsEnabled;
@@ -1356,7 +1358,7 @@ export class Renderer3D {
     // surrounding room while it's active so the transparent glass/water
     // doesn't show the room incongruously right behind the creature.
     const galleryCreatureActive = params.galleryCreature !== null;
-    for (const sceneStyle of ['nature', 'fishtank', 'arcade'] as const) {
+    for (const sceneStyle of SCENE_STYLES) {
       this.sceneRenderers[sceneStyle].setGalleryCreatureActive(galleryCreatureActive);
     }
 
@@ -2439,7 +2441,7 @@ export class Renderer3D {
    * (e.g. called before the gallery entity has spawned on this frame).
    */
   getGalleryFramingDistance(kind: PredatorKind | BoidSpecies, fallbackDistance = 220): number {
-    const set = (['hawk', 'unicorn'] as const).includes(kind as PredatorKind)
+    const set = SCENE_PREDATOR_KINDS.includes(kind as PredatorKind)
       ? this.predatorInstances.get(kind as PredatorKind)
       : this.speciesInstances.get(kind as BoidSpecies);
     if (!set) return fallbackDistance;
@@ -2971,7 +2973,7 @@ export class Renderer3D {
     this.disposeParrotProfileInstanceSets();
     this.disposePredatorInstanceSets();
     this.disposeAllCreatureGeometrySets();
-    for (const style of ['nature', 'fishtank', 'arcade'] as const) {
+    for (const style of SCENE_STYLES) {
       this.sceneRenderers[style].dispose();
     }
     this.bloodEffects.dispose();
