@@ -40,6 +40,32 @@ async function gotoApp(page: Page, path = '/'): Promise<void> {
   await page.goto(`${path}${separator}state=${encodeURIComponent(JSON.stringify(state))}`);
 }
 
+async function gotoGalleryCreature(
+  page: Page,
+  visualStyle: 'nature' | 'arcade' | 'fishtank',
+  galleryCreature: 'horse' | 'monster' | 'predator' | 'normal' | 'multicolor' | 'gold' | 'red' | 'blue',
+): Promise<void> {
+  const state = {
+    params: {
+      mode: '3d',
+      visualStyle,
+      galleryCreature,
+      running: true,
+      boidCount: 0,
+      multicolorCount: 0,
+      goldCount: 0,
+      redCount: 0,
+      blueCount: 0,
+      predatorCount: 0,
+      monsterCount: 0,
+      horseCount: 0,
+    },
+  };
+  await page.goto(`/?state=${encodeURIComponent(JSON.stringify(state))}`);
+  await expect.poll(async () => page.evaluate(() => (window as unknown as { __debugPosed?: boolean }).__debugPosed === true)).toBe(true);
+  await page.waitForTimeout(300);
+}
+
 /** Fails the test if the page logs a console error or an uncaught exception. */
 function failOnConsoleErrors(page: Page): void {
   page.on('console', (msg) => {
@@ -87,6 +113,63 @@ async function canvasHasVisibleContent(page: Page, canvasSelector: string): Prom
   // much larger. This avoids needing a PNG-decoding dependency just to
   // check "is there visible variety here".
   return png.length > 5000;
+}
+
+type RGB = [number, number, number];
+
+interface GalleryInstanceColors {
+  body: RGB | null;
+  wingLeft: RGB | null;
+  tail: RGB | null;
+  legs: RGB | null;
+}
+
+async function readGalleryInstanceColors(
+  page: Page,
+  galleryCreature: 'horse' | 'monster' | 'predator' | 'normal' | 'multicolor' | 'gold' | 'red' | 'blue',
+): Promise<GalleryInstanceColors | null> {
+  return page.evaluate((creature) => {
+    type MaybeMesh = { instanceColor?: { array?: ArrayLike<number> } } | null | undefined;
+    const globals = window as unknown as {
+      __debugRenderer?: {
+        speciesInstances?: Map<string, unknown>;
+        predatorInstances?: Map<string, unknown>;
+      };
+    };
+    const renderer = globals.__debugRenderer;
+    if (!renderer) return null;
+    const predatorKeyByCreature: Record<string, string> = {
+      predator: 'normal',
+      monster: 'monster',
+      horse: 'horse',
+    };
+    const isPredator = creature === 'predator' || creature === 'monster' || creature === 'horse';
+    const map = isPredator ? renderer.predatorInstances : renderer.speciesInstances;
+    if (!map) return null;
+    const key = isPredator ? predatorKeyByCreature[creature] : creature;
+    const set = map.get(key) as {
+      body?: MaybeMesh;
+      wingLeft?: MaybeMesh;
+      tail?: MaybeMesh;
+      legs?: MaybeMesh;
+    } | null | undefined;
+    if (!set) return null;
+    const readRgb = (mesh: MaybeMesh): RGB | null => {
+      const arr = mesh?.instanceColor?.array;
+      if (!arr || arr.length < 3) return null;
+      return [arr[0], arr[1], arr[2]];
+    };
+    return {
+      body: readRgb(set.body),
+      wingLeft: readRgb(set.wingLeft),
+      tail: readRgb(set.tail),
+      legs: readRgb(set.legs),
+    };
+  }, galleryCreature);
+}
+
+function sumRgb(rgb: RGB): number {
+  return rgb[0] + rgb[1] + rgb[2];
 }
 
 test.describe('App smoke tests', () => {
@@ -153,5 +236,77 @@ test.describe('App smoke tests', () => {
 
     await page.locator('#param-language').selectOption('es');
     await expect.poll(() => heading.textContent()).not.toBe('Controls');
+  });
+});
+
+test.describe('Render color regression checks', () => {
+  test('nature dragon keeps flat body/wing tint with white baked tail passthrough', async ({ page }) => {
+    failOnConsoleErrors(page);
+    await gotoGalleryCreature(page, 'nature', 'monster');
+    const colors = await readGalleryInstanceColors(page, 'monster');
+    expect(colors?.body).not.toBeNull();
+    expect(colors?.wingLeft).not.toBeNull();
+    expect(colors?.tail).not.toBeNull();
+    const body = colors!.body!;
+    const wing = colors!.wingLeft!;
+    const tail = colors!.tail!;
+    expect(Math.abs(body[0] - wing[0])).toBeLessThan(0.02);
+    expect(Math.abs(body[1] - wing[1])).toBeLessThan(0.02);
+    expect(Math.abs(body[2] - wing[2])).toBeLessThan(0.02);
+    expect(sumRgb(body)).toBeLessThan(2.2);
+    expect(tail[0]).toBeGreaterThan(0.95);
+    expect(tail[1]).toBeGreaterThan(0.95);
+    expect(tail[2]).toBeGreaterThan(0.95);
+  });
+
+  test('arcade normal boid keeps flat-mode body/wing color match', async ({ page }) => {
+    failOnConsoleErrors(page);
+    await gotoGalleryCreature(page, 'arcade', 'normal');
+    const colors = await readGalleryInstanceColors(page, 'normal');
+    expect(colors?.body).not.toBeNull();
+    expect(colors?.wingLeft).not.toBeNull();
+    const body = colors!.body!;
+    const wing = colors!.wingLeft!;
+    expect(Math.abs(body[0] - wing[0])).toBeLessThan(0.02);
+    expect(Math.abs(body[1] - wing[1])).toBeLessThan(0.02);
+    expect(Math.abs(body[2] - wing[2])).toBeLessThan(0.02);
+  });
+
+  test('arcade gold boid keeps songbird darker-wing shading', async ({ page }) => {
+    failOnConsoleErrors(page);
+    await gotoGalleryCreature(page, 'arcade', 'gold');
+    const colors = await readGalleryInstanceColors(page, 'gold');
+    expect(colors?.body).not.toBeNull();
+    expect(colors?.wingLeft).not.toBeNull();
+    const body = colors!.body!;
+    const wing = colors!.wingLeft!;
+    expect(sumRgb(wing)).toBeLessThan(sumRgb(body) * 0.9);
+  });
+
+  test('nature unicorn keeps species-tint lighter wing than body', async ({ page }) => {
+    failOnConsoleErrors(page);
+    await gotoGalleryCreature(page, 'nature', 'horse');
+    const colors = await readGalleryInstanceColors(page, 'horse');
+    expect(colors?.body).not.toBeNull();
+    expect(colors?.wingLeft).not.toBeNull();
+    const body = colors!.body!;
+    const wing = colors!.wingLeft!;
+    expect(sumRgb(wing)).toBeGreaterThan(sumRgb(body) * 1.1);
+  });
+
+  test('nature small-bird keeps white baked-gradient passthrough', async ({ page }) => {
+    failOnConsoleErrors(page);
+    await gotoGalleryCreature(page, 'nature', 'normal');
+    const colors = await readGalleryInstanceColors(page, 'normal');
+    expect(colors?.body).not.toBeNull();
+    expect(colors?.wingLeft).not.toBeNull();
+    const body = colors!.body!;
+    const wing = colors!.wingLeft!;
+    expect(body[0]).toBeGreaterThan(0.95);
+    expect(body[1]).toBeGreaterThan(0.95);
+    expect(body[2]).toBeGreaterThan(0.95);
+    expect(wing[0]).toBeGreaterThan(0.95);
+    expect(wing[1]).toBeGreaterThan(0.95);
+    expect(wing[2]).toBeGreaterThan(0.95);
   });
 });
