@@ -117,6 +117,17 @@ export function resolvePredatorRenderFlagsForKind(
   return NON_DRAGON_PREDATOR_RENDER_FLAGS;
 }
 
+export function createPredatorInstanceKey(
+  kind: PredatorKind,
+  count: number,
+  style: VisualStyle,
+  renderFlags: PredatorRenderFlags,
+): string {
+  return kind === HAWK_PREDATOR_KIND
+    ? `${count}:${style}:${renderFlags.isDragon}`
+    : `${count}:${style}`;
+}
+
 export interface BoidMotionStyleFlags {
   isProfiledParrot: boolean;
 }

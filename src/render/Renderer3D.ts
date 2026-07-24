@@ -41,12 +41,12 @@ import {
   type UprightStyle,
 } from './creatureUprightTuning';
 import {
+  createPredatorInstanceKey,
   createPredatorRenderFlags,
   createStyleFlags,
   createSceneRendererHooks,
   type BoidMotionStyleFlags,
   type ColourStrategy,
-  HAWK_PREDATOR_KIND,
   isPredatorKind,
   type MotionConfig,
   type PredatorKind,
@@ -1229,7 +1229,7 @@ export class Renderer3D {
     for (const kind of SCENE_PREDATOR_KINDS) {
       const count = countsByKind.get(kind) ?? 0;
       const kindRenderFlags = resolvePredatorRenderFlagsForKind(kind, renderFlags);
-      const instanceKey = this.getPredatorInstanceKey(kind, count, style, kindRenderFlags);
+      const instanceKey = createPredatorInstanceKey(kind, count, style, kindRenderFlags);
       if (this.predatorInstanceKeys.get(kind) !== instanceKey) {
         this.disposeInstanceSet(this.predatorInstances.get(kind) ?? null);
         const config = sceneRenderer.getPredatorInstanceConfig(kind, flags, kindRenderFlags);
@@ -1259,17 +1259,6 @@ export class Renderer3D {
       countsByKind.set(predator.kind, (countsByKind.get(predator.kind) ?? 0) + 1);
     }
     return countsByKind;
-  }
-
-  private getPredatorInstanceKey(
-    kind: PredatorKind,
-    count: number,
-    style: VisualStyle,
-    renderFlags: PredatorRenderFlags,
-  ): string {
-    return kind === HAWK_PREDATOR_KIND
-      ? `${count}:${style}:${renderFlags.isDragon}`
-      : `${count}:${style}`;
   }
 
   private resetPredatorOrientationCaches(kind: PredatorKind): void {
