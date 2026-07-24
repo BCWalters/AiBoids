@@ -7,7 +7,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { params, type TimeOfDayPreset, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
-import { BoidSpecies } from '../sim/Boid';
+import { BOID_SPECIES, BoidSpecies } from '../sim/Boid';
 import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
 import type { CreatureGeometries } from './geometry/sharedGeometry';
@@ -40,11 +40,6 @@ import {
   UNICORN_PREDATOR_SPECIES,
   type CreatureLabels,
 } from './sceneRenderers/createSceneRendererHooks';
-import {
-  PROFILED_BOID_NEUTRAL_PROFILE,
-  PROFILED_BOID_SPECIES,
-  RENDERER_BOID_SPECIES,
-} from './boidSpeciesRegistry';
 import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';import { createRendererSceneRenderers } from './sceneRendererFactory';
 import { UfoRenderer } from './UfoRenderer';
 import { CameraController } from './CameraController';
@@ -248,6 +243,13 @@ interface BoidRenderBatch {
   /** Small-bird-only: see CreatureGeometries.beak's doc comment. */
   beak?: THREE.InstancedMesh;
 }
+
+/**
+ * Profile name for the "neutral" (non-focus-pattern) Multicolor boid batch —
+ * the render batch that holds Multicolor boids not assigned to a scene-specific
+ * geometry profile.
+ */
+const MULTICOLOR_BOID_NEUTRAL_PROFILE = 'neutral';
 
 export class Renderer3D {
   private renderer: THREE.WebGLRenderer;
@@ -674,15 +676,15 @@ export class Renderer3D {
 
   private reconcileBoidRenderBatches(sim: Simulation, style: VisualStyle, flags: StyleFlags): void {
     const sceneRenderer = this.getSceneRenderer(style);
-    const profileNames = this.getProfileNamesForSpecies(PROFILED_BOID_SPECIES, sceneRenderer, flags);
+    const profileNames = this.getProfileNamesForSpecies(BoidSpecies.Multicolor, sceneRenderer, flags);
     const hasProfiledSpecies = profileNames.length > 0;
     const countsBySpecies = this.getBoidCountsBySpecies(sim.boids);
     const profileCounts = hasProfiledSpecies
-      ? this.getProfileCountsForSpecies(sim.boids, PROFILED_BOID_SPECIES, sceneRenderer, flags)
+      ? this.getProfileCountsForSpecies(sim.boids, BoidSpecies.Multicolor, sceneRenderer, flags)
       : new Map<string, number>();
     if (!hasProfiledSpecies) this.clearProfiledSpeciesInstances();
 
-    for (const species of RENDERER_BOID_SPECIES) {
+    for (const species of BOID_SPECIES) {
       const count = countsBySpecies.get(species) ?? 0;
       if (this.isProfiledSpecies(species) && hasProfiledSpecies) {
         this.reconcileProfiledSpeciesRenderBatches(
@@ -726,7 +728,7 @@ export class Renderer3D {
   }
 
   private isProfiledSpecies(species: BoidSpecies): boolean {
-    return species === PROFILED_BOID_SPECIES;
+    return species === BoidSpecies.Multicolor;
   }
 
   private getProfileCountsForSpecies(
@@ -764,12 +766,12 @@ export class Renderer3D {
     const nonNeutralCount = profileNames
       .reduce((sum, profile) => sum + (profileCounts.get(profile) ?? 0), 0);
     const neutralCount = Math.max(0, totalProfiledSpeciesCount - nonNeutralCount);
-    const neutralKey = `${neutralCount}:${style}:${PROFILED_BOID_NEUTRAL_PROFILE}`;
-    if (this.speciesInstanceKeys.get(PROFILED_BOID_SPECIES) !== neutralKey) {
-      this.disposeRenderBatch(this.speciesInstances.get(PROFILED_BOID_SPECIES) ?? null);
-      const neutralConfig = sceneRenderer.getParrotProfileInstanceConfig(PROFILED_BOID_NEUTRAL_PROFILE, flags);
+    const neutralKey = `${neutralCount}:${style}:${MULTICOLOR_BOID_NEUTRAL_PROFILE}`;
+    if (this.speciesInstanceKeys.get(BoidSpecies.Multicolor) !== neutralKey) {
+      this.disposeRenderBatch(this.speciesInstances.get(BoidSpecies.Multicolor) ?? null);
+      const neutralConfig = sceneRenderer.getParrotProfileInstanceConfig(MULTICOLOR_BOID_NEUTRAL_PROFILE, flags);
       this.speciesInstances.set(
-        PROFILED_BOID_SPECIES,
+        BoidSpecies.Multicolor,
         this.buildRenderBatch(
           neutralConfig.geometries,
           style,
@@ -779,7 +781,7 @@ export class Renderer3D {
           neutralConfig.bodyVertexColors,
         ),
       );
-      this.speciesInstanceKeys.set(PROFILED_BOID_SPECIES, neutralKey);
+      this.speciesInstanceKeys.set(BoidSpecies.Multicolor, neutralKey);
     }
     for (const profile of profileNames) {
       const profileCount = profileCounts.get(profile) ?? 0;
@@ -1873,7 +1875,7 @@ export class Renderer3D {
     const neutralCreatures: Boid[] = [];
     for (const creature of creatures) {
       const profile = sceneRenderer.getParrotGeometryProfile(creature, flags);
-      if (profile === PROFILED_BOID_NEUTRAL_PROFILE) neutralCreatures.push(creature);
+      if (profile === MULTICOLOR_BOID_NEUTRAL_PROFILE) neutralCreatures.push(creature);
       else {
         const bucket = profileCreatures.get(profile);
         if (bucket) bucket.push(creature);
@@ -1903,7 +1905,7 @@ export class Renderer3D {
 
 
   private hasAnyBoidSpeciesInstances(): boolean {
-    return RENDERER_BOID_SPECIES.some((species) => this.speciesInstances.get(species));
+    return BOID_SPECIES.some((species) => this.speciesInstances.get(species));
   }
 
   private hasAnyPredatorInstances(): boolean {
@@ -2010,7 +2012,7 @@ export class Renderer3D {
 
     const boidsBySpecies = this.groupBoidsBySpecies(sim.boids);
 
-    for (const species of RENDERER_BOID_SPECIES) {
+    for (const species of BOID_SPECIES) {
       this.updateBoidSpeciesConfig(species, boidsBySpecies, elapsed, dt, flags, sceneRenderer);
     }
   }
@@ -2152,7 +2154,7 @@ export class Renderer3D {
   }
 
   private disposeBoidRenderBatches(): void {
-    for (const species of RENDERER_BOID_SPECIES) {
+    for (const species of BOID_SPECIES) {
       this.disposeRenderBatch(this.speciesInstances.get(species) ?? null);
     }
   }
