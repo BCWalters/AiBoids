@@ -18,7 +18,7 @@ export interface CreatureSize {
   width: number;
 }
 
-export type CreatureSizer = (lengthFactor: number, widthFactor?: number) => CreatureSize;
+type CreatureSizer = (lengthFactor: number, widthFactor?: number) => CreatureSize;
 
 /**
  * Builds a sizer bound to a scene's base creature size. Call it with a

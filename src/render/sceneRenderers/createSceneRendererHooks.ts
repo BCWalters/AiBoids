@@ -66,8 +66,8 @@ export interface MotionConfig {
   preferUpright?: boolean;
 }
 
-export const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
-export const MONSTER_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Monster;
+const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
+const MONSTER_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Monster;
 export const UNICORN_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Horse;
 export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
 export const SCENE_PREDATOR_SPECIES: readonly PredatorSpecies[] = [
@@ -91,11 +91,6 @@ export interface PredatorRenderFlags {
   isMonster: boolean;
   isShark: boolean;
 }
-
-export const DEFAULT_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = {
-  isMonster: false,
-  isShark: false,
-};
 
 export interface StyleFlags {
   isNature: boolean;

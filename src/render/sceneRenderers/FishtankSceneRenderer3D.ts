@@ -443,11 +443,3 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     disposeCreatureGeometries(this.unicornPredatorGeometries);
   }
 }
-
-// Export fishtank-style color constants and types for use in Renderer3D
-export {
-  BUTTERFLYFISH_COLOR_PATTERNS,
-  SHARK_PREDATOR_BASE,
-  SHARK_PREDATOR_HUNT,
-  type SpeciesColorSet,
-};

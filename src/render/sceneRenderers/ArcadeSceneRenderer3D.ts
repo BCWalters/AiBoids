@@ -35,7 +35,7 @@ import {
 const ARCADE_BASE_CREATURE: CreatureSize = { length: 7, width: 2.6 };
 const arcadeSize = createCreatureSizer(ARCADE_BASE_CREATURE);
 
-export const ARCADE_CREATURE_SIZES = {
+const ARCADE_CREATURE_SIZES = {
   boid: arcadeSize(1),
   sparrow: arcadeSize(0.7),
   parrot: arcadeSize(1),
@@ -378,9 +378,6 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
 export {
   ARCADE_BOID_EMISSIVE,
   ARCADE_BOID_BASE,
-  ARCADE_BOID_PANIC,
-  ARCADE_PREDATOR_BASE,
-  ARCADE_PREDATOR_HUNT,
   ARCADE_PARROT_EMISSIVE,
   ARCADE_PARROT_BASE,
   ARCADE_GOLDFINCH_EMISSIVE,
@@ -389,6 +386,4 @@ export {
   ARCADE_CARDINAL_BASE,
   ARCADE_BLUEJAY_EMISSIVE,
   ARCADE_BLUEJAY_BASE,
-  ARCADE_UNICORN_BASE,
-  ARCADE_UNICORN_HUNT,
 };

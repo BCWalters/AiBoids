@@ -40,7 +40,7 @@ import {
 const NATURE_BASE_CREATURE: CreatureSize = { length: 9.1, width: 6.24 };
 const natureSize = createCreatureSizer(NATURE_BASE_CREATURE);
 
-export const NATURE_CREATURE_SIZES = {
+const NATURE_CREATURE_SIZES = {
   boid: natureSize(1),
   parrot: natureSize(1),
   // Small songbirds (goldfinch/cardinal/bluejay) read as noticeably smaller.
@@ -62,7 +62,7 @@ const NATURE_BLOOD_SPLATTER_SCALE = 6.3;
 /** Dragon mouth transform (fire-breath emit point), derived from the nature
  * dragon's own length — kept here so the fire-breath origin stays in sync
  * with the nature dragon geometry regardless of what that size is. */
-export const NATURE_DRAGON_MOUTH = computeDragonMouthTransform(NATURE_CREATURE_SIZES.dragon.length);
+const NATURE_DRAGON_MOUTH = computeDragonMouthTransform(NATURE_CREATURE_SIZES.dragon.length);
 
 // --- Nature style color constants: matte, earth-toned plumage with realistic gradients
 const NATURE_BOID_BASE = new THREE.Color(0xab8f68); // sandy tan-brown, contrasts against green ground
@@ -684,18 +684,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
 // Export nature-style color constants and types for use in Renderer3D
 export {
   NATURE_BOID_BASE,
-  NATURE_BOID_PANIC,
-  NATURE_PREDATOR_BASE,
-  NATURE_PREDATOR_HUNT,
   NATURE_HAWK_COLORS,
   PARROT_NATURE_VARIANTS,
-  NON_NEUTRAL_PARROT_PROFILES,
-  PARROT_FOCUS_PATTERN_INDEX,
-  DRAGON_PREDATOR_BASE,
-  DRAGON_PREDATOR_HUNT,
-  NATURE_UNICORN_BODY,
-  NATURE_UNICORN_HUNT,
-  NATURE_UNICORN_WING,
   GOLDFINCH_BODY_BASE,
   GOLDFINCH_WING_BASE,
   GOLDFINCH_TAIL_BASE,
@@ -705,7 +695,4 @@ export {
   BLUEJAY_BODY_BASE,
   BLUEJAY_WING_BASE,
   BLUEJAY_TAIL_BASE,
-  type ParrotGeometryProfile,
-  type NatureParrotVariant,
-  type SpeciesColorSet,
 };
