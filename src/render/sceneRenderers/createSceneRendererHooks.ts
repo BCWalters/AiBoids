@@ -29,14 +29,12 @@ export interface ColourStrategy {
   /** Per-creature body/wing/tail hue function (parrot/hawk plumage).
    * Overrides individualVariation when provided. */
   getSpeciesColors?: (creature: Predator | Boid) => SpeciesColorSet | null;
-  /** True for parrot profile variants whose geometry has baked vertex colours
-   * on wings/tail/legs — passes white so the vertex palette shows through. */
-  bakedWingPalette?: boolean;
+  /** Geometry bakes a per-part palette into wings/tail/legs (e.g. parrot profile
+   * variants). Passes white for those parts so the vertex palette shows through. */
+  preserveBakedPartPalette?: boolean;
   /** True for nature small songbirds with a SmallBirdPalette baked into body/
    * wing/tail geometry — passes white so the gradient shows through. */
   bakedBodyGradient?: boolean;
-  /** Enables nature-parrot-specific palette lock/passthrough behavior. */
-  useNatureParrotPalette?: boolean;
   /** Disables per-creature species jitter and preserves exact species colors. */
   lockSpeciesPalette?: boolean;
   beakColor?: THREE.Color;

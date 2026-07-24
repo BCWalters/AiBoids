@@ -127,8 +127,7 @@ interface CreatureInstanceColorArgs {
   getIntensity: (creature: Boid | Predator) => number;
   individualVariation: boolean;
   getSpeciesColors: ((creature: Boid | Predator) => SpeciesColorSet | null) | undefined;
-  bakedWingPalette: boolean;
-  useNatureParrotPalette: boolean;
+  preserveBakedPartPalette: boolean;
   lockSpeciesPalette: boolean;
   beakColor: THREE.Color | undefined;
   hasBakedBodyVertexColors: boolean;
@@ -160,9 +159,8 @@ interface ResolvedColorStrategy {
   getIntensity: (creature: Boid | Predator) => number;
   individualVariation: boolean;
   getSpeciesColors: ((creature: Boid | Predator) => SpeciesColorSet | null) | undefined;
-  bakedWingPalette: boolean;
+  preserveBakedPartPalette: boolean;
   bakedBodyGradient: boolean;
-  useNatureParrotPalette: boolean;
   lockSpeciesPalette: boolean;
   beakColor: THREE.Color | undefined;
 }
@@ -179,8 +177,7 @@ interface UpdateCreatureInstanceArgs {
   getIntensity: (creature: Boid | Predator) => number;
   individualVariation: boolean;
   getSpeciesColors: ((creature: Boid | Predator) => SpeciesColorSet | null) | undefined;
-  bakedWingPalette: boolean;
-  useNatureParrotPalette: boolean;
+  preserveBakedPartPalette: boolean;
   lockSpeciesPalette: boolean;
   beakColor: THREE.Color | undefined;
   hasBakedBodyVertexColors: boolean;
@@ -506,8 +503,7 @@ export class CreatureInstanceRenderer {
       getIntensity,
       individualVariation,
       getSpeciesColors,
-      bakedWingPalette,
-      useNatureParrotPalette,
+      preserveBakedPartPalette,
       lockSpeciesPalette,
       beakColor,
       hasBakedBodyVertexColors,
@@ -518,13 +514,10 @@ export class CreatureInstanceRenderer {
     let effectiveBase = baseColor;
     let effectiveWing: THREE.Color | null = null;
     let effectiveTail: THREE.Color | null = null;
-    let preserveParrotLegPalette = false;
+    let preserveLegPalette = false;
 
     if (speciesColors) {
-      const isGreenParrotVariant = useNatureParrotPalette
-        && speciesColors.body.getHex() === 0x44b749
-        && speciesColors.wing.getHex() === 0x44b749;
-      if (lockSpeciesPalette || isGreenParrotVariant) {
+      if (lockSpeciesPalette) {
         effectiveBase = speciesColors.body;
         effectiveWing = speciesColors.wing;
         effectiveTail = speciesColors.tail;
@@ -579,16 +572,15 @@ export class CreatureInstanceRenderer {
         set.tail.setColorAt(index, this.tailColor);
       }
     } else if (effectiveWing) {
-      const preserveParrotWingPalette = useNatureParrotPalette
-        && bakedWingPalette
+      const preserveWingPalette = preserveBakedPartPalette
         && !!set.wingLeft.geometry.getAttribute('color');
-      const preserveParrotTailPalette = preserveParrotWingPalette
+      const preserveTailPalette = preserveWingPalette
         && !!set.tail?.geometry.getAttribute('color');
-      preserveParrotLegPalette = preserveParrotWingPalette
+      preserveLegPalette = preserveWingPalette
         && !!set.legs?.geometry.getAttribute('color');
       // Species with their own distinct wing/tail base colors keep those
       // hues rather than just darkening the body color.
-      if (preserveParrotWingPalette) {
+      if (preserveWingPalette) {
         this.wingColor.setRGB(1, 1, 1);
       } else {
         this.wingColor.copy(effectiveWing).lerp(highlightColor, getIntensity(creature));
@@ -597,7 +589,7 @@ export class CreatureInstanceRenderer {
       set.wingRight.setColorAt(index, this.wingColor);
       if (set.tail) {
         if (effectiveTail) {
-          if (preserveParrotTailPalette) {
+          if (preserveTailPalette) {
             this.tailColor.setRGB(1, 1, 1);
           } else {
             this.tailColor.copy(effectiveTail).lerp(highlightColor, getIntensity(creature));
@@ -631,7 +623,7 @@ export class CreatureInstanceRenderer {
       }
     }
     if (set.legs) {
-      if (preserveParrotLegPalette || set.legs.geometry.getAttribute('color')) {
+      if (preserveLegPalette || set.legs.geometry.getAttribute('color')) {
         // Parrot legs: baked palette feet color, pass through with white.
         // Small-bird legs: baked species leg color, same white pass-through.
         this.legsColor.setRGB(1, 1, 1);
@@ -970,9 +962,8 @@ export class CreatureInstanceRenderer {
       getIntensity,
       individualVariation = false,
       getSpeciesColors,
-      bakedWingPalette = false,
+      preserveBakedPartPalette = false,
       bakedBodyGradient = false,
-      useNatureParrotPalette = false,
       lockSpeciesPalette = false,
       beakColor,
     } = colours;
@@ -983,9 +974,8 @@ export class CreatureInstanceRenderer {
       getIntensity,
       individualVariation,
       getSpeciesColors,
-      bakedWingPalette,
+      preserveBakedPartPalette,
       bakedBodyGradient,
-      useNatureParrotPalette,
       lockSpeciesPalette,
       beakColor,
     };
@@ -1004,8 +994,7 @@ export class CreatureInstanceRenderer {
       getIntensity,
       individualVariation,
       getSpeciesColors,
-      bakedWingPalette,
-      useNatureParrotPalette,
+      preserveBakedPartPalette,
       lockSpeciesPalette,
       beakColor,
       hasBakedBodyVertexColors,
@@ -1089,8 +1078,7 @@ export class CreatureInstanceRenderer {
       getIntensity,
       individualVariation,
       getSpeciesColors,
-      bakedWingPalette,
-      useNatureParrotPalette,
+      preserveBakedPartPalette,
       lockSpeciesPalette,
       beakColor,
       hasBakedBodyVertexColors,
@@ -1127,9 +1115,8 @@ export class CreatureInstanceRenderer {
       getIntensity,
       individualVariation,
       getSpeciesColors,
-      bakedWingPalette,
+      preserveBakedPartPalette,
       bakedBodyGradient,
-      useNatureParrotPalette,
       lockSpeciesPalette,
       beakColor,
     } = this.resolveColourStrategy(colours);
@@ -1170,8 +1157,7 @@ export class CreatureInstanceRenderer {
       getIntensity,
       individualVariation,
       getSpeciesColors,
-      bakedWingPalette,
-      useNatureParrotPalette,
+      preserveBakedPartPalette,
       lockSpeciesPalette,
       beakColor,
       hasBakedBodyVertexColors,
