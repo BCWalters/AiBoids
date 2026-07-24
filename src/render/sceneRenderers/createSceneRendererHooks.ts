@@ -65,11 +65,24 @@ export interface MotionConfig {
 }
 
 export type PredatorKind = 'hawk' | 'unicorn';
+export const HAWK_PREDATOR_KIND: PredatorKind = 'hawk';
+export const UNICORN_PREDATOR_KIND: PredatorKind = 'unicorn';
+export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
+export const SCENE_PREDATOR_KINDS: readonly PredatorKind[] = [HAWK_PREDATOR_KIND, UNICORN_PREDATOR_KIND];
+
+export function isPredatorKind(kind: string): kind is PredatorKind {
+  return SCENE_PREDATOR_KINDS.includes(kind as PredatorKind);
+}
 
 export interface PredatorRenderFlags {
   isDragon: boolean;
   isShark: boolean;
 }
+
+export const NON_DRAGON_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = {
+  isDragon: false,
+  isShark: false,
+};
 
 export interface StyleFlags {
   isNature: boolean;
@@ -77,9 +90,46 @@ export interface StyleFlags {
   isOrganic: boolean;
 }
 
+export function createStyleFlags(style: VisualStyle): StyleFlags {
+  const isNature = style === 'nature';
+  const isFishtank = style === 'fishtank';
+  return {
+    isNature,
+    isFishtank,
+    isOrganic: isNature || isFishtank,
+  };
+}
+
+export function createPredatorRenderFlags(
+  flags: StyleFlags,
+  dragonPredatorsEnabled: boolean,
+): PredatorRenderFlags {
+  const isDragon = flags.isOrganic && dragonPredatorsEnabled;
+  const isShark = isDragon && flags.isFishtank;
+  return { isDragon, isShark };
+}
+
+export function resolvePredatorRenderFlagsForKind(
+  kind: PredatorKind,
+  renderFlags: PredatorRenderFlags,
+): PredatorRenderFlags {
+  if (kind === HAWK_PREDATOR_KIND) return renderFlags;
+  return NON_DRAGON_PREDATOR_RENDER_FLAGS;
+}
+
+export function createPredatorInstanceKey(
+  kind: PredatorKind,
+  count: number,
+  style: VisualStyle,
+  renderFlags: PredatorRenderFlags,
+): string {
+  return kind === HAWK_PREDATOR_KIND
+    ? `${count}:${style}:${renderFlags.isDragon}`
+    : `${count}:${style}`;
+}
+
 export interface BoidMotionStyleFlags {
-  isFishTail: boolean;
-  isNatureParrot: boolean;
+  isProfiledParrot: boolean;
 }
 
 /** Minimal boid species configuration type used by boid rendering hooks.
