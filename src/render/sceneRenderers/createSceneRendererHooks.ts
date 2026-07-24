@@ -82,7 +82,6 @@ export interface StyleFlags {
 }
 
 export interface BoidMotionStyleFlags {
-  isFishTail: boolean;
   isProfiledParrot: boolean;
 }
 

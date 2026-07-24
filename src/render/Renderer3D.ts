@@ -2597,7 +2597,7 @@ export class Renderer3D {
     profileNames: readonly string[],
   ): void {
     const { neutralEntities, profileEntities } = this.partitionParrotEntities(entities, sceneRenderer, flags);
-    const boidMotionFlags: BoidMotionStyleFlags = { isFishTail: false, isProfiledParrot: true };
+    const boidMotionFlags: BoidMotionStyleFlags = { isProfiledParrot: true };
     this.updateInstances(
       instances,
       neutralEntities,
@@ -2633,7 +2633,6 @@ export class Renderer3D {
     sceneRenderer: SceneRendererHooks,
   ): void {
     const boidMotionFlags: BoidMotionStyleFlags = {
-      isFishTail: flags.isFishtank,
       isProfiledParrot,
     };
     this.updateInstances(
@@ -2660,12 +2659,6 @@ export class Renderer3D {
     const entities = this.getBoidEntitiesForSpecies(boidsBySpecies, config.species);
     const parrotProfileNames = config.species === 'parrot' ? sceneRenderer.getParrotProfileNames(flags) : [];
     const isProfiledParrot = parrotProfileNames.length > 0;
-    // Fish-tail wave (fishtank only): every fishtank species' caudal
-    // fin is rooted at the model's own local origin (sparrow/
-    // goldfinch/cardinal/bluejay's plain small-fish geometry, and
-    // now the parrot species' butterflyfish geometry too), so it's
-    // safe to sway around the shared pivot with no detachment risk
-    // (see FISH_TAIL_SWAY_AMPLITUDE's doc comment).
     if (isProfiledParrot) {
       this.updateProfiledParrotInstances(config, instances, entities, elapsed, dt, flags, sceneRenderer, parrotProfileNames);
       return;
