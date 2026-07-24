@@ -66,8 +66,8 @@ export interface MotionConfig {
   preferUpright?: boolean;
 }
 
-export const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
-export const MONSTER_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Monster;
+const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
+const MONSTER_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Monster;
 export const UNICORN_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Horse;
 export const SCENE_STYLES: readonly VisualStyle[] = ['nature', 'fishtank', 'arcade'];
 export const SCENE_PREDATOR_SPECIES: readonly PredatorSpecies[] = [
@@ -91,11 +91,6 @@ export interface PredatorRenderFlags {
   isMonster: boolean;
   isShark: boolean;
 }
-
-export const DEFAULT_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = {
-  isMonster: false,
-  isShark: false,
-};
 
 export interface StyleFlags {
   isNature: boolean;
@@ -209,7 +204,18 @@ export interface SceneRendererHooks {
     wasFishtank: boolean,
   ) => void;
   updateEnvironment: (elapsed: number) => void;
-  updateTransientEffects: (sim: Simulation, elapsed: number) => void;
+  /**
+   * Per-frame hook for scene-specific special creature effects (e.g. nature
+   * dragons breathing fire). `dragonDisplayQuats` carries the smoothed
+   * display orientations Renderer3D computes for 'dragon'-upright creatures
+   * during instance update, which effect emitters can pose against. Scenes
+   * without special creature effects (arcade/fishtank) implement a no-op.
+   */
+  updateSpecialCreatureEffects: (
+    sim: Simulation,
+    elapsed: number,
+    dragonDisplayQuats: Map<number, THREE.Quaternion>,
+  ) => void;
   configureEnvironmentAnchors: (sim: Simulation, center: Vector3, maxDim: number) => void;
   updateFrameAnchors: (sim: Simulation) => void;
   updateCameraClamp: (sim: Simulation) => void;

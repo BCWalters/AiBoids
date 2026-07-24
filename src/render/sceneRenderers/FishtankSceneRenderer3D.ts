@@ -167,7 +167,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     this.deps.fishtankEnv.update(elapsed);
   }
 
-  updateTransientEffects(_sim: Simulation, _elapsed: number): void {}
+  updateSpecialCreatureEffects(_sim: Simulation, _elapsed: number, _dragonDisplayQuats: Map<number, THREE.Quaternion>): void {}
 
   configureEnvironmentAnchors(sim: Simulation, _center: THREE.Vector3, _maxDim: number): void {
     placeFishtankEnvironment(this.deps.fishtankEnv, sim.width, sim.height, params.worldDepth);
@@ -443,11 +443,3 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     disposeCreatureGeometries(this.unicornPredatorGeometries);
   }
 }
-
-// Export fishtank-style color constants and types for use in Renderer3D
-export {
-  BUTTERFLYFISH_COLOR_PATTERNS,
-  SHARK_PREDATOR_BASE,
-  SHARK_PREDATOR_HUNT,
-  type SpeciesColorSet,
-};
