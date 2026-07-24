@@ -32,8 +32,13 @@ import { createFireBreathEffects, type FireBreathEffects } from './styles/nature
 import { createUFOVisual, type UFOVisual } from './ufoEffects';
 import {
   createSceneRendererHooks,
+  type BoidMotionStyleFlags,
+  type ColourStrategy,
+  type MotionConfig,
+  type PredatorRenderFlags,
   type SceneEnvironmentToggles,
   type SceneRendererHooks,
+  type StyleFlags,
 } from './sceneRenderers/createSceneRendererHooks';
 import {
   NatureSceneRenderer3D,
@@ -322,55 +327,6 @@ function idHash(id: number, salt: number): number {
   return x - Math.floor(x);
 }
 
-/** All colour-related parameters for one `updateInstances` call.
- * Bundled as a named-field object so call sites are self-documenting and
- * immune to positional-parameter order bugs.
- */
-interface ColourStrategy {
-  baseColor: THREE.Color;
-  highlightColor: THREE.Color;
-  getIntensity: (entity: Boid | Predator) => number;
-  /** Each entity gets a small HSL jitter + occasional rare morph around
-   * baseColor (sparrow-style individual variation). Default false. */
-  individualVariation?: boolean;
-  /** Per-entity body/wing/tail hue function (parrot/hawk plumage).
-   * Overrides individualVariation when provided. */
-  getSpeciesColors?: (entity: Boid | Predator) => SpeciesColorSet | null;
-  /** True for parrot profile variants whose geometry has baked vertex colours
-   * on wings/tail/legs — passes white so the vertex palette shows through. */
-  bakedWingPalette?: boolean;
-  /** True for nature small songbirds with a SmallBirdPalette baked into body/
-   * wing/tail geometry — passes white so the gradient shows through. */
-  bakedBodyGradient?: boolean;
-  /** Enables nature-parrot-specific palette lock/passthrough behavior. */
-  useNatureParrotPalette?: boolean;
-  /** Disables per-entity species jitter and preserves exact species colors. */
-  lockSpeciesPalette?: boolean;
-  beakColor?: THREE.Color;
-}
-
-/**
- * Per-species animation/motion parameters for one `updateInstances` call.
- * All fields are optional; defaults match the original parameter defaults so
- * call sites can omit anything they don't need to override.
- */
-interface MotionConfig {
-  flapFrequency?: number;
-  flapIdleAmplitude?: number;
-  flapSpeedAmplitude?: number;
-  getScale?: (entity: Boid | Predator) => number;
-  keepUpright?: boolean;
-  uprightStyle?: 'dragon' | 'unicorn' | 'shark';
-  bankScale?: number;
-  finRestBiasRad?: number;
-  tailSwayAxis?: THREE.Vector3;
-  tailSwayAmplitude?: number;
-  tailSwayFrequency?: number;
-  tailSwayPivotY?: number;
-  worldScale?: number;
-  meshScaleBoost?: number;
-  preferUpright?: boolean;
-}
 type UprightStyle = NonNullable<MotionConfig['uprightStyle']>;
 
 interface EntityInstanceMatrixArgs {
@@ -489,26 +445,10 @@ interface UpdateEntityInstanceArgs {
 }
 type UpdateEntitySharedArgs = Omit<UpdateEntityInstanceArgs, 'index' | 'entity'>;
 
-interface StyleFlags {
-  isNature: boolean;
-  isFishtank: boolean;
-  isOrganic: boolean;
-}
-
-interface PredatorRenderFlags {
-  isDragon: boolean;
-  isShark: boolean;
-}
-
 interface PredatorUpdateContext {
   hawks: Predator[];
   unicorns: Predator[];
   renderFlags: PredatorRenderFlags;
-}
-
-interface BoidMotionStyleFlags {
-  isFishTail: boolean;
-  isNatureParrot: boolean;
 }
 
 interface PredatorCounts {
