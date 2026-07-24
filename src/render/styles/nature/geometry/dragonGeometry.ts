@@ -559,10 +559,10 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
 
-  // Bake a root→tip colour gradient: body purple at the rump attachment
+  // Bake a root→tip color gradient: body purple at the rump attachment
   // fading to a deep dark purple at the tip. The renderer detects the
   // presence of this 'color' attribute and passes white as the instance
-  // colour so the gradient shows through unchanged.
+  // color so the gradient shows through unchanged.
   const rootColor = new THREE.Color(0xa060e8); // bright/light purple at the rump
   const tipColor  = new THREE.Color(0x080314); // near-black at the tip
   const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;

@@ -18,7 +18,7 @@ import {
   type SceneEnvironmentToggles,
   type ScenePresentationSettings,
   type SceneRendererHooks,
-  type ColourStrategy,
+  type ColorStrategy,
   type MotionConfig,
   type PredatorRenderFlags,
   type StyleFlags,
@@ -256,7 +256,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getPredatorColourStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColourStrategy {
+  getPredatorColorStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColorStrategy {
     switch (species) {
       case PredatorSpecies.Horse:
         return {
@@ -311,7 +311,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
-  getBoidColourStrategy(species: BoidSpecies, _flags: StyleFlags): ColourStrategy {
+  getBoidColorStrategy(species: BoidSpecies, _flags: StyleFlags): ColorStrategy {
     // Arcade has bright, simple coloring. Each species uses its arcadeBase color.
     // Multicolor ("Rainbow") boids get a per-creature neon variant for variety.
     const config = ARCADE_SPECIES_CONFIG[species];
@@ -352,7 +352,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(_flags: StyleFlags, _bakedWingPalette: boolean): ColourStrategy {
+  getParrotColorStrategy(_flags: StyleFlags, _bakedWingPalette: boolean): ColorStrategy {
     return {
       baseColor: ARCADE_PARROT_BASE,
       highlightColor: ARCADE_BOID_PANIC,

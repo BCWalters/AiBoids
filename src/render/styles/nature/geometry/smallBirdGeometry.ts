@@ -8,9 +8,9 @@ import {
 import { buildTailGeometry } from './birdSharedGeometry';
 
 /**
- * Per-species palette for baked vertex colour gradients on small-bird
+ * Per-species palette for baked vertex color gradients on small-bird
  * geometry. Pass to createRealisticBirdGeometries so each species gets its
- * own geometry instance with colours baked in.
+ * own geometry instance with colors baked in.
  *
  * Body uses a **bilinear 4-corner gradient** blending both axes:
  *  - Y axis: headBack/headBelly (near the face) → tailBack/tailBelly (near the tail)
@@ -334,7 +334,7 @@ function buildSmallBirdLegsGeometry(length: number, width: number, legsColor: TH
  * The main panel is a five-vertex fan (root → shoulder → tipFront →
  * tipRear → midTrail), giving a rounded wingtip rather than a sharp apex.
  * Four compact primary feathers extend from the outer tip region.
- * Optional per-palette wing gradient bakes root→tip X-axis colours.
+ * Optional per-palette wing gradient bakes root→tip X-axis colors.
  */
 function buildSmallBirdWingGeometry(
   span: number,
@@ -411,5 +411,4 @@ function buildSmallBirdWingGeometry(
   geometry.computeVertexNormals();
   return geometry;
 }
-
 

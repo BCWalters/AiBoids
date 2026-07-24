@@ -13,7 +13,7 @@ import { FlatColorApplicator } from './flatColorApplication';
 /**
  * All inputs needed to color one creature instance for a single frame. The
  * runtime color inputs (base/highlight/intensity, per-species/individual
- * variation) come from the scene's ColourStrategy; the baked-vertex flags
+ * variation) come from the scene's ColorStrategy; the baked-vertex flags
  * describe what the creature's geometry already carries.
  */
 export interface CreatureInstanceColorArgs {

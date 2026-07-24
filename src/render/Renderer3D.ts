@@ -760,7 +760,7 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getParrotColourStrategy(flags, false),
+      sceneRenderer.getParrotColorStrategy(flags, false),
       sceneRenderer.getBoidMotionConfig(species, flags, boidMotionFlags),
     );
     for (const profile of profileNames) {
@@ -772,7 +772,7 @@ export class Renderer3D {
         params.boidMaxSpeed,
         elapsed,
         dt,
-        sceneRenderer.getParrotColourStrategy(flags, true),
+        sceneRenderer.getParrotColorStrategy(flags, true),
         sceneRenderer.getBoidMotionConfig(species, flags, boidMotionFlags),
       );
     }
@@ -797,7 +797,7 @@ export class Renderer3D {
       params.boidMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getBoidColourStrategy(species, flags),
+      sceneRenderer.getBoidColorStrategy(species, flags),
       sceneRenderer.getBoidMotionConfig(species, flags, boidMotionFlags),
     );
   }
@@ -886,7 +886,7 @@ export class Renderer3D {
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getPredatorColourStrategy(species, renderFlags),
+      sceneRenderer.getPredatorColorStrategy(species, renderFlags),
       sceneRenderer.getPredatorMotionConfig(species, renderFlags),
     );
   }

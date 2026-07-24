@@ -13,7 +13,7 @@ import {
   type UprightStyle,
 } from './creatureUprightTuning';
 import {
-  type ColourStrategy,
+  type ColorStrategy,
   type CreatureColorMode,
   type MotionConfig,
   PredatorSpecies,
@@ -185,7 +185,7 @@ type UpdateCreatureSharedArgs = Omit<UpdateCreatureInstanceArgs, 'index' | 'crea
  * objects and per-creature animation state (flap phase, smoothed display
  * orientations) it needs. Renderer3D builds and reconciles the render batches
  * and decides which creatures go into each; this class only knows how to pose
- * and color one batch given a scene-supplied ColourStrategy + MotionConfig.
+ * and color one batch given a scene-supplied ColorStrategy + MotionConfig.
  */
 export class CreatureInstanceRenderer {
   private dummy = new THREE.Object3D();
@@ -741,7 +741,7 @@ export class CreatureInstanceRenderer {
     };
   }
 
-  private resolveColourStrategy(colours: ColourStrategy): ResolvedColorStrategy {
+  private resolveColorStrategy(colors: ColorStrategy): ResolvedColorStrategy {
     const {
       baseColor,
       highlightColor,
@@ -753,7 +753,7 @@ export class CreatureInstanceRenderer {
       lockSpeciesPalette = false,
       beakColor,
       colorMode,
-    } = colours;
+    } = colors;
 
     return {
       baseColor,
@@ -896,7 +896,7 @@ export class CreatureInstanceRenderer {
     maxSpeed: number,
     elapsed: number,
     dt: number,
-    colours: ColourStrategy,
+    colors: ColorStrategy,
     motion: MotionConfig,
   ): void {
     const {
@@ -910,7 +910,7 @@ export class CreatureInstanceRenderer {
       lockSpeciesPalette,
       beakColor,
       colorMode,
-    } = this.resolveColourStrategy(colours);
+    } = this.resolveColorStrategy(colors);
     const {
       flapFrequency,
       flapIdleAmplitude,
