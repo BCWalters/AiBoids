@@ -368,7 +368,6 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         ? (creature) => this.getButterflyfishColorVariant(creature)
         : (config.colors ? () => config.colors! : undefined),
       beakColor: config.beakColor,
-      bakedWingPalette: true,
     };
   }
 
@@ -390,7 +389,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(_flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+  getParrotColourStrategy(_flags: StyleFlags, _bakedWingPalette: boolean): ColourStrategy {
     const parrotConfig = FISHTANK_SPECIES_CONFIG[BoidSpecies.Multicolor];
     return {
       baseColor: parrotConfig.baseColor,
@@ -399,8 +398,6 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       individualVariation: true,
       getSpeciesColors: (creature) => this.getButterflyfishColorVariant(creature),
       beakColor: parrotConfig.beakColor,
-      bakedWingPalette,
-      useNatureParrotPalette: false,
     };
   }
 

@@ -575,7 +575,6 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       individualVariation: true,
       getSpeciesColors: config.colors ? () => config.colors! : undefined,
       beakColor: config.beakColor,
-      bakedWingPalette: true,
       bakedBodyGradient: species === BoidSpecies.Normal || species === BoidSpecies.Gold || species === BoidSpecies.Red || species === BoidSpecies.Blue,
     };
   }
@@ -611,8 +610,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       individualVariation: true,
       getSpeciesColors: (creature) => this.getParrotColorVariant(creature),
       beakColor: parrotConfig.beakColor,
-      bakedWingPalette,
-      useNatureParrotPalette: true, // Always use nature parrot palette in nature renderer
+      preserveBakedPartPalette: bakedWingPalette,
       lockSpeciesPalette: PARROT_FOCUS_PATTERN_INDEX !== null,
     };
   }

@@ -325,7 +325,6 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           }
         : undefined,
       beakColor: config.beakColor,
-      bakedWingPalette: true,
     };
   }
 
@@ -346,7 +345,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getParrotColourStrategy(_flags: StyleFlags, bakedWingPalette: boolean): ColourStrategy {
+  getParrotColourStrategy(_flags: StyleFlags, _bakedWingPalette: boolean): ColourStrategy {
     return {
       baseColor: ARCADE_PARROT_BASE,
       highlightColor: ARCADE_BOID_PANIC,
@@ -354,8 +353,6 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       individualVariation: false, // Arcade parrots are uniform
       getSpeciesColors: undefined, // All arcade parrots use the base color
       beakColor: ARCADE_SPECIES_CONFIG[BoidSpecies.Multicolor].beakColor,
-      bakedWingPalette,
-      useNatureParrotPalette: false,
     };
   }
 
