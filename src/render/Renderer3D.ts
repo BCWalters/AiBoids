@@ -9,7 +9,7 @@ import { params, type TimeOfDayPreset, type VisualStyle } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import type { Boid, BoidSpecies } from '../sim/Boid';
-import type { Predator, PredatorKind } from '../sim/Predator';
+import type { Predator } from '../sim/Predator';
 import { createBirdGeometries, createRealisticBirdGeometries } from './styles/nature/geometry/smallBirdGeometry';
 import { createHawkGeometries } from './styles/nature/geometry/hawkGeometry';
 import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
@@ -46,6 +46,7 @@ import {
   type ColourStrategy,
   HAWK_PREDATOR_KIND,
   type MotionConfig,
+  type PredatorKind,
   type PredatorRenderFlags,
   SCENE_PREDATOR_KINDS,
   SCENE_STYLES,
@@ -168,6 +169,7 @@ const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
 const PARROT_TAIL_SWAY_PIVOT_Y = -(BOID_LENGTH * 1.3) * 0.46;
 const PARROT_SPECIES: BoidSpecies = 'parrot';
 const NEUTRAL_PARROT_PROFILE = 'neutral';
+const NON_DRAGON_PREDATOR_RENDER_FLAGS: PredatorRenderFlags = { isDragon: false, isShark: false };
 
 // Dragon tail sway: on-screen references (movies/TV) almost always show a
 // dragon's tail undulating up and down as it flies, driven by the same
@@ -382,8 +384,7 @@ interface UpdateEntityInstanceArgs {
 type UpdateEntitySharedArgs = Omit<UpdateEntityInstanceArgs, 'index' | 'entity'>;
 
 interface PredatorUpdateContext {
-  hawks: Predator[];
-  unicorns: Predator[];
+  predatorsByKind: Map<PredatorKind, Predator[]>;
   renderFlags: PredatorRenderFlags;
 }
 
@@ -2530,14 +2531,15 @@ export class Renderer3D {
     return { isDragon, isShark };
   }
 
-  private partitionPredators(predators: Predator[]): { hawks: Predator[]; unicorns: Predator[] } {
-    const hawks: Predator[] = [];
-    const unicorns: Predator[] = [];
-    for (const predator of predators) {
-      if (predator.kind === UNICORN_PREDATOR_KIND) unicorns.push(predator);
-      else hawks.push(predator);
+  private partitionPredatorsByKind(predators: Predator[]): Map<PredatorKind, Predator[]> {
+    const predatorsByKind = new Map<PredatorKind, Predator[]>();
+    for (const kind of SCENE_PREDATOR_KINDS) {
+      predatorsByKind.set(kind, []);
     }
-    return { hawks, unicorns };
+    for (const predator of predators) {
+      predatorsByKind.get(predator.kind)?.push(predator);
+    }
+    return predatorsByKind;
   }
 
 
@@ -2555,24 +2557,33 @@ export class Renderer3D {
     flags: StyleFlags,
   ): PredatorUpdateContext {
     const renderFlags = this.getPredatorRenderFlags(flags);
-    const { hawks, unicorns } = this.partitionPredators(sim.predators);
-    return { hawks, unicorns, renderFlags };
+    const predatorsByKind = this.partitionPredatorsByKind(sim.predators);
+    return { predatorsByKind, renderFlags };
   }
 
   private updatePredatorInstanceSets(
     context: PredatorUpdateContext,
     elapsed: number,
     dt: number,
-    flags: StyleFlags,
+    _flags: StyleFlags,
   ): void {
-    this.updateHawkPredatorInstances(
-      context.hawks,
-      elapsed,
-      dt,
-      flags,
-      context.renderFlags,
-    );
-    this.updateUnicornPredatorInstances(context.unicorns, elapsed, dt, flags);
+    for (const kind of SCENE_PREDATOR_KINDS) {
+      this.updatePredatorKindInstances(
+        kind,
+        context.predatorsByKind.get(kind) ?? [],
+        elapsed,
+        dt,
+        this.getPredatorRenderFlagsForKind(kind, context.renderFlags),
+      );
+    }
+  }
+
+  private getPredatorRenderFlagsForKind(
+    kind: PredatorKind,
+    renderFlags: PredatorRenderFlags,
+  ): PredatorRenderFlags {
+    if (kind === HAWK_PREDATOR_KIND) return renderFlags;
+    return NON_DRAGON_PREDATOR_RENDER_FLAGS;
   }
 
   private updateProfiledParrotInstances(
@@ -2698,46 +2709,25 @@ export class Renderer3D {
     this.updatePredatorInstanceSets(context, elapsed, dt, flags);
   }
 
-  private updateHawkPredatorInstances(
-    hawks: Predator[],
+  private updatePredatorKindInstances(
+    kind: PredatorKind,
+    predators: Predator[],
     elapsed: number,
     dt: number,
-    _flags: StyleFlags,
     renderFlags: PredatorRenderFlags,
   ): void {
-    const hawkInstances = this.predatorInstances.get(HAWK_PREDATOR_KIND);
-    if (!hawkInstances) return;
-    if (hawks.length === 0) return;
+    const instances = this.predatorInstances.get(kind);
+    if (!instances) return;
+    if (predators.length === 0) return;
     const sceneRenderer = this.getSceneRenderer(params.visualStyle);
     this.updateInstances(
-      hawkInstances,
-      hawks,
+      instances,
+      predators,
       params.predatorMaxSpeed,
       elapsed,
       dt,
-      sceneRenderer.getPredatorColourStrategy(HAWK_PREDATOR_KIND, renderFlags),
-      sceneRenderer.getPredatorMotionConfig(HAWK_PREDATOR_KIND, renderFlags),
-    );
-  }
-
-  private updateUnicornPredatorInstances(
-    unicorns: Predator[],
-    elapsed: number,
-    dt: number,
-    _flags: StyleFlags,
-  ): void {
-    const unicornInstances = this.predatorInstances.get(UNICORN_PREDATOR_KIND);
-    if (!unicornInstances) return;
-    if (unicorns.length === 0) return;
-    const sceneRenderer = this.getSceneRenderer(params.visualStyle);
-    this.updateInstances(
-      unicornInstances,
-      unicorns,
-      params.predatorMaxSpeed,
-      elapsed,
-      dt,
-      sceneRenderer.getPredatorColourStrategy(UNICORN_PREDATOR_KIND, { isDragon: false, isShark: false }),
-      sceneRenderer.getPredatorMotionConfig(UNICORN_PREDATOR_KIND, { isDragon: false, isShark: false }),
+      sceneRenderer.getPredatorColourStrategy(kind, renderFlags),
+      sceneRenderer.getPredatorMotionConfig(kind, renderFlags),
     );
   }
 
