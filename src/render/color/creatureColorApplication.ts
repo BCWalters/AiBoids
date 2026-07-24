@@ -5,6 +5,7 @@ import type { SpeciesColorSet, CreatureColorMode } from '../sceneRenderers/creat
 import type { BoidRenderBatch } from '../CreatureInstanceRenderer';
 import { idHash, jitterHSL } from './colorJitter';
 import { ParrotColorApplicator } from './parrotColorApplication';
+import { SmallBirdColorApplicator } from './smallBirdColorApplication';
 
 /**
  * All inputs needed to color one creature instance for a single frame. The
@@ -42,6 +43,7 @@ export interface CreatureInstanceColorArgs {
  */
 export class CreatureColorApplicator {
   private parrot = new ParrotColorApplicator();
+  private smallBird = new SmallBirdColorApplicator();
   private stateColor = new THREE.Color();
   private variantColor = new THREE.Color();
   private wingColor = new THREE.Color();
@@ -73,6 +75,10 @@ export class CreatureColorApplicator {
   apply(args: CreatureInstanceColorArgs): void {
     if (args.colorMode === 'parrot') {
       this.parrot.apply(args);
+      return;
+    }
+    if (args.colorMode === 'smallBird') {
+      this.smallBird.apply(args);
       return;
     }
     const {

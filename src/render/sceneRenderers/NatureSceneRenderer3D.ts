@@ -568,6 +568,10 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     // plumage, songbirds get individual HSL variation, and the small-bird
     // species render through a baked body/wing/tail vertex gradient.
     const config = NATURE_SPECIES_CONFIG[species];
+    const isBakedSmallBird = species === BoidSpecies.Normal
+      || species === BoidSpecies.Gold
+      || species === BoidSpecies.Red
+      || species === BoidSpecies.Blue;
     return {
       baseColor: config.natureBase,
       highlightColor: NATURE_BOID_PANIC,
@@ -575,7 +579,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       individualVariation: true,
       getSpeciesColors: config.colors ? () => config.colors! : undefined,
       beakColor: config.beakColor,
-      bakedBodyGradient: species === BoidSpecies.Normal || species === BoidSpecies.Gold || species === BoidSpecies.Red || species === BoidSpecies.Blue,
+      bakedBodyGradient: isBakedSmallBird,
+      colorMode: isBakedSmallBird ? 'smallBird' : undefined,
     };
   }
 
