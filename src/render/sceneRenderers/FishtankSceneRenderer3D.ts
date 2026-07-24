@@ -11,7 +11,7 @@ import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
 import { createButterflyfishGeometries } from '../styles/fishtank/geometry/butterflyfishGeometry';
-import { createSeaHorseGeometries } from '../styles/fishtank/geometry/seaHorseGeometry';
+import { createSeaHorseGeometries, SEAHORSE_BODY_COLOR, SEAHORSE_HUNT_COLOR } from '../styles/fishtank/geometry/seaHorseGeometry';
 import { createFishGeometries } from '../styles/fishtank/geometry/smallFishGeometry';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
@@ -296,12 +296,28 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   getPredatorColorStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColorStrategy {
     switch (species) {
       case PredatorSpecies.Horse: {
-        const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
+        // Mauve-pink body that leans toward lavender (but not fully), sourced
+        // from the seahorse's own palette so all seahorse color lives in
+        // seaHorseGeometry.ts. The tail instanceColor is WHITE so the tail's
+        // baked base->tip lavender gradient (in seaHorseGeometry) shows through
+        // unmodified; body/wing carry the shared seahorse tint.
+        const seahorseBody = new THREE.Color(SEAHORSE_BODY_COLOR);
+        const FISHTANK_SEAHORSE_COLORS = {
+          body: seahorseBody.clone(),
+          wing: seahorseBody.clone(),
+          tail: new THREE.Color(0xffffff),
+        };
         return {
-          baseColor: new THREE.Color(0xf0d070),
-          highlightColor: new THREE.Color(0xfffacd),
+          baseColor: seahorseBody.clone(),
+          highlightColor: new THREE.Color(SEAHORSE_HUNT_COLOR),
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => FISHTANK_SEAHORSE_COLORS,
+          // Lock the palette: there is only ever one seahorse, so the per-
+          // individual HSL jitter adds no variety — it just lightened this
+          // single body toward white, leaving it looking washed out next to the
+          // tail's baked (un-jittered) base color. Locking keeps the body/wing
+          // at the exact SEAHORSE_BODY_COLOR so the body matches the tail base.
+          lockSpeciesPalette: true,
           colorMode: 'speciesTint',
         };
       }
@@ -325,8 +341,12 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       case PredatorSpecies.Horse:
         return {
           flapFrequency: 3.2,
-          flapIdleAmplitude: 0.22,
-          flapSpeedAmplitude: 0.5,
+          // Gentle pectoral flutter. The shared engine flaps the fins around
+          // the body's long axis pivoting at the centerline; large amplitudes
+          // swung the side fins through the torso. Small amplitudes keep the
+          // now side-mounted fins feathering fore/aft at the shoulder.
+          flapIdleAmplitude: 0.1,
+          flapSpeedAmplitude: 0.18,
           keepUpright: true,
           uprightStyle: 'unicorn',
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS

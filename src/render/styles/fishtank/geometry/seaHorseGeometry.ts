@@ -24,9 +24,23 @@ export function createSeaHorseGeometries(length: number, width: number): Creatur
   return { body, wingLeft, wingRight, tail };
 }
 
+// Seahorse palette — single source of truth shared between the baked tail
+// gradient (below) and the fishtank scene's Horse-predator color tint
+// (FishtankSceneRenderer3D). Kept here so every seahorse-specific color lives
+// in the seahorse's own module rather than being split across files.
+//
+// The body reads as a pink that leans toward lavender (but is not fully
+// lavender); the tail fades from that same body tone at its base to a more
+// saturated purple-lavender at the curled tip.
+export const SEAHORSE_BODY_COLOR = 0xd98cc9;
+export const SEAHORSE_HUNT_COLOR = 0xf2d6ee;
+export const SEAHORSE_TAIL_TIP_COLOR = 0xa87fe0;
+
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
 const HORN_COLOR = new THREE.Color(0xffd54a);
 const EYE_COLOR = new THREE.Color(0x101014);
+const TAIL_BASE_COLOR = new THREE.Color(SEAHORSE_BODY_COLOR);
+const TAIL_TIP_COLOR = new THREE.Color(SEAHORSE_TAIL_TIP_COLOR);
 
 interface SpinePoint {
   y: number;
@@ -37,11 +51,11 @@ interface SpinePoint {
 }
 
 function buildSeaHorseBodyGeometry(length: number, width: number): THREE.BufferGeometry {
-  const { geometry: shell, crestY, crestZ, crestRadius, eyeY, eyeZ, eyeRadius } = buildSeaHorseShellGeometry(length, width);
+  const { geometry: shell, crestY, crestZ, crestRadius, eyeX, eyeY, eyeZ, eyeRadius } = buildSeaHorseShellGeometry(length, width);
   const dorsalFin = buildDorsalFinGeometry(length, width);
   const ridge = buildBodyRidgeGeometry(length, width);
   const horn = buildSeaHorseHornGeometry(crestY, crestZ, crestRadius);
-  const eyes = buildEyeDotsGeometry(width * 0.11, eyeY, eyeZ, eyeRadius);
+  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
   const merged = mergeGeometriesWithColor([
     { geometry: shell, color: WHITE_VERTEX_COLOR },
@@ -66,6 +80,7 @@ function buildSeaHorseShellGeometry(
   crestY: number;
   crestZ: number;
   crestRadius: number;
+  eyeX: number;
   eyeY: number;
   eyeZ: number;
   eyeRadius: number;
@@ -90,32 +105,68 @@ function buildSeaHorseShellGeometry(
 
   const geometry = buildSweptGeometry(spine, 12);
   const crest = spine[7];
-  const cheek = spine[8];
+  // Seat the eyes on the widest cheek of the head, embedded into the surface —
+  // NOT out near the crown/snout. The previous anchor used spine[8] (the crown)
+  // plus a forward +Z push of half the section depth, which shoved the eyes onto
+  // the narrow snout ridge where they poked through/over it and read as floating
+  // past the head. Instead, blend between spine[6] (the widest cheek/gill
+  // section) and spine[7] (the snout base) and sit the eye centers just inside
+  // that section's side surface (x = local half-width) with no forward push, so
+  // each eye rests symmetrically on a cheek with only a slight, eye-like bulge.
+  const cheekA = spine[6];
+  const cheekB = spine[7];
+  const eyeBlend = 0.35; // mostly on the wide cheek, nudged toward the snout base
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const eyeSecY = lerp(cheekA.y, cheekB.y, eyeBlend);
+  const eyeSecZ = lerp(cheekA.z, cheekB.z, eyeBlend);
+  const eyeSecRadius = lerp(cheekA.radius, cheekB.radius, eyeBlend);
+  const eyeSecXScale = lerp(cheekA.xScale ?? 1, cheekB.xScale ?? 1, eyeBlend);
+  // The head's side surface at this section sits at x = radius * xScale (the
+  // squircle's widest point, at cross-section angle 0). Seat the eye center just
+  // inside that so the small sphere pokes out only slightly.
+  const eyeHalfWidth = eyeSecRadius * eyeSecXScale;
   return {
     geometry,
     crestY: crest.y,
     crestZ: crest.z,
     crestRadius: crest.radius,
-    eyeY: cheek.y,
-    eyeZ: cheek.z + cheek.radius * (cheek.zScale ?? 1) * 0.15,
-    eyeRadius: width * 0.035,
+    eyeX: eyeHalfWidth * 0.82,
+    eyeY: eyeSecY,
+    eyeZ: eyeSecZ,
+    eyeRadius: width * 0.022,
   };
 }
 
 function buildSeaHorseHornGeometry(crestY: number, crestZ: number, crestRadius: number): THREE.BufferGeometry {
-  const hornLength = crestRadius * 1.7;
-  const hornRadius = crestRadius * 0.34;
+  // Smaller coronet than before (length 1.15x vs 1.7x, radius 0.28x vs 0.34x)
+  // and pulled back/down so its base embeds into the crest instead of hovering
+  // above it. The old +0.14*radius lift and +0.92*radius forward offset left a
+  // visible gap between the horn base and the head; seating the base at
+  // ~0.35*radius forward with a slight downward nudge closes it.
+  const hornLength = crestRadius * 1.15;
+  const hornRadius = crestRadius * 0.28;
   const horn = new THREE.ConeGeometry(hornRadius, hornLength, 8);
   horn.rotateX(Math.PI / 2);
-  horn.translate(0, crestY + crestRadius * 0.14, crestZ + crestRadius * 0.92 + hornLength * 0.5);
+  horn.translate(0, crestY - crestRadius * 0.05, crestZ + crestRadius * 0.3 + hornLength * 0.5);
   return horn;
 }
 
 function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeometry {
-  const rootTop = new THREE.Vector3(0, -length * 0.015, length * 0.045);
-  const rootBottom = new THREE.Vector3(0, -length * 0.055, -length * 0.16);
-  const tip = new THREE.Vector3(0, -length * 0.18, -length * 0.015);
-  return extrudeRingGeometry([rootTop, rootBottom, tip], width * 0.06);
+  // A seahorse's dorsal fin runs down the mid-back. Built as a scalloped sail
+  // in the Y-Z plane and given real thickness along X (via extrudeAlongX) so it
+  // reads as a solid 3D fin from every angle instead of the previous
+  // paper-thin sheet that vanished edge-on. The wavy outer edge (three crest
+  // points) mimics the rippled membrane of a real dorsal fin.
+  const outline = [
+    new THREE.Vector3(0, length * 0.02, length * 0.05),
+    new THREE.Vector3(0, -length * 0.02, -length * 0.02),
+    new THREE.Vector3(0, -length * 0.055, -length * 0.16),
+    // Outer (free) edge — pushed back/-Z and down/-Y, lightly scalloped.
+    new THREE.Vector3(0, -length * 0.16, -length * 0.14),
+    new THREE.Vector3(0, -length * 0.185, -length * 0.055),
+    new THREE.Vector3(0, -length * 0.155, length * 0.02),
+  ];
+  return extrudeAlongXGeometry(outline, width * 0.055);
 }
 
 function buildBodyRidgeGeometry(length: number, width: number): THREE.BufferGeometry {
@@ -134,25 +185,82 @@ function buildRidgePlate(anchor: THREE.Vector3, height: number, thickness: numbe
   const front = new THREE.Vector3(0, anchor.y + height * 0.35, anchor.z);
   const back = new THREE.Vector3(0, anchor.y - height * 0.35, anchor.z - height * 0.08);
   const tip = new THREE.Vector3(0, anchor.y + height * 0.04, anchor.z + height);
-  return extrudeRingGeometry([front, back, tip], thickness);
+  // Thicken the spike along X (extrudeAlongX) rather than Z. These crest plates
+  // live in the Y-Z plane (all x=0); the shared extrudeRingGeometry would spread
+  // their depth along Z — the same plane the plate already spans — leaving them
+  // paper-thin edge-on from the front/back (the "2D fin" that vanished). Giving
+  // them width in X makes each spike a small solid ridge visible from any angle.
+  return extrudeAlongXGeometry([front, back, tip], thickness * 1.6);
 }
 
 function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): THREE.BufferGeometry {
-  const span = length * 0.16;
-  // Root anchored to match spine[6] in buildSeaHorseShellGeometry (y=halfLen*0.1,
-  // z=length*0.16) -- the shoulder/gill area where a seahorse's pectoral fins
-  // actually sit. The previous z (length*0.11) sat well below the body's actual
-  // curve at that y, so the fin floated in open space ahead of/below the body
-  // instead of looking attached to it.
+  // The animated "wing" slot. The shared engine flaps these around the body's
+  // long (vertical +Y) axis, pivoting at the body centerline (x=0, z=0). Any
+  // part of the fin that sits off that axis ORBITS the centerline as it flaps —
+  // which is why an earlier side-rooted fin swung around and sheared through the
+  // torso. The fix mirrors the small fish's pectoral fins exactly: root the fin
+  // AT the centerline (x=0, z=0) so the root stays pinned on the rotation axis
+  // and only the outward-fanning blade sweeps fore/aft — a true fixed-point
+  // hinge. The kite ring lies flat in the X/Y plane (z=0), so extrudeRingGeometry
+  // thickens it along Z into a thin-but-real 3D paddle that doesn't vanish
+  // edge-on. Buried root + outward blade reads as attached at the shoulder.
   const rootY = length * 0.05;
-  const rootZ = length * 0.16;
-  const ring = [
-    new THREE.Vector3(0, rootY, rootZ),
-    new THREE.Vector3(side * span * 0.45, rootY + length * 0.038, rootZ + width * 0.022),
-    new THREE.Vector3(side * span, rootY + length * 0.005, rootZ + width * 0.018),
-    new THREE.Vector3(side * span * 0.54, rootY - length * 0.07, rootZ - width * 0.025),
-  ];
-  return extrudeRingGeometry(ring, width * 0.04);
+  const span = width * 0.3;
+  const chord = length * 0.15;
+  const root = new THREE.Vector3(0, rootY, 0);
+  const leadingBulge = new THREE.Vector3(side * span * 0.55, rootY + chord * 0.4, 0);
+  const tip = new THREE.Vector3(side * span, rootY - chord * 0.1, 0);
+  const trailingBulge = new THREE.Vector3(side * span * 0.45, rootY - chord * 0.5, 0);
+  // Thin: a seahorse pectoral fin is a delicate membrane, so give it just enough
+  // depth to catch the light and not disappear edge-on, not a chunky slab.
+  const thickness = width * 0.02;
+  return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
+}
+
+/**
+ * Like extrudeRingGeometry, but gives the ring thickness along the X axis
+ * instead of Z. Used for the seahorse dorsal fin, whose outline lives in the
+ * Y-Z plane and therefore needs its solid depth spread sideways (±X) to read
+ * as a 3D fin rather than a flat sheet. Seahorse-local so it doesn't disturb
+ * the shared Z-extrude used by every other creature part.
+ */
+function extrudeAlongXGeometry(ring: THREE.Vector3[], thickness: number): THREE.BufferGeometry {
+  const n = ring.length;
+  const half = thickness / 2;
+  const front = ring.map((p) => new THREE.Vector3(p.x + half, p.y, p.z));
+  const back = ring.map((p) => new THREE.Vector3(p.x - half, p.y, p.z));
+
+  const centroid = new THREE.Vector3();
+  ring.forEach((p) => centroid.add(p));
+  centroid.divideScalar(n);
+
+  const positions: number[] = [];
+  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) =>
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3) => {
+    const e1 = new THREE.Vector3().subVectors(p1, p0);
+    const e2 = new THREE.Vector3().subVectors(p2, p0);
+    const normal = new THREE.Vector3().crossVectors(e1, e2);
+    const triCentroid = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3);
+    const outward = new THREE.Vector3().subVectors(triCentroid, centroid);
+    if (normal.dot(outward) < 0) pushTri(p0, p2, p1);
+    else pushTri(p0, p1, p2);
+  };
+
+  for (let i = 1; i < n - 1; i++) {
+    pushOutward(front[0], front[i], front[i + 1]);
+    pushOutward(back[0], back[i], back[i + 1]);
+  }
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    pushOutward(front[i], back[i], back[j]);
+    pushOutward(front[i], back[j], front[j]);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeometry {
@@ -192,6 +300,7 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
 
   const path: THREE.Vector3[] = [];
   const radii: number[] = [];
+  const tailColors: THREE.Color[] = [];
   for (let i = 0; i < samples; i++) {
     const t = i / (samples - 1);
     const theta = startTheta + turns * t;
@@ -209,9 +318,16 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
     // before narrowing, rather than shrinking linearly right away.
     const taper = 1 - (1 - t) * (1 - t);
     radii.push(THREE.MathUtils.lerp(bodyEndRadius, tailTipRadius, taper));
+    // Bake an absolute color gradient along the coil: body tone at the base
+    // (so the tail root matches the body) fading to a saturated purple-lavender
+    // at the curled tip. Eased toward the tip so most of the visible coil stays
+    // near the body color and the lavender concentrates at the end. The scene
+    // tint sets the tail instanceColor to white so this baked color shows
+    // through unmodified (mirroring the "pass white through" legs pattern).
+    tailColors.push(TAIL_BASE_COLOR.clone().lerp(TAIL_TIP_COLOR, t * t));
   }
 
-  return buildTubeGeometry(path, radii, 8);
+  return buildTubeGeometry(path, radii, 8, tailColors);
 }
 
 function buildSweptGeometry(spine: SpinePoint[], segments: number): THREE.BufferGeometry {
@@ -278,10 +394,36 @@ function crossSectionOffset(radius: number, angle: number, xScale: number, zScal
   return { x, z };
 }
 
-function buildTubeGeometry(path: THREE.Vector3[], radii: number[], sides: number): THREE.BufferGeometry {
+function buildTubeGeometry(
+  path: THREE.Vector3[],
+  radii: number[],
+  sides: number,
+  ringColors?: THREE.Color[],
+): THREE.BufferGeometry {
   const positions: number[] = [];
-  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => {
+  const colors: number[] = [];
+  // Each emitted vertex carries the color of the path sample (ring) it belongs
+  // to, so a per-sample gradient along `ringColors` bakes straight into the
+  // tail's vertex colors. `ci`/`cj` are the ring indices of the two ends of a
+  // side quad; caps reuse their single ring's color.
+  const pushTri = (
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    c: THREE.Vector3,
+    ca?: number,
+    cb?: number,
+    cc?: number,
+  ) => {
     positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    if (ringColors) {
+      const put = (idx?: number) => {
+        const color = ringColors[idx ?? 0];
+        colors.push(color.r, color.g, color.b);
+      };
+      put(ca);
+      put(cb);
+      put(cc);
+    }
   };
 
   let normal = new THREE.Vector3(0, 0, 1);
@@ -316,26 +458,30 @@ function buildTubeGeometry(path: THREE.Vector3[], radii: number[], sides: number
   for (let i = 0; i < rings.length - 1; i++) {
     for (let s = 0; s < sides; s++) {
       const next = (s + 1) % sides;
-      pushTri(rings[i][s], rings[i + 1][s], rings[i + 1][next]);
-      pushTri(rings[i][s], rings[i + 1][next], rings[i][next]);
+      pushTri(rings[i][s], rings[i + 1][s], rings[i + 1][next], i, i + 1, i + 1);
+      pushTri(rings[i][s], rings[i + 1][next], rings[i][next], i, i + 1, i);
     }
   }
 
   const startCenter = path[0];
   for (let s = 0; s < sides; s++) {
     const next = (s + 1) % sides;
-    pushTri(startCenter, rings[0][next], rings[0][s]);
+    pushTri(startCenter, rings[0][next], rings[0][s], 0, 0, 0);
   }
 
   const endCenter = path[path.length - 1];
   const endRing = rings[rings.length - 1];
+  const lastIndex = rings.length - 1;
   for (let s = 0; s < sides; s++) {
     const next = (s + 1) % sides;
-    pushTri(endCenter, endRing[s], endRing[next]);
+    pushTri(endCenter, endRing[s], endRing[next], lastIndex, lastIndex, lastIndex);
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  if (ringColors) {
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+  }
   geometry.computeVertexNormals();
   return geometry;
 }
