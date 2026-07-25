@@ -22,17 +22,30 @@ jobs:
       - run: npm test
 
   e2e:
+    name: e2e (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
-      # Shard the Playwright suite across parallel runners. The tests run on
-      # software WebGL (SwiftShader) with no GPU, so the heavy 3D styles (the
-      # fishtank scene especially) take seconds per frame; splitting the specs
-      # across shards turns a multi-minute serial run into a few parallel
-      # ~1-minute runs. Each runner still uses workers:1 (see
-      # playwright.config.ts) to avoid SwiftShader contexts starving each other.
+      # Split the Playwright suite into named jobs by scene rather than by an
+      # opaque numeric shard. The tests run on software WebGL (SwiftShader) with
+      # no GPU, and every test pays its own scene shader-compile, so cost tracks
+      # which 3D scene a test loads. Grouping by scene keeps each job short and
+      # self-documenting: a PR that touches nothing fishtank-related can ignore a
+      # slow "fishtank" run, etc. The "core" job catches the cheap, untagged
+      # non-scene tests (2D mode, language, panel toggle, default load). Each
+      # runner still uses workers:1 (see playwright.config.ts) to avoid
+      # SwiftShader contexts starving each other. To rebalance, move a spec's
+      # @scene tag rather than renumbering shards.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        include:
+          - name: fishtank
+            filter: --grep @fishtank
+          - name: nature
+            filter: --grep @nature
+          - name: arcade
+            filter: --grep @arcade
+          - name: core
+            filter: '--grep-invert "@fishtank|@nature|@arcade"'
     steps:
       - uses: actions/checkout@v4
 
@@ -57,13 +70,13 @@ jobs:
       - run: npx playwright install-deps chromium
         if: steps.playwright-cache.outputs.cache-hit == 'true'
 
-      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
+      - run: npm run test:e2e -- ${{ matrix.filter }}
         env:
           CI: true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report-shard-${{ matrix.shard }}
+          name: playwright-report-${{ matrix.name }}
           path: playwright-report/
           retention-days: 7
 
