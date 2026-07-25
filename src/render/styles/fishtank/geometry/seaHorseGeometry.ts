@@ -32,7 +32,11 @@ export function createSeaHorseGeometries(length: number, width: number): Creatur
 // The body reads as a pink that leans toward lavender (but is not fully
 // lavender); the tail fades from that same body tone at its base to a more
 // saturated purple-lavender at the curled tip.
-export const SEAHORSE_BODY_COLOR = 0xd98cc9;
+// Body and tail-base share this exact value so they render as the same tone
+// (the body's instanceColor and the tail's baked base vertex color both resolve
+// to it). Nudged slightly lighter than the previous mauve-pink per feedback
+// while staying in the same close family.
+export const SEAHORSE_BODY_COLOR = 0xdf9dd1;
 export const SEAHORSE_HUNT_COLOR = 0xf2d6ee;
 export const SEAHORSE_TAIL_TIP_COLOR = 0xa87fe0;
 
@@ -143,7 +147,10 @@ function buildSeaHorseHornGeometry(crestY: number, crestZ: number, crestRadius: 
   // above it. The old +0.14*radius lift and +0.92*radius forward offset left a
   // visible gap between the horn base and the head; seating the base at
   // ~0.35*radius forward with a slight downward nudge closes it.
-  const hornLength = crestRadius * 1.15;
+  // 25% taller than before (1.4375x vs 1.15x) while keeping the SAME base point:
+  // the base sits at crestZ + crestRadius*0.3 (center = base + hornLength*0.5),
+  // so growing hornLength extends the tip forward without moving the base.
+  const hornLength = crestRadius * 1.4375;
   const hornRadius = crestRadius * 0.28;
   const horn = new THREE.ConeGeometry(hornRadius, hornLength, 8);
   horn.rotateX(Math.PI / 2);
@@ -166,7 +173,9 @@ function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeom
     new THREE.Vector3(0, -length * 0.185, -length * 0.055),
     new THREE.Vector3(0, -length * 0.155, length * 0.02),
   ];
-  return extrudeAlongXGeometry(outline, width * 0.055);
+  // Thin membrane: just enough X-depth to stay 3D (not vanish edge-on) while
+  // reading as a delicate, wispy sail rather than a solid keel.
+  return extrudeAlongXGeometry(outline, width * 0.014);
 }
 
 function buildBodyRidgeGeometry(length: number, width: number): THREE.BufferGeometry {
@@ -190,30 +199,34 @@ function buildRidgePlate(anchor: THREE.Vector3, height: number, thickness: numbe
   // their depth along Z — the same plane the plate already spans — leaving them
   // paper-thin edge-on from the front/back (the "2D fin" that vanished). Giving
   // them width in X makes each spike a small solid ridge visible from any angle.
-  return extrudeAlongXGeometry([front, back, tip], thickness * 1.6);
+  // Keep the spikes 3D (visible from any angle) but thin/wispy — a slim ridge,
+  // not a chunky slab.
+  return extrudeAlongXGeometry([front, back, tip], thickness * 0.55);
 }
 
 function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): THREE.BufferGeometry {
   // The animated "wing" slot. The shared engine flaps these around the body's
-  // long (vertical +Y) axis, pivoting at the body centerline (x=0, z=0). Any
-  // part of the fin that sits off that axis ORBITS the centerline as it flaps —
-  // which is why an earlier side-rooted fin swung around and sheared through the
-  // torso. The fix mirrors the small fish's pectoral fins exactly: root the fin
-  // AT the centerline (x=0, z=0) so the root stays pinned on the rotation axis
-  // and only the outward-fanning blade sweeps fore/aft — a true fixed-point
-  // hinge. The kite ring lies flat in the X/Y plane (z=0), so extrudeRingGeometry
-  // thickens it along Z into a thin-but-real 3D paddle that doesn't vanish
-  // edge-on. Buried root + outward blade reads as attached at the shoulder.
-  const rootY = length * 0.05;
-  const span = width * 0.3;
-  const chord = length * 0.15;
-  const root = new THREE.Vector3(0, rootY, 0);
-  const leadingBulge = new THREE.Vector3(side * span * 0.55, rootY + chord * 0.4, 0);
-  const tip = new THREE.Vector3(side * span, rootY - chord * 0.1, 0);
-  const trailingBulge = new THREE.Vector3(side * span * 0.45, rootY - chord * 0.5, 0);
-  // Thin: a seahorse pectoral fin is a delicate membrane, so give it just enough
-  // depth to catch the light and not disappear edge-on, not a chunky slab.
-  const thickness = width * 0.02;
+  // long (vertical +Y) axis, pivoting at the body centerline (x=0, z=0), with a
+  // gentle amplitude (see the seahorse motion config). Per feedback, the fin now
+  // attaches at the OUTSIDE of the body — its root sits on the body's side
+  // surface (x = surfaceX) rather than buried on the centerline — so it visibly
+  // hinges off the flank like the small fish's pectorals. Because the flap
+  // amplitude is small, an off-axis root only sweeps a short arc near the
+  // surface instead of shearing through the torso. The kite ring lies flat in an
+  // X/Y plane (constant z), so extrudeRingGeometry gives it depth along Z into a
+  // very thin, wispy 3D paddle.
+  const rootY = length * 0.03;
+  const rootZ = length * 0.05;
+  // Body side surface at the shoulder section (~spine[4/5]): x = radius * xScale.
+  const surfaceX = width * 0.15;
+  const span = width * 0.28; // blade reach outward from the flank
+  const chord = length * 0.13;
+  const root = new THREE.Vector3(side * surfaceX, rootY, rootZ);
+  const leadingBulge = new THREE.Vector3(side * (surfaceX + span * 0.5), rootY + chord * 0.35, rootZ);
+  const tip = new THREE.Vector3(side * (surfaceX + span), rootY - chord * 0.1, rootZ);
+  const trailingBulge = new THREE.Vector3(side * (surfaceX + span * 0.45), rootY - chord * 0.5, rootZ);
+  // As thin as possible while still catching light and not disappearing edge-on.
+  const thickness = width * 0.008;
   return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
 }
 
