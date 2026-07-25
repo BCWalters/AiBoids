@@ -311,7 +311,11 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         const seahorseBody = new THREE.Color(SEAHORSE_BODY_COLOR);
         const FISHTANK_SEAHORSE_COLORS = {
           body: seahorseBody.clone(),
-          wing: seahorseBody.clone(),
+          // The pectoral fins bake their own rainbow vertex colors (see
+          // seaHorseGeometry.buildPectoralFinGeometry); their instanceColor must
+          // be white so the rainbow renders as pure color rather than being
+          // multiplied by the body's pink tint.
+          wing: new THREE.Color(0xffffff),
           tail: seahorseBody.clone(),
         };
         return {

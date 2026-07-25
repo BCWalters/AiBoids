@@ -18,8 +18,8 @@ import {
  */
 export function createSeaHorseGeometries(length: number, width: number): CreatureGeometries {
   const body = buildSeaHorseBodyGeometry(length, width);
-  const wingLeft = addUniformVertexColor(buildPectoralFinGeometry(length, width, 1), WHITE_VERTEX_COLOR);
-  const wingRight = addUniformVertexColor(buildPectoralFinGeometry(length, width, -1), WHITE_VERTEX_COLOR);
+  const wingLeft = buildPectoralFinGeometry(length, width, 1);
+  const wingRight = buildPectoralFinGeometry(length, width, -1);
   const tail = buildCurledTailGeometry(length, width);
   return { body, wingLeft, wingRight, tail };
 }
@@ -34,9 +34,10 @@ export function createSeaHorseGeometries(length: number, width: number): Creatur
 // saturated purple-lavender at the curled tip.
 // Body and tail-base share this exact value so they render as the same tone
 // (the body's instanceColor and the tail's baked base vertex color both resolve
-// to it). Nudged slightly lighter than the previous mauve-pink per feedback
-// while staying in the same close family.
-export const SEAHORSE_BODY_COLOR = 0xdf9dd1;
+// to it). Set halfway between the prior mauve-pink (0xdf9dd1) and the lighter
+// lavender (0xe9b8e0) per feedback — a touch pinker than the lighter tone while
+// staying lighter than the original.
+export const SEAHORSE_BODY_COLOR = 0xe4abd9;
 export const SEAHORSE_HUNT_COLOR = 0xf2d6ee;
 export const SEAHORSE_TAIL_TIP_COLOR = 0xa87fe0;
 
@@ -63,6 +64,22 @@ const TAIL_TIP_RATIO = new THREE.Color().setRGB(
   TAIL_TIP_COLOR.g / TAIL_BASE_COLOR.g,
   TAIL_TIP_COLOR.b / TAIL_BASE_COLOR.b,
 );
+
+// Rainbow fin/dorsal styling — mirrors the nature unicorn's pegasus-wing look
+// (violet at the root, red at the tip) but kept entirely local to the seahorse.
+// Matches the unicorn's HSL sweep (see unicornGeometry.addRainbowVertexColors).
+const RAINBOW_ROOT_HUE = 0.78; // violet at the root
+const RAINBOW_TIP_HUE = 0.0; // red at the tip
+const RAINBOW_SATURATION = 0.85;
+const RAINBOW_LIGHTNESS = 0.62;
+// The dorsal fin is merged into the body mesh, so its baked vertex color is
+// multiplied by the body's (pink) instanceColor. To let the rainbow read as
+// pure color there — exactly like the pectoral fins, which sit on their own
+// white-instanceColor mesh — the dorsal rainbow is baked as a RATIO relative to
+// the body color (rainbow / body), so instanceColor * ratio == rainbow at idle.
+// SEAHORSE_BODY_COLOR components are already linear (ColorManagement on),
+// matching the shader's linear instanceColor*vertex multiply.
+const SEAHORSE_BODY_LINEAR = new THREE.Color(SEAHORSE_BODY_COLOR);
 
 interface SpinePoint {
   y: number;
@@ -119,7 +136,13 @@ function buildSeaHorseShellGeometry(
     { y: 0, z: -length * 0.02, radius: width * 0.295, xScale: 0.6, zScale: 1.28 },
     { y: halfLen * 0.05, z: length * 0.08, radius: width * 0.255, xScale: 0.56, zScale: 1.2 },
     { y: halfLen * 0.1, z: length * 0.16, radius: width * 0.19, xScale: 0.48, zScale: 1.02 },
-    { y: halfLen * 0.145, z: length * 0.215, radius: width * 0.15, xScale: 0.42, zScale: 0.9 },
+    // Snout tip. Shortened 20% by moving this point 20% of the way back toward
+    // the head section (spine[6]) along the snout axis: original tip was
+    // (y 0.145, z 0.215); pulling back 20% of the (0.045, 0.055) spine[6]->tip
+    // delta gives (y 0.136, z 0.204). Radius/scale unchanged so the snout keeps
+    // its taper, just less far forward. The horn and eyes anchor off this point,
+    // so they follow the shorter snout automatically.
+    { y: halfLen * 0.136, z: length * 0.204, radius: width * 0.15, xScale: 0.42, zScale: 0.9 },
     { y: halfLen * 0.205, z: length * 0.195, radius: width * 0.125, xScale: 0.38, zScale: 0.82 },
     { y: halfLen * 0.28, z: length * 0.115, radius: width * 0.1, xScale: 0.32, zScale: 0.58 },
     { y: halfLen * 0.36, z: length * 0.025, radius: width * 0.072, xScale: 0.27, zScale: 0.42 },
@@ -193,7 +216,14 @@ function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeom
   ];
   // Thin membrane: just enough X-depth to stay 3D (not vanish edge-on) while
   // reading as a delicate, wispy sail rather than a solid keel.
-  return extrudeAlongXGeometry(outline, width * 0.014);
+  const fin = extrudeAlongXGeometry(outline, width * 0.014);
+  // Rainbow the sail like the pectoral fins: violet where it roots against the
+  // back (top-front of the outline), red at the free outer edge. The dorsal is
+  // merged into the body mesh (pink instanceColor), so bake as a ratio relative
+  // to the body so the multiply resolves to a pure rainbow (divideByBody=true).
+  const finRoot = new THREE.Vector3(0, length * 0.02, length * 0.05);
+  const finReach = length * 0.24;
+  return addRainbowVertexColors(fin, finRoot, finReach, true);
 }
 
 function buildBodyRidgeGeometry(length: number, width: number): THREE.BufferGeometry {
@@ -245,7 +275,11 @@ function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): 
   const trailingBulge = new THREE.Vector3(side * (surfaceX + span * 0.45), rootY - chord * 0.5, rootZ);
   // As thin as possible while still catching light and not disappearing edge-on.
   const thickness = width * 0.008;
-  return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
+  const geometry = extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
+  // Rainbow the fin from its root (violet, where it meets the flank) to the
+  // blade tip (red), matching the unicorn's wings. These fins render on their
+  // own white-instanceColor mesh, so the baked color shows as pure rainbow.
+  return addRainbowVertexColors(geometry, root, span, false);
 }
 
 /**
@@ -518,13 +552,43 @@ function buildTubeGeometry(
   return geometry;
 }
 
-function addUniformVertexColor(geometry: THREE.BufferGeometry, color: THREE.Color): THREE.BufferGeometry {
+/**
+ * Bakes the unicorn-style rainbow hue gradient (violet at `root`, red at the
+ * far tip) into a per-vertex 'color' attribute, based on each vertex's straight-
+ * line distance from `root`. Seahorse-local so the shared pipeline is untouched.
+ *
+ * When `divideByBody` is true, the baked color is stored as a ratio relative to
+ * SEAHORSE_BODY_COLOR — used for the dorsal fin, whose color attribute is later
+ * multiplied by the body's pink instanceColor; dividing first cancels that tint
+ * so the rainbow renders pure. Pectoral fins live on their own white-
+ * instanceColor mesh and pass false (absolute rainbow).
+ */
+function addRainbowVertexColors(
+  geometry: THREE.BufferGeometry,
+  root: THREE.Vector3,
+  maxDistance: number,
+  divideByBody: boolean,
+): THREE.BufferGeometry {
   const position = geometry.getAttribute('position');
   const colors = new Float32Array(position.count * 3);
+  const color = new THREE.Color();
+  const vertex = new THREE.Vector3();
   for (let i = 0; i < position.count; i++) {
-    colors[i * 3] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
+    vertex.set(position.getX(i), position.getY(i), position.getZ(i));
+    const t = THREE.MathUtils.clamp(vertex.distanceTo(root) / maxDistance, 0, 1);
+    const hue = THREE.MathUtils.lerp(RAINBOW_ROOT_HUE, RAINBOW_TIP_HUE, t);
+    color.setHSL(hue, RAINBOW_SATURATION, RAINBOW_LIGHTNESS);
+    let r = color.r;
+    let g = color.g;
+    let b = color.b;
+    if (divideByBody) {
+      r /= SEAHORSE_BODY_LINEAR.r;
+      g /= SEAHORSE_BODY_LINEAR.g;
+      b /= SEAHORSE_BODY_LINEAR.b;
+    }
+    colors[i * 3] = r;
+    colors[i * 3 + 1] = g;
+    colors[i * 3 + 2] = b;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return geometry;
