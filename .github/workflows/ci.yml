@@ -25,21 +25,27 @@ jobs:
     name: e2e (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
-      # Split the Playwright suite into two named jobs by content rather than by
-      # an opaque numeric shard. The tests run on software WebGL (SwiftShader)
-      # with no GPU, and the fishtank 3D scene is by far the most expensive to
-      # render (seconds per frame), so it gets its own "fishtank" job. Every
-      # other spec runs together in the fast "standard" job. Naming the jobs this
-      # way means a PR that doesn't touch anything fishtank-related can safely
-      # ignore a slow "fishtank" run. Each runner still uses workers:1 (see
-      # playwright.config.ts) to avoid SwiftShader contexts starving each other.
+      # Split the Playwright suite into named jobs by scene rather than by an
+      # opaque numeric shard. The tests run on software WebGL (SwiftShader) with
+      # no GPU, and every test pays its own scene shader-compile, so cost tracks
+      # which 3D scene a test loads. Grouping by scene keeps each job short and
+      # self-documenting: a PR that touches nothing fishtank-related can ignore a
+      # slow "fishtank" run, etc. The "core" job catches the cheap, untagged
+      # non-scene tests (2D mode, language, panel toggle, default load). Each
+      # runner still uses workers:1 (see playwright.config.ts) to avoid
+      # SwiftShader contexts starving each other. To rebalance, move a spec's
+      # @scene tag rather than renumbering shards.
       fail-fast: false
       matrix:
         include:
           - name: fishtank
             filter: --grep @fishtank
-          - name: standard
-            filter: --grep-invert @fishtank
+          - name: nature
+            filter: --grep @nature
+          - name: arcade
+            filter: --grep @arcade
+          - name: core
+            filter: '--grep-invert "@fishtank|@nature|@arcade"'
     steps:
       - uses: actions/checkout@v4
 
