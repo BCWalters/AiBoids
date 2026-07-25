@@ -46,6 +46,24 @@ const EYE_COLOR = new THREE.Color(0x101014);
 const TAIL_BASE_COLOR = new THREE.Color(SEAHORSE_BODY_COLOR);
 const TAIL_TIP_COLOR = new THREE.Color(SEAHORSE_TAIL_TIP_COLOR);
 
+// The tail's instanceColor is set (by the scene tint) to the body color and
+// then multiplied by the baked per-vertex color, so the baked gradient is
+// stored as a RATIO relative to the body rather than as absolute colors:
+//   base ratio = body/body = white   -> base renders as the body color
+//   tip  ratio = tip/body            -> tip renders as the lavender tip color
+// Because instanceColor tracks the body through the hunt-highlight lerp, the
+// tail base stays exactly equal to the body at every hunt intensity (fixing the
+// prior white-instanceColor path where the body drifted toward the highlight
+// during hunts but the tail base did not). Ratios are computed in the linear
+// space THREE.Color stores, matching the shader's linear instanceColor*vertex
+// multiply. THREE.Color components are already linear (ColorManagement on).
+const TAIL_BASE_RATIO = new THREE.Color(1, 1, 1);
+const TAIL_TIP_RATIO = new THREE.Color().setRGB(
+  TAIL_TIP_COLOR.r / TAIL_BASE_COLOR.r,
+  TAIL_TIP_COLOR.g / TAIL_BASE_COLOR.g,
+  TAIL_TIP_COLOR.b / TAIL_BASE_COLOR.b,
+);
+
 interface SpinePoint {
   y: number;
   z: number;
@@ -331,13 +349,14 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
     // before narrowing, rather than shrinking linearly right away.
     const taper = 1 - (1 - t) * (1 - t);
     radii.push(THREE.MathUtils.lerp(bodyEndRadius, tailTipRadius, taper));
-    // Bake an absolute color gradient along the coil: body tone at the base
-    // (so the tail root matches the body) fading to a saturated purple-lavender
-    // at the curled tip. Eased toward the tip so most of the visible coil stays
-    // near the body color and the lavender concentrates at the end. The scene
-    // tint sets the tail instanceColor to white so this baked color shows
-    // through unmodified (mirroring the "pass white through" legs pattern).
-    tailColors.push(TAIL_BASE_COLOR.clone().lerp(TAIL_TIP_COLOR, t * t));
+    // Bake the coil gradient as a ratio relative to the body color (see
+    // TAIL_BASE_RATIO / TAIL_TIP_RATIO above): base = white so the tail root
+    // renders as exactly the body color, easing toward tip/body so the
+    // saturated purple-lavender concentrates at the curled tip. The scene tint
+    // sets the tail instanceColor to the body color, so instanceColor * this
+    // baked ratio yields the intended absolute gradient while keeping the base
+    // locked to the body at every hunt intensity.
+    tailColors.push(TAIL_BASE_RATIO.clone().lerp(TAIL_TIP_RATIO, t * t));
   }
 
   return buildTubeGeometry(path, radii, 8, tailColors);

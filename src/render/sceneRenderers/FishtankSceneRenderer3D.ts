@@ -298,14 +298,21 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       case PredatorSpecies.Horse: {
         // Mauve-pink body that leans toward lavender (but not fully), sourced
         // from the seahorse's own palette so all seahorse color lives in
-        // seaHorseGeometry.ts. The tail instanceColor is WHITE so the tail's
-        // baked base->tip lavender gradient (in seaHorseGeometry) shows through
-        // unmodified; body/wing carry the shared seahorse tint.
+        // seaHorseGeometry.ts. body/wing/tail ALL carry the same seahorse body
+        // tint as their instanceColor. Critically the tail instanceColor is the
+        // body color (not white): the shared speciesTint applicator lerps each
+        // part's instanceColor toward the hunt highlight, so a white tail
+        // instanceColor would drift differently from the body during hunts and
+        // pull the tail base out of sync with the body. The tail geometry bakes
+        // its base->tip lavender gradient as a *ratio relative to the body*
+        // (base = white, tip = tip/body), so instanceColor * bakedRatio
+        // reproduces the intended absolute gradient while keeping the tail base
+        // exactly equal to the body at every hunt intensity.
         const seahorseBody = new THREE.Color(SEAHORSE_BODY_COLOR);
         const FISHTANK_SEAHORSE_COLORS = {
           body: seahorseBody.clone(),
           wing: seahorseBody.clone(),
-          tail: new THREE.Color(0xffffff),
+          tail: seahorseBody.clone(),
         };
         return {
           baseColor: seahorseBody.clone(),
