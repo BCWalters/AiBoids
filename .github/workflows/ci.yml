@@ -23,6 +23,16 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    strategy:
+      # Shard the Playwright suite across parallel runners. The tests run on
+      # software WebGL (SwiftShader) with no GPU, so the heavy 3D styles (the
+      # fishtank scene especially) take seconds per frame; splitting the specs
+      # across shards turns a multi-minute serial run into a few parallel
+      # ~1-minute runs. Each runner still uses workers:1 (see
+      # playwright.config.ts) to avoid SwiftShader contexts starving each other.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
 
@@ -32,14 +42,28 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      # On a cache hit the browser binary is already present, but the apt
+      # system libraries it links against are not, so still install those.
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+      - run: npx playwright install-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+
+      - run: npm run test:e2e -- --shard=${{ matrix.shard }}/3
         env:
           CI: true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-shard-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
 
