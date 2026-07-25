@@ -3,6 +3,7 @@ import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometry,
   mergeGeometriesWithColor,
+  mergePositionOnlyGeometries,
   buildEyeDotsGeometry,
 } from '../../../geometry/sharedGeometry';
 import {
@@ -60,6 +61,20 @@ const DEFAULT_FIN_SIZING: FinSizing = {
   caudalSpreadFactor: 0.85,
 };
 
+// Small-fish size reductions that are *proportions* (silhouette shape), not
+// overall creature size — overall size lives in FISHTANK_CREATURE_SIZES
+// (length/width). Kept here with the other body proportions:
+//  - BODY_DEPTH: the aquarium fish are 25% shallower back-to-belly (local Z,
+//    dorsal-to-ventral) than their profile/heightStretch would otherwise give.
+//  - SIDE_SQUASH: 25% narrower flank-to-flank (local X) than their per-variant
+//    sideSquash would otherwise give — applied here (not via the width size)
+//    so the fins aren't rescaled with it.
+//  - DORSAL_HEIGHT: the dorsal fin stands 25% shorter than its per-variant
+//    heightFactor, independent of the body-depth change above.
+const SMALL_FISH_BODY_DEPTH_SCALE = 0.75;
+const SMALL_FISH_SIDE_SQUASH_SCALE = 0.75;
+const SMALL_FISH_DORSAL_HEIGHT_SCALE = 0.75;
+
 /** Builds the shared lathe body (nose at +Y, peduncle at -Y) with the given
  * profile and lateral-compression proportions. The caller bakes the body's
  * color pattern before it is merged with the dorsal fin and eyes. */
@@ -70,20 +85,40 @@ function buildLatheBody(profile: THREE.Vector2[], proportions: BodyProportions):
 }
 
 /**
- * A single triangular dorsal fin standing up (+Z) from the fish's back over
- * the widest part of the body — the single strongest silhouette cue that
- * separates "a fish" from "a flattened egg". Built via extrudeRingGeometryAlongX
- * (thickened flank-to-flank along X) because its ring lies in the Y-Z plane, so
- * a Z-axis extrusion would leave it vanishingly thin edge-on.
+ * A low trapezoidal dorsal fin standing up (+Z) from the fish's back over the
+ * widest part of the body — the single strongest silhouette cue that separates
+ * "a fish" from "a flattened egg". A flat-topped trapezoid (two upper corners,
+ * inset from the base corners) rather than a single tall peak, so it reads as a
+ * generic fish ridge instead of a shark's dorsal. Built via
+ * extrudeRingGeometryAlongX (thickened flank-to-flank along X) because its ring
+ * lies in the Y-Z plane, so a Z-axis extrusion would leave it vanishingly thin
+ * edge-on.
  */
 function buildDorsalFinGeometry(length: number, width: number, heightFactor: number, heightStretch: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const finHeight = width * heightFactor * 0.5;
-  const root = new THREE.Vector3(0, halfLen * 0.08, width * 0.3 * heightStretch);
-  const back = new THREE.Vector3(0, -halfLen * 0.35, width * 0.32 * heightStretch);
-  const tip = new THREE.Vector3(0, -halfLen * 0.1, width * 0.3 * heightStretch + finHeight);
-  const thickness = width * 0.12;
-  return extrudeRingGeometryAlongX([root, back, tip], thickness);
+  const finHeight = width * heightFactor * 0.28125; // 25% shorter (was * 0.375)
+  // Shift the whole fin forward (+Y, toward the head) so it sits over the
+  // shoulder rather than mid-back.
+  const forwardShift = halfLen * 0.2;
+  const baseZ = width * 0.3 * heightStretch;
+  // Base extents, then extended 50% longer about their own midpoint so the
+  // fin grows fore-and-aft without drifting off its forward position.
+  const frontBaseY0 = halfLen * 0.12 + forwardShift;
+  const rearBaseY0 = -halfLen * 0.35 + forwardShift;
+  const baseMidY = (frontBaseY0 + rearBaseY0) * 0.5;
+  const frontBaseY = baseMidY + (frontBaseY0 - baseMidY) * 1.5;
+  const rearBaseY = baseMidY + (rearBaseY0 - baseMidY) * 1.5;
+  const baseLen = frontBaseY - rearBaseY;
+  // Top edge shorter than the base (corners inset along Y) → trapezoid.
+  const topInset = baseLen * 0.28;
+  const frontBase = new THREE.Vector3(0, frontBaseY, baseZ);
+  const rearBase = new THREE.Vector3(0, rearBaseY, baseZ);
+  const rearTop = new THREE.Vector3(0, rearBaseY + topInset, baseZ + finHeight);
+  const frontTop = new THREE.Vector3(0, frontBaseY - topInset, baseZ + finHeight);
+  // As thin as possible flank-to-flank while still a real 3D prism (not a
+  // zero-width sheet that would vanish edge-on).
+  const thickness = width * 0.02;
+  return extrudeRingGeometryAlongX([frontBase, rearBase, rearTop, frontTop], thickness);
 }
 
 /**
@@ -109,18 +144,39 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
 }
 
 /**
- * A forked caudal (tail) fin trailing behind the body (toward -Y): a quad
- * boundary (root -> upperTip -> notch -> lowerTip) extruded into a real prism,
- * with `notch` pulled forward toward the root to cut the classic V-shaped fork.
- * Static (does not flap).
+ * A forked (lyre-shaped) caudal (tail) fin trailing behind the body (toward
+ * -Y). Real small fish have a VERTICAL tail — it spans dorsal-to-ventral
+ * (up/down = local Z), NOT side-to-side like a whale's horizontal fluke — so
+ * the fin lies in the Y-Z plane and is thickened flank-to-flank along X via
+ * extrudeRingGeometryAlongX (a Z-axis extrusion would leave it edge-on and
+ * near-invisible). It is built as TWO triangular lobes that share one short
+ * vertical edge on the fish's centerline (the base where the fin meets the
+ * peduncle); the upper lobe fans back-and-up and the lower lobe fans
+ * back-and-down to tips that reach outside the body's vertical extent, leaving
+ * a V-notch between them at the rear. Static (does not flap).
  */
-function buildCaudalFinGeometry(length: number, width: number, spread: number): THREE.BufferGeometry {
-  const root = new THREE.Vector3(0, 0, 0);
-  const upperTip = new THREE.Vector3(-width * spread, -length * 0.5, 0);
-  const lowerTip = new THREE.Vector3(width * spread, -length * 0.5, 0);
-  const notch = new THREE.Vector3(0, -length * 0.18, 0);
+function buildCaudalFinGeometry(length: number, width: number, spread: number, heightStretch: number): THREE.BufferGeometry {
+  // Reaches back from the peduncle (very back of the body). The body is a solid
+  // tapering lathe, so the fin's base simply embeds into the rear of the body.
+  const finLength = length * 0.24;
+  const rootBackY = -length * 0.32; // base sits at the back of the body
+  // Vertical (dorsal-ventral) half-height, scaled by the body's own depth
+  // (heightStretch) so the tail stays proportionate to each species' body.
+  const halfHeight = width * spread * heightStretch;
+  // The shared "short side": a short vertical edge on the centerline where both
+  // lobes attach to the body.
+  const notchHalf = halfHeight * 0.35;
+  // Each lobe's tip reaches outside the body's vertical extent (spread apart top
+  // and bottom) and angles backward, giving the classic forked silhouette.
+  const tipHeight = halfHeight * 0.975; // halfway between original 1.3 and the 0.65 trial
+  const baseTop = new THREE.Vector3(0, rootBackY, notchHalf);
+  const baseLower = new THREE.Vector3(0, rootBackY, -notchHalf);
+  const upperTip = new THREE.Vector3(0, rootBackY - finLength, tipHeight);
+  const lowerTip = new THREE.Vector3(0, rootBackY - finLength, -tipHeight);
   const thickness = width * 0.05;
-  return extrudeRingGeometry([root, upperTip, notch, lowerTip], thickness);
+  const upperLobe = extrudeRingGeometryAlongX([baseTop, upperTip, baseLower], thickness);
+  const lowerLobe = extrudeRingGeometryAlongX([baseTop, lowerTip, baseLower], thickness);
+  return mergePositionOnlyGeometries([upperLobe, lowerLobe]);
 }
 
 interface FishVariant {
@@ -144,20 +200,31 @@ function buildFishVariant(length: number, width: number, variant: FishVariant): 
   const halfLen = length * 0.5;
   const fins = { ...DEFAULT_FIN_SIZING, ...(variant.fins ?? {}) };
 
+  // Apply the back-to-belly (depth, local Z) and flank-to-flank (side-squash,
+  // local X) reductions to the variant's own proportions, then use these
+  // adjusted proportions everywhere the body shape matters (lathe body, dorsal
+  // fin root height, eye placement) so the dorsal fin and eyes stay on the now-
+  // shallower, narrower body surface.
+  const proportions: BodyProportions = {
+    ...variant.proportions,
+    sideSquash: variant.proportions.sideSquash * SMALL_FISH_SIDE_SQUASH_SCALE,
+    heightStretch: variant.proportions.heightStretch * SMALL_FISH_BODY_DEPTH_SCALE,
+  };
+
   let profile = variant.profile(halfLen, width);
   if (variant.profileSubdivide) profile = subdivideProfile(profile, variant.profileSubdivide);
-  const lathe = buildLatheBody(profile, variant.proportions);
+  const lathe = buildLatheBody(profile, proportions);
   const coloredBody = variant.bakeBody(lathe, halfLen, width);
 
   const dorsal = bakeUniformColor(
-    buildDorsalFinGeometry(length, width, fins.dorsalHeightFactor, variant.proportions.heightStretch),
+    buildDorsalFinGeometry(length, width, fins.dorsalHeightFactor * SMALL_FISH_DORSAL_HEIGHT_SCALE, proportions.heightStretch),
     variant.dorsalColor,
   );
 
   const eyeRadius = width * (variant.eyeRadiusFactor ?? 0.04);
   const eyeY = halfLen * 0.62;
-  const eyeX = width * 0.22 * variant.proportions.sideSquash;
-  const eyeZ = width * 0.1 * variant.proportions.heightStretch;
+  const eyeX = width * 0.22 * proportions.sideSquash;
+  const eyeZ = width * 0.1 * proportions.heightStretch;
   const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
   const body = mergeGeometriesWithColor([
@@ -170,7 +237,7 @@ function buildFishVariant(length: number, width: number, variant: FishVariant): 
   const chord = length * fins.pectoralChordFactor;
   const wingLeft = bakeUniformColor(buildPectoralFinGeometry(length, span, chord, 1), variant.pectoralColor);
   const wingRight = bakeUniformColor(buildPectoralFinGeometry(length, span, chord, -1), variant.pectoralColor);
-  const tail = bakeUniformColor(buildCaudalFinGeometry(length, width, fins.caudalSpreadFactor), variant.tailColor);
+  const tail = bakeUniformColor(buildCaudalFinGeometry(length, width, fins.caudalSpreadFactor, proportions.heightStretch), variant.tailColor);
 
   return { body, wingLeft, wingRight, tail };
 }
