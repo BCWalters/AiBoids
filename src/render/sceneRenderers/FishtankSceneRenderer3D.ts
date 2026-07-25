@@ -12,7 +12,7 @@ import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
 import { createButterflyfishGeometries } from '../styles/fishtank/geometry/butterflyfishGeometry';
-import { createSeaHorseGeometries } from '../styles/fishtank/geometry/seaHorseGeometry';
+import { createSeaHorseGeometries, SEAHORSE_BODY_COLOR, SEAHORSE_HUNT_COLOR } from '../styles/fishtank/geometry/seaHorseGeometry';
 import {
   createPlainFishGeometries,
   createGoldfishGeometries,
@@ -316,12 +316,39 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   getPredatorColorStrategy(species: PredatorSpecies, _renderFlags: PredatorRenderFlags): ColorStrategy {
     switch (species) {
       case PredatorSpecies.Horse: {
-        const FISHTANK_SEAHORSE_COLORS = { body: new THREE.Color(0xf0d070), wing: new THREE.Color(0xf0d070), tail: new THREE.Color(0xf0d070) };
+        // Mauve-pink body that leans toward lavender (but not fully), sourced
+        // from the seahorse's own palette so all seahorse color lives in
+        // seaHorseGeometry.ts. body/wing/tail ALL carry the same seahorse body
+        // tint as their instanceColor. Critically the tail instanceColor is the
+        // body color (not white): the shared speciesTint applicator lerps each
+        // part's instanceColor toward the hunt highlight, so a white tail
+        // instanceColor would drift differently from the body during hunts and
+        // pull the tail base out of sync with the body. The tail geometry bakes
+        // its base->tip lavender gradient as a *ratio relative to the body*
+        // (base = white, tip = tip/body), so instanceColor * bakedRatio
+        // reproduces the intended absolute gradient while keeping the tail base
+        // exactly equal to the body at every hunt intensity.
+        const seahorseBody = new THREE.Color(SEAHORSE_BODY_COLOR);
+        const FISHTANK_SEAHORSE_COLORS = {
+          body: seahorseBody.clone(),
+          // The pectoral fins bake their own rainbow vertex colors (see
+          // seaHorseGeometry.buildPectoralFinGeometry); their instanceColor must
+          // be white so the rainbow renders as pure color rather than being
+          // multiplied by the body's pink tint.
+          wing: new THREE.Color(0xffffff),
+          tail: seahorseBody.clone(),
+        };
         return {
-          baseColor: new THREE.Color(0xf0d070),
-          highlightColor: new THREE.Color(0xfffacd),
+          baseColor: seahorseBody.clone(),
+          highlightColor: new THREE.Color(SEAHORSE_HUNT_COLOR),
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           getSpeciesColors: () => FISHTANK_SEAHORSE_COLORS,
+          // Lock the palette: there is only ever one seahorse, so the per-
+          // individual HSL jitter adds no variety — it just lightened this
+          // single body toward white, leaving it looking washed out next to the
+          // tail's baked (un-jittered) base color. Locking keeps the body/wing
+          // at the exact SEAHORSE_BODY_COLOR so the body matches the tail base.
+          lockSpeciesPalette: true,
           colorMode: 'speciesTint',
         };
       }
@@ -352,8 +379,12 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       case PredatorSpecies.Horse:
         return {
           flapFrequency: 3.2,
-          flapIdleAmplitude: 0.22,
-          flapSpeedAmplitude: 0.5,
+          // Gentle pectoral flutter. The shared engine flaps the fins around
+          // the body's long axis pivoting at the centerline; large amplitudes
+          // swung the side fins through the torso. Small amplitudes keep the
+          // now side-mounted fins feathering fore/aft at the shoulder.
+          flapIdleAmplitude: 0.1,
+          flapSpeedAmplitude: 0.18,
           keepUpright: true,
           uprightStyle: 'unicorn',
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
