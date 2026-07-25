@@ -46,8 +46,16 @@ const fishtankSize = createCreatureSizer(FISHTANK_BASE_CREATURE);
 export const FISHTANK_CREATURE_SIZES = {
   fish: fishtankSize(1),
   butterflyfish: fishtankSize(1),
-  // Sparrow reskin — smaller darting fish.
-  sparrow: fishtankSize(0.525),
+  // The four small aquarium fish (Fish / Goldfish / Clownfish / Blue Tang) are
+  // sized from these factors. Body-depth (back-to-belly, −25%) and flank-to-
+  // flank width (narrower, −25%) are handled as shape proportions in
+  // smallFishGeometry.ts (SMALL_FISH_BODY_DEPTH_SCALE / SMALL_FISH_SIDE_SQUASH_SCALE)
+  // so they don't also rescale the fins.
+  //
+  // Goldfish / Clownfish / Blue Tang — previously the standard fish size (×1).
+  smallFish: fishtankSize(0.75),
+  // Plain "Fish" — a smaller darting sparrow reskin; previously ×0.525 uniform.
+  plainFish: fishtankSize(0.525 * 0.75),
   // Barracuda (normal predator) — long/lean but clearly smaller than the monster shark.
   barracuda: fishtankSize(27 / FISHTANK_BASE_CREATURE.length, 9.6 / FISHTANK_BASE_CREATURE.width),
   // Shark — a large torpedo-shaped hunter, 36 x 15.84 world units.
@@ -174,12 +182,12 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   constructor(deps: FishtankSceneRendererDependencies) {
     this.deps = deps;
-    // Plain "Fish" stays small/darting (sparrow size); the named aquarium
-    // species use the standard fish size.
-    this.plainFishGeometries = createPlainFishGeometries(FISHTANK_CREATURE_SIZES.sparrow.length, FISHTANK_CREATURE_SIZES.sparrow.width);
-    this.goldfishGeometries = createGoldfishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
-    this.clownfishGeometries = createClownfishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
-    this.blueTangGeometries = createBlueTangGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
+    // Plain "Fish" stays small/darting (sparrow-derived size); the named
+    // aquarium species use the shared small-fish size.
+    this.plainFishGeometries = createPlainFishGeometries(FISHTANK_CREATURE_SIZES.plainFish.length, FISHTANK_CREATURE_SIZES.plainFish.width);
+    this.goldfishGeometries = createGoldfishGeometries(FISHTANK_CREATURE_SIZES.smallFish.length, FISHTANK_CREATURE_SIZES.smallFish.width);
+    this.clownfishGeometries = createClownfishGeometries(FISHTANK_CREATURE_SIZES.smallFish.length, FISHTANK_CREATURE_SIZES.smallFish.width);
+    this.blueTangGeometries = createBlueTangGeometries(FISHTANK_CREATURE_SIZES.smallFish.length, FISHTANK_CREATURE_SIZES.smallFish.width);
     this.butterflyfishGeometries = createButterflyfishGeometries(FISHTANK_CREATURE_SIZES.butterflyfish.length, FISHTANK_CREATURE_SIZES.butterflyfish.width);
     this.barracudaPredatorGeometries = createBarracudaGeometries(FISHTANK_CREATURE_SIZES.barracuda.length, FISHTANK_CREATURE_SIZES.barracuda.width);
     this.sharkPredatorGeometries = createSharkGeometries(FISHTANK_CREATURE_SIZES.shark.length, FISHTANK_CREATURE_SIZES.shark.width);
