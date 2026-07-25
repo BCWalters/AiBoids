@@ -39,6 +39,11 @@ interface ParrotPalette {
    * (back color at crown/dorsal surface, belly color at ventral surface)
    * instead of the default dominant-weight back/belly region split. */
   dorsalGradient: boolean;
+  /** When true, the face dome (the filled opening the beak grows from) is
+   * baked with a smooth dorsal→ventral Z-axis gradient from `back` (top) to
+   * `belly` (bottom) instead of the flat `facePatch` color, so the face fades
+   * between the bird's back and belly colors. */
+  faceDomeGradient: boolean;
 }
 
 const GREEN_FOCUS_PARROT_PALETTE: ParrotPalette = {
@@ -56,6 +61,7 @@ const GREEN_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0x44b749),
   tailTip: new THREE.Color(0xc8e455),
   dorsalGradient: true,
+  faceDomeGradient: true,
 };
 
 const BLUE_GOLD_FOCUS_PARROT_PALETTE: ParrotPalette = {
@@ -73,6 +79,7 @@ const BLUE_GOLD_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0x2f75ff),
   tailTip: new THREE.Color(0xffe033),
   dorsalGradient: false,
+  faceDomeGradient: true,
 };
 
 const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
@@ -90,6 +97,7 @@ const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0xe0c45d),
   tailTip: new THREE.Color(0x2b57b0),
   dorsalGradient: false,
+  faceDomeGradient: true,
 };
 
 const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
@@ -107,6 +115,7 @@ const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0x7b60c8),
   tailTip: new THREE.Color(0xd1c2ff),
   dorsalGradient: false,
+  faceDomeGradient: true,
 };
 
 const NEUTRAL_PARROT_PALETTE: ParrotPalette = {
@@ -124,6 +133,7 @@ const NEUTRAL_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0xffffff),
   tailTip: new THREE.Color(0xffffff),
   dorsalGradient: false,
+  faceDomeGradient: true,
 };
 
 let ACTIVE_PARROT_PALETTE: ParrotPalette = GREEN_FOCUS_PARROT_PALETTE;
@@ -251,6 +261,7 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.2, 12, 10);
   beakSocketFill.scale(0.96, 0.9, 0.902);
   beakSocketFill.translate(0, faceY - length * 0.004, -length * 0.02 + faceRadius * 0.26);
+  if (ACTIVE_PARROT_PALETTE.faceDomeGradient) tintParrotFaceDomeGradient(beakSocketFill);
   rotateGeometryAroundXPivot(beakSocketFill, headTiltPivotY, PARROT_HEAD_TILT_RAD);
 
   const eyeY = halfLen * headFrac(0.79);
@@ -702,6 +713,29 @@ function buildParrotLegsGeometry(length: number, width: number): THREE.BufferGeo
   return mergeGeometriesWithColor([
     { geometry: mergePositionOnlyGeometries([left, right]), color: ACTIVE_PARROT_PALETTE.feet },
   ]);
+}
+
+function tintParrotFaceDomeGradient(geometry: THREE.BufferGeometry): void {
+  // Smooth dorsal→ventral gradient purely in Z across the face dome: back
+  // color at the top (max Z, dorsal side) fading to belly color at the bottom
+  // (min Z, ventral side), so the face reads as a fade between the bird's back
+  // and belly colors instead of a flat patch. Uses the dome's own Z extent so
+  // the gradient spans exactly surface-to-surface. Baked before the head-tilt
+  // rotation; the colors ride along with their vertices afterward.
+  const pos = geometry.getAttribute('position');
+  geometry.computeBoundingBox();
+  const minZ = geometry.boundingBox?.min.z ?? -1;
+  const maxZ = geometry.boundingBox?.max.z ?? 1;
+  const zSpan = Math.max(1e-5, maxZ - minZ);
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const z = pos.getZ(i);
+    const t = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp((z - minZ) / zSpan, 0, 1), 0, 1);
+    colors[i * 3]     = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.r, ACTIVE_PARROT_PALETTE.back.r, t);
+    colors[i * 3 + 1] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.g, ACTIVE_PARROT_PALETTE.back.g, t);
+    colors[i * 3 + 2] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.b, ACTIVE_PARROT_PALETTE.back.b, t);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
 
 function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number): void {
