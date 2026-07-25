@@ -690,6 +690,22 @@ export class Renderer3D {
     this.cameraController.setCameraState(position, target);
   }
 
+  /**
+   * Returns the perspective camera — used by FollowCamController's
+   * screen-space entity picker.
+   */
+  getCamera(): THREE.PerspectiveCamera {
+    return this.cameraController.getCamera();
+  }
+
+  /**
+   * Exponentially smooth the orbit target toward a world-space position —
+   * delegates to CameraController.smoothOrbitTarget (see its doc for details).
+   */
+  smoothOrbitTarget(x: number, y: number, z: number, alpha: number): void {
+    this.cameraController.smoothOrbitTarget(x, y, z, alpha);
+  }
+
   private groupBoidsBySpecies(boids: Boid[]): Map<BoidSpecies, Boid[]> {
     const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
     for (const boid of boids) {
