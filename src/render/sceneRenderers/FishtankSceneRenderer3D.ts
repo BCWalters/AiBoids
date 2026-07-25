@@ -403,7 +403,10 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       tailSwayPivotY: tailSwayPivot,
       worldScale: TANK_VISUAL_SCALE,
       meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
-      preferUpright: false,
+      // Keep fish dorsal-up: their flattened bodies + distinct dorsal fin make an
+      // unconstrained roll read as swimming sideways/upside-down. This anchors
+      // model +Z (dorsal) to world up while still allowing pitch and turn-banking.
+      preferUpright: true,
     };
   }
 

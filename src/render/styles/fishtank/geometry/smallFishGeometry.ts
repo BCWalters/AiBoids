@@ -78,7 +78,7 @@ function buildLatheBody(profile: THREE.Vector2[], proportions: BodyProportions):
  */
 function buildDorsalFinGeometry(length: number, width: number, heightFactor: number, heightStretch: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const finHeight = width * heightFactor;
+  const finHeight = width * heightFactor * 0.5;
   const root = new THREE.Vector3(0, halfLen * 0.08, width * 0.3 * heightStretch);
   const back = new THREE.Vector3(0, -halfLen * 0.35, width * 0.32 * heightStretch);
   const tip = new THREE.Vector3(0, -halfLen * 0.1, width * 0.3 * heightStretch + finHeight);
@@ -188,7 +188,7 @@ export function createPlainFishGeometries(length: number, width: number): Creatu
   const back = new THREE.Color(0x6f7c63);
   const belly = new THREE.Color(0xd7dcd0);
   return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.62, heightStretch: 0.675 },
+    proportions: { sideSquash: 0.465, heightStretch: 0.675 },
     profile: (h, w) => [
       new THREE.Vector2(0, -h * 1.0),
       new THREE.Vector2(w * 0.14, -h * 0.82),
@@ -213,7 +213,7 @@ export function createGoldfishGeometries(length: number, width: number): Creatur
   const belly = new THREE.Color(0xffb347);
   const finColor = new THREE.Color(0xff8c1a);
   return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.72, heightStretch: 0.86 },
+    proportions: { sideSquash: 0.54, heightStretch: 0.86 },
     profile: (h, w) => [
       new THREE.Vector2(0, -h * 1.0),
       new THREE.Vector2(w * 0.2, -h * 0.76),
@@ -245,7 +245,7 @@ export function createClownfishGeometries(length: number, width: number): Creatu
   const edge = new THREE.Color(0x1a120c);
   const finColor = new THREE.Color(0xf4661c);
   return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.66, heightStretch: 0.75 },
+    proportions: { sideSquash: 0.495, heightStretch: 0.75 },
     profileSubdivide: 4,
     profile: (h, w) => [
       new THREE.Vector2(0, -h * 0.95),
@@ -277,7 +277,7 @@ export function createBlueTangGeometries(length: number, width: number): Creatur
   const mark = new THREE.Color(0x0b1622);
   const yellow = new THREE.Color(0xffcf00);
   return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.5, heightStretch: 1.0 },
+    proportions: { sideSquash: 0.375, heightStretch: 1.0 },
     profileSubdivide: 4,
     profile: (h, w) => [
       new THREE.Vector2(0, -h * 0.9),
