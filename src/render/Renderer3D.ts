@@ -27,6 +27,7 @@ import {
   type CreatureLabels,
 } from './sceneRenderers/createSceneRendererHooks';
 import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';import { createRendererSceneRenderers } from './sceneRendererFactory';
+import { isReducedGraphics } from './graphicsQuality';
 import { UfoRenderer } from './UfoRenderer';
 import { CameraController } from './CameraController';
 import { CreatureInstanceRenderer, type BoidRenderBatch } from './CreatureInstanceRenderer';
@@ -40,6 +41,7 @@ const MULTICOLOR_BOID_NEUTRAL_PROFILE = 'neutral';
 
 export class Renderer3D {
   private renderer: THREE.WebGLRenderer;
+  private readonly reducedGraphics = isReducedGraphics();
   private composer: EffectComposer;
   private afterimagePass: AfterimagePass;
   private bloomPass: UnrealBloomPass;
@@ -93,13 +95,18 @@ export class Renderer3D {
     // little precision at fishtank distances, causing z-fighting on thin
     // stacked surfaces (tank window layers). Log depth spreads precision
     // evenly across the range.
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Reduced-graphics mode (see graphicsQuality) drops the GPU-heavy effects
+    // that dominate frame time under software WebGL — used by the e2e suite on
+    // CI so it doesn't spend seconds per frame rendering bloom/shadows/glass.
+    const reducedGraphics = isReducedGraphics();
+
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !reducedGraphics, logarithmicDepthBuffer: true });
+    this.renderer.setPixelRatio(reducedGraphics ? 1 : Math.min(window.devicePixelRatio, 2));
     // ACES tone mapping keeps the physically-based Sky shader from blowing
     // out to solid white and gives the nature-style earth tones more depth.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.65;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = !reducedGraphics;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
@@ -115,7 +122,7 @@ export class Renderer3D {
     this.ambientLight = new THREE.AmbientLight(0xffffff, 0.35);
     this.keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
     this.keyLight.position.set(1, 1, 1);
-    this.keyLight.castShadow = true;
+    this.keyLight.castShadow = !reducedGraphics;
     this.keyLight.shadow.mapSize.set(1536, 1536);
     this.keyLight.shadow.radius = 3;
     this.scene.add(this.ambientLight, this.keyLight);
@@ -306,11 +313,11 @@ export class Renderer3D {
     this.currentStyle = style;
     const sceneRenderer = this.getSceneRenderer(style);
     const presentation = sceneRenderer.getPresentationSettings();
-    this.bloomPass.enabled = presentation.bloomEnabled;
+    this.bloomPass.enabled = presentation.bloomEnabled && !this.reducedGraphics;
     // The afterimage/motion-trail effect persists whole previous frames —
     // great for arcade neon trails, but in organic (fog-using) styles a camera
     // pan drags a smeary ghost trail of the bright sky/water across the frame.
-    this.afterimagePass.enabled = presentation.afterimageEnabled;
+    this.afterimagePass.enabled = presentation.afterimageEnabled && !this.reducedGraphics;
     sceneRenderer.setStyleVisibility();
     if (this.boundsHelper) this.boundsHelper.visible = presentation.boundsHelperVisible;
     this.ambientLight.intensity = presentation.ambientLightIntensity;
@@ -353,7 +360,7 @@ export class Renderer3D {
     if (this.appliedWaterEffectsEnabled !== params.waterEffectsEnabled) {
       this.appliedWaterEffectsEnabled = params.waterEffectsEnabled;
     }
-    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled;
+    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled && !this.reducedGraphics;
     if (this.appliedShadowsEnabled !== shadowsEnabled) {
       this.renderer.shadowMap.enabled = shadowsEnabled;
       this.keyLight.castShadow = shadowsEnabled;

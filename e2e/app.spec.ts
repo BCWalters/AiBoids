@@ -37,7 +37,10 @@ async function gotoApp(page: Page, path = '/'): Promise<void> {
     },
   };
   const separator = path.includes('?') ? '&' : '?';
-  await page.goto(`${path}${separator}state=${encodeURIComponent(JSON.stringify(state))}`);
+  // lowfx=1 opts into reduced-graphics mode (see src/render/graphicsQuality.ts):
+  // drops bloom/shadows/AA/transmission water that are ruinously slow under
+  // software WebGL on CI but irrelevant to what these smoke tests assert.
+  await page.goto(`${path}${separator}state=${encodeURIComponent(JSON.stringify(state))}&lowfx=1`);
 }
 
 async function gotoGalleryCreature(
@@ -61,7 +64,7 @@ async function gotoGalleryCreature(
       horseCount: 0,
     },
   };
-  await page.goto(`/?state=${encodeURIComponent(JSON.stringify(state))}`);
+  await page.goto(`/?state=${encodeURIComponent(JSON.stringify(state))}&lowfx=1`);
   await expect.poll(async () => page.evaluate(() => (window as unknown as { __debugPosed?: boolean }).__debugPosed === true)).toBe(true);
   await page.waitForTimeout(300);
 }
@@ -194,24 +197,21 @@ test.describe('App smoke tests', () => {
       .toBe(!initiallyCollapsed);
   });
 
-  test('cycling through every visual style keeps the 3D canvas rendering', async ({ page }) => {
-    test.setTimeout(120_000);
-    failOnConsoleErrors(page);
-    await gotoApp(page);
-    const styleSelect = page.locator('#param-visual-style');
-    const styles = await styleSelect.locator('option').allTextContents();
-    expect(styles.length).toBeGreaterThanOrEqual(2);
-
-    const values = await styleSelect.locator('option').evaluateAll((opts) =>
-      opts.map((o) => (o as HTMLOptionElement).value),
-    );
-
-    for (const value of values) {
-      await styleSelect.selectOption(value);
+  // One test per visual style rather than a single loop, so Playwright's
+  // --shard can spread the expensive styles (fishtank especially) across
+  // parallel CI runners instead of serializing them in one long test.
+  for (const style of ['arcade', 'nature', 'fishtank'] as const) {
+    test(`visual style "${style}" keeps the 3D canvas rendering`, async ({ page }) => {
+      test.setTimeout(120_000);
+      failOnConsoleErrors(page);
+      await gotoApp(page);
+      const styleSelect = page.locator('#param-visual-style');
+      await expect(styleSelect.locator(`option[value="${style}"]`)).toHaveCount(1);
+      await styleSelect.selectOption(style);
       await page.waitForTimeout(500);
       expect(await canvasHasVisibleContent(page, '#sim-canvas-3d')).toBe(true);
-    }
-  });
+    });
+  }
 
   test('switching to 2D mode shows the 2D canvas with visible boids, and back to 3D', async ({ page }) => {
     failOnConsoleErrors(page);

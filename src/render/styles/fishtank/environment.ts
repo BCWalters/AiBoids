@@ -16,6 +16,7 @@ import {
   createWayfindingSign,
   type OverheadLamp,
 } from './roomDecor';
+import { isReducedGraphics } from '../../graphicsQuality';
 
 /**
  * "Fish tank" style environment: a glass aquarium box (matching the sim's
@@ -462,11 +463,17 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   frame.visible = false;
 
   const waterGeometry = new THREE.BoxGeometry(1, 1, 1);
+  // Reduced-graphics mode (e2e/CI on software WebGL): a MeshPhysicalMaterial
+  // with transmission > 0 forces a second render pass every frame and compiles
+  // an expensive shader — the single biggest cost of the fishtank scene under
+  // SwiftShader. Dropping transmission to 0 keeps a translucent tint but skips
+  // that pass entirely.
+  const reducedGraphics = isReducedGraphics();
   const waterMaterial = new THREE.MeshPhysicalMaterial({
     color: WATER_COLOR,
     transparent: true,
     opacity: 0.34,
-    transmission: 0.35,
+    transmission: reducedGraphics ? 0 : 0.35,
     thickness: 0.8,
     ior: 1.07,
     roughness: 0.08,
@@ -491,7 +498,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   caustics.rotation.x = -Math.PI / 2;
   caustics.visible = false;
 
-  const particleCount = 750;
+  const particleCount = reducedGraphics ? 60 : 750;
   const particlePositions = new Float32Array(particleCount * 3);
   const particleSeeds = new Float32Array(particleCount);
   for (let i = 0; i < particleCount; i++) {
