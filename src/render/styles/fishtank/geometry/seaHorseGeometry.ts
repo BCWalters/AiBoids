@@ -37,7 +37,7 @@ export function createSeaHorseGeometries(length: number, width: number): Creatur
 // to it). Set halfway between the prior mauve-pink (0xdf9dd1) and the lighter
 // lavender (0xe9b8e0) per feedback — a touch pinker than the lighter tone while
 // staying lighter than the original.
-export const SEAHORSE_BODY_COLOR = 0xed9dd2;
+export const SEAHORSE_BODY_COLOR = 0xf28cbc;
 export const SEAHORSE_HUNT_COLOR = 0xf2d6ee;
 export const SEAHORSE_TAIL_TIP_COLOR = 0xa87fe0;
 
@@ -80,6 +80,19 @@ const RAINBOW_LIGHTNESS = 0.62;
 // SEAHORSE_BODY_COLOR components are already linear (ColorManagement on),
 // matching the shader's linear instanceColor*vertex multiply.
 const SEAHORSE_BODY_LINEAR = new THREE.Color(SEAHORSE_BODY_COLOR);
+
+// The small ridge/crest fins running down the head and belly midline read as
+// lavender rather than sharing the pink body color. They are merged into the
+// body mesh (pink instanceColor), so — like the dorsal rainbow — the lavender is
+// baked as a RATIO relative to the body color so instanceColor * ratio == the
+// lavender at idle, and it tracks the body through the hunt-highlight lerp.
+const SEAHORSE_FIN_COLOR = 0xc9b3e8;
+const SEAHORSE_FIN_LINEAR = new THREE.Color(SEAHORSE_FIN_COLOR);
+const SEAHORSE_FIN_RATIO = new THREE.Color().setRGB(
+  SEAHORSE_FIN_LINEAR.r / SEAHORSE_BODY_LINEAR.r,
+  SEAHORSE_FIN_LINEAR.g / SEAHORSE_BODY_LINEAR.g,
+  SEAHORSE_FIN_LINEAR.b / SEAHORSE_BODY_LINEAR.b,
+);
 
 interface SpinePoint {
   y: number;
@@ -135,15 +148,15 @@ function buildSeaHorseShellGeometry(
     { y: -halfLen * 0.06, z: -length * 0.14, radius: width * 0.27, xScale: 0.58, zScale: 1.18 },
     { y: 0, z: -length * 0.02, radius: width * 0.295, xScale: 0.6, zScale: 1.28 },
     { y: halfLen * 0.05, z: length * 0.08, radius: width * 0.255, xScale: 0.56, zScale: 1.2 },
-    { y: halfLen * 0.1, z: length * 0.16, radius: width * 0.19, xScale: 0.48, zScale: 1.02 },
-    // Snout tip. Shortened 20% by moving this point 20% of the way back toward
-    // the head section (spine[6]) along the snout axis: original tip was
-    // (y 0.145, z 0.215); pulling back 20% of the (0.045, 0.055) spine[6]->tip
-    // delta gives (y 0.136, z 0.204). Radius/scale unchanged so the snout keeps
-    // its taper, just less far forward. The horn and eyes anchor off this point,
-    // so they follow the shorter snout automatically.
-    { y: halfLen * 0.136, z: length * 0.204, radius: width * 0.15, xScale: 0.42, zScale: 0.9 },
-    { y: halfLen * 0.205, z: length * 0.195, radius: width * 0.125, xScale: 0.38, zScale: 0.82 },
+    // Muzzle/snout points. The nose/head is shortened a further 20%: each forward
+    // (+Z) muzzle point is pulled toward the face base at spine[5].z (0.08) so its
+    // reach beyond the face is scaled x0.8. spine[6] 0.16->0.144, snout tip
+    // spine[7] 0.204->0.179, muzzle crown spine[8] 0.195->0.172. y/radius/scale
+    // unchanged so the head keeps its profile, just a stubbier nose. The horn and
+    // eyes anchor off spine[7]/[6], so they follow the shorter snout automatically.
+    { y: halfLen * 0.1, z: length * 0.144, radius: width * 0.19, xScale: 0.48, zScale: 1.02 },
+    { y: halfLen * 0.136, z: length * 0.179, radius: width * 0.15, xScale: 0.42, zScale: 0.9 },
+    { y: halfLen * 0.205, z: length * 0.172, radius: width * 0.125, xScale: 0.38, zScale: 0.82 },
     { y: halfLen * 0.28, z: length * 0.115, radius: width * 0.1, xScale: 0.32, zScale: 0.58 },
     { y: halfLen * 0.36, z: length * 0.025, radius: width * 0.072, xScale: 0.27, zScale: 0.42 },
   ];
@@ -235,6 +248,17 @@ function buildBodyRidgeGeometry(length: number, width: number): THREE.BufferGeom
   ];
   const merged = mergePositionOnlyGeometries(spikes);
   spikes.forEach((geometry) => geometry.dispose());
+  // Paint the crest/belly ridge plates lavender. Baked as a solid per-vertex
+  // ratio relative to the body color so, once merged into the pink-instanceColor
+  // body mesh, instanceColor * ratio renders the lavender (see SEAHORSE_FIN_RATIO).
+  const count = merged.getAttribute('position').count;
+  const colors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    colors[i * 3] = SEAHORSE_FIN_RATIO.r;
+    colors[i * 3 + 1] = SEAHORSE_FIN_RATIO.g;
+    colors[i * 3 + 2] = SEAHORSE_FIN_RATIO.b;
+  }
+  merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return merged;
 }
 
@@ -337,13 +361,20 @@ function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeo
   // radius that comfortably covers the body's cross-section there, hides the
   // seam by burying it inside the overlapping solid volume instead.
   const halfLen = length * 0.5;
-  // Moved forward slightly (was -halfLen * 0.16) per feedback.
-  const anchorY = -halfLen * 0.1;
-  const anchorZ = -length * 0.28;
-  // 30% thinner than before (0.1125 -> ~0.0788), paired with the body's
-  // existing wider taper near the attachment point, so the tail base looks
-  // more proportional.
-  const bodyEndRadius = width * 0.0788;
+  const bodyEndRadius = width * 0.0788 * 0.95;
+  // Vertical (down the body) position of the tail root. NOTE: in this model's
+  // authoring frame the +Y axis is the seahorse's front/back (belly<->dorsal)
+  // horizontal direction once it is posed upright (model +Z is world-up, see
+  // MODEL_UP_AXIS in CreatureInstanceRenderer), NOT its long axis. So anchorY —
+  // despite the name — slides the tail base horizontally between belly and back.
+  // Start from -halfLen * 0.1 (the original attach point, which poked out the
+  // belly/front) and pull it back toward the dorsal side by 0.75x the tail base
+  // radius so the thick root tucks behind the body instead of out the front.
+  const anchorY = -halfLen * 0.1 - bodyEndRadius * 0.75;
+  // Vertical drop of the tail root along the body length. (Authoring +Z is the
+  // upright model's world-up axis; -Z moves the root down toward the tail end.)
+  // 20% of the base diameter below the rear taper so the base tucks in cleanly.
+  const anchorZ = -length * 0.28 * 1.05 - bodyEndRadius * 2 * 0.2;
   const tailTipRadius = width * 0.014;
   const maxRadius = length * 0.205;
   const minRadius = length * 0.038;
