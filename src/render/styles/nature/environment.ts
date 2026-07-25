@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import type { TimeOfDayPreset } from '../../../sim/params';
+import {
+  createWaterUniforms,
+  applyWaterWaveShader,
+  updateWaterUniforms,
+} from './waterWaves';
 
 /**
  * "Nature" style environment: a physically-based sky dome (with a
@@ -769,6 +774,12 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
   const { ocean, beach } = createOceanPatch(OCEAN_GAP_ANGLE, OCEAN_GAP_HALF_WIDTH);
   ocean.receiveShadow = true;
   beach.receiveShadow = true;
+  // Patch the ocean material with the wave/reflection shader.  sunDirection
+  // is an empty Vector3 at this point — it gets populated once
+  // applyTimeOfDay('noon') runs below, and then synced every frame via
+  // updateWaterUniforms inside update().
+  const oceanWaterUniforms = createWaterUniforms(sunDirection);
+  applyWaterWaveShader(ocean.material as THREE.MeshStandardMaterial, oceanWaterUniforms);
   const rocks = ROCK_CLUSTER_DEFS.map(() => createRockCluster());
   rocks.forEach((rock) => {
     rock.castShadow = true;
@@ -858,6 +869,7 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
     fog,
     update(elapsed: number) {
       skyUniforms.time.value = elapsed;
+      updateWaterUniforms(oceanWaterUniforms, elapsed, sunDirection, sunLight.color);
     },
     setVisible(visible: boolean) {
       sky.visible = visible;
