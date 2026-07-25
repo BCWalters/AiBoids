@@ -1,9 +1,15 @@
-import { params, resetParams, type SimParams, type SimMode, type VisualStyle, type GalleryCreature, type TimeOfDayPreset } from '../sim/params';
+import { params, resetParams, type SimParams, type SimMode, type VisualStyle, type GalleryCreature, type TimeOfDayPreset, type FollowCamMode } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES, type Language } from '../i18n/language';
 import { t, type TranslationKey } from '../i18n/translations';
 import type { CreatureLabels } from '../render/sceneRenderers/createSceneRendererHooks';
+
+// Keys of SimParams whose value is a boolean — used by buildBooleanToggle so
+// a single helper can bind any on/off feature flag without per-flag builders.
+type BooleanParamKey = {
+  [K in keyof SimParams]: SimParams[K] extends boolean ? K : never;
+}[keyof SimParams];
 
 interface SliderSpec {
   key: keyof SimParams;
@@ -231,6 +237,29 @@ export class ControlPanel {
       if (params.visualStyle === 'fishtank') visualSettingsChildren.push(this.buildWaterEffectsToggle());
     }
     this.container.appendChild(this.buildSection('visualSettings', t('sectionVisualSettings'), visualSettingsChildren, false));
+
+    // Visual FX section — 3D-only. Groups the Creature View follow-cam plus
+    // the post-processing and scene-specific visual toggles. These are the
+    // scaffolded feature flags (see params.ts); scene-specific ones are only
+    // shown for the style they apply to.
+    if (params.mode === '3d') {
+      const visualFxChildren: HTMLElement[] = [
+        this.buildFollowCamModeToggle(),
+        this.buildBooleanToggle('showCreatureInspectorLabel', 'param-show-creature-inspector', 'showCreatureInspector'),
+        this.buildBooleanToggle('colorGradingEnabledLabel', 'param-color-grading-enabled', 'colorGradingEnabled'),
+        this.buildBooleanToggle('depthOfFieldEnabledLabel', 'param-depth-of-field-enabled', 'depthOfFieldEnabled'),
+      ];
+      if (params.visualStyle === 'nature') {
+        visualFxChildren.push(this.buildBooleanToggle('waterWavesEnabledLabel', 'param-water-waves-enabled', 'waterWavesEnabled'));
+        visualFxChildren.push(this.buildBooleanToggle('waterReflectionsEnabledLabel', 'param-water-reflections-enabled', 'waterReflectionsEnabled'));
+      }
+      if (params.visualStyle === 'fishtank') {
+        visualFxChildren.push(this.buildBooleanToggle('tankDecorEnabledLabel', 'param-tank-decor-enabled', 'tankDecorEnabled'));
+        visualFxChildren.push(this.buildBooleanToggle('bubblesEnabledLabel', 'param-bubbles-enabled', 'bubblesEnabled'));
+        visualFxChildren.push(this.buildBooleanToggle('depthMurkEnabledLabel', 'param-depth-murk-enabled', 'depthMurkEnabled'));
+      }
+      this.container.appendChild(this.buildSection('visualFx', t('sectionVisualFx'), visualFxChildren, false));
+    }
 
     this.container.appendChild(
       this.buildSection(
@@ -590,6 +619,63 @@ export class ControlPanel {
 
     wrapper.appendChild(input);
     wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  /**
+   * Generic boolean checkbox toggle bound to a boolean-valued SimParams key.
+   * Reduces duplication for the growing set of on/off visual feature flags.
+   */
+  private buildBooleanToggle(labelKey: TranslationKey, id: string, key: BooleanParamKey): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t(labelKey);
+    label.htmlFor = id;
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = id;
+    input.checked = params[key];
+    input.addEventListener('change', () => {
+      params[key] = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
+    return wrapper;
+  }
+
+  private buildFollowCamModeToggle(): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row';
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'control-label-row';
+    const label = document.createElement('label');
+    label.textContent = t('followCamModeLabel');
+    labelRow.appendChild(label);
+    wrapper.appendChild(labelRow);
+
+    const select = document.createElement('select');
+    select.id = 'param-follow-cam-mode';
+    const options: { value: FollowCamMode; textKey: TranslationKey }[] = [
+      { value: 'off', textKey: 'followCamModeOff' },
+      { value: 'orbit', textKey: 'followCamModeOrbit' },
+    ];
+    for (const opt of options) {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = t(opt.textKey);
+      if (opt.value === params.followCamMode) option.selected = true;
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      params.followCamMode = select.value as FollowCamMode;
+    });
+
+    wrapper.appendChild(select);
     return wrapper;
   }
 
