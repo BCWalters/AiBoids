@@ -6,6 +6,7 @@ import type { Predator } from '../../sim/Predator';
 import { type Boid, BoidSpecies } from '../../sim/Boid';
 import { computeFishtankRoomBounds, placeFishtankEnvironment, TANK_VISUAL_SCALE } from '../styles/fishtank/environment';
 import { getSharkTailPivotY, createSharkGeometries } from '../styles/fishtank/geometry/sharkGeometry';
+import { getBarracudaTailPivotY, createBarracudaGeometries } from '../styles/fishtank/geometry/barracudaGeometry';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
@@ -47,6 +48,8 @@ export const FISHTANK_CREATURE_SIZES = {
   butterflyfish: fishtankSize(1),
   // Sparrow reskin — smaller darting fish.
   sparrow: fishtankSize(0.525),
+  // Barracuda (normal predator) — long/lean but clearly smaller than the monster shark.
+  barracuda: fishtankSize(27 / FISHTANK_BASE_CREATURE.length, 9.6 / FISHTANK_BASE_CREATURE.width),
   // Shark — a large torpedo-shaped hunter, 36 x 15.84 world units.
   shark: fishtankSize(36 / FISHTANK_BASE_CREATURE.length, 15.84 / FISHTANK_BASE_CREATURE.width),
   // Sea horse (unicorn reskin) — 36 x 14.85 world units.
@@ -76,6 +79,13 @@ const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
 // Shark predator (fishtank dragon-geometry variant): medium gray hide
 const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
 const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
+// Barracuda (normal fishtank predator): cooler steel-blue body with a brighter chase tint.
+// Bright silvery steel base; the body geometry bakes its own dorsal-to-belly
+// gradient (dark steel back → pale silver belly) as vertex colors that
+// multiply against this, so keep the base near-white-silver to let that
+// gradient show. Hunt state brightens toward a cold, almost mirror sheen.
+const BARRACUDA_PREDATOR_BASE = new THREE.Color(0xc4ccd2);
+const BARRACUDA_PREDATOR_HUNT = new THREE.Color(0xe8eef2);
 
 // Per-species fishtank boid config. Owned by this scene so the aquatic-variant
 // colors, beaks and geometry selection can be tuned independently of the other
@@ -118,7 +128,14 @@ const SHARK_TAIL_SWAY_AMPLITUDE = 0.5; // radians; a visibly wide side-to-side b
 const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — the main swimming motion
 const SHARK_FIN_REST_TILT_RAD = 0.4;
 const FISHTANK_FISH_MESH_BOOST = 2.2;
+const FISHTANK_BARRACUDA_MESH_BOOST = 0.44;
 const FISHTANK_SHARK_MESH_BOOST = 0.55;
+const BARRACUDA_FLAP_FREQUENCY = 2.5;
+const BARRACUDA_FLAP_IDLE_AMPLITUDE = 0.04;
+const BARRACUDA_FLAP_SPEED_AMPLITUDE = 0.08;
+const BARRACUDA_TAIL_SWAY_AMPLITUDE = 0.44;
+const BARRACUDA_TAIL_SWAY_FREQUENCY = 3.9;
+const BARRACUDA_FIN_REST_TILT_RAD = 0.32;
 // Reference length fed to getSharkTailPivotY for the tail-sway pivot. This is
 // an independent motion-tuning value, intentionally NOT the shark's geometry
 // length (see FISHTANK_CREATURE_SIZES.shark) — preserved as-is.
@@ -151,6 +168,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   private readonly clownfishGeometries: CreatureGeometries;
   private readonly blueTangGeometries: CreatureGeometries;
   private readonly butterflyfishGeometries: CreatureGeometries;
+  private readonly barracudaPredatorGeometries: CreatureGeometries;
   private readonly sharkPredatorGeometries: CreatureGeometries;
   private readonly unicornPredatorGeometries: CreatureGeometries;
 
@@ -163,6 +181,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     this.clownfishGeometries = createClownfishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
     this.blueTangGeometries = createBlueTangGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
     this.butterflyfishGeometries = createButterflyfishGeometries(FISHTANK_CREATURE_SIZES.butterflyfish.length, FISHTANK_CREATURE_SIZES.butterflyfish.width);
+    this.barracudaPredatorGeometries = createBarracudaGeometries(FISHTANK_CREATURE_SIZES.barracuda.length, FISHTANK_CREATURE_SIZES.barracuda.width);
     this.sharkPredatorGeometries = createSharkGeometries(FISHTANK_CREATURE_SIZES.shark.length, FISHTANK_CREATURE_SIZES.shark.width);
     this.unicornPredatorGeometries = createSeaHorseGeometries(FISHTANK_CREATURE_SIZES.seahorse.length, FISHTANK_CREATURE_SIZES.seahorse.width);
   }
@@ -306,16 +325,23 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           colorMode: 'speciesTint',
         };
       }
-      
-      case PredatorSpecies.Monster:
+
       case PredatorSpecies.Normal:
+        return {
+          baseColor: BARRACUDA_PREDATOR_BASE,
+          highlightColor: BARRACUDA_PREDATOR_HUNT,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
+          colorMode: 'flat',
+        };
+
+      case PredatorSpecies.Monster:
         return {
           baseColor: SHARK_PREDATOR_BASE,
           highlightColor: SHARK_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           colorMode: 'flat',
         };
-      
+
       default:
         throw new Error(`Unknown predator species: ${species}`);
     }
@@ -334,10 +360,24 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
         };
-      
-      case PredatorSpecies.Monster:
+
       case PredatorSpecies.Normal:
-        // Both map to shark motion in the fishtank
+        return {
+          flapFrequency: BARRACUDA_FLAP_FREQUENCY,
+          flapIdleAmplitude: BARRACUDA_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: BARRACUDA_FLAP_SPEED_AMPLITUDE,
+          keepUpright: true,
+          uprightStyle: 'shark',
+          finRestBiasRad: BARRACUDA_FIN_REST_TILT_RAD,
+          tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
+          tailSwayAmplitude: BARRACUDA_TAIL_SWAY_AMPLITUDE,
+          tailSwayFrequency: BARRACUDA_TAIL_SWAY_FREQUENCY,
+          tailSwayPivotY: getBarracudaTailPivotY(FISHTANK_CREATURE_SIZES.barracuda.length),
+          worldScale: TANK_VISUAL_SCALE,
+          meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_BARRACUDA_MESH_BOOST,
+        };
+
+      case PredatorSpecies.Monster:
         return {
           flapFrequency: SHARK_FLAP_FREQUENCY,
           flapIdleAmplitude: SHARK_FLAP_IDLE_AMPLITUDE,
@@ -352,7 +392,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
         };
-      
+
       default:
         throw new Error(`Unknown predator species: ${species}`);
     }
@@ -465,9 +505,13 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     _renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
     switch (species) {
-      case PredatorSpecies.Monster:
       case PredatorSpecies.Normal:
-        // Both map to shark geometry in the fishtank
+        return {
+          geometries: this.barracudaPredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: true,
+        };
+      case PredatorSpecies.Monster:
         return {
           geometries: this.sharkPredatorGeometries,
           rainbowWings: false,
@@ -494,7 +538,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         blue: 'Blue Tang',
       },
       predator: {
-        normal: 'Shark',
+        normal: 'Barracuda',
         monster: 'Shark',
         horse: 'Sea Horse',
       },
@@ -508,6 +552,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     disposeCreatureGeometries(this.clownfishGeometries);
     disposeCreatureGeometries(this.blueTangGeometries);
     disposeCreatureGeometries(this.butterflyfishGeometries);
+    disposeCreatureGeometries(this.barracudaPredatorGeometries);
     disposeCreatureGeometries(this.sharkPredatorGeometries);
     disposeCreatureGeometries(this.unicornPredatorGeometries);
   }
