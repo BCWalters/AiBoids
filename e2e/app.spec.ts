@@ -197,11 +197,14 @@ test.describe('App smoke tests', () => {
       .toBe(!initiallyCollapsed);
   });
 
-  // One test per visual style rather than a single loop, so Playwright's
-  // --shard can spread the expensive styles (fishtank especially) across
-  // parallel CI runners instead of serializing them in one long test.
+  // One test per visual style rather than a single loop. The fishtank scene is
+  // far more expensive to render under CI's software WebGL, so it is tagged
+  // @fishtank and split into its own named CI job (see .github/workflows/ci.yml)
+  // while the other styles run together in the fast "standard" job.
   for (const style of ['arcade', 'nature', 'fishtank'] as const) {
-    test(`visual style "${style}" keeps the 3D canvas rendering`, async ({ page }) => {
+    test(`visual style "${style}" keeps the 3D canvas rendering`, {
+      tag: style === 'fishtank' ? ['@fishtank'] : [],
+    }, async ({ page }) => {
       test.setTimeout(120_000);
       failOnConsoleErrors(page);
       await gotoApp(page);
