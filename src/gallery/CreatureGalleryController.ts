@@ -273,26 +273,38 @@ export class CreatureGalleryController {
   }
 
   private enterGallery(creatureSpecies: GalleryCreature): void {
-    this.gallerySnapshot = {
-      mode: params.mode,
-      // Snapshotted (and restored on exit) same as the other fields below,
-      // but deliberately *not* reset to a fixed style here — the gallery
-      // keeps whatever visual style was already active, and the "Visual
-      // style" dropdown stays fully usable while the gallery is open (see
-      // the previousGalleryVisualStyle check in applySelectionChanges) so
-      // a model can be inspected/compared across nature, fishtank, and
-      // arcade without ever leaving gallery mode.
-      visualStyle: params.visualStyle,
-      boidCount: params.boidCount,
-      multicolorCount: params.multicolorCount,
-      goldCount: params.goldCount,
-      redCount: params.redCount,
-      blueCount: params.blueCount,
-      predatorCount: params.predatorCount,
-      monsterCount: params.monsterCount,
-      horseCount: params.horseCount,
-      running: params.running,
-    };
+    // Only snapshot the *real* pre-gallery simulation. Switching directly
+    // from one gallery creature to another (e.g. picking a second creature
+    // in the dropdown without returning to "None" first) re-runs this
+    // method while the params still hold the previous creature's isolated,
+    // zeroed-out population — snapshotting again there would overwrite the
+    // genuine pre-gallery state with a single-creature one, so exiting
+    // would wrongly restore just that creature instead of the full
+    // population. Guarding on a null snapshot keeps the original capture
+    // until the gallery is actually exited (exitGallery clears it).
+    if (!this.gallerySnapshot) {
+      this.gallerySnapshot = {
+        mode: params.mode,
+        // Snapshotted (and restored on exit) same as the other fields
+        // below, but deliberately *not* reset to a fixed style here — the
+        // gallery keeps whatever visual style was already active, and the
+        // "Visual style" dropdown stays fully usable while the gallery is
+        // open (see the previousGalleryVisualStyle check in
+        // applySelectionChanges) so a model can be inspected/compared
+        // across nature, fishtank, and arcade without ever leaving gallery
+        // mode.
+        visualStyle: params.visualStyle,
+        boidCount: params.boidCount,
+        multicolorCount: params.multicolorCount,
+        goldCount: params.goldCount,
+        redCount: params.redCount,
+        blueCount: params.blueCount,
+        predatorCount: params.predatorCount,
+        monsterCount: params.monsterCount,
+        horseCount: params.horseCount,
+        running: params.running,
+      };
+    }
 
     params.mode = '3d';
     params.boidCount = 0;
