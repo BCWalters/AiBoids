@@ -128,3 +128,165 @@ export function bakeVerticalStripeColors(
   if (nonIndexed !== geometry) geometry.dispose();
   return nonIndexed;
 }
+
+
+/**
+ * Subdivides a lathe profile (array of Vector2 control points, authored
+ * tail-to-nose) by linearly inserting `perEdge` extra samples along every
+ * edge. Y-based color baking (countershading, bands, region markings) can
+ * only place a color boundary where the lathe actually has a ring of
+ * vertices; a hand-authored profile has just a handful of rings, so a band
+ * edge would smear across a whole tall triangle. Subdividing first gives
+ * those bakers enough Y resolution to render a reasonably crisp boundary
+ * while keeping the low-poly silhouette (the extra points sit exactly on
+ * the original straight profile edges, so the outline is unchanged).
+ */
+export function subdivideProfile(profile: THREE.Vector2[], perEdge: number): THREE.Vector2[] {
+  const out: THREE.Vector2[] = [];
+  for (let i = 0; i < profile.length - 1; i++) {
+    const a = profile[i];
+    const b = profile[i + 1];
+    for (let s = 0; s < perEdge; s++) {
+      const t = s / perEdge;
+      out.push(new THREE.Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t));
+    }
+  }
+  out.push(profile[profile.length - 1].clone());
+  return out;
+}
+
+
+/** Converts to non-indexed (so adjacent triangles that straddle a color
+ * boundary don't share — and thus smear — a single vertex color) and
+ * returns the geometry plus a fresh color buffer ready to fill. Shared
+ * scaffolding for the per-species fish color bakers below. */
+function beginVertexColorBake(geometry: THREE.BufferGeometry): {
+  geo: THREE.BufferGeometry;
+  pos: THREE.BufferAttribute;
+  colors: Float32Array;
+} {
+  const geo = geometry.index ? geometry.toNonIndexed() : geometry;
+  if (geo !== geometry) geometry.dispose();
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+  return { geo, pos, colors: new Float32Array(pos.count * 3) };
+}
+
+function finishVertexColorBake(geo: THREE.BufferGeometry, colors: Float32Array): THREE.BufferGeometry {
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geo;
+}
+
+
+/**
+ * Bakes a uniform per-vertex 'color' onto a (position-only) geometry —
+ * used for the fins, so a white-passthrough color path (see the small-bird
+ * color applicator) shows the fin's real hue unchanged rather than tinting
+ * it with the per-instance body color.
+ */
+export function bakeUniformColor(geometry: THREE.BufferGeometry, color: THREE.Color): THREE.BufferGeometry {
+  const pos = geometry.getAttribute('position');
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return geometry;
+}
+
+
+/**
+ * Bakes dorsoventral countershading — the near-universal real-fish cue of a
+ * darker back fading to a paler belly — into a lathed body by its local Z
+ * (the model's up axis): vertices at the top (back) take `backColor`, those
+ * at the bottom (belly) take `bellyColor`, lerped by normalized height from
+ * the geometry's own Z bounding-box range.
+ */
+export function bakeCountershadeColors(
+  geometry: THREE.BufferGeometry,
+  backColor: THREE.Color,
+  bellyColor: THREE.Color,
+): THREE.BufferGeometry {
+  const { geo, pos, colors } = beginVertexColorBake(geometry);
+  geo.computeBoundingBox();
+  const minZ = geo.boundingBox!.min.z;
+  const maxZ = geo.boundingBox!.max.z;
+  const span = Math.max(1e-6, maxZ - minZ);
+  const tmp = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const zN = THREE.MathUtils.clamp((pos.getZ(i) - minZ) / span, 0, 1);
+    tmp.copy(bellyColor).lerp(backColor, zN);
+    colors[i * 3] = tmp.r;
+    colors[i * 3 + 1] = tmp.g;
+    colors[i * 3 + 2] = tmp.b;
+  }
+  return finishVertexColorBake(geo, colors);
+}
+
+
+/**
+ * Bakes a clownfish-style banded pattern along the body length (local Y,
+ * tail at -halfLen to nose at +halfLen): the body takes `bodyColor` except
+ * inside each band's normalized [from,to] length fraction, which takes
+ * `bandColor`, with a thin `edge` fraction on either side taking
+ * `edgeColor` (the dark outline real anemonefish bands carry).
+ */
+export function bakeLengthBandColors(
+  geometry: THREE.BufferGeometry,
+  halfLen: number,
+  bodyColor: THREE.Color,
+  bandColor: THREE.Color,
+  edgeColor: THREE.Color,
+  bands: Array<{ from: number; to: number }>,
+  edge: number,
+): THREE.BufferGeometry {
+  const { geo, pos, colors } = beginVertexColorBake(geometry);
+  for (let i = 0; i < pos.count; i++) {
+    const t = THREE.MathUtils.clamp((pos.getY(i) + halfLen) / (2 * halfLen), 0, 1);
+    let color = bodyColor;
+    for (const band of bands) {
+      if (t >= band.from && t <= band.to) {
+        color = bandColor;
+        break;
+      }
+      if ((t >= band.from - edge && t < band.from) || (t > band.to && t <= band.to + edge)) {
+        color = edgeColor;
+      }
+    }
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  return finishVertexColorBake(geo, colors);
+}
+
+
+/**
+ * Bakes the blue-tang "palette" look: a royal-blue body carrying a black
+ * marking across its upper flank (high local Z) over the mid-to-rear
+ * length, while the face and belly stay blue — the surgeonfish/"Dory" cue.
+ */
+export function bakeUpperFlankMarkColors(
+  geometry: THREE.BufferGeometry,
+  bodyColor: THREE.Color,
+  markColor: THREE.Color,
+  halfLen: number,
+  options: { zFrom: number; lengthFrom: number; lengthTo: number },
+): THREE.BufferGeometry {
+  const { geo, pos, colors } = beginVertexColorBake(geometry);
+  geo.computeBoundingBox();
+  const minZ = geo.boundingBox!.min.z;
+  const maxZ = geo.boundingBox!.max.z;
+  const span = Math.max(1e-6, maxZ - minZ);
+  for (let i = 0; i < pos.count; i++) {
+    const t = THREE.MathUtils.clamp((pos.getY(i) + halfLen) / (2 * halfLen), 0, 1);
+    const zN = THREE.MathUtils.clamp((pos.getZ(i) - minZ) / span, 0, 1);
+    const inMark = zN >= options.zFrom && t >= options.lengthFrom && t <= options.lengthTo;
+    const color = inMark ? markColor : bodyColor;
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  return finishVertexColorBake(geo, colors);
+}
