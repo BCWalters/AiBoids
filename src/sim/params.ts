@@ -15,6 +15,12 @@ export type SimMode = '2d' | '3d';
 // reskinned into fish/tank scenery independently of nature's assets.
 export type VisualStyle = 'arcade' | 'nature' | 'fishtank';
 export type TimeOfDayPreset = 'dawn' | 'noon' | 'sunset' | 'night';
+// Creature View / follow-cam mode. 'off' = normal free orbit camera.
+// 'orbit' = tier-1 "orbit-lock": OrbitControls stays fully interactive but
+// the orbit target tracks a (damped) selected creature so it stays centered
+// while the user orbits/zooms. Future tiers (chase / cockpit) will extend
+// this union — see the Creature View feature lane.
+export type FollowCamMode = 'off' | 'orbit';
 
 export interface SimParams {
   // Rendering / dimensionality mode
@@ -103,6 +109,34 @@ export interface SimParams {
   animationBlendStrength: number;
   // Fishtank-only: animated caustics + suspended particle water FX.
   waterEffectsEnabled: boolean;
+
+  // ---- Visual FX feature flags (scaffolding for parallel feature work) ----
+  // These default to off/neutral so they produce no visual change until each
+  // feature lane wires up the code that reads them. Grouped here so feature
+  // agents each own only their scene/render file and never collide on this
+  // shared params object.
+  //
+  // Creature View (follow-cam): click a creature to have the camera track it.
+  // 'off' = normal free orbit. See FollowCamMode.
+  followCamMode: FollowCamMode;
+  // Show the on-screen creature inspector HUD (species / speed / state) while
+  // a creature is selected via Creature View.
+  showCreatureInspector: boolean;
+  // Post-processing: filmic color grading (contrast/saturation) pass.
+  colorGradingEnabled: boolean;
+  // Post-processing: depth-of-field (focus on flock center / followed creature).
+  depthOfFieldEnabled: boolean;
+  // Nature-only: animated water surface (wave displacement).
+  waterWavesEnabled: boolean;
+  // Nature-only: reflections / sun specular glints on water.
+  waterReflectionsEnabled: boolean;
+  // Fishtank-only: tank substrate (gravel/sand) + plants/coral decor.
+  tankDecorEnabled: boolean;
+  // Fishtank-only: rising bubble particles.
+  bubblesEnabled: boolean;
+  // Fishtank-only: depth-based murk gradient (water darkens toward the back).
+  depthMurkEnabled: boolean;
+  // ------------------------------------------------------------------------
   // Optional in-app rendering HUD (frame-time/fps and related diagnostics).
   showRenderingStats: boolean;
   // Optional bounded in-memory diagnostics capture for export/debugging.
@@ -181,6 +215,18 @@ export const defaultParams: SimParams = {
   animationBlendStrength: 1,
   waterEffectsEnabled: true,
   showRenderingStats: false,
+
+  // Visual FX feature flags — default off/neutral (no visual change until a
+  // feature lane wires up the reads).
+  followCamMode: 'off',
+  showCreatureInspector: true,
+  colorGradingEnabled: false,
+  depthOfFieldEnabled: false,
+  waterWavesEnabled: false,
+  waterReflectionsEnabled: false,
+  tankDecorEnabled: false,
+  bubblesEnabled: false,
+  depthMurkEnabled: false,
   enableDiagnosticsCapture: false,
   predatorCatchEnabled: true,
 
