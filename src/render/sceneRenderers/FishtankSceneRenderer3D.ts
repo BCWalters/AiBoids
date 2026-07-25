@@ -6,13 +6,19 @@ import type { Predator } from '../../sim/Predator';
 import { type Boid, BoidSpecies } from '../../sim/Boid';
 import { computeFishtankRoomBounds, placeFishtankEnvironment, TANK_VISUAL_SCALE } from '../styles/fishtank/environment';
 import { getSharkTailPivotY, createSharkGeometries } from '../styles/fishtank/geometry/sharkGeometry';
+import { getBarracudaTailPivotY, createBarracudaGeometries } from '../styles/fishtank/geometry/barracudaGeometry';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
 import { createButterflyfishGeometries } from '../styles/fishtank/geometry/butterflyfishGeometry';
 import { createSeaHorseGeometries, SEAHORSE_BODY_COLOR, SEAHORSE_HUNT_COLOR } from '../styles/fishtank/geometry/seaHorseGeometry';
-import { createFishGeometries } from '../styles/fishtank/geometry/smallFishGeometry';
+import {
+  createPlainFishGeometries,
+  createGoldfishGeometries,
+  createClownfishGeometries,
+  createBlueTangGeometries,
+} from '../styles/fishtank/geometry/smallFishGeometry';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -42,6 +48,8 @@ export const FISHTANK_CREATURE_SIZES = {
   butterflyfish: fishtankSize(1),
   // Sparrow reskin — smaller darting fish.
   sparrow: fishtankSize(0.525),
+  // Barracuda (normal predator) — long/lean but clearly smaller than the monster shark.
+  barracuda: fishtankSize(27 / FISHTANK_BASE_CREATURE.length, 9.6 / FISHTANK_BASE_CREATURE.width),
   // Shark — a large torpedo-shaped hunter, 36 x 15.84 world units.
   shark: fishtankSize(36 / FISHTANK_BASE_CREATURE.length, 15.84 / FISHTANK_BASE_CREATURE.width),
   // Sea horse (unicorn reskin) — 36 x 14.85 world units.
@@ -71,6 +79,13 @@ const BUTTERFLYFISH_COLOR_PATTERNS: SpeciesColorSet[] = [
 // Shark predator (fishtank dragon-geometry variant): medium gray hide
 const SHARK_PREDATOR_BASE = new THREE.Color(0x6e7278); // medium slate-gray hide
 const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray when locked on
+// Barracuda (normal fishtank predator): cooler steel-blue body with a brighter chase tint.
+// Bright silvery steel base; the body geometry bakes its own dorsal-to-belly
+// gradient (dark steel back → pale silver belly) as vertex colors that
+// multiply against this, so keep the base near-white-silver to let that
+// gradient show. Hunt state brightens toward a cold, almost mirror sheen.
+const BARRACUDA_PREDATOR_BASE = new THREE.Color(0xc4ccd2);
+const BARRACUDA_PREDATOR_HUNT = new THREE.Color(0xe8eef2);
 
 // Per-species fishtank boid config. Owned by this scene so the aquatic-variant
 // colors, beaks and geometry selection can be tuned independently of the other
@@ -78,42 +93,30 @@ const SHARK_PREDATOR_HUNT = new THREE.Color(0xa8adb3); // lighter, brighter gray
 // duplicated here so the fishtank can diverge without touching nature).
 interface FishtankSpeciesConfig {
   baseColor: THREE.Color;
-  colors?: SpeciesColorSet;
   beakColor?: THREE.Color;
   tailSwayPivotY?: number;
-  useSmallGeometry: boolean;
-  useParrotGeometry?: boolean;
 }
 
 const FISHTANK_SPECIES_CONFIG: Record<BoidSpecies, FishtankSpeciesConfig> = {
   [BoidSpecies.Normal]: {
     baseColor: new THREE.Color(0xab8f68),
     beakColor: new THREE.Color(0x6b5a4a),
-    useSmallGeometry: true,
   },
   [BoidSpecies.Multicolor]: {
     baseColor: new THREE.Color(0xffffff),
-    useParrotGeometry: true,
     tailSwayPivotY: -4.186,
-    useSmallGeometry: false,
   },
   [BoidSpecies.Gold]: {
     baseColor: new THREE.Color(0xf5d327),
-    colors: { body: new THREE.Color(0xf5d327), wing: new THREE.Color(0x1c1c1c), tail: new THREE.Color(0x1c1c1c) },
     beakColor: new THREE.Color(0xf07820),
-    useSmallGeometry: false,
   },
   [BoidSpecies.Red]: {
     baseColor: new THREE.Color(0xcc2936),
-    colors: { body: new THREE.Color(0xcc2936), wing: new THREE.Color(0x8f1f28), tail: new THREE.Color(0x3d0f14) },
     beakColor: new THREE.Color(0xe84040),
-    useSmallGeometry: false,
   },
   [BoidSpecies.Blue]: {
     baseColor: new THREE.Color(0x3b6fa0),
-    colors: { body: new THREE.Color(0x3b6fa0), wing: new THREE.Color(0xdfe8ef), tail: new THREE.Color(0x1c3350) },
     beakColor: new THREE.Color(0x8c8c8c),
-    useSmallGeometry: false,
   },
 };
 
@@ -125,7 +128,14 @@ const SHARK_TAIL_SWAY_AMPLITUDE = 0.5; // radians; a visibly wide side-to-side b
 const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — the main swimming motion
 const SHARK_FIN_REST_TILT_RAD = 0.4;
 const FISHTANK_FISH_MESH_BOOST = 2.2;
+const FISHTANK_BARRACUDA_MESH_BOOST = 0.44;
 const FISHTANK_SHARK_MESH_BOOST = 0.55;
+const BARRACUDA_FLAP_FREQUENCY = 2.5;
+const BARRACUDA_FLAP_IDLE_AMPLITUDE = 0.04;
+const BARRACUDA_FLAP_SPEED_AMPLITUDE = 0.08;
+const BARRACUDA_TAIL_SWAY_AMPLITUDE = 0.44;
+const BARRACUDA_TAIL_SWAY_FREQUENCY = 3.9;
+const BARRACUDA_FIN_REST_TILT_RAD = 0.32;
 // Reference length fed to getSharkTailPivotY for the tail-sway pivot. This is
 // an independent motion-tuning value, intentionally NOT the shark's geometry
 // length (see FISHTANK_CREATURE_SIZES.shark) — preserved as-is.
@@ -150,18 +160,28 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   private readonly deps: FishtankSceneRendererDependencies;
 
   // Fishtank owns and disposes its own creature geometries, sized from
-  // FISHTANK_CREATURE_SIZES. No other scene knows about these.
-  private readonly boidGeometries: CreatureGeometries;
-  private readonly sparrowGeometries: CreatureGeometries;
+  // FISHTANK_CREATURE_SIZES. No other scene knows about these. Each small-fish
+  // species has its own fully color-baked geometry so it reads as that real
+  // fish (see smallFishGeometry.ts).
+  private readonly plainFishGeometries: CreatureGeometries;
+  private readonly goldfishGeometries: CreatureGeometries;
+  private readonly clownfishGeometries: CreatureGeometries;
+  private readonly blueTangGeometries: CreatureGeometries;
   private readonly butterflyfishGeometries: CreatureGeometries;
+  private readonly barracudaPredatorGeometries: CreatureGeometries;
   private readonly sharkPredatorGeometries: CreatureGeometries;
   private readonly unicornPredatorGeometries: CreatureGeometries;
 
   constructor(deps: FishtankSceneRendererDependencies) {
     this.deps = deps;
-    this.boidGeometries = createFishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
-    this.sparrowGeometries = createFishGeometries(FISHTANK_CREATURE_SIZES.sparrow.length, FISHTANK_CREATURE_SIZES.sparrow.width);
+    // Plain "Fish" stays small/darting (sparrow size); the named aquarium
+    // species use the standard fish size.
+    this.plainFishGeometries = createPlainFishGeometries(FISHTANK_CREATURE_SIZES.sparrow.length, FISHTANK_CREATURE_SIZES.sparrow.width);
+    this.goldfishGeometries = createGoldfishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
+    this.clownfishGeometries = createClownfishGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
+    this.blueTangGeometries = createBlueTangGeometries(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.fish.width);
     this.butterflyfishGeometries = createButterflyfishGeometries(FISHTANK_CREATURE_SIZES.butterflyfish.length, FISHTANK_CREATURE_SIZES.butterflyfish.width);
+    this.barracudaPredatorGeometries = createBarracudaGeometries(FISHTANK_CREATURE_SIZES.barracuda.length, FISHTANK_CREATURE_SIZES.barracuda.width);
     this.sharkPredatorGeometries = createSharkGeometries(FISHTANK_CREATURE_SIZES.shark.length, FISHTANK_CREATURE_SIZES.shark.width);
     this.unicornPredatorGeometries = createSeaHorseGeometries(FISHTANK_CREATURE_SIZES.seahorse.length, FISHTANK_CREATURE_SIZES.seahorse.width);
   }
@@ -332,16 +352,23 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           colorMode: 'speciesTint',
         };
       }
-      
-      case PredatorSpecies.Monster:
+
       case PredatorSpecies.Normal:
+        return {
+          baseColor: BARRACUDA_PREDATOR_BASE,
+          highlightColor: BARRACUDA_PREDATOR_HUNT,
+          getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
+          colorMode: 'flat',
+        };
+
+      case PredatorSpecies.Monster:
         return {
           baseColor: SHARK_PREDATOR_BASE,
           highlightColor: SHARK_PREDATOR_HUNT,
           getIntensity: (creature: Predator | Boid) => (creature as Predator).huntIntensity,
           colorMode: 'flat',
         };
-      
+
       default:
         throw new Error(`Unknown predator species: ${species}`);
     }
@@ -364,10 +391,24 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
         };
-      
-      case PredatorSpecies.Monster:
+
       case PredatorSpecies.Normal:
-        // Both map to shark motion in the fishtank
+        return {
+          flapFrequency: BARRACUDA_FLAP_FREQUENCY,
+          flapIdleAmplitude: BARRACUDA_FLAP_IDLE_AMPLITUDE,
+          flapSpeedAmplitude: BARRACUDA_FLAP_SPEED_AMPLITUDE,
+          keepUpright: true,
+          uprightStyle: 'shark',
+          finRestBiasRad: BARRACUDA_FIN_REST_TILT_RAD,
+          tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
+          tailSwayAmplitude: BARRACUDA_TAIL_SWAY_AMPLITUDE,
+          tailSwayFrequency: BARRACUDA_TAIL_SWAY_FREQUENCY,
+          tailSwayPivotY: getBarracudaTailPivotY(FISHTANK_CREATURE_SIZES.barracuda.length),
+          worldScale: TANK_VISUAL_SCALE,
+          meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_BARRACUDA_MESH_BOOST,
+        };
+
+      case PredatorSpecies.Monster:
         return {
           flapFrequency: SHARK_FLAP_FREQUENCY,
           flapIdleAmplitude: SHARK_FLAP_IDLE_AMPLITUDE,
@@ -382,26 +423,40 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
         };
-      
+
       default:
         throw new Error(`Unknown predator species: ${species}`);
     }
   }
 
   getBoidColorStrategy(species: BoidSpecies, _flags: StyleFlags): ColorStrategy {
-    // Fishtank boids have simpler coloring than nature (no panic jitter)
+    // Fishtank boids have simpler coloring than nature (no panic jitter).
     const config = FISHTANK_SPECIES_CONFIG[species];
     const isParrot = species === BoidSpecies.Multicolor;
+    if (isParrot) {
+      // Butterflyfish: per-variant striped tint over the baked stripe geometry.
+      return {
+        baseColor: config.baseColor,
+        highlightColor: new THREE.Color(0xffff00),
+        getIntensity: (creature) => (creature as Boid).panicLevel,
+        individualVariation: false,
+        getSpeciesColors: (creature) => this.getButterflyfishColorVariant(creature),
+        beakColor: config.beakColor,
+        colorMode: 'speciesTint',
+      };
+    }
+    // The four small fish (Fish / Goldfish / Clownfish / Blue Tang) bake their
+    // full multi-hue colors into their geometry, so the instance color just
+    // passes white through (small-bird color path) to show the baked pattern.
     return {
       baseColor: config.baseColor,
-      highlightColor: new THREE.Color(0xffff00), // Yellow highlight for fishtank
+      highlightColor: new THREE.Color(0xffff00),
       getIntensity: (creature) => (creature as Boid).panicLevel,
-      individualVariation: false, // Fishtank fish have consistent coloring
-      getSpeciesColors: isParrot
-        ? (creature) => this.getButterflyfishColorVariant(creature)
-        : (config.colors ? () => config.colors! : undefined),
+      individualVariation: false,
+      getSpeciesColors: undefined,
       beakColor: config.beakColor,
-      colorMode: (isParrot || config.colors) ? 'speciesTint' : 'flat',
+      bakedBodyGradient: true,
+      colorMode: 'smallBird',
     };
   }
 
@@ -419,7 +474,10 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       tailSwayPivotY: tailSwayPivot,
       worldScale: TANK_VISUAL_SCALE,
       meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
-      preferUpright: false,
+      // Keep fish dorsal-up: their flattened bodies + distinct dorsal fin make an
+      // unconstrained roll read as swimming sideways/upside-down. This anchors
+      // model +Z (dorsal) to world up while still allowing pitch and turn-banking.
+      preferUpright: true,
     };
   }
 
@@ -458,14 +516,18 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getBoidInstanceConfig(species: BoidSpecies, _flags: StyleFlags): SceneBoidInstanceConfig {
-    const config = FISHTANK_SPECIES_CONFIG[species];
-    if (config.useSmallGeometry) {
-      return { geometries: this.sparrowGeometries, bodyVertexColors: true };
+    switch (species) {
+      case BoidSpecies.Gold:
+        return { geometries: this.goldfishGeometries, bodyVertexColors: true };
+      case BoidSpecies.Red:
+        return { geometries: this.clownfishGeometries, bodyVertexColors: true };
+      case BoidSpecies.Blue:
+        return { geometries: this.blueTangGeometries, bodyVertexColors: true };
+      case BoidSpecies.Multicolor:
+        return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
+      default:
+        return { geometries: this.plainFishGeometries, bodyVertexColors: true };
     }
-    if (config.useParrotGeometry) {
-      return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
-    }
-    return { geometries: this.boidGeometries, bodyVertexColors: true };
   }
 
   getPredatorInstanceConfig(
@@ -474,9 +536,13 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     _renderFlags: PredatorRenderFlags,
   ): ScenePredatorInstanceConfig {
     switch (species) {
-      case PredatorSpecies.Monster:
       case PredatorSpecies.Normal:
-        // Both map to shark geometry in the fishtank
+        return {
+          geometries: this.barracudaPredatorGeometries,
+          rainbowWings: false,
+          bodyVertexColors: true,
+        };
+      case PredatorSpecies.Monster:
         return {
           geometries: this.sharkPredatorGeometries,
           rainbowWings: false,
@@ -503,7 +569,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         blue: 'Blue Tang',
       },
       predator: {
-        normal: 'Shark',
+        normal: 'Barracuda',
         monster: 'Shark',
         horse: 'Sea Horse',
       },
@@ -512,9 +578,12 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   dispose(): void {
     this.deps.fishtankEnv.dispose();
-    disposeCreatureGeometries(this.boidGeometries);
-    disposeCreatureGeometries(this.sparrowGeometries);
+    disposeCreatureGeometries(this.plainFishGeometries);
+    disposeCreatureGeometries(this.goldfishGeometries);
+    disposeCreatureGeometries(this.clownfishGeometries);
+    disposeCreatureGeometries(this.blueTangGeometries);
     disposeCreatureGeometries(this.butterflyfishGeometries);
+    disposeCreatureGeometries(this.barracudaPredatorGeometries);
     disposeCreatureGeometries(this.sharkPredatorGeometries);
     disposeCreatureGeometries(this.unicornPredatorGeometries);
   }

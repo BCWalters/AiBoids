@@ -37,7 +37,10 @@ async function gotoApp(page: Page, path = '/'): Promise<void> {
     },
   };
   const separator = path.includes('?') ? '&' : '?';
-  await page.goto(`${path}${separator}state=${encodeURIComponent(JSON.stringify(state))}`);
+  // lowfx=1 opts into reduced-graphics mode (see src/render/graphicsQuality.ts):
+  // drops bloom/shadows/AA/transmission water that are ruinously slow under
+  // software WebGL on CI but irrelevant to what these smoke tests assert.
+  await page.goto(`${path}${separator}state=${encodeURIComponent(JSON.stringify(state))}&lowfx=1`);
 }
 
 async function gotoGalleryCreature(
@@ -61,7 +64,7 @@ async function gotoGalleryCreature(
       horseCount: 0,
     },
   };
-  await page.goto(`/?state=${encodeURIComponent(JSON.stringify(state))}`);
+  await page.goto(`/?state=${encodeURIComponent(JSON.stringify(state))}&lowfx=1`);
   await expect.poll(async () => page.evaluate(() => (window as unknown as { __debugPosed?: boolean }).__debugPosed === true)).toBe(true);
   await page.waitForTimeout(300);
 }
@@ -194,24 +197,25 @@ test.describe('App smoke tests', () => {
       .toBe(!initiallyCollapsed);
   });
 
-  test('cycling through every visual style keeps the 3D canvas rendering', async ({ page }) => {
-    test.setTimeout(120_000);
-    failOnConsoleErrors(page);
-    await gotoApp(page);
-    const styleSelect = page.locator('#param-visual-style');
-    const styles = await styleSelect.locator('option').allTextContents();
-    expect(styles.length).toBeGreaterThanOrEqual(2);
-
-    const values = await styleSelect.locator('option').evaluateAll((opts) =>
-      opts.map((o) => (o as HTMLOptionElement).value),
-    );
-
-    for (const value of values) {
-      await styleSelect.selectOption(value);
+  // One test per visual style rather than a single loop. Each 3D style is
+  // tagged with its scene (@arcade / @nature / @fishtank) so CI can run each
+  // scene as its own named job (see .github/workflows/ci.yml). Under software
+  // WebGL every test pays its own scene shader-compile, so grouping by scene is
+  // what keeps each job short and makes it obvious which run to watch.
+  for (const style of ['arcade', 'nature', 'fishtank'] as const) {
+    test(`visual style "${style}" keeps the 3D canvas rendering`, {
+      tag: [`@${style}`],
+    }, async ({ page }) => {
+      test.setTimeout(120_000);
+      failOnConsoleErrors(page);
+      await gotoApp(page);
+      const styleSelect = page.locator('#param-visual-style');
+      await expect(styleSelect.locator(`option[value="${style}"]`)).toHaveCount(1);
+      await styleSelect.selectOption(style);
       await page.waitForTimeout(500);
       expect(await canvasHasVisibleContent(page, '#sim-canvas-3d')).toBe(true);
-    }
-  });
+    });
+  }
 
   test('switching to 2D mode shows the 2D canvas with visible boids, and back to 3D', async ({ page }) => {
     failOnConsoleErrors(page);
@@ -240,7 +244,9 @@ test.describe('App smoke tests', () => {
 });
 
 test.describe('Render color regression checks', () => {
-  test('nature dragon keeps flat body/wing tint with white baked tail passthrough', async ({ page }) => {
+  test('nature dragon keeps flat body/wing tint with white baked tail passthrough', {
+    tag: ['@nature'],
+  }, async ({ page }) => {
     failOnConsoleErrors(page);
     await gotoGalleryCreature(page, 'nature', 'monster');
     const colors = await readGalleryInstanceColors(page, 'monster');
@@ -259,7 +265,9 @@ test.describe('Render color regression checks', () => {
     expect(tail[2]).toBeGreaterThan(0.95);
   });
 
-  test('arcade normal boid keeps flat-mode body/wing color match', async ({ page }) => {
+  test('arcade normal boid keeps flat-mode body/wing color match', {
+    tag: ['@arcade'],
+  }, async ({ page }) => {
     failOnConsoleErrors(page);
     await gotoGalleryCreature(page, 'arcade', 'normal');
     const colors = await readGalleryInstanceColors(page, 'normal');
@@ -272,7 +280,9 @@ test.describe('Render color regression checks', () => {
     expect(Math.abs(body[2] - wing[2])).toBeLessThan(0.02);
   });
 
-  test('arcade gold boid keeps songbird darker-wing shading', async ({ page }) => {
+  test('arcade gold boid keeps songbird darker-wing shading', {
+    tag: ['@arcade'],
+  }, async ({ page }) => {
     failOnConsoleErrors(page);
     await gotoGalleryCreature(page, 'arcade', 'gold');
     const colors = await readGalleryInstanceColors(page, 'gold');
@@ -283,7 +293,9 @@ test.describe('Render color regression checks', () => {
     expect(sumRgb(wing)).toBeLessThan(sumRgb(body) * 0.9);
   });
 
-  test('nature unicorn keeps species-tint lighter wing than body', async ({ page }) => {
+  test('nature unicorn keeps species-tint lighter wing than body', {
+    tag: ['@nature'],
+  }, async ({ page }) => {
     failOnConsoleErrors(page);
     await gotoGalleryCreature(page, 'nature', 'horse');
     const colors = await readGalleryInstanceColors(page, 'horse');
@@ -294,7 +306,9 @@ test.describe('Render color regression checks', () => {
     expect(sumRgb(wing)).toBeGreaterThan(sumRgb(body) * 1.1);
   });
 
-  test('nature small-bird keeps white baked-gradient passthrough', async ({ page }) => {
+  test('nature small-bird keeps white baked-gradient passthrough', {
+    tag: ['@nature'],
+  }, async ({ page }) => {
     failOnConsoleErrors(page);
     await gotoGalleryCreature(page, 'nature', 'normal');
     const colors = await readGalleryInstanceColors(page, 'normal');

@@ -2,137 +2,98 @@ import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometry,
-  mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
 } from '../../../geometry/sharedGeometry';
-import { extrudeRingGeometryAlongX } from './fishSharedGeometry';
+import {
+  extrudeRingGeometryAlongX,
+  subdivideProfile,
+  bakeUniformColor,
+  bakeCountershadeColors,
+  bakeLengthBandColors,
+  bakeUpperFlankMarkColors,
+} from './fishSharedGeometry';
 
-// Fish tank style: createFishGeometries builds the small-fish silhouette
-// used for the small-species instances (see Renderer3D's
-// createFishtankFishGeometries alias): a laterally-compressed torpedo
-// body, dorsal fin, forked caudal fin, and small paddle-shaped pectoral
-// fins.
+// Fish tank style: the small-species instances (Fish / Goldfish / Clownfish /
+// Blue Tang). Each is a distinct, fully color-baked variant of a shared
+// laterally-compressed lathe body + dorsal fin + paddle pectoral fins + forked
+// caudal fin. Because every part bakes its real colors into a per-vertex
+// 'color' attribute, these route through a WHITE-passthrough color path (the
+// small-bird color applicator) so the baked multi-hue pattern shows unchanged
+// rather than being flattened to one per-instance tint — the only way to get a
+// clownfish's white bands over an orange body, or a blue tang's black flank
+// mark and yellow tail, from a single instanced mesh.
 
-/**
- * Small-fish geometry: a laterally-compressed (taller than it is wide,
- * seen head-on), torpedo-shaped lathed body with a triangular dorsal fin
- * baked onto its back, a pair of small paddle-shaped pectoral fins (using
- * the wingLeft/wingRight slots so they get the existing per-instance
- * flap animation — reads as a paddling/steering motion), and a forked
- * caudal (tail) fin. Replaces the small-bird silhouette this file started
- * as (see the file-level comment above).
- */
-export function createFishGeometries(length: number, width: number): CreatureGeometries {
-  const body = buildFishBodyGeometry(length, width);
+// Near-black eye baked onto every small-fish head; stays correct under the
+// white-passthrough color path (it carries its own dark vertex color).
+const EYE_COLOR = new THREE.Color(0x0a0a0a);
+// mergeGeometriesWithColor uses an input geometry's own baked 'color' attribute
+// when present and only falls back to this uniform color otherwise; the body
+// and fins all bake their own colors, so this is a never-used placeholder for
+// those parts.
+const UNUSED_MERGE_COLOR = new THREE.Color(0xffffff);
 
-  // Deliberately small relative to body length — real pectoral fins are
-  // modest paddles, not another pair of wings. An earlier pass sized
-  // these off `width` (finSpan = width * 1.6) which, once width was
-  // itself boosted for the fishtank species' fatter proportions, made
-  // the fins nearly as long as the whole body and read as spiky
-  // antennae rather than fins.
-  const finSpan = length * 0.3;
-  const finChord = length * 0.26;
-  const wingLeft = buildPectoralFinGeometry(length, finSpan, finChord, 1);
-  const wingRight = buildPectoralFinGeometry(length, finSpan, finChord, -1);
-
-  const tail = buildCaudalFinGeometry(length, width);
-
-  return { body, wingLeft, wingRight, tail };
+interface BodyProportions {
+  /** Non-uniform post-lathe scale on local X (flank-to-flank). <1 makes the
+   * fish laterally compressed (narrower side-to-side). */
+  sideSquash: number;
+  /** Non-uniform post-lathe scale on local Z (dorsal-to-ventral). >1 makes the
+   * fish taller — the deep/disc body real fish read as fish-shaped. */
+  heightStretch: number;
 }
 
-
-/**
- * Radially-symmetric (lathed) torpedo body profile: nose points along
- * local +Y to match FORWARD_AXIS, tapering to a slender peduncle (the
- * narrow "handle" a real fish's tail fin attaches to) at -Y. A lathe
- * alone produces a body round in cross-section (equally wide as it is
- * tall); real fish read as fish rather than "a floating egg" mostly
- * because they're laterally compressed — noticeably taller (dorsal-to-
- * ventral) than they are wide (side-to-side) — so BODY_SIDE_SQUASH/
- * BODY_HEIGHT_STRETCH apply that compression as a non-uniform scale
- * after the lathe (X is the model's local left-right axis, Z is local
- * up — see MODEL_RIGHT_AXIS/MODEL_UP_AXIS in Renderer3D.ts). A dorsal
- * fin (see buildDorsalFinGeometry) and a pair of near-black eye dots are
- * merged onto the body afterward, same trick as the small-bird geometry
- * this replaced.
- */
-const BODY_SIDE_SQUASH = 0.62; // narrower side-to-side
-const BODY_HEIGHT_STRETCH = 1.3; // taller dorsal-to-ventral
-
-function buildFishBodyGeometry(length: number, width: number): THREE.BufferGeometry {
-  const halfLen = length * 0.5;
-  const profile = [
-    new THREE.Vector2(width * 0.05, -halfLen * 1.0), // peduncle tip, where the caudal fin attaches
-    new THREE.Vector2(width * 0.14, -halfLen * 0.82), // slender peduncle
-    new THREE.Vector2(width * 0.32, -halfLen * 0.55), // rear body widening
-    new THREE.Vector2(width * 0.46, -halfLen * 0.2), // widest point, just behind center
-    new THREE.Vector2(width * 0.44, halfLen * 0.12), // shoulder, just past center
-    new THREE.Vector2(width * 0.3, halfLen * 0.45), // head taper begins
-    new THREE.Vector2(width * 0.16, halfLen * 0.68), // snout base
-    new THREE.Vector2(width * 0.05, halfLen * 0.85), // blunt nose tip
-  ];
-  const body = new THREE.LatheGeometry(profile, 14);
-  body.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
-
-  const dorsalFin = buildDorsalFinGeometry(length, width);
-
-  const eyeY = halfLen * 0.62;
-  const eyeX = width * 0.22 * BODY_SIDE_SQUASH;
-  const eyeZ = width * 0.08 * BODY_HEIGHT_STRETCH;
-  const eyeRadius = width * 0.055;
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
-
-  return mergeGeometriesWithColor([
-    { geometry: mergePositionOnlyGeometries([body, dorsalFin]), color: WHITE_VERTEX_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
-  ]);
+interface FinSizing {
+  /** Dorsal fin height as a fraction of body width. */
+  dorsalHeightFactor: number;
+  /** Pectoral fin span (sideways reach) as a fraction of body length. */
+  pectoralSpanFactor: number;
+  /** Pectoral fin chord (fore-aft size) as a fraction of body length. */
+  pectoralChordFactor: number;
+  /** Caudal fin spread (upper/lower tip reach) as a fraction of body width. */
+  caudalSpreadFactor: number;
 }
 
-// Near-black eye baked onto every small-fish species' head — stays
-// visually correct under any per-species per-instance body tint multiply
-// (near-black stays near-black regardless of what it's multiplied
-// against), same trick as the small-bird geometry it replaced.
-const EYE_COLOR = new THREE.Color(0x0d0b08);
-const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
+const DEFAULT_FIN_SIZING: FinSizing = {
+  dorsalHeightFactor: 0.9,
+  pectoralSpanFactor: 0.3,
+  pectoralChordFactor: 0.26,
+  caudalSpreadFactor: 0.85,
+};
+
+/** Builds the shared lathe body (nose at +Y, peduncle at -Y) with the given
+ * profile and lateral-compression proportions. The caller bakes the body's
+ * color pattern before it is merged with the dorsal fin and eyes. */
+function buildLatheBody(profile: THREE.Vector2[], proportions: BodyProportions): THREE.BufferGeometry {
+  const body = new THREE.LatheGeometry(profile, 16);
+  body.scale(proportions.sideSquash, 1, proportions.heightStretch);
+  return body;
+}
 
 /**
- * A single triangular dorsal fin standing up (+Z, the model's local "up")
- * from the fish's back, roughly over the widest part of the body — the
- * single most important silhouette cue that separates "a fish" from "a
- * slightly flattened egg". Built via extrudeRingGeometryAlongX rather
- * than the shared (Z-axis) extrudeRingGeometry or a flat zero-thickness
- * plane: this fin's ring lies in the Y-Z plane (every point has X=0), so
- * it needs thickness added along X (flank-to-flank) to keep a visible
- * silhouette from any angle — Z-axis extrusion would only nudge its
- * already-dominant Y/Z shape, leaving it just as vanishingly thin when
- * viewed edge-on from the front or back (the same bug the shark's dorsal
- * fin had before this fix — see sharkGeometry.ts's history).
+ * A single triangular dorsal fin standing up (+Z) from the fish's back over
+ * the widest part of the body — the single strongest silhouette cue that
+ * separates "a fish" from "a flattened egg". Built via extrudeRingGeometryAlongX
+ * (thickened flank-to-flank along X) because its ring lies in the Y-Z plane, so
+ * a Z-axis extrusion would leave it vanishingly thin edge-on.
  */
-function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeometry {
+function buildDorsalFinGeometry(length: number, width: number, heightFactor: number, heightStretch: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const finHeight = width * 0.9;
-  const root = new THREE.Vector3(0, halfLen * 0.05, width * 0.3 * BODY_HEIGHT_STRETCH);
-  const back = new THREE.Vector3(0, -halfLen * 0.35, width * 0.32 * BODY_HEIGHT_STRETCH);
-  const tip = new THREE.Vector3(0, -halfLen * 0.12, width * 0.3 * BODY_HEIGHT_STRETCH + finHeight);
+  const finHeight = width * heightFactor * 0.5;
+  const root = new THREE.Vector3(0, halfLen * 0.08, width * 0.3 * heightStretch);
+  const back = new THREE.Vector3(0, -halfLen * 0.35, width * 0.32 * heightStretch);
+  const tip = new THREE.Vector3(0, -halfLen * 0.1, width * 0.3 * heightStretch + finHeight);
   const thickness = width * 0.12;
   return extrudeRingGeometryAlongX([root, back, tip], thickness);
 }
 
 /**
- * A small paddle/kite-shaped pectoral fin extending sideways from near
- * the body's origin. `side` is +1 for the fin extending toward +X (left)
- * or -1 toward -X (right, mirrored). Rooted with a slight forward offset
- * (+Y) so it reads as attached near the "gills", ahead of the body's
- * center, rather than dead-center like the wings this replaced. Built as
- * a 4-point kite (root -> leadingBulge -> tip -> trailingBulge, fanned
- * from the root) extruded into a real 3D prism via extrudeRingGeometry
- * (this ring lies flat in the X/Y plane, so the shared helper's own
- * Z-thickening axis is exactly the right one here) rather than a flat
- * zero-thickness pair of triangles, so it doesn't vanish when viewed
- * from directly above or below — the same fix applied to the shark's
- * pectoral fins.
+ * A small paddle/kite-shaped pectoral fin extending sideways near the gills.
+ * `side` is +1 (toward +X / left) or -1 (mirrored). Rooted with a slight
+ * forward (+Y) offset so it reads as attached near the gills. Built as a
+ * 4-point kite extruded into a real prism (its ring lies in the X/Y plane, so
+ * the shared Z-thickening helper is correct here) so it keeps a silhouette from
+ * above/below. These use the wingLeft/wingRight slots so they get the existing
+ * per-instance flap animation (reads as paddling/steering).
  */
 function buildPectoralFinGeometry(length: number, span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
   const rootY = length * 0.12;
@@ -147,27 +108,196 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
   return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
 }
 
-
 /**
- * A forked caudal (tail) fin trailing behind the body (toward local -Y),
- * built from a quadrilateral boundary (root -> upperTip -> notch ->
- * lowerTip) extruded into a real 3D prism via extrudeRingGeometry — reads
- * as a forked fish tail from a distance, but (unlike a flat zero-
- * thickness plane) doesn't disappear when viewed edge-on from directly
- * the side. `notch` is pulled forward toward the root (rather than out
- * to the tips, as the bird tail-fan this replaces did) to cut a V-shaped
- * notch into the trailing edge — the classic forked-tail silhouette.
- * extrudeRingGeometry triangulates this quad via the diagonal from
- * `root` to `notch`, which correctly handles `notch` being a reflex
- * (concave) vertex. Static (does not flap).
+ * A forked caudal (tail) fin trailing behind the body (toward -Y): a quad
+ * boundary (root -> upperTip -> notch -> lowerTip) extruded into a real prism,
+ * with `notch` pulled forward toward the root to cut the classic V-shaped fork.
+ * Static (does not flap).
  */
-function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeometry {
+function buildCaudalFinGeometry(length: number, width: number, spread: number): THREE.BufferGeometry {
   const root = new THREE.Vector3(0, 0, 0);
-  const upperTip = new THREE.Vector3(-width * 0.85, -length * 0.5, 0);
-  const lowerTip = new THREE.Vector3(width * 0.85, -length * 0.5, 0);
+  const upperTip = new THREE.Vector3(-width * spread, -length * 0.5, 0);
+  const lowerTip = new THREE.Vector3(width * spread, -length * 0.5, 0);
   const notch = new THREE.Vector3(0, -length * 0.18, 0);
   const thickness = width * 0.05;
-
   return extrudeRingGeometry([root, upperTip, notch, lowerTip], thickness);
 }
 
+interface FishVariant {
+  proportions: BodyProportions;
+  /** Lathe profile control points, authored tail (-Y) to nose (+Y), as
+   * (radius, y) pairs scaled by width/halfLen. */
+  profile: (halfLen: number, width: number) => THREE.Vector2[];
+  /** Extra per-edge profile subdivision, for variants whose color pattern
+   * (bands / flank mark) needs finer Y resolution than the raw control points. */
+  profileSubdivide?: number;
+  /** Bakes the body's per-vertex color pattern onto the lathe. */
+  bakeBody: (body: THREE.BufferGeometry, halfLen: number, width: number) => THREE.BufferGeometry;
+  dorsalColor: THREE.Color;
+  pectoralColor: THREE.Color;
+  tailColor: THREE.Color;
+  fins?: Partial<FinSizing>;
+  eyeRadiusFactor?: number;
+}
+
+function buildFishVariant(length: number, width: number, variant: FishVariant): CreatureGeometries {
+  const halfLen = length * 0.5;
+  const fins = { ...DEFAULT_FIN_SIZING, ...(variant.fins ?? {}) };
+
+  let profile = variant.profile(halfLen, width);
+  if (variant.profileSubdivide) profile = subdivideProfile(profile, variant.profileSubdivide);
+  const lathe = buildLatheBody(profile, variant.proportions);
+  const coloredBody = variant.bakeBody(lathe, halfLen, width);
+
+  const dorsal = bakeUniformColor(
+    buildDorsalFinGeometry(length, width, fins.dorsalHeightFactor, variant.proportions.heightStretch),
+    variant.dorsalColor,
+  );
+
+  const eyeRadius = width * (variant.eyeRadiusFactor ?? 0.04);
+  const eyeY = halfLen * 0.62;
+  const eyeX = width * 0.22 * variant.proportions.sideSquash;
+  const eyeZ = width * 0.1 * variant.proportions.heightStretch;
+  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+
+  const body = mergeGeometriesWithColor([
+    { geometry: coloredBody, color: UNUSED_MERGE_COLOR },
+    { geometry: dorsal, color: UNUSED_MERGE_COLOR },
+    { geometry: eyes, color: EYE_COLOR },
+  ]);
+
+  const span = length * fins.pectoralSpanFactor;
+  const chord = length * fins.pectoralChordFactor;
+  const wingLeft = bakeUniformColor(buildPectoralFinGeometry(length, span, chord, 1), variant.pectoralColor);
+  const wingRight = bakeUniformColor(buildPectoralFinGeometry(length, span, chord, -1), variant.pectoralColor);
+  const tail = bakeUniformColor(buildCaudalFinGeometry(length, width, fins.caudalSpreadFactor), variant.tailColor);
+
+  return { body, wingLeft, wingRight, tail };
+}
+
+
+// ---------------------------------------------------------------------------
+// Per-species variants. Colors chosen to read as the real fish; geometry
+// proportions give each species a distinct, recognizable silhouette.
+// ---------------------------------------------------------------------------
+
+/** Plain fish ("Fish"): a streamlined, mildly-compressed body with natural
+ * countershading (olive-steel back fading to a pale silver belly) and muted
+ * olive-gray fins — a believable generic minnow/baitfish. */
+export function createPlainFishGeometries(length: number, width: number): CreatureGeometries {
+  const back = new THREE.Color(0x6f7c63);
+  const belly = new THREE.Color(0xd7dcd0);
+  return buildFishVariant(length, width, {
+    proportions: { sideSquash: 0.465, heightStretch: 0.675 },
+    profile: (h, w) => [
+      new THREE.Vector2(0, -h * 1.0),
+      new THREE.Vector2(w * 0.14, -h * 0.82),
+      new THREE.Vector2(w * 0.3, -h * 0.5),
+      new THREE.Vector2(w * 0.46, -h * 0.15),
+      new THREE.Vector2(w * 0.44, h * 0.15),
+      new THREE.Vector2(w * 0.3, h * 0.45),
+      new THREE.Vector2(w * 0.16, h * 0.68),
+      new THREE.Vector2(0, h * 0.85),
+    ],
+    bakeBody: (body) => bakeCountershadeColors(body, back, belly),
+    dorsalColor: new THREE.Color(0x7c8a70),
+    pectoralColor: new THREE.Color(0x9aa690),
+    tailColor: new THREE.Color(0x7c8a70),
+  });
+}
+
+/** Goldfish: a deep, rounded, chunky body in rich orange fading to a lighter
+ * gold belly, with large flowing orange fins. */
+export function createGoldfishGeometries(length: number, width: number): CreatureGeometries {
+  const back = new THREE.Color(0xff6a00);
+  const belly = new THREE.Color(0xffb347);
+  const finColor = new THREE.Color(0xff8c1a);
+  return buildFishVariant(length, width, {
+    proportions: { sideSquash: 0.54, heightStretch: 0.86 },
+    profile: (h, w) => [
+      new THREE.Vector2(0, -h * 1.0),
+      new THREE.Vector2(w * 0.2, -h * 0.76),
+      new THREE.Vector2(w * 0.44, -h * 0.42),
+      new THREE.Vector2(w * 0.56, -h * 0.08),
+      new THREE.Vector2(w * 0.54, h * 0.22),
+      new THREE.Vector2(w * 0.38, h * 0.5),
+      new THREE.Vector2(w * 0.2, h * 0.72),
+      new THREE.Vector2(0, h * 0.87),
+    ],
+    bakeBody: (body) => bakeCountershadeColors(body, back, belly),
+    dorsalColor: finColor,
+    pectoralColor: finColor,
+    tailColor: finColor,
+    fins: {
+      dorsalHeightFactor: 1.15,
+      pectoralSpanFactor: 0.4,
+      pectoralChordFactor: 0.34,
+      caudalSpreadFactor: 1.0,
+    },
+  });
+}
+
+/** Clownfish: a stubby oval orange body crossed by three white vertical bands
+ * outlined in black, with orange fins. */
+export function createClownfishGeometries(length: number, width: number): CreatureGeometries {
+  const bodyColor = new THREE.Color(0xf4661c);
+  const band = new THREE.Color(0xf7f4ee);
+  const edge = new THREE.Color(0x1a120c);
+  const finColor = new THREE.Color(0xf4661c);
+  return buildFishVariant(length, width, {
+    proportions: { sideSquash: 0.495, heightStretch: 0.75 },
+    profileSubdivide: 4,
+    profile: (h, w) => [
+      new THREE.Vector2(0, -h * 0.95),
+      new THREE.Vector2(w * 0.24, -h * 0.68),
+      new THREE.Vector2(w * 0.46, -h * 0.34),
+      new THREE.Vector2(w * 0.52, h * 0.0),
+      new THREE.Vector2(w * 0.5, h * 0.28),
+      new THREE.Vector2(w * 0.34, h * 0.55),
+      new THREE.Vector2(w * 0.18, h * 0.75),
+      new THREE.Vector2(0, h * 0.9),
+    ],
+    bakeBody: (body, halfLen) =>
+      bakeLengthBandColors(body, halfLen, bodyColor, band, edge, [
+        { from: 0.6, to: 0.72 }, // head band, just behind the eye
+        { from: 0.38, to: 0.5 }, // mid-body band
+        { from: 0.14, to: 0.22 }, // peduncle band
+      ], 0.03),
+    dorsalColor: finColor,
+    pectoralColor: finColor,
+    tailColor: finColor,
+    eyeRadiusFactor: 0.045,
+  });
+}
+
+/** Blue Tang: a tall, disc-shaped, strongly-compressed royal-blue body with a
+ * black "palette" marking across the upper flank and a bright yellow tail. */
+export function createBlueTangGeometries(length: number, width: number): CreatureGeometries {
+  const blue = new THREE.Color(0x1560bd);
+  const mark = new THREE.Color(0x0b1622);
+  const yellow = new THREE.Color(0xffcf00);
+  return buildFishVariant(length, width, {
+    proportions: { sideSquash: 0.375, heightStretch: 1.0 },
+    profileSubdivide: 4,
+    profile: (h, w) => [
+      new THREE.Vector2(0, -h * 0.9),
+      new THREE.Vector2(w * 0.26, -h * 0.6),
+      new THREE.Vector2(w * 0.52, -h * 0.26),
+      new THREE.Vector2(w * 0.62, h * 0.06),
+      new THREE.Vector2(w * 0.56, h * 0.36),
+      new THREE.Vector2(w * 0.4, h * 0.6),
+      new THREE.Vector2(w * 0.2, h * 0.78),
+      new THREE.Vector2(0, h * 0.9),
+    ],
+    bakeBody: (body, halfLen) =>
+      bakeUpperFlankMarkColors(body, blue, mark, halfLen, { zFrom: 0.42, lengthFrom: 0.12, lengthTo: 0.72 }),
+    dorsalColor: mark,
+    pectoralColor: yellow,
+    tailColor: yellow,
+    fins: {
+      dorsalHeightFactor: 0.7,
+      caudalSpreadFactor: 0.7,
+    },
+    eyeRadiusFactor: 0.045,
+  });
+}

@@ -197,7 +197,7 @@ const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
 };
 
 // Dragon predator variant (nature style only): purple, leathery-winged
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x61339b); // matched to the visible root tone at the tail base
+const DRAGON_PREDATOR_BASE = new THREE.Color(0x502a7f); // slightly darker body purple (per issue #73); tail root is baked to match this
 const DRAGON_PREDATOR_HUNT = new THREE.Color(0x7b4fc2); // brighter chase tint while staying in the same palette
 
 // Unicorn predator (all styles): light lavender body, always upright

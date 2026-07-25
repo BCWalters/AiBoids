@@ -16,6 +16,7 @@ import {
   createWayfindingSign,
   type OverheadLamp,
 } from './roomDecor';
+import { isReducedGraphics } from '../../graphicsQuality';
 
 /**
  * "Fish tank" style environment: a glass aquarium box (matching the sim's
@@ -420,18 +421,37 @@ function createCausticsTexture(size = 256): THREE.CanvasTexture {
 }
 
 export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironment {
+  // Reduced-graphics mode (e2e/CI on software WebGL, opted in via ?lowfx=1):
+  // the fishtank scene is by far the most expensive under SwiftShader. The two
+  // MeshPhysicalMaterial surfaces (glass + water) each compile a large PBR
+  // shader (clearcoat/transmission/IOR permutations) whose lazy first-frame
+  // compile is the dominant cost. Swapping them for the cheapest possible
+  // MeshBasicMaterial keeps a translucent tint but skips that compile and the
+  // per-frame lighting math, and disabling caustics/particles avoids extra
+  // transparent overdraw. None of this affects what the smoke test asserts
+  // (that the canvas renders visible content).
+  const reducedGraphics = isReducedGraphics();
+
   // Placeholder 1x1x1 boxes — placeFishtankEnvironment resizes/positions
   // everything below once the sim's actual world dimensions are known.
   const glassGeometry = new THREE.BoxGeometry(1, 1, 1);
-  const glassMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xdff6ff,
-    transparent: true,
-    opacity: 0.18,
-    roughness: 0.05,
-    metalness: 0,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
+  const glassMaterial: THREE.Material = reducedGraphics
+    ? new THREE.MeshBasicMaterial({
+        color: 0xdff6ff,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    : new THREE.MeshPhysicalMaterial({
+        color: 0xdff6ff,
+        transparent: true,
+        opacity: 0.18,
+        roughness: 0.05,
+        metalness: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
   const glassPanels = new THREE.Mesh(glassGeometry, glassMaterial);
   glassPanels.visible = false;
   glassPanels.receiveShadow = true;
@@ -462,18 +482,30 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   frame.visible = false;
 
   const waterGeometry = new THREE.BoxGeometry(1, 1, 1);
-  const waterMaterial = new THREE.MeshPhysicalMaterial({
-    color: WATER_COLOR,
-    transparent: true,
-    opacity: 0.34,
-    transmission: 0.35,
-    thickness: 0.8,
-    ior: 1.07,
-    roughness: 0.08,
-    metalness: 0,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
+  // See the reduced-graphics note at the top of this function: in reduced mode
+  // the water becomes a flat translucent MeshBasicMaterial (no transmission
+  // pass, no PBR shader compile), which is the single biggest fishtank speedup
+  // under software WebGL.
+  const waterMaterial: THREE.MeshBasicMaterial | THREE.MeshPhysicalMaterial = reducedGraphics
+    ? new THREE.MeshBasicMaterial({
+        color: WATER_COLOR,
+        transparent: true,
+        opacity: 0.34,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      })
+    : new THREE.MeshPhysicalMaterial({
+        color: WATER_COLOR,
+        transparent: true,
+        opacity: 0.34,
+        transmission: 0.35,
+        thickness: 0.8,
+        ior: 1.07,
+        roughness: 0.08,
+        metalness: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
   const waterFill = new THREE.Mesh(waterGeometry, waterMaterial);
   waterFill.visible = false;
   waterFill.receiveShadow = true;
@@ -491,7 +523,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   caustics.rotation.x = -Math.PI / 2;
   caustics.visible = false;
 
-  const particleCount = 750;
+  const particleCount = reducedGraphics ? 60 : 750;
   const particlePositions = new Float32Array(particleCount * 3);
   const particleSeeds = new Float32Array(particleCount);
   for (let i = 0; i < particleCount; i++) {
@@ -750,7 +782,10 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   );
 
   let fogEnabled = true;
-  let waterEffectsEnabled = true;
+  // In reduced-graphics mode the animated caustics + suspended particles
+  // (extra transparent overdraw + a per-frame vertex loop) are disabled
+  // entirely; they contribute nothing the smoke test checks for.
+  let waterEffectsEnabled = !reducedGraphics;
   let causticsBaseOpacity = TANK_LIGHTING_PRESETS.noon.causticsBaseOpacity;
   let particlesBaseOpacity = TANK_LIGHTING_PRESETS.noon.particleOpacity;
 
@@ -802,6 +837,9 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     suspendedParticles,
     update(elapsed: number) {
       if (!waterFill.visible) return;
+      // Reduced mode: caustics + particles are off, so skip all their per-frame
+      // work (texture-offset writes and the particle position rewrite loop).
+      if (!waterEffectsEnabled) return;
       const causticsMap = causticsMaterial.map;
       if (causticsMap) {
         causticsMap.offset.x = elapsed * 0.025;
@@ -890,8 +928,8 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       applyTimeOfDay(preset);
     },
     setWaterEffectsEnabled(enabled: boolean) {
-      waterEffectsEnabled = enabled;
-      const visible = waterFill.visible && enabled;
+      waterEffectsEnabled = enabled && !reducedGraphics;
+      const visible = waterFill.visible && waterEffectsEnabled;
       caustics.visible = visible;
       suspendedParticles.visible = visible;
     },
