@@ -37,7 +37,7 @@ export function createSeaHorseGeometries(length: number, width: number): Creatur
 // to it). Set halfway between the prior mauve-pink (0xdf9dd1) and the lighter
 // lavender (0xe9b8e0) per feedback — a touch pinker than the lighter tone while
 // staying lighter than the original.
-export const SEAHORSE_BODY_COLOR = 0xe4abd9;
+export const SEAHORSE_BODY_COLOR = 0xed9dd2;
 export const SEAHORSE_HUNT_COLOR = 0xf2d6ee;
 export const SEAHORSE_TAIL_TIP_COLOR = 0xa87fe0;
 
