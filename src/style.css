@@ -91,6 +91,22 @@ body {
   z-index: 5;
 }
 
+#creature-inspector {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(201, 209, 217, 0.22);
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.78);
+  color: #c9d1d9;
+  font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
+  white-space: pre;
+  pointer-events: none;
+  z-index: 5;
+}
+
 #control-panel {
   width: 300px;
   flex-shrink: 0;

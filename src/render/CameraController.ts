@@ -110,4 +110,23 @@ export class CameraController {
     this.controls.target.set(target[0], target[1], target[2]);
     this.controls.update();
   }
+
+  /**
+   * Exponentially smooth the OrbitControls orbit target toward a world-space
+   * position — used by FollowCamController's orbit-lock mode.
+   * `alpha` is the per-frame blend factor (0 = no movement, 1 = snap).
+   * OrbitControls.update() is NOT called here; Renderer3D.renderOutput() calls
+   * it every frame so the smooth motion is picked up automatically.
+   */
+  smoothOrbitTarget(x: number, y: number, z: number, alpha: number): void {
+    const t = this.controls.target;
+    t.x += (x - t.x) * alpha;
+    t.y += (y - t.y) * alpha;
+    t.z += (z - t.z) * alpha;
+  }
+
+  /** Returns the perspective camera — used by the screen-space entity picker. */
+  getCamera(): THREE.PerspectiveCamera {
+    return this.camera;
+  }
 }

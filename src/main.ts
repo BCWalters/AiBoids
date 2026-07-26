@@ -5,6 +5,7 @@ import { Renderer3D } from './render/Renderer3D';
 import { ControlPanel } from './ui/ControlPanel';
 import { Diagnostics } from './diagnostics/Diagnostics';
 import { CreatureGalleryController } from './gallery/CreatureGalleryController';
+import { FollowCamController } from './render/FollowCamController';
 import { params, type SimMode } from './sim/params';
 import { onLanguageChange } from './i18n/language';
 import { t } from './i18n/translations';
@@ -48,6 +49,13 @@ const diagnostics = new Diagnostics(sim, canvasStack);
 
 let renderer2D: Renderer | null = null;
 let renderer3D: Renderer3D | null = null;
+
+// Creature View follow-cam controller — manages click-to-select, per-frame
+// orbit-lock damping, and the creature inspector HUD overlay. Constructed
+// here so the HUD element is appended to canvasStack early (before applyMode
+// creates renderer3D). The click listener is registered below, after canvas3D
+// is known.
+const followCamController = new FollowCamController(canvasStack);
 
 // Creature Gallery + "Copy deep link" subsystem (see gallery/CreatureGalleryController).
 // Constructed here — before ControlPanel and the initial applyMode below —
@@ -157,6 +165,14 @@ window.addEventListener('resize', () => {
   resizeCanvases();
 });
 
+// Creature View: left-click on the 3D canvas selects the nearest creature
+// (only active when followCamMode === 'orbit'; inert otherwise).
+canvas3D.addEventListener('click', (e) => {
+  if (renderer3D) {
+    followCamController.handleCanvasClick(e, canvas3D, sim, renderer3D);
+  }
+});
+
 let lastTime = performance.now();
 
 function loop(now: number): void {
@@ -179,7 +195,12 @@ function loop(now: number): void {
   const uiEnd = performance.now();
 
   if (params.mode === '3d') {
-    renderer3D?.render(sim);
+    if (renderer3D) {
+      // Creature View orbit-lock: smooth the orbit target before render so
+      // OrbitControls.update() inside renderOutput() picks up the new target.
+      followCamController.update(dt, sim, renderer3D);
+      renderer3D.render(sim);
+    }
   } else {
     renderer2D?.render(sim);
   }
