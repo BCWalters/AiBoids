@@ -5,7 +5,14 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { params, type TimeOfDayPreset, type VisualStyle } from '../sim/params';
+import {
+  createColorGradingPass,
+  applyColorGradingPreset,
+  COLOR_GRADING_PRESETS,
+} from './colorGradingPass';
 import type { Simulation } from '../sim/Simulation';
 import { BOID_SPECIES, BoidSpecies } from '../sim/Boid';
 import type { Boid } from '../sim/Boid';
@@ -39,12 +46,35 @@ import { CreatureInstanceRenderer, type BoidRenderBatch } from './CreatureInstan
  */
 const MULTICOLOR_BOID_NEUTRAL_PROFILE = 'neutral';
 
+/**
+ * Per-style bloom parameters. Applied whenever the active visual style changes
+ * so each scene has its own characteristic glow budget. The enabled/disabled
+ * state is still controlled by ScenePresentationSettings.bloomEnabled.
+ */
+const STYLE_BLOOM_PARAMS: Record<VisualStyle, { strength: number; radius: number; threshold: number }> = {
+  arcade: { strength: 0.85, radius: 0.40, threshold: 0.15 }, // neon-saturated glow
+  nature: { strength: 0.60, radius: 0.50, threshold: 0.10 }, // soft sunlit haze
+  fishtank: { strength: 0.50, radius: 0.55, threshold: 0.08 }, // subtle caustic shimmer
+};
+
+/**
+ * Per-style exposure scale applied on top of the time-of-day base exposure.
+ * Kept very close to 1.0 to avoid noticeable regressions.
+ */
+const STYLE_EXPOSURE_SCALE: Record<VisualStyle, number> = {
+  arcade: 1.00,
+  nature: 1.00,
+  fishtank: 0.93, // slightly dimmer for underwater depth
+};
+
 export class Renderer3D {
   private renderer: THREE.WebGLRenderer;
   private readonly reducedGraphics = isReducedGraphics();
   private composer: EffectComposer;
   private afterimagePass: AfterimagePass;
   private bloomPass: UnrealBloomPass;
+  private colorGradingPass: ShaderPass;
+  private dofPass: BokehPass;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private controls: OrbitControls;
@@ -136,6 +166,14 @@ export class Renderer3D {
     this.composer.addPass(this.afterimagePass);
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.4, 0.15);
     this.composer.addPass(this.bloomPass);
+    // Depth of field (BokehPass) — disabled until params.depthOfFieldEnabled = true.
+    // Placed after bloom so the glow is included in the depth blur.
+    this.dofPass = new BokehPass(this.scene, this.camera, { focus: 500, aperture: 0.004, maxblur: 0.005 });
+    this.dofPass.enabled = false;
+    this.composer.addPass(this.dofPass);
+    // Filmic color grading — disabled until params.colorGradingEnabled = true.
+    this.colorGradingPass = createColorGradingPass();
+    this.composer.addPass(this.colorGradingPass);
     this.composer.addPass(new OutputPass());
 
     this.initializeSceneRenderers();
@@ -322,6 +360,18 @@ export class Renderer3D {
     if (this.boundsHelper) this.boundsHelper.visible = presentation.boundsHelperVisible;
     this.ambientLight.intensity = presentation.ambientLightIntensity;
     this.keyLight.visible = presentation.keyLightVisible;
+
+    // Apply scene-tuned bloom parameters (strength/radius/threshold) for the
+    // new style. The enabled flag above still controls whether bloom fires at
+    // all; these params just ensure each style's glow budget is appropriate.
+    const bloomParams = STYLE_BLOOM_PARAMS[style];
+    this.bloomPass.strength = bloomParams.strength;
+    this.bloomPass.radius = bloomParams.radius;
+    this.bloomPass.threshold = bloomParams.threshold;
+
+    // Load the per-style color grading preset so it's ready when the user
+    // enables the flag — no visual change until colorGradingPass.enabled = true.
+    applyColorGradingPreset(this.colorGradingPass, COLOR_GRADING_PRESETS[style]);
 
     // Re-apply the zoom clamp for the new style: nature's distance fog
     // needs a tight max zoom-out, while fishtank now has real geometry
@@ -921,7 +971,9 @@ export class Renderer3D {
       sunset: 0.6,
       night: 0.44,
     } as const;
-    return exposureByTime[timeOfDay];
+    // Apply a small per-style scale on top of the time-of-day base so each
+    // scene has its own characteristic brightness budget.
+    return exposureByTime[timeOfDay] * STYLE_EXPOSURE_SCALE[params.visualStyle];
   }
 
   private updatePostProcessingAndEnvironment(
@@ -935,6 +987,21 @@ export class Renderer3D {
     sceneRenderer.updateEnvironment(elapsed);
     this.renderer.toneMappingExposure = this.getToneMappingExposureForTimeOfDay(params.timeOfDay);
     this.sceneAssets.driftingClouds.update(dt);
+
+    // --- Feature-flag driven passes (toggled at runtime, no chain rebuild) ---
+
+    // Color grading: enable/disable based on param flag.
+    this.colorGradingPass.enabled = params.colorGradingEnabled && !this.reducedGraphics;
+
+    // Depth of field: enable/disable based on param flag; when enabled update
+    // the focus distance to the current orbit-controls target so the pass
+    // always focuses on whatever the camera is centered on.
+    const dofEnabled = params.depthOfFieldEnabled && !this.reducedGraphics;
+    this.dofPass.enabled = dofEnabled;
+    if (dofEnabled) {
+      (this.dofPass.uniforms as Record<string, { value: unknown }>)['focus'].value =
+        this.camera.position.distanceTo(this.controls.target);
+    }
   }
 
   private updateTransientSceneEffects(
