@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { TimeOfDayPreset } from '../../../sim/params';
+import { params, type TimeOfDayPreset } from '../../../sim/params';
 import {
   createCheckerTexture,
   createArtPiece,
@@ -79,6 +79,14 @@ export interface FishtankEnvironment {
   fog: THREE.Fog;
   caustics: THREE.Mesh;
   suspendedParticles: THREE.Points;
+  /** Gravel/sand substrate plane inside the tank (gated by tankDecorEnabled). */
+  substrate: THREE.Mesh;
+  /** Simple seaweed/coral plant meshes grouped inside the tank (gated by tankDecorEnabled). */
+  tankPlants: THREE.Group;
+  /** Rising bubble particle system emitted from the tank floor (gated by bubblesEnabled). */
+  bubbleParticles: THREE.Points;
+  /** Semi-transparent depth-murk planes inside the tank (gated by depthMurkEnabled). */
+  murkPlanes: THREE.Mesh[];
   /** Call once per frame while fishtank style is active (animates caustics + suspended particles). */
   update(elapsed: number): void;
   setVisible(visible: boolean): void;
@@ -420,6 +428,66 @@ function createCausticsTexture(size = 256): THREE.CanvasTexture {
   return texture;
 }
 
+/** Procedural gravel/sand texture for the tank substrate. */
+function createGravelTexture(size = 256): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#8a7a60';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 800; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 1.5 + Math.random() * 4;
+    const shade = Math.floor(90 + Math.random() * 70);
+    const hue = 25 + Math.floor(Math.random() * 20);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `hsl(${hue},30%,${shade * 0.39}%)`;
+    ctx.fill();
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * Creates a simple plant/coral mesh Group whose local origin sits at the
+ * plant base (bottom), so rotation applied to the Group creates a natural
+ * sway pivoting around the base. `localHeight` is in the parent group's
+ * local-space units (same scale as suspendedParticles, i.e. −0.5..+0.5 = tank
+ * height).
+ */
+function createPlantMesh(isCoral: boolean, localHeight: number, color: number): THREE.Group {
+  const group = new THREE.Group();
+  if (!isCoral) {
+    // Seaweed/kelp: a tapered cone representing a leafy frond.
+    const geo = new THREE.ConeGeometry(localHeight * 0.22, localHeight, 5, 1);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    mesh.position.y = localHeight / 2;
+    group.add(mesh);
+  } else {
+    // Coral: a short stem capped with a rounded blob.
+    const stemH = localHeight * 0.5;
+    const stemGeo = new THREE.CylinderGeometry(localHeight * 0.07, localHeight * 0.1, stemH, 5);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.05 });
+    const stemMesh = new THREE.Mesh(stemGeo, mat);
+    stemMesh.position.y = stemH / 2;
+    group.add(stemMesh);
+    const blobGeo = new THREE.SphereGeometry(localHeight * 0.28, 7, 5);
+    const blobMesh = new THREE.Mesh(blobGeo, mat);
+    blobMesh.position.y = stemH + localHeight * 0.2;
+    group.add(blobMesh);
+  }
+  return group;
+}
+
 export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironment {
   // Reduced-graphics mode (e2e/CI on software WebGL, opted in via ?lowfx=1):
   // the fishtank scene is by far the most expensive under SwiftShader. The two
@@ -546,7 +614,108 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   const suspendedParticles = new THREE.Points(particleGeometry, particleMaterial);
   suspendedParticles.visible = false;
 
-  // Floor: black/white checker tile texture rather than a flat color.
+  // --- Tank Decor: gravel substrate + plant/coral meshes ----------------
+  // Scaled/positioned like suspendedParticles by placeFishtankEnvironment.
+  const substrateTexture = createGravelTexture();
+  const substrateMaterial = new THREE.MeshStandardMaterial({
+    map: substrateTexture,
+    roughness: 0.95,
+    metalness: 0,
+  });
+  // Thin box (Y≈2% of local space) sitting on the tank floor.
+  const substrate = new THREE.Mesh(new THREE.BoxGeometry(1, 0.02, 1), substrateMaterial);
+  substrate.visible = false;
+
+  // 7 plant/coral meshes. Positions are in tankPlants local space where
+  // Y ∈ −0.5..+0.5 = tank floor to ceiling and XZ ∈ −0.5..+0.5 = tank sides.
+  // Each child Group pivots from its own origin (= plant base on the floor),
+  // enabling natural sway animation without moving the root.
+  const PLANT_DEFS: { isCoral: boolean; h: number; color: number; px: number; pz: number }[] = [
+    { isCoral: false, h: 0.28, color: 0x2e8b57, px: -0.30, pz: -0.36 },
+    { isCoral: false, h: 0.22, color: 0x3cb371, px:  0.32, pz: -0.38 },
+    { isCoral: true,  h: 0.20, color: 0xe8602c, px: -0.37, pz:  0.18 },
+    { isCoral: false, h: 0.26, color: 0x20b97e, px:  0.34, pz:  0.30 },
+    { isCoral: false, h: 0.20, color: 0x2e8b57, px: -0.24, pz:  0.38 },
+    { isCoral: true,  h: 0.16, color: 0xf07030, px:  0.14, pz: -0.40 },
+    { isCoral: false, h: 0.24, color: 0x1e9060, px:  0.38, pz: -0.10 },
+  ];
+  const tankPlants = new THREE.Group();
+  // Closure state for sway animation — one entry per plant, matched by index.
+  const plantSwayParams: { freq: number; phase: number; amp: number }[] = [];
+  PLANT_DEFS.forEach((def) => {
+    const plant = createPlantMesh(def.isCoral, def.h, def.color);
+    // Base at local Y=−0.5 (tank floor), XZ within ±0.4 of center.
+    plant.position.set(def.px, -0.5, def.pz);
+    tankPlants.add(plant);
+    plantSwayParams.push({
+      freq: 0.38 + Math.random() * 0.28,
+      phase: Math.random() * Math.PI * 2,
+      amp: 0.04 + Math.random() * 0.035,
+    });
+  });
+  tankPlants.visible = false;
+
+  // --- Bubbles: rising particles from 3 floor emitters -------------------
+  // Base XZ positions (emitter + per-bubble jitter) are fixed in local space;
+  // only Y changes each frame.  Disabled in reduced-graphics mode.
+  const BUBBLE_COUNT = reducedGraphics ? 0 : 90;
+  const BUBBLE_EMITTERS = [
+    { x: -0.22, z:  0.28 },
+    { x:  0.02, z: -0.32 },
+    { x:  0.26, z:  0.08 },
+  ];
+  const bubblePositions = new Float32Array(Math.max(BUBBLE_COUNT, 1) * 3);
+  const bubblePhases   = new Float32Array(Math.max(BUBBLE_COUNT, 1));
+  // Store base XZ separately so the wiggle doesn't accumulate frame-to-frame.
+  const bubbleBaseXZ   = new Float32Array(Math.max(BUBBLE_COUNT, 1) * 2);
+  for (let i = 0; i < BUBBLE_COUNT; i++) {
+    const emitter = BUBBLE_EMITTERS[i % BUBBLE_EMITTERS.length];
+    const bx = emitter.x + (Math.random() - 0.5) * 0.07;
+    const bz = emitter.z + (Math.random() - 0.5) * 0.07;
+    bubbleBaseXZ[i * 2]     = bx;
+    bubbleBaseXZ[i * 2 + 1] = bz;
+    bubblePositions[i * 3]     = bx;
+    bubblePositions[i * 3 + 1] = -0.5; // start at floor
+    bubblePositions[i * 3 + 2] = bz;
+    bubblePhases[i] = Math.random(); // stagger 0..1
+  }
+  const bubbleGeo = new THREE.BufferGeometry();
+  bubbleGeo.setAttribute('position', new THREE.BufferAttribute(bubblePositions, 3));
+  bubbleGeo.setAttribute('seed', new THREE.BufferAttribute(bubblePhases, 1));
+  const bubbleMat = new THREE.PointsMaterial({
+    color: 0xe8f8ff,
+    size: 2.2,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const bubbleParticles = new THREE.Points(bubbleGeo, bubbleMat);
+  bubbleParticles.visible = false;
+
+  // --- Depth murk: 3 semi-transparent planes at increasing tank depths -----
+  // Planes span the tank XY cross-section and are placed at −30 %, 0 %,
+  // and +30 % offsets from the tank centre along Z.  Opacity increases with
+  // depth (i.e. toward the back glass wall farthest from the camera).
+  // Positioned/sized by placeFishtankEnvironment; DoubleSide so they read
+  // correctly when the camera orbits to the opposite side of the tank.
+  const MURK_OPACITIES = [0.05, 0.10, 0.14];
+  const murkPlanes: THREE.Mesh[] = MURK_OPACITIES.map((opacity) => {
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({
+        color: 0x041832,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    plane.visible = false;
+    return plane;
+  });
+
+
   const floorTexture = createCheckerTexture('#1c1c1c', '#f2f2f2', 8);
   const floorGeometry = new THREE.PlaneGeometry(1, 1);
   const floorMaterial = new THREE.MeshStandardMaterial({
@@ -757,6 +926,10 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     waterFill,
     caustics,
     suspendedParticles,
+    substrate,
+    tankPlants,
+    bubbleParticles,
+    ...murkPlanes,
     roomFloor,
     roomCeiling,
     roomWallBack,
@@ -835,11 +1008,36 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
     fog,
     caustics,
     suspendedParticles,
+    substrate,
+    tankPlants,
+    bubbleParticles,
+    murkPlanes,
     update(elapsed: number) {
       if (!waterFill.visible) return;
-      // Reduced mode: caustics + particles are off, so skip all their per-frame
-      // work (texture-offset writes and the particle position rewrite loop).
+
+      // --- Tank decor: sway animation + runtime toggle ---
+      // Runs regardless of waterEffectsEnabled so plants sway even in
+      // reduced-graphics mode (sway is CPU-side only, no extra GPU cost).
+      const wantDecor = params.tankDecorEnabled;
+      if (substrate.visible !== wantDecor) substrate.visible = wantDecor;
+      if (tankPlants.visible !== wantDecor) tankPlants.visible = wantDecor;
+      if (wantDecor) {
+        tankPlants.children.forEach((child, i) => {
+          const sway = plantSwayParams[i];
+          if (sway) child.rotation.z = Math.sin(elapsed * sway.freq + sway.phase) * sway.amp;
+        });
+      }
+
+      // --- Depth murk: runtime toggle (no per-frame animation needed) ---
+      const wantMurk = params.depthMurkEnabled;
+      murkPlanes.forEach((plane) => {
+        if (plane.visible !== wantMurk) plane.visible = wantMurk;
+      });
+
+      // Reduced mode: caustics + particles (and bubbles) are off — skip all
+      // their per-frame work (texture-offset writes and position rewrite loops).
       if (!waterEffectsEnabled) return;
+
       const causticsMap = causticsMaterial.map;
       if (causticsMap) {
         causticsMap.offset.x = elapsed * 0.025;
@@ -856,6 +1054,24 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         positions.setY(i, y);
       }
       positions.needsUpdate = true;
+
+      // --- Bubbles: rising animation + runtime toggle ---
+      // BUBBLE_COUNT is 0 in reduced-graphics mode so this is a no-op there.
+      const wantBubbles = params.bubblesEnabled && BUBBLE_COUNT > 0;
+      if (bubbleParticles.visible !== wantBubbles) bubbleParticles.visible = wantBubbles;
+      if (wantBubbles) {
+        const bubPos = bubbleGeo.getAttribute('position') as THREE.BufferAttribute;
+        const bubSeeds = bubbleGeo.getAttribute('seed') as THREE.BufferAttribute;
+        for (let i = 0; i < bubPos.count; i++) {
+          const phase = bubSeeds.getX(i);
+          // Rise from local Y=−0.5 (floor) to +0.5 (surface), looping.
+          const y = ((phase + elapsed * 0.055) % 1) - 0.5;
+          // Subtle horizontal wiggle around the emitter base position.
+          const wiggle = Math.sin(elapsed * 0.8 + phase * 9.42) * 0.012;
+          bubPos.setXYZ(i, bubbleBaseXZ[i * 2] + wiggle, y, bubbleBaseXZ[i * 2 + 1] + wiggle * 0.6);
+        }
+        bubPos.needsUpdate = true;
+      }
     },
     setVisible(visible: boolean) {
       glassPanels.visible = visible;
@@ -864,6 +1080,13 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       waterFill.visible = visible;
       caustics.visible = visible && waterEffectsEnabled;
       suspendedParticles.visible = visible && waterEffectsEnabled;
+      // New decor objects respect their own flags when becoming visible.
+      substrate.visible = visible && params.tankDecorEnabled;
+      tankPlants.visible = visible && params.tankDecorEnabled;
+      bubbleParticles.visible = visible && params.bubblesEnabled && BUBBLE_COUNT > 0;
+      murkPlanes.forEach((plane) => {
+        plane.visible = visible && params.depthMurkEnabled;
+      });
       roomFloor.visible = visible;
       roomCeiling.visible = visible;
       roomWallBack.visible = visible;
@@ -991,6 +1214,10 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
         waterFill,
         caustics,
         suspendedParticles,
+        substrate,
+        tankPlants,
+        bubbleParticles,
+        ...murkPlanes,
         roomFloor,
         roomCeiling,
         roomWallBack,
@@ -1027,6 +1254,16 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
       (caustics.material as THREE.Material).dispose();
       suspendedParticles.geometry.dispose();
       (suspendedParticles.material as THREE.Material).dispose();
+      substrate.geometry.dispose();
+      (substrate.material as THREE.MeshStandardMaterial).map?.dispose();
+      (substrate.material as THREE.Material).dispose();
+      disposeObject3D(tankPlants);
+      bubbleGeo.dispose();
+      bubbleMat.dispose();
+      murkPlanes.forEach((plane) => {
+        plane.geometry.dispose();
+        (plane.material as THREE.Material).dispose();
+      });
       roomFloor.geometry.dispose();
       (roomFloor.material as THREE.MeshStandardMaterial).map?.dispose();
       (roomFloor.material as THREE.Material).dispose();
@@ -1169,7 +1406,47 @@ export function placeFishtankEnvironment(
   env.suspendedParticles.scale.set(worldWidth - inset, waterHeight - inset, worldDepth - inset);
   env.suspendedParticles.position.set(center.x, waterHeight / 2, center.z);
 
-  // Base trim: a dark plastic plinth bridging the small gap between the
+  // --- Tank decor: substrate + plants -----------------------------------
+  // Substrate: a thin gravel/sand box sitting on the tank floor.  Y-scale
+  // is 2% of the water height; placed so its top face is just above y=0.
+  const substrateH = waterHeight * 0.02;
+  env.substrate.scale.set(worldWidth - inset * 1.2, substrateH, worldDepth - inset * 1.2);
+  env.substrate.position.set(center.x, substrateH / 2, center.z);
+  // Tile the gravel texture based on tank footprint so each pebble reads
+  // at a believable real-world size rather than one giant texture.
+  const substrateMap = (env.substrate.material as THREE.MeshStandardMaterial).map;
+  if (substrateMap) {
+    const tileScale = Math.max(worldWidth, worldDepth) / 80;
+    substrateMap.repeat.set(tileScale, tileScale);
+  }
+
+  // Plant group uses the same local-space convention as suspendedParticles
+  // (Y ∈ −0.5..+0.5 = tank floor to water surface, XZ ∈ −0.5..+0.5 =
+  // tank sides).  Each plant child is already positioned at local Y=−0.5
+  // so it lands on the tank floor in world-space.
+  env.tankPlants.scale.set(worldWidth - inset, waterHeight - inset, worldDepth - inset);
+  env.tankPlants.position.set(center.x, waterHeight / 2, center.z);
+
+  // --- Bubbles: scale + position (XZ already fixed from init) -----------
+  // Same convention as suspendedParticles; only Y is animated per-frame.
+  env.bubbleParticles.scale.set(worldWidth - inset, waterHeight - inset, worldDepth - inset);
+  env.bubbleParticles.position.set(center.x, waterHeight / 2, center.z);
+
+  // --- Depth murk planes: 3 planes at −30%, 0%, +30% of tank depth ------
+  // The camera typically views the tank from the high-Z side (see
+  // FishtankSceneRenderer3D's configureInitialFraming).  Planes are
+  // spaced across the Z axis of the tank interior and grow progressively
+  // more opaque toward the low-Z "back" wall.  They span the full XY
+  // cross-section of the water volume so they are visible from any orbit
+  // angle (DoubleSide material, see createFishtankEnvironment).
+  const halfTankD = (worldDepth - inset) / 2;
+  const murkZOffsets = [-halfTankD * 0.3, 0, halfTankD * 0.3];
+  env.murkPlanes.forEach((plane, i) => {
+    plane.scale.set(worldWidth - inset, waterHeight - inset, 1);
+    plane.position.set(center.x, waterHeight / 2, center.z + murkZOffsets[i]);
+  });
+
+
   // glass box's bottom edge and the room floor beneath it (no table
   // anymore — the tank stands directly on the floor, like a genuine
   // giant public-aquarium exhibit tank), hiding that seam the way real
