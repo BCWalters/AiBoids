@@ -3,6 +3,13 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    # ready_for_review is NOT one of the default activity types (which are
+    # opened/synchronize/reopened). Without it, a PR opened as a draft and later
+    # marked ready never starts CI: it sits at mergeable_state "blocked" with
+    # zero check runs, indefinitely. That failure mode is dangerous because it
+    # presents as an *absent* check rather than a red one, so a PR can look
+    # merge-ready having never been built or tested. See #226.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
