@@ -82,6 +82,18 @@ export interface MotionConfig {
    * animation arcs untouched.
    */
   restOnFloor?: boolean;
+  /**
+   * When true, the render loop clamps the creature's world X/Z so its
+   * orientation-rotated geometry stays within the tank's side glass walls.
+   * Needed for long fishtank creatures — the shark in particular — whose
+   * nose/tail extend well fore/aft of the model origin the simulation positions
+   * them by, so swimming close to a side wall otherwise pokes the extremities
+   * through the glass (see #167). The swim region's world image equals the glass
+   * interior, so each inner wall sits at center ± center*worldScale. The clamp
+   * only engages right at a wall, leaving normal mid-tank motion untouched. Only
+   * meaningful when a scene applies a worldScale (fishtank).
+   */
+  containWithinTankWalls?: boolean;
 }
 
 const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
