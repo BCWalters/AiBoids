@@ -25,8 +25,14 @@ export interface TailGradient {
  * "finger" feathers at the tip (rooted along the outer trailing edge, each
  * angled slightly differently) — the visual cue that reads as "wingtip
  * primary feathers" on a soaring bird of prey.
+ *
+ * @param broadTip - When true, fans the primary feathers in a wider arc
+ *   (8 feathers, −20° to +55° spread) to produce a broad, blunter wingtip
+ *   like a hawk or eagle soaring with spread primaries. Default false keeps
+ *   the original 6-feather, narrower spread for the unicorn's swept wing.
+ *   Overall wingspan and chord are unchanged; only the tip profile differs.
  */
-export function buildFingeredWingGeometry(span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
+export function buildFingeredWingGeometry(span: number, chord: number, side: 1 | -1, broadTip: boolean = false): THREE.BufferGeometry {
   const s = side;
   const positions: number[] = [];
   const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
@@ -42,14 +48,15 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
   const shoulder = [mainSpan * 0.42 * s, chord * 0.42, 0];
   pushTri(root, shoulder, tip);
 
-  // fingerCount raised from 5->6 and each feather now has an explicit,
-  // deliberate gap to its neighbors (rather than nearly-touching bases)
-  // so individual feathers read as separate shapes rather than one solid
-  // scalloped edge — closer to a real fanned primary-feather look.
-  const fingerCount = 6;
-  const innerAnchor = [mainSpan * 0.5 * s, -chord * 0.1, 0];
+  // Broad-tip mode (hawk): 8 feathers spread in a wider arc so the wingtip
+  // reads as an open "hand" of primaries rather than a sharp triangle.
+  // Original mode (unicorn): 6 feathers in a tighter arc.
+  const fingerCount = broadTip ? 8 : 6;
+  const innerAnchor = broadTip
+    ? [mainSpan * 0.46 * s, -chord * 0.1, 0]
+    : [mainSpan * 0.5 * s, -chord * 0.1, 0];
   const outerAnchor = tip;
-  const halfWidth = 0.075;
+  const halfWidth = broadTip ? 0.065 : 0.075;
   for (let i = 0; i < fingerCount; i++) {
     const t = i / (fingerCount - 1);
     const rootPt = lerp3(innerAnchor, outerAnchor, Math.max(0, t - halfWidth));
@@ -62,7 +69,10 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
     // past it (the old 0.3-0.42*span bug) or staying tucked well inside
     // it (barely past the main panel's own edge).
     const fingerLen = span * (0.12 + 0.16 * t);
-    const spreadRad = ((-16 + 42 * t) * Math.PI) / 180;
+    // Broad tip: spread primary feathers from −20° to +55° (75° total arc)
+    // for the "open hand" silhouette of a soaring hawk. Normal: −16° to +26°.
+    const spreadDeg = broadTip ? (-20 + 75 * t) : (-16 + 42 * t);
+    const spreadRad = (spreadDeg * Math.PI) / 180;
 
     const baseDirX = s;
     const baseDirY = -0.55;
