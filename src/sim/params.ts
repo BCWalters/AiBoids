@@ -130,10 +130,6 @@ export interface SimParams {
   waterWavesEnabled: boolean;
   // Nature-only: reflections / sun specular glints on water.
   waterReflectionsEnabled: boolean;
-  // Fishtank-only: tank substrate (gravel/sand) + plants/coral decor.
-  tankDecorEnabled: boolean;
-  // Fishtank-only: rising bubble particles.
-  bubblesEnabled: boolean;
   // Fishtank-only: depth-based murk gradient (water darkens toward the back).
   depthMurkEnabled: boolean;
   // ------------------------------------------------------------------------
@@ -224,8 +220,6 @@ export const defaultParams: SimParams = {
   depthOfFieldEnabled: false,
   waterWavesEnabled: false,
   waterReflectionsEnabled: false,
-  tankDecorEnabled: false,
-  bubblesEnabled: false,
   depthMurkEnabled: false,
   enableDiagnosticsCapture: false,
   predatorCatchEnabled: true,
