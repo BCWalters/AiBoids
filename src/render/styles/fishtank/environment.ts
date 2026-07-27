@@ -554,7 +554,7 @@ export function createFishtankEnvironment(scene: THREE.Scene): FishtankEnvironme
   // depth (i.e. toward the back glass wall farthest from the camera).
   // Positioned/sized by placeFishtankEnvironment; DoubleSide so they read
   // correctly when the camera orbits to the opposite side of the tank.
-  const MURK_OPACITIES = [0.05, 0.10, 0.14];
+  const MURK_OPACITIES = [0.14, 0.10, 0.05];
   const murkPlanes: THREE.Mesh[] = MURK_OPACITIES.map((opacity) => {
     const plane = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
