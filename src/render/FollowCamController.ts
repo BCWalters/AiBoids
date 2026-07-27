@@ -4,6 +4,7 @@ import type { Simulation } from '../sim/Simulation';
 import type { Renderer3D } from './Renderer3D';
 import { params } from '../sim/params';
 import { pickEntity, type EntityForPicking } from './EntityPicker';
+import { pickStatusPhrase, type CreatureStatusCategory } from './creatureStatusPhrases';
 
 /** Exponential-smoothing rate (1/s) for damping the orbit-controls target. */
 const TARGET_DAMP_RATE = 8;
@@ -189,27 +190,23 @@ export class FollowCamController {
     const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 
     let speciesLabel: string;
-    let stateLabel: string;
+    let category: CreatureStatusCategory;
 
     if (this.selectedIsPredator) {
       const pred = entity as Predator;
       speciesLabel = labels.predator[pred.species] ?? pred.species;
-      stateLabel = pred.digesting
-        ? 'Digesting'
-        : pred.huntIntensity > 0.5
-          ? 'Hunting'
-          : 'Searching';
+      category = pred.digesting ? 'digesting' : pred.huntIntensity > 0.5 ? 'hunting' : 'searching';
     } else {
       const boid = entity as Boid;
       speciesLabel = labels.boid[boid.species] ?? boid.species;
-      stateLabel = boid.panicLevel > 0.5 ? 'Fleeing' : 'Flocking';
+      category = boid.panicLevel > 0.5 ? 'fleeing' : 'flocking';
     }
 
     this.hud.style.display = 'block';
     // Each line is set as a separate text node via children to support
     // the white-space:pre CSS on the container without needing innerHTML.
     const line1 = speciesLabel;
-    const line2 = `${Math.round(speed)} u/s \u00b7 ${stateLabel}`;
+    const line2 = `${Math.round(speed)} u/s \u00b7 ${pickStatusPhrase(category, entity.id, performance.now())}`;
     this.hud.textContent = `${line1}\n${line2}`;
   }
 }
