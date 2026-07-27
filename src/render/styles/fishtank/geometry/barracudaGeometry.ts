@@ -71,7 +71,7 @@ export function createBarracudaGeometries(rawLength: number, width: number): Cre
  * Authored tail(-Y) → nose(+Y).
  */
 function buildBarracudaBodyProfile(halfLen: number, width: number): THREE.Vector2[] {
-  return [
+  const controlPoints = [
     new THREE.Vector2(0, -halfLen * 1.0),
     new THREE.Vector2(width * 0.05, -halfLen * 0.9),
     new THREE.Vector2(width * 0.1, -halfLen * 0.72),
@@ -85,12 +85,16 @@ function buildBarracudaBodyProfile(halfLen: number, width: number): THREE.Vector
     new THREE.Vector2(width * 0.04, halfLen * 0.92),
     new THREE.Vector2(0, halfLen * 1.0),
   ];
+  // Resample the authored silhouette along a smooth spline so the flat-shaded
+  // lathe has many closely-spaced, gently-varying facets instead of a few long
+  // banded ones. getPoints(n) returns n+1 points passing through the controls.
+  return new THREE.SplineCurve(controlPoints).getPoints(66);
 }
 
 function buildBarracudaBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = buildBarracudaBodyProfile(halfLen, width);
-  const body = new THREE.LatheGeometry(profile, 16);
+  const body = new THREE.LatheGeometry(profile, 32);
   body.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
 
   const dorsalFins = buildDorsalFinsGeometry(length, width, profile);
