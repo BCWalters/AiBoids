@@ -49,6 +49,45 @@ export const DIGEST_WAIT_DURATION = 3.5;
 // as an anti-stacking floor, not a tunable behavior.
 const PREDATOR_MUTUAL_SEPARATION_RADIUS = 60;
 const PREDATOR_MUTUAL_SEPARATION_WEIGHT = 2.2;
+const SINGLE_WALL_STALL_SPEED_FRACTION = 0.15;
+export const CORNER_STUCK_ESCAPE_THRESHOLD = 1.2;
+
+function nearestWallInwardNormal(position: Vec3, bounds: WorldBounds, margin: number): Vec3 | null {
+  if (margin <= 0) return null;
+
+  let bestDistance = Infinity;
+  let normal: Vec3 | null = null;
+  const consider = (distance: number, candidate: Vec3): void => {
+    if (distance >= margin || distance >= bestDistance) return;
+    bestDistance = distance;
+    normal = candidate;
+  };
+
+  consider(position.x, V.create(1, 0, 0));
+  consider(bounds.width - position.x, V.create(-1, 0, 0));
+  consider(position.y, V.create(0, 1, 0));
+  consider(bounds.height - position.y, V.create(0, -1, 0));
+  consider(position.z, V.create(0, 0, 1));
+  consider(bounds.depth - position.z, V.create(0, 0, -1));
+  return normal;
+}
+
+export function shouldAccumulateBoundaryStuckTime(
+  position: Vec3,
+  velocity: Vec3,
+  bounds: WorldBounds,
+  margin: number,
+  predatorMaxSpeed: number,
+): boolean {
+  const nearWalls = nearWallAxisCount(position, bounds, margin);
+  if (nearWalls >= 2) return true;
+  if (nearWalls < 1) return false;
+
+  const inwardNormal = nearestWallInwardNormal(position, bounds, margin);
+  if (!inwardNormal) return false;
+  const inwardSpeed = V.dot(velocity, inwardNormal);
+  return inwardSpeed < predatorMaxSpeed * SINGLE_WALL_STALL_SPEED_FRACTION;
+}
 
 export class Predator {
   readonly id: number;
@@ -116,15 +155,15 @@ export class Predator {
   private resuming = false;
 
   /**
-   * How long (seconds) this predator has continuously been within
-   * boundaryMargin of any wall. A chase can reach the same stable
-   * equilibrium against a single wall as it can in a true corner —
-   * pursuit keeps pressing inward while wall-avoidance keeps pushing
-   * back out, so nothing ever breaks the tie. Tracked so update() can
-   * force a brief, decisive escape push once this drags on too long,
-   * rather than fighting it out with pursuit forever.
+   * How long (seconds) this predator has continuously been in a
+   * boundary trap: either pinned into a true 2+-wall corner/edge, or
+   * lingering at a single wall without making meaningful progress back
+   * into open water. Tracked so update() can force a brief, decisive
+   * escape push once this drags on too long, rather than fighting a
+   * stable wall-vs-pursuit equilibrium forever.
    */
   private cornerStuckTime = 0;
+  private boundaryEscapeOverrideActive = false;
 
   constructor(position: Vec3, velocity: Vec3, species: PredatorSpecies = PredatorSpecies.Normal) {
     this.id = nextId++;
@@ -151,6 +190,10 @@ export class Predator {
     return V.heading2D(this.velocity);
   }
 
+  get isBoundaryEscapeOverrideActive(): boolean {
+    return this.boundaryEscapeOverrideActive;
+  }
+
   /**
    * Simple pursuit: steer toward the nearest visible boid. If none are
    * within perception range, steer toward the center of mass of visible
@@ -160,6 +203,7 @@ export class Predator {
    * for wall steer-away.
    */
   update(dt: number, boids: Boid[], predators: Predator[], bounds: WorldBounds): void {
+    this.boundaryEscapeOverrideActive = false;
     if (this.digesting) {
       this.updateDigesting(dt, boids, bounds);
       return;
@@ -238,11 +282,13 @@ export class Predator {
     this.huntIntensity += (targetIntensity - this.huntIntensity) * huntSmoothing;
 
     if (p.mode === '3d') {
-      // Track how long we've been pinned in any boundary layer — see
-      // cornerStuckTime's doc comment. Decays twice as fast as it builds
-      // so a predator that only clips a wall briefly while maneuvering
+      // Track how long we've been in a genuine wall trap — see
+      // cornerStuckTime's doc comment. True corners/edges always count;
+      // the single-wall case only counts once inward progress has
+      // effectively stalled. Decays twice as fast as it builds so a
+      // predator that only clips a wall briefly while maneuvering
       // doesn't trigger the escape override.
-      if (nearWallAxisCount(this.position, bounds, p.boundaryMargin) >= 1) {
+      if (shouldAccumulateBoundaryStuckTime(this.position, this.velocity, bounds, p.boundaryMargin, p.predatorMaxSpeed)) {
         this.cornerStuckTime += dt;
       } else {
         this.cornerStuckTime = Math.max(0, this.cornerStuckTime - dt * 2);
@@ -272,13 +318,13 @@ export class Predator {
       // of the boundary layer, cornerStuckTime decays and normal pursuit
       // takes back over — reads as a brief "break off and reposition"
       // rather than a permanent behavior change.
-      const CORNER_STUCK_ESCAPE_THRESHOLD = 1.2;
       if (this.cornerStuckTime > CORNER_STUCK_ESCAPE_THRESHOLD) {
         const center = V.create(bounds.width / 2, bounds.height / 2, bounds.depth / 2);
         const toCenter = V.sub(center, this.position);
         if (V.magnitudeSq(toCenter) > 1e-6) {
           const desired = V.setMagnitude(toCenter, p.predatorMaxSpeed);
           acceleration = V.limit(V.sub(desired, this.velocity), p.maxForce * 1.5);
+          this.boundaryEscapeOverrideActive = true;
         }
       }
     }

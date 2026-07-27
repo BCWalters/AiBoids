@@ -65,8 +65,9 @@ export function clampToBounds(position: Vec3, bounds: WorldBounds): void {
 
 /**
  * Counts how many axes (0-3) `position` is currently within `margin` of a
- * wall on. Callers can treat 1 wall as a simple boundary graze or a real
- * single-wall trap, and 2+ walls as a true corner/edge wedge.
+ * wall on. Callers can treat 1 wall as a simple boundary graze or combine
+ * it with an additional stall/progress heuristic to detect a true
+ * single-wall trap, while 2+ walls still indicate a corner/edge wedge.
  */
 export function nearWallAxisCount(position: Vec3, bounds: WorldBounds, margin: number): number {
   if (margin <= 0) return 0;

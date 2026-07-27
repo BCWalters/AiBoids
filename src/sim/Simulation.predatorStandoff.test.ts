@@ -51,6 +51,60 @@ function runChase(setup: ChaseSetup, seconds: number) {
   };
 }
 
+function wallDistance(position: { x: number; y: number; z: number }): number {
+  return Math.min(
+    position.x,
+    position.y,
+    position.z,
+    1000 - position.x,
+    1000 - position.y,
+    1000 - position.z,
+  );
+}
+
+function runOpenWaterDutyCycleScenario(seconds: number) {
+  params.boidCount = 6;
+  params.predatorCount = 3;
+  params.monsterCount = 1;
+  params.predatorCatchEnabled = false;
+
+  const sim = new Simulation(1000, 1000);
+  sim.boids = [
+    new Boid(create(420, 480, 500), create(20, 10, 0)),
+    new Boid(create(580, 520, 520), create(-15, 5, -10)),
+    new Boid(create(520, 420, 450), create(10, 15, 10)),
+    new Boid(create(480, 560, 550), create(-10, -10, 5)),
+    new Boid(create(560, 460, 480), create(0, 20, -10)),
+    new Boid(create(440, 540, 530), create(15, -5, 0)),
+  ];
+  sim.predators = [
+    new Predator(create(140, 25, 500), create(45, 35, 0), PredatorSpecies.Normal),
+    new Predator(create(860, 975, 500), create(-45, -35, 0), PredatorSpecies.Normal),
+    new Predator(create(25, 500, 430), create(35, 10, 15), PredatorSpecies.Normal),
+    new Predator(create(500, 520, 975), create(0, -15, -35), PredatorSpecies.Monster),
+  ];
+
+  const dt = 1 / 60;
+  let overrideFrames = 0;
+  let totalPredatorFrames = 0;
+  let minBoidWallDistance = Infinity;
+  for (let i = 0; i < Math.round(seconds / dt); i++) {
+    sim.update(dt);
+    for (const predator of sim.predators) {
+      totalPredatorFrames++;
+      if (predator.isBoundaryEscapeOverrideActive) overrideFrames++;
+    }
+    for (const boid of sim.boids) {
+      minBoidWallDistance = Math.min(minBoidWallDistance, wallDistance(boid.position));
+    }
+  }
+
+  return {
+    overrideRatio: overrideFrames / totalPredatorFrames,
+    minBoidWallDistance,
+  };
+}
+
 describe('Simulation predator wall standoffs', () => {
   beforeEach(() => {
     configureSinglePredatorChase();
@@ -94,5 +148,12 @@ describe('Simulation predator wall standoffs', () => {
 
     expect(finalDistance).toBeLessThan(initialDistance * 0.5);
     expect(minDistance).toBeLessThan(60);
+  });
+
+  it('keeps the escape override to a low duty cycle when predators skim a wall but prey stays in open water', () => {
+    const { overrideRatio, minBoidWallDistance } = runOpenWaterDutyCycleScenario(6);
+
+    expect(minBoidWallDistance).toBeGreaterThan(params.boundaryMargin * 2);
+    expect(overrideRatio).toBeLessThan(0.01);
   });
 });
