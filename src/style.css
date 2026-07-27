@@ -103,8 +103,23 @@ body {
   color: #c9d1d9;
   font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
   white-space: pre;
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 5;
+}
+
+.creature-inspector-pov-toggle {
+  margin-top: 8px;
+  padding: 4px 8px;
+  background: #21262d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.creature-inspector-pov-toggle:hover {
+  background: #30363d;
 }
 
 #control-panel {
