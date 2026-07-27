@@ -218,3 +218,120 @@ export function buildEyeDotsGeometry(x: number, y: number, z: number, radius: nu
   return mergePositionOnlyGeometries([left, right]);
 }
 
+
+/**
+ * Dimensions for a barrel that hides the wedge which opens at an
+ * articulated joint between two box-section segments.
+ *
+ * Two flat, square-cut faces are only flush at exactly one angle. Rotate
+ * one and a wedge opens on the outside of the bend, widening with the
+ * bend angle. Before the rig work the joints never moved, so this was
+ * invisible; now that they articulate it shows.
+ *
+ * A cylinder *about the hinge axis* is invariant under the hinge rotation,
+ * exactly as a sphere is, so it covers the joint identically at every bend
+ * angle with nothing to tune against a maximum angle. But it is far
+ * tighter. A sphere has to bulge to the moving face's half-*diagonal* in
+ * order to swallow its corners, and it then carries that same fat radius
+ * across the whole joint — including the middle, where the gap only ever
+ * reaches the face's half-depth. That surplus in the middle is what reads
+ * as a knee pad. A barrel separates the two requirements: `radius` covers
+ * the fore-aft reach, `halfLength` covers the width, and neither has to
+ * pay for the other.
+ *
+ * `radius` is driven by the segment that *moves*, since only the moving
+ * face can expose a see-through slot; where the stationary segment is
+ * wider it simply presents a flat annulus of its own end face, which
+ * reads as leg rather than as a hole. `halfLength` is driven by the
+ * widest segment, so the barrel spans the joint's full width.
+ *
+ * Because the moving face's half-depth is typically no larger than the
+ * stationary segment's, the barrel usually sits *within* the limb's
+ * existing silhouette and adds no visible bulge at all.
+ */
+export function jointBarrelForBoxSection({
+  movingHalfDepth,
+  widestHalfWidth,
+  margin = 1.03,
+}: {
+  movingHalfDepth: number;
+  widestHalfWidth: number;
+  margin?: number;
+}): { radius: number; halfLength: number } {
+  return { radius: movingHalfDepth * margin, halfLength: widestHalfWidth * margin };
+}
+
+/**
+ * Appends a low-poly barrel to a raw position/colour buffer, for use as a
+ * joint cover (see jointBarrelForBoxSection).
+ *
+ * The caller is responsible for placing `center` on, and aligning `axis`
+ * with, the joint's rotation axis. Off-axis and the cover wobbles as the
+ * joint bends instead of sitting still, which is worse than the gap it
+ * was added to hide.
+ */
+export function pushJointBarrel(
+  sink: { positions: number[]; colors: number[] },
+  {
+    center,
+    axis,
+    radius,
+    halfLength,
+    color,
+    segments = 10,
+  }: {
+    center: THREE.Vector3;
+    axis: THREE.Vector3;
+    radius: number;
+    halfLength: number;
+    color: THREE.Color;
+    segments?: number;
+  },
+): void {
+  const forward = axis.clone().normalize();
+  // Any two vectors perpendicular to the axis will do; pick a seed that
+  // cannot be parallel to it, so the cross product never degenerates.
+  const seed = Math.abs(forward.x) > 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+  const right = new THREE.Vector3().crossVectors(forward, seed).normalize();
+  const up = new THREE.Vector3().crossVectors(forward, right).normalize();
+
+  const rim = (end: number, seg: number): THREE.Vector3 => {
+    const theta = (seg / segments) * Math.PI * 2;
+    return center
+      .clone()
+      .addScaledVector(forward, end * halfLength)
+      .addScaledVector(right, Math.cos(theta) * radius)
+      .addScaledVector(up, Math.sin(theta) * radius);
+  };
+
+  // Wind each triangle so its normal points away from the barrel's own
+  // surface, rather than trusting a hand-derived winding order to stay
+  // consistent across the wall and both end caps.
+  const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, reference: THREE.Vector3) => {
+    const normal = new THREE.Vector3()
+      .subVectors(p1, p0)
+      .cross(new THREE.Vector3().subVectors(p2, p0));
+    const outward = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3).sub(reference);
+    const [a, b, c] = normal.dot(outward) < 0 ? [p0, p2, p1] : [p0, p1, p2];
+    for (const p of [a, b, c]) {
+      sink.positions.push(p.x, p.y, p.z);
+      sink.colors.push(color.r, color.g, color.b);
+    }
+  };
+
+  for (let seg = 0; seg < segments; seg++) {
+    const a = rim(-1, seg);
+    const b = rim(1, seg);
+    const c = rim(1, seg + 1);
+    const d = rim(-1, seg + 1);
+    // Wall faces point away from the axis, so reference the axis point
+    // level with the quad rather than the barrel's centre.
+    const onAxis = center.clone();
+    pushOutward(a, b, c, onAxis);
+    pushOutward(a, c, d, onAxis);
+    for (const end of [-1, 1] as const) {
+      const capCenter = center.clone().addScaledVector(forward, end * halfLength);
+      pushOutward(capCenter, rim(end, seg), rim(end, seg + 1), center);
+    }
+  }
+}
