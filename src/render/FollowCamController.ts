@@ -114,8 +114,12 @@ export class FollowCamController {
     const entities = this.buildEntityList(sim, renderer3D);
     const picked = pickEntity(mouseX, mouseY, rect.width, rect.height, renderer3D.getCamera(), entities);
 
-    this.selectedId = picked?.id ?? null;
-    this.selectedIsPredator = picked?.isPredator ?? false;
+    if (picked) {
+      this.selectedId = picked.id;
+      this.selectedIsPredator = picked.isPredator;
+    } else {
+      this.clearSelection(renderer3D, sim);
+    }
   }
 
   /**
@@ -130,8 +134,12 @@ export class FollowCamController {
 
     const entity = this.resolveSelected(sim);
     if (!entity) {
-      // Entity was removed (population change) — gracefully deselect.
-      this.selectedId = null;
+      if (this.selectedId !== null) {
+        // Entity was removed (population change) — gracefully deselect and
+        // reset the orbit target back to scene centre so the user isn't left
+        // orbiting an off-centre point near the boundary.
+        this.clearSelection(renderer3D, sim);
+      }
       this.hud.style.display = 'none';
       return;
     }
@@ -153,15 +161,26 @@ export class FollowCamController {
     }
   }
 
-  /** Clears the current selection. */
-  deselect(): void {
-    this.selectedId = null;
-    this.hud.style.display = 'none';
+  /** Clears the current selection and resets the orbit target to scene center. */
+  deselect(renderer3D: Renderer3D, sim: Simulation): void {
+    this.clearSelection(renderer3D, sim);
   }
 
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Shared "on deselect" path — clears selection state, hides the HUD, and
+   * resets the OrbitControls target back to the scene center so the user
+   * doesn't orbit around a stale off-centre point after the creature is gone.
+   */
+  private clearSelection(renderer3D: Renderer3D, sim: Simulation): void {
+    this.selectedId = null;
+    this.selectedIsPredator = false;
+    this.hud.style.display = 'none';
+    renderer3D.resetOrbitTarget(sim);
+  }
 
   private buildEntityList(sim: Simulation, renderer3D: Renderer3D): EntityForPicking[] {
     const entities: EntityForPicking[] = [];
