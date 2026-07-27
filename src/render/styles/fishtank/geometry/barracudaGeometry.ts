@@ -46,7 +46,7 @@ const TAIL_ROOT_COLOR = new THREE.Color(0x9aa6b0);
 const TAIL_TIP_COLOR = new THREE.Color(0x121417);
 
 // Root of the caudal fin (local Y), as a fraction of raw input length.
-const BARRACUDA_TAIL_PIVOT_FRACTION = -0.92 * 0.5 * BARRACUDA_LENGTH_SCALE;
+const BARRACUDA_TAIL_PIVOT_FRACTION = -0.88 * 0.5 * BARRACUDA_LENGTH_SCALE;
 
 export function getBarracudaTailPivotY(rawLength: number): number {
   return BARRACUDA_TAIL_PIVOT_FRACTION * rawLength;
@@ -94,8 +94,17 @@ function buildBarracudaBodyGeometry(length: number, width: number): THREE.Buffer
   body.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
 
   const dorsalFins = buildDorsalFinsGeometry(length, width, profile);
+  // Base the countershading gradient on the BODY's own vertical extent, not the
+  // merged shell: the dorsal fins rise well above the back, and if their tips
+  // set maxZ the body gets squeezed into the pale belly→flank half and never
+  // reaches the dark back color. Fins above the body's back simply clamp to it.
+  body.computeBoundingBox();
+  const bodyMinZ = body.boundingBox!.min.z;
+  const bodyMaxZ = body.boundingBox!.max.z;
   const shell = bakeDorsalVentralGradient(
     mergePositionOnlyGeometries([body, dorsalFins]),
+    bodyMinZ,
+    bodyMaxZ,
   );
 
   const lowerJaw = buildLowerJawGeometry(length, width, profile);
@@ -378,10 +387,10 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
  */
 function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const peduncleY = -halfLen * 0.92;
+  const peduncleY = -halfLen * 0.88;
   const root = new THREE.Vector3(0, peduncleY, 0);
   const upperTip = new THREE.Vector3(0, -halfLen * 1.6, width * 0.36);
-  const notch = new THREE.Vector3(0, -halfLen * 1.2, 0);
+  const notch = new THREE.Vector3(0, -halfLen * 1.38, 0);
   const lowerTip = new THREE.Vector3(0, -halfLen * 1.6, -width * 0.36);
   const fin = extrudeRingGeometryAlongX([root, upperTip, notch, lowerTip], width * 0.05);
   return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.6);
