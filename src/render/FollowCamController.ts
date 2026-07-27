@@ -2,12 +2,19 @@ import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
 import type { Simulation } from '../sim/Simulation';
 import type { Renderer3D } from './Renderer3D';
+import * as THREE from 'three';
 import { params } from '../sim/params';
 import { pickEntity, type EntityForPicking } from './EntityPicker';
 import { pickStatusPhrase, type CreatureStatusCategory } from './creatureStatusPhrases';
 
 /** Exponential-smoothing rate (1/s) for damping the orbit-controls target. */
 const TARGET_DAMP_RATE = 8;
+const POV_POSITION_DAMP_RATE = 12;
+const POV_LOOK_DAMP_RATE = 14;
+const POV_FORWARD_OFFSET = 10;
+const POV_UP_OFFSET = 2;
+const POV_LOOK_AHEAD = 40;
+const MIN_VECTOR_LEN_SQ = 1e-6;
 
 /** CSS-pixel radius within which a pointer-up is considered a stationary click. */
 export const DRAG_THRESHOLD_PX = 5;
@@ -46,7 +53,14 @@ export function isDragMove(
 export class FollowCamController {
   private selectedId: number | null = null;
   private selectedIsPredator = false;
+  private povActive = false;
+  private controlsSuspendedForPov = false;
+  private povCameraPos: THREE.Vector3 | null = null;
+  private povLookTarget: THREE.Vector3 | null = null;
   private readonly hud: HTMLElement;
+  private readonly hudLine1: HTMLElement;
+  private readonly hudLine2: HTMLElement;
+  private readonly povButton: HTMLButtonElement;
 
   // Pointer-down coordinates for drag-vs-click discrimination.
   private _pointerDownX = 0;
@@ -58,7 +72,21 @@ export class FollowCamController {
     this.hud.id = 'creature-inspector';
     this.hud.setAttribute('aria-live', 'polite');
     this.hud.style.display = 'none';
+    this.hudLine1 = document.createElement('div');
+    this.hudLine2 = document.createElement('div');
+    this.povButton = document.createElement('button');
+    this.povButton.type = 'button';
+    this.povButton.className = 'creature-inspector-pov-toggle';
+    this.povButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (this.selectedId === null) return;
+      this.setPovActive(!this.povActive);
+    });
+    this.hud.append(this.hudLine1, this.hudLine2, this.povButton);
     container.appendChild(this.hud);
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') this.setPovActive(false);
+    });
   }
 
   /**
@@ -114,11 +142,18 @@ export class FollowCamController {
     const entities = this.buildEntityList(sim, renderer3D);
     const picked = pickEntity(mouseX, mouseY, rect.width, rect.height, renderer3D.getCamera(), entities);
 
+    const prevId = this.selectedId;
+    const prevIsPredator = this.selectedIsPredator;
     if (picked) {
       this.selectedId = picked.id;
       this.selectedIsPredator = picked.isPredator;
     } else {
       this.clearSelection(renderer3D, sim);
+      return;
+    }
+    if (this.povActive && (prevId !== this.selectedId || prevIsPredator !== this.selectedIsPredator)) {
+      this.povCameraPos = null;
+      this.povLookTarget = null;
     }
   }
 
@@ -128,6 +163,8 @@ export class FollowCamController {
    */
   update(dt: number, sim: Simulation, renderer3D: Renderer3D): void {
     if (params.followCamMode !== 'orbit') {
+      this.syncOrbitControls(renderer3D, true);
+      this.setPovActive(false);
       this.hud.style.display = 'none';
       return;
     }
@@ -144,15 +181,22 @@ export class FollowCamController {
       return;
     }
 
-    // Exponentially smooth the orbit target toward the selected creature's
-    // render-space position so it stays centred while the user orbits/zooms.
-    const alpha = 1 - Math.exp(-dt * TARGET_DAMP_RATE);
     const renderedPos = renderer3D.toRenderedPosition(
       entity.position.x,
       entity.position.y,
       entity.position.z,
     );
-    renderer3D.smoothOrbitTarget(renderedPos.x, renderedPos.y, renderedPos.z, alpha);
+
+    if (this.povActive) {
+      this.syncOrbitControls(renderer3D, false);
+      this.updatePovCamera(dt, entity, renderer3D, renderedPos);
+    } else {
+      const controlsRestored = this.syncOrbitControls(renderer3D, true);
+      // Exponentially smooth the orbit target toward the selected creature's
+      // render-space position so it stays centred while the user orbits/zooms.
+      const alpha = controlsRestored ? 1 : 1 - Math.exp(-dt * TARGET_DAMP_RATE);
+      renderer3D.smoothOrbitTarget(renderedPos.x, renderedPos.y, renderedPos.z, alpha);
+    }
 
     if (params.showCreatureInspector) {
       this.syncHud(entity, renderer3D);
@@ -178,6 +222,8 @@ export class FollowCamController {
   private clearSelection(renderer3D: Renderer3D, sim: Simulation): void {
     this.selectedId = null;
     this.selectedIsPredator = false;
+    this.setPovActive(false);
+    this.syncOrbitControls(renderer3D, true);
     this.hud.style.display = 'none';
     renderer3D.resetOrbitTarget(sim);
   }
@@ -222,10 +268,81 @@ export class FollowCamController {
     }
 
     this.hud.style.display = 'block';
-    // Each line is set as a separate text node via children to support
-    // the white-space:pre CSS on the container without needing innerHTML.
-    const line1 = speciesLabel;
-    const line2 = `${Math.round(speed)} u/s \u00b7 ${pickStatusPhrase(category, entity.id, performance.now())}`;
-    this.hud.textContent = `${line1}\n${line2}`;
+    this.hudLine1.textContent = speciesLabel;
+    this.hudLine2.textContent = `${Math.round(speed)} u/s \u00b7 ${pickStatusPhrase(category, entity.id, performance.now())}`;
+    this.povButton.textContent = this.povActive ? 'Exit POV (Esc)' : 'Enter POV';
+  }
+
+  private updatePovCamera(
+    dt: number,
+    entity: Boid | Predator,
+    renderer3D: Renderer3D,
+    renderedPos: THREE.Vector3,
+  ): void {
+    const heading = this.getRenderedHeading(entity, renderer3D, renderedPos);
+
+    const desiredCameraPos = renderedPos
+      .clone()
+      .addScaledVector(heading, POV_FORWARD_OFFSET)
+      .add(new THREE.Vector3(0, POV_UP_OFFSET, 0));
+    const desiredLookTarget = desiredCameraPos.clone().addScaledVector(heading, POV_LOOK_AHEAD);
+
+    if (!this.povCameraPos) this.povCameraPos = desiredCameraPos.clone();
+    if (!this.povLookTarget) this.povLookTarget = desiredLookTarget.clone();
+
+    const posAlpha = 1 - Math.exp(-dt * POV_POSITION_DAMP_RATE);
+    const lookAlpha = 1 - Math.exp(-dt * POV_LOOK_DAMP_RATE);
+    this.povCameraPos.lerp(desiredCameraPos, posAlpha);
+    this.povLookTarget.lerp(desiredLookTarget, lookAlpha);
+
+    renderer3D.setCameraPose(this.povCameraPos, this.povLookTarget);
+  }
+
+  private syncOrbitControls(renderer3D: Renderer3D, enabled: boolean): boolean {
+    if (enabled) {
+      if (!this.controlsSuspendedForPov) return false;
+      renderer3D.setOrbitControlsEnabled(true);
+      this.controlsSuspendedForPov = false;
+      return true;
+    }
+
+    if (this.controlsSuspendedForPov) return false;
+    renderer3D.setOrbitControlsEnabled(false);
+    this.controlsSuspendedForPov = true;
+    return true;
+  }
+
+  private getRenderedHeading(entity: Boid | Predator, renderer3D: Renderer3D, renderedPos: THREE.Vector3): THREE.Vector3 {
+    const heading = new THREE.Vector3(entity.renderHeading.x, entity.renderHeading.y, entity.renderHeading.z);
+    if (heading.lengthSq() < MIN_VECTOR_LEN_SQ) {
+      heading.set(entity.velocity.x, entity.velocity.y, entity.velocity.z);
+    }
+    if (heading.lengthSq() < MIN_VECTOR_LEN_SQ) {
+      renderer3D.getCamera().getWorldDirection(heading);
+    }
+    if (heading.lengthSq() < MIN_VECTOR_LEN_SQ) {
+      heading.set(0, 0, -1);
+    } else {
+      heading.normalize();
+    }
+
+    const renderedAhead = renderer3D.toRenderedPosition(
+      entity.position.x + heading.x,
+      entity.position.y + heading.y,
+      entity.position.z + heading.z,
+    );
+    const renderedHeading = renderedAhead.sub(renderedPos);
+    if (renderedHeading.lengthSq() < MIN_VECTOR_LEN_SQ) {
+      return heading;
+    }
+    return renderedHeading.normalize();
+  }
+
+  private setPovActive(active: boolean): void {
+    this.povActive = active && this.selectedId !== null;
+    if (!this.povActive) {
+      this.povCameraPos = null;
+      this.povLookTarget = null;
+    }
   }
 }

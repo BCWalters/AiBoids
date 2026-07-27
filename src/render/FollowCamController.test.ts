@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { FollowCamController, isDragMove, DRAG_THRESHOLD_PX } from './FollowCamController';
 import { params, resetParams } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
@@ -106,6 +107,8 @@ describe('FollowCamController drag-aware selection', () => {
       toRenderedPosition: (x: number, y: number, z: number) => ({ x, y, z }),
       smoothOrbitTarget,
       resetOrbitTarget: vi.fn(),
+      setOrbitControlsEnabled: vi.fn(),
+      setCameraPose: vi.fn(),
       getCreatureLabels: () => ({ boid: {}, predator: {} }),
     } as unknown as Renderer3D;
   });
@@ -198,6 +201,8 @@ function makeRenderer(): Renderer3D {
     toRenderedPosition: (x: number, y: number, z: number) => new THREE.Vector3(x, y, z),
     smoothOrbitTarget: vi.fn(),
     resetOrbitTarget: vi.fn(),
+    setOrbitControlsEnabled: vi.fn(),
+    setCameraPose: vi.fn(),
     getCreatureLabels: () => ({ boid: {}, predator: {} }),
   } as unknown as Renderer3D;
 }
@@ -261,5 +266,123 @@ describe('FollowCamController deselect → orbit target reset', () => {
 
     expect(renderer.resetOrbitTarget).toHaveBeenCalledOnce();
     expect(renderer.resetOrbitTarget).toHaveBeenCalledWith(sim);
+  });
+});
+
+describe('FollowCamController POV mode', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    resetParams();
+    params.followCamMode = 'orbit';
+    params.showCreatureInspector = true;
+  });
+
+  it('enters POV from HUD and exits on Escape', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const controller = new FollowCamController(container);
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    const boid = {
+      id: 1,
+      species: 'normal',
+      position: { x: 10, y: 20, z: 30 },
+      velocity: { x: 0, y: 1, z: 0 },
+      renderHeading: { x: 0, y: 1, z: 0 },
+      panicLevel: 0,
+    };
+    const renderer = {
+      toRenderedPosition: (x: number, y: number, z: number) => new THREE.Vector3(x * 4, y * 4, z * 4),
+      smoothOrbitTarget: vi.fn(),
+      resetOrbitTarget: vi.fn(),
+      getCamera: () => camera,
+      getCreatureLabels: () => ({
+        boid: { normal: 'Sparrow' },
+        predator: { normal: 'Hawk', monster: 'Dragon', horse: 'Unicorn' },
+      }),
+      setOrbitControlsEnabled: vi.fn(),
+      setCameraPose: vi.fn(),
+    } as unknown as Renderer3D;
+    const sim = { boids: [boid], predators: [] } as unknown as Simulation;
+
+    (controller as unknown as { selectedId: number | null }).selectedId = 1;
+    (controller as unknown as { selectedIsPredator: boolean }).selectedIsPredator = false;
+
+    controller.update(1 / 60, sim, renderer);
+    const button = container.querySelector<HTMLButtonElement>('.creature-inspector-pov-toggle');
+    expect(button?.textContent).toBe('Enter POV');
+
+    button?.click();
+    controller.update(1 / 60, sim, renderer);
+    expect(button?.textContent).toBe('Exit POV (Esc)');
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    controller.update(1 / 60, sim, renderer);
+    expect(button?.textContent).toBe('Enter POV');
+  });
+
+  it('keeps POV camera inside minDistance by disabling real OrbitControls update path', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const controller = new FollowCamController(container);
+
+    const canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
+    camera.position.set(600, 300, 900);
+    const controls = new OrbitControls(camera, canvas);
+    controls.enabled = true;
+    controls.target.set(0, 0, 0);
+    controls.minDistance = 120;
+    controls.maxDistance = 5000;
+    controls.update();
+
+    const renderer = {
+      toRenderedPosition: (x: number, y: number, z: number) => new THREE.Vector3(x * 4, y * 4, z * 4),
+      smoothOrbitTarget: (x: number, y: number, z: number, alpha: number) => {
+        controls.target.x += (x - controls.target.x) * alpha;
+        controls.target.y += (y - controls.target.y) * alpha;
+        controls.target.z += (z - controls.target.z) * alpha;
+      },
+      resetOrbitTarget: vi.fn(),
+      setOrbitControlsEnabled: (enabled: boolean) => {
+        controls.enabled = enabled;
+      },
+      setCameraPose: (position: THREE.Vector3, lookTarget: THREE.Vector3) => {
+        camera.position.copy(position);
+        camera.lookAt(lookTarget);
+        camera.updateMatrixWorld();
+      },
+      getCamera: () => camera,
+      getCreatureLabels: () => ({ boid: { normal: 'Sparrow' }, predator: { normal: 'Hawk', monster: 'Dragon', horse: 'Unicorn' } }),
+    } as unknown as Renderer3D;
+
+    const sim = {
+      boids: [{
+        id: 1,
+        species: 'normal',
+        position: { x: 10, y: 20, z: 30 },
+        velocity: { x: 0, y: 0, z: -1 },
+        renderHeading: { x: 0, y: 0, z: -1 },
+        panicLevel: 0,
+      }],
+      predators: [],
+    } as unknown as Simulation;
+
+    (controller as unknown as { selectedId: number | null }).selectedId = 1;
+    (controller as unknown as { selectedIsPredator: boolean }).selectedIsPredator = false;
+
+    controller.update(1 / 60, sim, renderer);
+    container.querySelector<HTMLButtonElement>('.creature-inspector-pov-toggle')?.click();
+
+    controller.update(1 / 60, sim, renderer);
+    controls.update();
+
+    expect(controls.enabled).toBe(false);
+    const expectedPovPosition = new THREE.Vector3(40, 82, 110);
+    expect(camera.position.distanceTo(expectedPovPosition)).toBeLessThan(1e-6);
+
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+    expect(direction.dot(new THREE.Vector3(0, 0, -1))).toBeGreaterThan(0.7);
   });
 });

@@ -129,6 +129,22 @@ body {
   z-index: 5;
 }
 
+.creature-inspector-pov-toggle {
+  margin-top: 8px;
+  padding: 4px 8px;
+  background: #21262d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.creature-inspector-pov-toggle:hover {
+  background: #30363d;
+}
+
 #control-panel {
   width: 300px;
   flex-shrink: 0;

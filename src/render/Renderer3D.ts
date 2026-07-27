@@ -773,6 +773,16 @@ export class Renderer3D {
     this.cameraController.smoothOrbitTarget(center.x, center.y, center.z, 1);
   }
 
+  /** Enable/disable OrbitControls updates/interactions. */
+  setOrbitControlsEnabled(enabled: boolean): void {
+    this.cameraController.setOrbitControlsEnabled(enabled);
+  }
+
+  /** Set camera position + look target directly (used by POV follow-cam). */
+  setCameraPose(position: THREE.Vector3, lookTarget: THREE.Vector3): void {
+    this.cameraController.setCameraPose(position, lookTarget);
+  }
+
   private groupBoidsBySpecies(boids: Boid[]): Map<BoidSpecies, Boid[]> {
     const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
     for (const boid of boids) {
@@ -1077,7 +1087,7 @@ export class Renderer3D {
   }
 
   private renderOutput(): void {
-    this.controls.update();
+    if (this.controls.enabled) this.controls.update();
     this.composer.render();
   }
 
