@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry, singleLegPart } from '../../../geometry/sharedGeometry';
+import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry, buildTailCapGeometry, singleLegPart } from '../../../geometry/sharedGeometry';
 import { buildFingeredWingGeometry, buildTailGeometry, buildHookedBeakGeometry } from './birdSharedGeometry';
 
 /**
@@ -40,12 +40,14 @@ export function createHawkGeometries(length: number, width: number): CreatureGeo
 
   // Broader, longer wings than the small-bird shape — a soaring raptor's
   // wings are proportionally larger relative to its body than a small
-  // perching bird's — reusing the shared fingered-wing shape (already
-  // reads as a bird of prey) rather than duplicating it.
+  // perching bird's — reusing the shared fingered-wing shape with broadTip
+  // enabled so the hawk's wingtips fan out like real primary feathers
+  // (broad, rounded "fingered" silhouette) rather than coming to a sharp
+  // triangular point like a swift/falcon.
   const wingSpan = length * 1.5;
   const wingChord = length * 0.68;
-  const wingLeft = buildFingeredWingGeometry(wingSpan, wingChord, 1);
-  const wingRight = buildFingeredWingGeometry(wingSpan, wingChord, -1);
+  const wingLeft = buildFingeredWingGeometry(wingSpan, wingChord, 1, true);
+  const wingRight = buildFingeredWingGeometry(wingSpan, wingChord, -1, true);
 
   // Real bald eagle tails are white — handled for free via a plain
   // per-instance tail tint (see Renderer3D's NATURE_HAWK_COLORS), no
@@ -84,7 +86,14 @@ const HEAD_EXTRA_NARROW = 0.82;
 function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const headFrac = (frac: number) => HEAD_START_FRAC + (frac - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE;
+  // faceRadius: the beak's cross-section radius at the join point — kept as
+  // authored so the beak silhouette is unchanged.
   const faceRadius = width * 0.14 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW;
+  // headFaceRadius: the head's face-opening radius — deliberately smaller than
+  // faceRadius so the beak fully occludes the head's open ring from any view
+  // angle (the beak's 8-gon inscribed radius ≈ 0.924 * faceRadius, so any
+  // headFaceRadius ≤ 0.5 * faceRadius is well inside that boundary).
+  const headFaceRadius = faceRadius * 0.5;
   const faceY = halfLen * HEAD_END_FRAC;
   const profile = [
     new THREE.Vector2(width * 0.04, -halfLen * 1.0), // tail tip
@@ -95,7 +104,7 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
     new THREE.Vector2(width * 0.3 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW, halfLen * headFrac(0.54)), // head base
     new THREE.Vector2(width * 0.32 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW, halfLen * headFrac(0.64)), // crown
     new THREE.Vector2(width * 0.24 * HEAD_NARROW_SCALE * HEAD_EXTRA_NARROW, halfLen * headFrac(0.74)), // brow, just above the eyes
-    new THREE.Vector2(faceRadius, faceY), // face, where the beak attaches
+    new THREE.Vector2(headFaceRadius, faceY), // face — narrowed so the beak fully occludes the opening
   ];
   // The torso/chest/neck portion of the profile stays the dark plumage
   // color; the head-base-onward portion (index 5+) is tinted white —
@@ -110,6 +119,11 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   const torso = new THREE.LatheGeometry(new THREE.SplineCurve(torsoProfile).getPoints(48), 32);
   const head = new THREE.LatheGeometry(new THREE.SplineCurve(headProfile).getPoints(32), 32);
 
+  // Seal the open tail-end lathe ring with a double-sided disc cap so it no
+  // longer reads as a transparent hole when viewed from behind. Colored to
+  // match the back plumage so it reads as continuous dark feathering.
+  const tailCap = buildTailCapGeometry(-halfLen * 1.0, width * 0.04, 32);
+
   // Straighter beak than a macaw's full curl — a bald eagle's beak is
   // mostly straight along its length with the hook concentrated right
   // at the tip, not curving continuously from the base. maxAngleDeg
@@ -117,6 +131,7 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   // buildHookedBeakGeometry biases most of that curl toward the tip
   // already (angle grows with t^1.6), so a modest max angle reads as
   // "mostly straight, hooked tip" instead of the parrot's full hook.
+  // The root cap fills the narrowed head-face opening so no gap is visible.
   const beak = buildHookedBeakGeometry(faceY, faceRadius, length * 0.110, 28, 0.8);
 
   const eyeY = halfLen * headFrac(0.7);
@@ -127,6 +142,7 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
 
   return mergeGeometriesWithColor([
     { geometry: torso, color: TORSO_COLOR },
+    { geometry: tailCap, color: TORSO_COLOR },
     { geometry: head, color: HEAD_COLOR },
     { geometry: beak, color: BEAK_COLOR },
     { geometry: eyes, color: EYE_COLOR },
