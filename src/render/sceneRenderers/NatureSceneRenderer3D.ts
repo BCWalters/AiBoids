@@ -139,7 +139,7 @@ const _PARROT_FLAP_FREQUENCY = 5.4;
 const _PARROT_FLAP_IDLE_AMPLITUDE = 0.4;
 const _PARROT_FLAP_SPEED_AMPLITUDE = 0.95;
 const BIRD_TAIL_SWAY_AMPLITUDE = 0.07;
-const _PARROT_TAIL_SWAY_AMPLITUDE = 0.06;
+const PARROT_TAIL_SWAY_AMPLITUDE = 0.06;
 const BIRD_TAIL_FLARE_STRENGTH = 0.3;
 
 type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus';
@@ -675,7 +675,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       legTuckRad: BIRD_LEG_TUCK_RAD,
       getScale: (creature) => (creature as Boid).scale,
       tailSwayAmplitude: isParrot && isProfiledParrot
-        ? _PARROT_TAIL_SWAY_AMPLITUDE
+        ? PARROT_TAIL_SWAY_AMPLITUDE
         : BIRD_TAIL_SWAY_AMPLITUDE,
       tailSwayFrequency: undefined,
       tailFlareStrength: BIRD_TAIL_FLARE_STRENGTH,
