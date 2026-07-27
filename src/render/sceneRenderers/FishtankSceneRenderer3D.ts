@@ -36,6 +36,12 @@ import {
   type SpeciesColorSet,
   type CreatureLabels,
 } from './createSceneRendererHooks';
+import {
+  applyFishScaleShader,
+  BONY_FISH_SCALE_CONFIG,
+  BARRACUDA_SCALE_CONFIG,
+  SHARK_SCALE_CONFIG,
+} from '../styles/fishtank/fishScaleShader';
 
 // --- Fishtank creature sizing: every fishtank creature is a factor of this
 // single base creature size (the standard fish/boid). No fishtank creature is
@@ -605,6 +611,42 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         horse: 'Sea Horse',
       },
     };
+  }
+
+  /**
+   * Applies the procedural fish scale shader to every fishtank fish body
+   * material when it is first created.  The seahorse body is excluded (it is
+   * not a scaled fish); sharks use SHARK_SCALE_CONFIG (edgeDarkness=0, a
+   * deliberate no-op since sharks have dermal denticles, not plate scales).
+   *
+   * Scale density is derived from the geometry's own bounding-box half-length
+   * so the scale-cell size is proportional to the fish's body — a goldfish and
+   * a barracuda each end up with the same fraction of their body covered by one
+   * scale cell rather than the same absolute world-space cell size.
+   */
+  patchBodyMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    // Seahorse is not a scaled fish — skip entirely.
+    if (geometries === this.unicornPredatorGeometries) return;
+
+    // Identify the per-species scale config by matching against the geometry
+    // instances created in the constructor.  Sharks get the explicit no-op
+    // config; barracudas get reduced density/darkness; every other fishtank
+    // fish uses the standard bony-fish config.
+    let config = BONY_FISH_SCALE_CONFIG;
+    if (geometries === this.sharkPredatorGeometries) {
+      config = SHARK_SCALE_CONFIG;
+    } else if (geometries === this.barracudaPredatorGeometries) {
+      config = BARRACUDA_SCALE_CONFIG;
+    }
+
+    // Compute the body half-length from the bounding box so the scale
+    // frequency is automatically proportional to this fish's actual size.
+    const bodyGeo = geometries.body;
+    if (!bodyGeo.boundingBox) bodyGeo.computeBoundingBox();
+    const bb = bodyGeo.boundingBox!;
+    const halfLen = (bb.max.y - bb.min.y) / 2;
+
+    applyFishScaleShader(material, config, halfLen);
   }
 
   dispose(): void {

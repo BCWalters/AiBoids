@@ -280,6 +280,24 @@ export interface SceneRendererHooks {
    * (e.g. 'normal' boid → "Sparrow" in nature, "Fish" in fishtank, "Boid" in arcade).
    */
   getCreatureLabels: () => CreatureLabels;
+  /**
+   * Optional scene-specific hook called immediately after the body
+   * `MeshStandardMaterial` is created for a render batch, before the mesh is
+   * constructed.  Scenes that apply custom `onBeforeCompile` shader patches
+   * (e.g. the fishtank fish scale shader) implement this to inject them once
+   * per material rather than once per frame.
+   *
+   * The `geometries` object is provided so implementations can look up the
+   * body half-length (or identify which species is being built) without
+   * needing to thread additional parameters through `buildRenderBatch`.
+   *
+   * All other scenes leave this unimplemented (the default `undefined`
+   * means no patching occurs).
+   */
+  patchBodyMaterial?: (
+    material: THREE.MeshStandardMaterial,
+    geometries: CreatureGeometries,
+  ) => void;
   dispose: () => void;
 }
 
