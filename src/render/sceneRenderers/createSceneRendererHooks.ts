@@ -280,6 +280,14 @@ export interface SceneRendererHooks {
    * (e.g. 'normal' boid → "Sparrow" in nature, "Fish" in fishtank, "Boid" in arcade).
    */
   getCreatureLabels: () => CreatureLabels;
+  /**
+   * Optional hook to patch the body MeshStandardMaterial after it is
+   * constructed in Renderer3D.buildRenderBatch. Called once per batch,
+   * before the material is used for any InstancedMesh. Intended for
+   * scene-specific onBeforeCompile injections (e.g. fishtank fish-scale
+   * pattern). Scenes that don't need it can omit the method entirely.
+   */
+  patchBodyMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
   dispose: () => void;
 }
 

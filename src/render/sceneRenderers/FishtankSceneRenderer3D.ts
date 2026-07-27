@@ -19,6 +19,12 @@ import {
   createClownfishGeometries,
   createBlueTangGeometries,
 } from '../styles/fishtank/geometry/smallFishGeometry';
+import {
+  applyFishScaleShader,
+  BONY_FISH_SCALE_CONFIG,
+  BARRACUDA_SCALE_CONFIG,
+  SHARK_SCALE_CONFIG,
+} from '../styles/fishtank/fishScaleShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -605,6 +611,26 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         horse: 'Sea Horse',
       },
     };
+  }
+
+  patchBodyMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    // Sea horse: not a fish — no scale pattern.
+    if (geometries === this.unicornPredatorGeometries) return;
+
+    let config;
+    if (geometries === this.sharkPredatorGeometries) {
+      // Sharks bear dermal denticles, not plate scales. SHARK_SCALE_CONFIG
+      // has edgeDarkness=0 so applyFishScaleShader returns immediately —
+      // this is intentional documentation that sharks were considered.
+      config = SHARK_SCALE_CONFIG;
+    } else if (geometries === this.barracudaPredatorGeometries) {
+      config = BARRACUDA_SCALE_CONFIG;
+    } else {
+      // All small bony fish (Tetra, Goldfish, Clownfish, Blue Tang) and
+      // Butterflyfish share the same bony-plate scale config.
+      config = BONY_FISH_SCALE_CONFIG;
+    }
+    applyFishScaleShader(material, geometries.body, config);
   }
 
   dispose(): void {
