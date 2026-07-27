@@ -241,8 +241,8 @@ describe('FollowCamController POV mode', () => {
         id: 1,
         species: 'normal',
         position: { x: 10, y: 20, z: 30 },
-        velocity: { x: 0, y: 1, z: 0 },
-        renderHeading: { x: 0, y: 1, z: 0 },
+        velocity: { x: 0, y: 0, z: -1 },
+        renderHeading: { x: 0, y: 0, z: -1 },
         panicLevel: 0,
       }],
       predators: [],
@@ -255,13 +255,14 @@ describe('FollowCamController POV mode', () => {
     container.querySelector<HTMLButtonElement>('.creature-inspector-pov-toggle')?.click();
 
     controller.update(1 / 60, sim, renderer);
-    if (controls.enabled) controls.update();
+    controls.update();
 
-    const distanceToTarget = camera.position.distanceTo(controls.target);
-    expect(distanceToTarget).toBeLessThan(controls.minDistance);
+    expect(controls.enabled).toBe(false);
+    const expectedPovPosition = new THREE.Vector3(40, 82, 110);
+    expect(camera.position.distanceTo(expectedPovPosition)).toBeLessThan(1e-6);
 
     const direction = new THREE.Vector3();
     camera.getWorldDirection(direction);
-    expect(direction.y).toBeGreaterThan(0.7);
+    expect(direction.dot(new THREE.Vector3(0, 0, -1))).toBeGreaterThan(0.7);
   });
 });
