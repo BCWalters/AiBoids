@@ -168,13 +168,14 @@ export class Renderer3D {
     this.composer.addPass(this.bloomPass);
     // Depth of field (BokehPass) — disabled until params.depthOfFieldEnabled = true.
     // Placed after bloom so the glow is included in the depth blur.
-    this.dofPass = new BokehPass(this.scene, this.camera, { focus: 500, aperture: 0.004, maxblur: 0.005 });
+    this.dofPass = new BokehPass(this.scene, this.camera, { focus: 500, aperture: 0.0015, maxblur: 0.002 });
     this.dofPass.enabled = false;
     this.composer.addPass(this.dofPass);
     // Filmic color grading — disabled until params.colorGradingEnabled = true.
+    // Placed after OutputPass so grading operates on tone-mapped display-referred color.
+    this.composer.addPass(new OutputPass());
     this.colorGradingPass = createColorGradingPass();
     this.composer.addPass(this.colorGradingPass);
-    this.composer.addPass(new OutputPass());
 
     this.initializeSceneRenderers();
   }

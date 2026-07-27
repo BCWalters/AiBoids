@@ -2,9 +2,10 @@
  * Filmic color grading post-processing pass.
  *
  * Implements a contrast / saturation / lift-gamma-gain shader as a ShaderPass
- * that can be inserted into the EffectComposer chain. Each visual style has a
- * tasteful preset; when the pass is disabled (colorGradingEnabled = false)
- * the image is visually identical to the ungraded output.
+ * that can be inserted into the EffectComposer chain after tone mapping. Each
+ * visual style has a tasteful preset; when the pass is disabled
+ * (colorGradingEnabled = false) the image is visually identical to the
+ * ungraded output.
  */
 import * as THREE from 'three';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -89,8 +90,6 @@ const ColorGradingShader = {
 
       // --- Contrast (S-curve pivot at 0.5) ---
       color = (color - 0.5) * contrast + 0.5;
-      color = clamp(color, 0.0, 1.0);
-
       // --- Saturation via luminance ---
       float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
       color = mix(vec3(luma), color, saturation);
