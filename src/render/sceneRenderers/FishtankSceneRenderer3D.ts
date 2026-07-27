@@ -163,8 +163,12 @@ interface FishtankSceneRendererDependencies {
   controls: OrbitControls;
   driftingClouds: DriftingClouds;
   fishtankCenter: THREE.Vector3;
-  fishtankEnv: FishtankEnvironment;
-  natureEnv: { setVisible: (visible: boolean) => void };
+  /**
+   * Lazy getter for the active FishtankEnvironment.  Returns null when
+   * fishtank is not the active style (env is disposed).  All methods that
+   * touch the env must null-guard before use.
+   */
+  getFishtankEnv: () => FishtankEnvironment | null;
 }
 
 export class FishtankSceneRenderer3D implements SceneRendererHooks {
@@ -198,8 +202,9 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   setStyleVisibility(): void {
-    this.deps.natureEnv.setVisible(false);
-    this.deps.fishtankEnv.setVisible(true);
+    // The fishtank env was just created by LazyEnvProvider — it's naturally
+    // visible.  The nature env has been disposed (null); no setVisible(false)
+    // is needed since it no longer exists in the scene graph.
     this.deps.driftingClouds.setVisible(false);
   }
 
@@ -239,13 +244,15 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   updateEnvironment(elapsed: number): void {
-    this.deps.fishtankEnv.update(elapsed);
+    this.deps.getFishtankEnv()?.update(elapsed);
   }
 
   updateSpecialCreatureEffects(_sim: Simulation, _elapsed: number, _dragonDisplayQuats: Map<number, THREE.Quaternion>): void {}
 
   configureEnvironmentAnchors(sim: Simulation, _center: THREE.Vector3, _maxDim: number): void {
-    placeFishtankEnvironment(this.deps.fishtankEnv, sim.width, sim.height, params.worldDepth);
+    const env = this.deps.getFishtankEnv();
+    if (!env) return;
+    placeFishtankEnvironment(env, sim.width, sim.height, params.worldDepth);
   }
 
   updateFrameAnchors(sim: Simulation): void {
@@ -271,17 +278,21 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   applyEnvironmentToggles(toggles: SceneEnvironmentToggles): void {
-    this.deps.fishtankEnv.setFogEnabled(toggles.fogEnabled);
-    this.deps.fishtankEnv.setTimeOfDay(toggles.timeOfDay);
-    this.deps.fishtankEnv.setWaterEffectsEnabled(toggles.waterEffectsEnabled);
+    const env = this.deps.getFishtankEnv();
+    if (!env) return;
+    env.setFogEnabled(toggles.fogEnabled);
+    env.setTimeOfDay(toggles.timeOfDay);
+    env.setWaterEffectsEnabled(toggles.waterEffectsEnabled);
   }
 
   setShadowsEnabled(enabled: boolean): void {
-    this.deps.fishtankEnv.keyLight.castShadow = enabled;
+    const env = this.deps.getFishtankEnv();
+    if (!env) return;
+    env.keyLight.castShadow = enabled;
   }
 
   setGalleryCreatureActive(active: boolean): void {
-    this.deps.fishtankEnv.setRoomVisible(!active);
+    this.deps.getFishtankEnv()?.setRoomVisible(!active);
   }
 
   getPresentationSettings(): ScenePresentationSettings {
@@ -610,7 +621,8 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   dispose(): void {
-    this.deps.fishtankEnv.dispose();
+    // The fishtank env is owned by LazyEnvProvider and disposed there — do not
+    // call dispose() on it here to avoid a double-dispose.
     disposeCreatureGeometries(this.plainFishGeometries);
     disposeCreatureGeometries(this.goldfishGeometries);
     disposeCreatureGeometries(this.clownfishGeometries);

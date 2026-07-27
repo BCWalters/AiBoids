@@ -354,7 +354,22 @@ export class Renderer3D {
     if (this.currentStyle === style) return;
     const wasFishtank = this.currentStyle === 'fishtank';
     this.currentStyle = style;
+
+    // Lazy environment: dispose the previously-active heavy env and create the
+    // one for the new style.  Must run before setStyleVisibility so the freshly-
+    // built env is already in the scene graph when visibility is configured.
+    this.sceneAssets.envProvider.switchToStyle(style);
+
     const sceneRenderer = this.getSceneRenderer(style);
+
+    // Position the freshly-built environment (replays placeNatureEnvironment /
+    // placeFishtankEnvironment for the current world size, since the bounds-
+    // helper's early-return prevents configureSceneEnvironmentAnchors from
+    // re-running when only the style changes).
+    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
+    const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    sceneRenderer.configureEnvironmentAnchors(sim, center, maxDim);
+
     const presentation = sceneRenderer.getPresentationSettings();
     this.bloomPass.enabled = presentation.bloomEnabled && !this.reducedGraphics;
     // The afterimage/motion-trail effect persists whole previous frames —
@@ -382,8 +397,21 @@ export class Renderer3D {
     // needs a tight max zoom-out, while fishtank now has real geometry
     // (a table + room) around the tank that's worth seeing when zoomed
     // out further, so it gets a much looser clamp than nature.
-    const maxDim = Math.max(sim.width, sim.height, params.worldDepth);
     sceneRenderer.applyStyleTransition(sim, maxDim, wasFishtank);
+
+    // Re-apply current environment toggles and shadow state to the freshly-built
+    // env.  updateEnvironmentParameterToggles() will skip re-applying them on the
+    // next frame (the params haven't changed), so we must apply them here so the
+    // new env gets the correct fog/timeOfDay/water/lightShafts/shadow state.
+    const toggles: SceneEnvironmentToggles = {
+      fogEnabled: params.fogEnabled,
+      timeOfDay: params.timeOfDay,
+      lightShaftsEnabled: params.lightShaftsEnabled,
+      waterEffectsEnabled: params.waterEffectsEnabled,
+    };
+    sceneRenderer.applyEnvironmentToggles(toggles);
+    const shadowsEnabled = params.mode === '3d' && params.softShadowsEnabled && !this.reducedGraphics;
+    sceneRenderer.setShadowsEnabled(shadowsEnabled);
   }
 
   private updateEnvironmentParameterToggles(): void {
