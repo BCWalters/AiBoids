@@ -116,6 +116,11 @@ const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22;
 // inherited implicitly from Renderer3D's shared tail-sway default; it is now
 // owned here so the hawk's motion is fully self-described.
 const HAWK_TAIL_SWAY_AMPLITUDE = 0.22;
+// Hawks are large soaring raptors — they flap noticeably slower than the small
+// passerines (FLAP_FREQUENCY = 7.6) or even parrots (_PARROT_FLAP_FREQUENCY =
+// 5.4). A value of 3.5 rad/s sits between the dragon (2.15) and parrot (5.4)
+// and reads as a heavy, powerful wingbeat rather than a frantic small-bird flap.
+const HAWK_FLAP_FREQUENCY = 3.5;
 const _UNICORN_FLAP_FREQUENCY = 3.2;
 const _UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
 const _UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
@@ -607,7 +612,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       
       case PredatorSpecies.Normal:
         return {
-          flapFrequency: FLAP_FREQUENCY,
+          flapFrequency: HAWK_FLAP_FREQUENCY,
           flapIdleAmplitude: FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: FLAP_SPEED_AMPLITUDE,
           flapDownstrokeFraction: BIRD_DOWNSTROKE_FRACTION,
@@ -799,3 +804,5 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
 
 // NATURE_HAWK_COLORS is consumed by the hawk geometry builder.
 export { NATURE_HAWK_COLORS };
+// Exported for unit tests that assert hawk flap frequency intent is preserved.
+export { HAWK_FLAP_FREQUENCY, FLAP_FREQUENCY };
