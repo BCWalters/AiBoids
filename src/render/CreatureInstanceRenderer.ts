@@ -115,6 +115,7 @@ interface CreatureInstanceMatrixArgs {
   flapSpeedAmplitude: number;
   finRestBiasRad: number;
   flapDownstrokeFraction: number;
+  flapBottomClipRad: number;
   legSwingAmplitude: number;
   legTuckRad: number;
   tailSwayAmplitude: number;
@@ -136,6 +137,7 @@ interface ResolvedMotionConfig {
   bankScale: number;
   finRestBiasRad: number;
   flapDownstrokeFraction: number;
+  flapBottomClipRad: number;
   legSwingAmplitude: number;
   legTuckRad: number;
   tailSwayAmplitude: number;
@@ -188,6 +190,7 @@ interface UpdateCreatureInstanceArgs {
   bankScale: number;
   finRestBiasRad: number;
   flapDownstrokeFraction: number;
+  flapBottomClipRad: number;
   legSwingAmplitude: number;
   legTuckRad: number;
   tailSwayAmplitude: number;
@@ -533,6 +536,7 @@ export class CreatureInstanceRenderer {
       flapSpeedAmplitude,
       finRestBiasRad,
       flapDownstrokeFraction,
+      flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
       tailSwayAmplitude,
@@ -563,6 +567,7 @@ export class CreatureInstanceRenderer {
       flapSpeedAmplitude,
       finRestBiasRad,
       flapDownstrokeFraction,
+      flapBottomClipRad,
       uprightStyle,
     });
     this.applyWingFlapMatrices(set, index, flapAngle);
@@ -758,6 +763,7 @@ export class CreatureInstanceRenderer {
     flapSpeedAmplitude,
     finRestBiasRad,
     flapDownstrokeFraction,
+    flapBottomClipRad,
     uprightStyle,
   }: {
     creature: Boid | Predator;
@@ -776,6 +782,7 @@ export class CreatureInstanceRenderer {
     flapSpeedAmplitude: number;
     finRestBiasRad: number;
     flapDownstrokeFraction: number;
+    flapBottomClipRad: number;
     uprightStyle: UprightStyle;
   }): number {
     const { frequencyMultiplier, amplitudeMultiplier } = computeFlapStateMultipliers({
@@ -805,6 +812,7 @@ export class CreatureInstanceRenderer {
       amplitude,
       restBiasRad: finRestBiasRad,
       downstrokeFraction: flapDownstrokeFraction,
+      bottomClipRad: flapBottomClipRad,
     });
   }
 
@@ -1063,6 +1071,7 @@ export class CreatureInstanceRenderer {
       bankScale = 1,
       finRestBiasRad = 0,
       flapDownstrokeFraction = SYMMETRIC_DOWNSTROKE_FRACTION,
+      flapBottomClipRad = 0,
       legSwingAmplitude = 0,
       legTuckRad = 0,
       tailSwayAmplitude = 0,
@@ -1084,6 +1093,7 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
       tailSwayAmplitude,
@@ -1152,6 +1162,7 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
       tailSwayAmplitude,
@@ -1208,6 +1219,7 @@ export class CreatureInstanceRenderer {
       flapSpeedAmplitude,
       finRestBiasRad,
       flapDownstrokeFraction,
+      flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
       tailSwayAmplitude,
@@ -1282,6 +1294,7 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
       tailSwayAmplitude,
@@ -1327,6 +1340,7 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
       tailSwayAmplitude,

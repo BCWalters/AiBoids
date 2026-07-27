@@ -405,3 +405,97 @@ describe('legSwingAngleFromPhase', () => {
     expect(Math.sin(LEG_SWING_PHASE_OFFSET)).not.toBeCloseTo(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dragon wing-bottom clip (issue #199)
+// ---------------------------------------------------------------------------
+// These constants mirror the values in NatureSceneRenderer3D.ts.  They are
+// intentionally duplicated here (not imported) so that a change to one without
+// the other causes a test failure — a canary for the fix being complete.
+const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
+const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
+const DRAGON_BOTTOM_CLIP_RAD = 0.30;
+
+// Phase at the TOP of the stroke: warpStrokePhase input u=0 → the quarter-
+// cycle offset in warpStrokePhase means phase = -π/2 reaches u=0 exactly.
+const PHASE_AT_TOP = -Math.PI / 2;
+// Phase at the BOTTOM of the stroke (symmetric default): u = 0.5.
+const PHASE_AT_BOTTOM_SYMMETRIC = Math.PI / 2;
+
+describe('dragon wing-bottom clip (issue #199)', () => {
+  // Amplitude at full speed, state-multiplier = 1 (the worst-case scenario
+  // that previously caused the wing to pass through the legs).
+  const amplitudeAtMaxSpeed = DRAGON_FLAP_IDLE_AMPLITUDE + DRAGON_FLAP_SPEED_AMPLITUDE; // 1.25
+
+  it('leaves the top of the stroke at its pre-change value (-1.25 rad at max speed)', () => {
+    // Pre-change: flapAngleFromPhase({ phase: PHASE_AT_TOP, amplitude: 1.25, restBiasRad: 0 })
+    // = 1.25 * sin(-π/2) + 0 = -1.25
+    const angle = flapAngleFromPhase({
+      phase: PHASE_AT_TOP,
+      amplitude: amplitudeAtMaxSpeed,
+      restBiasRad: 0,
+      bottomClipRad: DRAGON_BOTTOM_CLIP_RAD,
+    });
+    expect(angle).toBeCloseTo(-1.25);
+  });
+
+  it('raises the bottom of the stroke from +1.25 to +0.95 rad at max speed', () => {
+    // Pre-change: flapAngleFromPhase({ phase: PHASE_AT_BOTTOM, amplitude: 1.25, restBiasRad: 0 })
+    // = 1.25 * sin(π/2) + 0 = +1.25
+    // Post-change (d = 0.30): bottom = 1.25 - 0.30 = 0.95
+    const angle = flapAngleFromPhase({
+      phase: PHASE_AT_BOTTOM_SYMMETRIC,
+      amplitude: amplitudeAtMaxSpeed,
+      restBiasRad: 0,
+      bottomClipRad: DRAGON_BOTTOM_CLIP_RAD,
+    });
+    expect(angle).toBeCloseTo(0.95);
+  });
+
+  it('leaves the top unchanged at idle speed as well', () => {
+    // Pre-change idle top = -DRAGON_FLAP_IDLE_AMPLITUDE = -0.4
+    const angle = flapAngleFromPhase({
+      phase: PHASE_AT_TOP,
+      amplitude: DRAGON_FLAP_IDLE_AMPLITUDE,
+      restBiasRad: 0,
+      bottomClipRad: DRAGON_BOTTOM_CLIP_RAD,
+    });
+    expect(angle).toBeCloseTo(-0.4);
+  });
+
+  it('clips the bottom at idle speed to amplitude - clip (0.40 - 0.30 = 0.10 rad)', () => {
+    const angle = flapAngleFromPhase({
+      phase: PHASE_AT_BOTTOM_SYMMETRIC,
+      amplitude: DRAGON_FLAP_IDLE_AMPLITUDE,
+      restBiasRad: 0,
+      bottomClipRad: DRAGON_BOTTOM_CLIP_RAD,
+    });
+    expect(angle).toBeCloseTo(0.10);
+  });
+
+  it('does not affect other creatures (bottomClipRad defaulting to 0)', () => {
+    // A bird at full speed: amplitude = 0.25 + 0.9 = 1.15 (FLAP_IDLE + FLAP_SPEED)
+    const birdAmplitude = 0.25 + 0.9;
+    const phase = 1.23;
+    const unchanged = flapAngleFromPhase({ phase, amplitude: birdAmplitude, restBiasRad: 0 });
+    const withZeroClip = flapAngleFromPhase({
+      phase,
+      amplitude: birdAmplitude,
+      restBiasRad: 0,
+      bottomClipRad: 0,
+    });
+    expect(withZeroClip).toBe(unchanged);
+  });
+
+  it('the new stroke bottom (0.95 rad) keeps the wing inner boundary clear of the leg claws', () => {
+    // Back leg claws in the nature scene: deepest Z = −13.95 model units.
+    // Dragon wing wristAnchor is at X_local = 16.2 (span=67.5, span*0.24=16.2).
+    // At the new stroke floor θ = 0.95 rad:
+    //   Z_wristAnchor = −16.2 × sin(0.95) ≈ −13.19, which clears −13.95 by ~0.76 units.
+    const thetaNew = 0.95; // new maximum downstroke (amplitude - clip = 1.25 - 0.30)
+    const WRIST_ANCHOR_X_LOCAL = 16.2; // span * 0.24 = 67.5 * 0.24
+    const LEG_CLAW_DEEPEST_Z = -13.95; // back leg claws, absolute value of Z
+    const zWristAtNewBottom = -WRIST_ANCHOR_X_LOCAL * Math.sin(thetaNew);
+    expect(zWristAtNewBottom).toBeGreaterThan(LEG_CLAW_DEEPEST_Z); // clears the claw
+  });
+});
