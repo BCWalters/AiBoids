@@ -127,6 +127,19 @@ body {
   white-space: pre;
   pointer-events: none;
   z-index: 5;
+  /* Fixed size so digit-count and phrase changes don't resize the box. */
+  min-width: 26ch;
+  text-align: left;
+}
+
+/* Fixed-width speed segment on line 2 of the creature HUD.
+ * Right-aligning within a stable min-width prevents the ` · phrase` from
+ * jumping left/right as the rounded speed changes digit count. */
+.hud-speed {
+  display: inline-block;
+  min-width: 7ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 #control-panel {

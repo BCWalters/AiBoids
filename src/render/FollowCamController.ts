@@ -47,6 +47,10 @@ export class FollowCamController {
   private selectedId: number | null = null;
   private selectedIsPredator = false;
   private readonly hud: HTMLElement;
+  // Stable child elements updated each frame by syncHud.
+  private readonly hudLine1: HTMLSpanElement;
+  private readonly hudSpeedSpan: HTMLSpanElement;
+  private readonly hudPhraseSpan: HTMLSpanElement;
 
   // Pointer-down coordinates for drag-vs-click discrimination.
   private _pointerDownX = 0;
@@ -58,6 +62,18 @@ export class FollowCamController {
     this.hud.id = 'creature-inspector';
     this.hud.setAttribute('aria-live', 'polite');
     this.hud.style.display = 'none';
+
+    // Build child structure once; syncHud only updates textContent each frame.
+    this.hudLine1 = document.createElement('span');
+    this.hudSpeedSpan = document.createElement('span');
+    this.hudSpeedSpan.className = 'hud-speed';
+    this.hudPhraseSpan = document.createElement('span');
+    this.hud.appendChild(this.hudLine1);
+    this.hud.appendChild(document.createTextNode('\n'));
+    this.hud.appendChild(this.hudSpeedSpan);
+    this.hud.appendChild(document.createTextNode(' \u00b7 '));
+    this.hud.appendChild(this.hudPhraseSpan);
+
     container.appendChild(this.hud);
   }
 
@@ -222,10 +238,8 @@ export class FollowCamController {
     }
 
     this.hud.style.display = 'block';
-    // Each line is set as a separate text node via children to support
-    // the white-space:pre CSS on the container without needing innerHTML.
-    const line1 = speciesLabel;
-    const line2 = `${Math.round(speed)} u/s \u00b7 ${pickStatusPhrase(category, entity.id, performance.now())}`;
-    this.hud.textContent = `${line1}\n${line2}`;
+    this.hudLine1.textContent = speciesLabel;
+    this.hudSpeedSpan.textContent = `${Math.round(speed)} u/s`;
+    this.hudPhraseSpan.textContent = pickStatusPhrase(category, entity.id, performance.now());
   }
 }
