@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createRealisticBirdGeometries, type SmallBirdPalette } from './smallBirdGeometry';
+import { GOLDFINCH_NATURE_PALETTE } from '../../../sceneRenderers/NatureSceneRenderer3D';
 
 /**
  * Regression tests for issue #227: the small-bird body dorsal/ventral blend
@@ -207,6 +208,42 @@ describe('small-bird body dorsal gradient fix (issue #227)', () => {
         }
       }
       expect(hasReversal).toBe(true);
+    });
+
+  });
+
+  // ---------------------------------------------------------------------------
+  // The tests above build with a palette declared inside this file, which
+  // proves the algorithm honours whatever palette it is handed but says
+  // nothing about the palette the app actually ships. Bind to the real one so
+  // the shipped config can't quietly lose the feature (same gap that was
+  // closed on #214's goldfinch tail gradient).
+  // ---------------------------------------------------------------------------
+  describe('shipped goldfinch config', () => {
+
+    it('still enables the dorsal gradient', () => {
+      expect(GOLDFINCH_NATURE_PALETTE.dorsalGradient).toBe(true);
+    });
+
+    it('renders a rump close to the shipped tailBack at the size the app uses', () => {
+      // NATURE_CREATURE_SIZES.smallBird = natureSize(0.75) of the 9.1 x 6.24
+      // base creature. Inlined rather than imported because that table is not
+      // exported and #228 is concurrently touching that file.
+      const geoms = createRealisticBirdGeometries(
+        9.1 * 0.75,
+        6.24 * 0.75,
+        new THREE.Color(0x888888),
+        GOLDFINCH_NATURE_PALETTE,
+      );
+      const rump = dorsalColorsPerBand(geoms.body, 10)[9];
+      const tailBack = GOLDFINCH_NATURE_PALETTE.tailBack;
+      // Absolute anchor first. Every other bound here is expressed relative to
+      // tailBack, so on its own this assertion would still pass if the shipped
+      // rump colour were retuned to bright yellow -- the rendered rump would
+      // simply follow it. Pinning tailBack to an actually-dark value is what
+      // makes the relative checks below mean something.
+      expect(luma(tailBack)).toBeLessThan(0.05);
+      expect(luma(rump)).toBeLessThan(luma(tailBack) + 0.05);
     });
 
   });
