@@ -751,17 +751,20 @@ function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number)
   const colors = new Float32Array(pos.count * 3);
 
   if (ACTIVE_PARROT_PALETTE.dorsalGradient) {
-    // Smooth dorsal→ventral gradient purely in Z: back color at the crown
-    // (max Z, dorsal surface), belly color at the underside (min Z).
-    // Using the geometry's own bounding-box extent so the gradient spans
-    // exactly from surface to surface regardless of body proportions.
-    geometry.computeBoundingBox();
-    const minZ = geometry.boundingBox?.min.z ?? -halfLen * 0.3;
-    const maxZ = geometry.boundingBox?.max.z ?? halfLen * 0.3;
-    const zSpan = Math.max(1e-5, maxZ - minZ);
+    // Smooth dorsal→ventral gradient in Z: back color at the crown (dorsal
+    // surface, normal.z ≈ +1), belly color at the underside (normal.z ≈ -1).
+    //
+    // We use the vertex normal's Z component rather than position.z /
+    // global-zSpan. The torso is a LatheGeometry that tapers to near-zero
+    // radius at the nose and tail tips; at those tips position.z ≈ 0 for
+    // every vertex, so a bounding-box normalisation always returns t ≈ 0.5
+    // there — blending back and belly instead of showing the correct colour.
+    // The vertex normal is independent of the local radius and correctly
+    // gives +1 (back) / -1 (belly) even at the tips.
+    geometry.computeVertexNormals();
+    const normalAttr = geometry.getAttribute('normal');
     for (let i = 0; i < pos.count; i++) {
-      const z = pos.getZ(i);
-      const t = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp((z - minZ) / zSpan, 0, 1), 0, 1);
+      const t = THREE.MathUtils.smoothstep((normalAttr.getZ(i) + 1) / 2, 0, 1);
       colors[i * 3]     = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.r, ACTIVE_PARROT_PALETTE.back.r, t);
       colors[i * 3 + 1] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.g, ACTIVE_PARROT_PALETTE.back.g, t);
       colors[i * 3 + 2] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.b, ACTIVE_PARROT_PALETTE.back.b, t);
