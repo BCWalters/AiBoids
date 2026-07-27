@@ -64,6 +64,20 @@ const LENGTH = 2.0;
 const WIDTH  = 0.8;
 const STANDOFF = WIDTH * EYE_STANDOFF_SCALE;
 
+// Every gap assertion below is expressed as a multiple of STANDOFF, which is
+// itself derived from EYE_STANDOFF_SCALE - so they all stay green no matter how
+// the constant is retuned, including to a value that buries the eye flush in the
+// skull or pushes it back out on a stalk. Anchor the constant to an absolute
+// range so the relative bounds mean something. #201 asked for "flat with just a
+// small bulge", so the eye must clear the skull but by only a few percent of the
+// body width.
+describe('dragon eye standoff constant', () => {
+  it('keeps the eye proud of the skull but only slightly', () => {
+    expect(EYE_STANDOFF_SCALE).toBeGreaterThan(0.004);
+    expect(EYE_STANDOFF_SCALE).toBeLessThan(0.05);
+  });
+});
+
 // ── Ray-triangle intersection (Moller-Trumbore), returns t ──────────────────
 
 /**
@@ -199,7 +213,10 @@ describe('dragon eye conformance (#201 follow-up)', () => {
       // toward the skull. Gap should be ~= eyeStandoff for all disc vertices.
       const inwardDir = new THREE.Vector3(v.x > 0 ? -1 : 1, 0, 0);
       const gap = nearestBodyHit(v, inwardDir, bodyTris);
-      expect(gap).toBeGreaterThan(0);
+      // Lower bound must be proportional to STANDOFF, not just > 0: an absolute
+      // bound passes even when the eye is sunk to 5% of its standoff, which reads
+      // as flush with the skull and defeats the point of the test.
+      expect(gap).toBeGreaterThan(STANDOFF * 0.33);
       expect(gap).toBeLessThan(STANDOFF * 3);
     }
   });
@@ -214,7 +231,10 @@ describe('dragon eye conformance (#201 follow-up)', () => {
     for (const v of pupilVertices) {
       const inwardDir = new THREE.Vector3(v.x > 0 ? -1 : 1, 0, 0);
       const gap = nearestBodyHit(v, inwardDir, bodyTris);
-      expect(gap).toBeGreaterThan(0);
+      // Lower bound must be proportional to STANDOFF, not just > 0: an absolute
+      // bound passes even when the eye is sunk to 5% of its standoff, which reads
+      // as flush with the skull and defeats the point of the test.
+      expect(gap).toBeGreaterThan(STANDOFF * 0.33);
       expect(gap).toBeLessThan(STANDOFF * 3);
     }
   });
