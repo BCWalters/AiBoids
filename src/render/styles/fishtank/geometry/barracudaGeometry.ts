@@ -406,11 +406,11 @@ function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeom
   const halfLen = length * 0.5;
   const peduncleY = -halfLen * 0.88;
   const root = new THREE.Vector3(0, peduncleY, 0);
-  const upperTip = new THREE.Vector3(0, -halfLen * 1.6, width * 0.36);
+  const upperTip = new THREE.Vector3(0, -halfLen * 1.46, width * 0.36);
   const notch = new THREE.Vector3(0, -halfLen * 1.32, 0);
-  const lowerTip = new THREE.Vector3(0, -halfLen * 1.6, -width * 0.36);
+  const lowerTip = new THREE.Vector3(0, -halfLen * 1.46, -width * 0.36);
   const fin = extrudeRingGeometryAlongX([root, upperTip, notch, lowerTip], width * 0.05);
-  return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.6);
+  return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.46);
 }
 
 /**
