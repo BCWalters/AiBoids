@@ -725,6 +725,46 @@ export class Renderer3D {
     return effectiveRadius / Math.tan(verticalFovRad / 2) / offsetMagnitude;
   }
 
+  /**
+   * World-space distance from a creature's model origin to the front tip of its
+   * geometry along its forward axis (model-local +Y, see FORWARD_AXIS in
+   * CreatureInstanceRenderer), at the given entity scale. The POV camera uses
+   * this to sit at the creature's "nose" looking forward, instead of at the body
+   * centre — which renders from inside the mesh (issue #159).
+   *
+   * `isPredator` selects the correct instance batch and mesh-scale boost, since
+   * boid and predator species strings can collide (both have a `'normal'`).
+   * Returns 0 when the species batch isn't instantiated yet (caller falls back
+   * to the raw origin).
+   */
+  getCreatureForwardExtent(
+    species: PredatorSpecies | BoidSpecies,
+    isPredator: boolean,
+    entityScale: number,
+  ): number {
+    const set = isPredator
+      ? this.predatorInstances.get(species as PredatorSpecies)
+      : this.speciesInstances.get(species as BoidSpecies);
+    if (!set) return 0;
+
+    // Union the body with the (optional) beak, which reaches forward past the
+    // body on small birds — the true nose is the farthest-forward of the two.
+    const box = new THREE.Box3();
+    for (const mesh of [set.body, set.beak]) {
+      if (!mesh) continue;
+      const geometry = mesh.geometry;
+      if (!geometry.boundingBox) geometry.computeBoundingBox();
+      if (geometry.boundingBox) box.union(geometry.boundingBox);
+    }
+    if (box.isEmpty()) return 0;
+
+    const forwardModel = box.max.y; // FORWARD_AXIS is model-local +Y
+    const active = this.getActiveSceneRenderer();
+    const worldScale = active.getWorldScale();
+    const meshScaleBoost = active.getCreatureMeshScaleBoost(species, isPredator);
+    return forwardModel * entityScale * worldScale * meshScaleBoost;
+  }
+
   /** Returns the scene-specific creature display labels for the active visual style. */
   getCreatureLabels(): CreatureLabels {
     return this.getActiveSceneRenderer().getCreatureLabels();
