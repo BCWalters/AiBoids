@@ -70,10 +70,8 @@ export interface MotionConfig {
   /** Radians the legs are drawn back at full speed, on top of the swing. */
   legTuckRad?: number;
 
-  tailSwayAxis?: THREE.Vector3;
   tailSwayAmplitude?: number;
   tailSwayFrequency?: number;
-  tailSwayPivotY?: number;
   worldScale?: number;
   meshScaleBoost?: number;
   preferUpright?: boolean;
