@@ -9,6 +9,8 @@ import {
   computeTailSwayPhase,
   flapAngleFromPhase,
   initialFlapPhase,
+  legSwingAngleFromPhase,
+  LEG_SWING_PHASE_OFFSET,
   SYMMETRIC_DOWNSTROKE_FRACTION,
   tailSwayAngleFromPhase,
   type FlapStateWeights,
@@ -343,5 +345,63 @@ describe('tail sway', () => {
         amplitude: 0.3,
       });
     expect(at()).toBe(at());
+  });
+});
+
+describe('legSwingAngleFromPhase', () => {
+  it('is a no-op when the scene gives the creature no leg motion', () => {
+    // Rigid legs must stay exactly welded, so the angle has to be exactly 0 —
+    // the renderer relies on articulating by zero reproducing the body matrix.
+    // Math.abs normalises -0, which a zero amplitude produces on the negative
+    // half of the sine and which rotates identically to +0.
+    for (let i = 0; i <= 16; i += 1) {
+      const angle = legSwingAngleFromPhase({
+        phase: (i / 16) * Math.PI * 2,
+        amplitude: 0,
+        tuckRad: 0,
+        speedFraction: 1,
+      });
+      expect(Math.abs(angle)).toBe(0);
+    }
+  });
+
+  it('draws the legs backward as speed rises', () => {
+    const at = (speedFraction: number) =>
+      legSwingAngleFromPhase({ phase: 0.4, amplitude: 0, tuckRad: 0.3, speedFraction });
+    // Positive is forward, so tucking back means a decreasing angle.
+    expect(at(1)).toBeLessThan(at(0.5));
+    expect(at(0.5)).toBeLessThan(at(0));
+    expect(at(0)).toBe(0);
+    expect(at(1)).toBeCloseTo(-0.3);
+  });
+
+  it('clamps the speed fraction so out-of-range input cannot over-tuck', () => {
+    const tuckRad = 0.3;
+    expect(legSwingAngleFromPhase({ phase: 0, amplitude: 0, tuckRad, speedFraction: 4 })).toBeCloseTo(-tuckRad);
+    expect(legSwingAngleFromPhase({ phase: 0, amplitude: 0, tuckRad, speedFraction: -4 })).toBeCloseTo(0);
+  });
+
+  it('oscillates around the tuck rather than replacing it', () => {
+    const amplitude = 0.12;
+    const tuckRad = 0.3;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < 512; i += 1) {
+      const angle = legSwingAngleFromPhase({
+        phase: (i / 512) * Math.PI * 2,
+        amplitude,
+        tuckRad,
+        speedFraction: 1,
+      });
+      min = Math.min(min, angle);
+      max = Math.max(max, angle);
+    }
+    expect(max).toBeCloseTo(-tuckRad + amplitude, 2);
+    expect(min).toBeCloseTo(-tuckRad - amplitude, 2);
+  });
+
+  it('lags the wingbeat instead of moving in lockstep with it', () => {
+    expect(LEG_SWING_PHASE_OFFSET).toBeGreaterThan(0);
+    expect(Math.sin(LEG_SWING_PHASE_OFFSET)).not.toBeCloseTo(0);
   });
 });

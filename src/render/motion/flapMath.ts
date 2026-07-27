@@ -251,3 +251,33 @@ export function computeTailSwayPhase({
 export function tailSwayAngleFromPhase({ phase, amplitude }: { phase: number; amplitude: number }): number {
   return amplitude * Math.sin(phase);
 }
+
+/**
+ * Legs trail the wingbeat slightly — they're driven by the body's motion
+ * rather than driving it, so they lag rather than moving in lockstep.
+ */
+export const LEG_SWING_PHASE_OFFSET = Math.PI * 0.35;
+
+/**
+ * Fore/aft leg swing angle (radians) about the hip. Positive swings the feet
+ * forward: legs hang along model -Z, and rotating about the model right axis
+ * by a positive angle carries them toward +Y, which is model-forward.
+ *
+ * Two things combine here:
+ *  - an oscillation off the flap clock, so the legs aren't dead weight
+ *  - a speed-proportional backward tuck, because a creature at cruise pulls
+ *    its legs back against the body rather than leaving them dangling
+ */
+export function legSwingAngleFromPhase({
+  phase,
+  amplitude,
+  tuckRad,
+  speedFraction,
+}: {
+  phase: number;
+  amplitude: number;
+  tuckRad: number;
+  speedFraction: number;
+}): number {
+  return amplitude * Math.sin(phase + LEG_SWING_PHASE_OFFSET) - tuckRad * clamp(speedFraction, 0, 1);
+}
