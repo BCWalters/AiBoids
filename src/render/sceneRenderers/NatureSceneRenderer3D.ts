@@ -39,7 +39,7 @@ import {
 const NATURE_BASE_CREATURE: CreatureSize = { length: 9.1, width: 6.24 };
 const natureSize = createCreatureSizer(NATURE_BASE_CREATURE);
 
-const NATURE_CREATURE_SIZES = {
+export const NATURE_CREATURE_SIZES = {
   boid: natureSize(1),
   parrot: natureSize(1),
   // Small songbirds (goldfinch/cardinal/bluejay) read as noticeably smaller.

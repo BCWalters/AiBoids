@@ -32,7 +32,7 @@ import {
 const ARCADE_BASE_CREATURE: CreatureSize = { length: 7, width: 2.6 };
 const arcadeSize = createCreatureSizer(ARCADE_BASE_CREATURE);
 
-const ARCADE_CREATURE_SIZES = {
+export const ARCADE_CREATURE_SIZES = {
   boid: arcadeSize(1),
   sparrow: arcadeSize(0.7),
   parrot: arcadeSize(1),
