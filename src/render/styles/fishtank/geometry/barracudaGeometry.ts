@@ -34,7 +34,7 @@ const EYE_COLOR = new THREE.Color(0x08070a);
 const MOUTH_CAVITY_COLOR = new THREE.Color(0x0b0d10); // dark open-mouth interior
 const FANG_COLOR = new THREE.Color(0xffffff); // small white teeth
 const FLANK_MARK_COLOR = new THREE.Color(0xffffff); // pale rectangular flank marks
-const LOWER_JAW_COLOR = new THREE.Color(0x8a949e); // gray underslung lower jaw
+const LOWER_JAW_COLOR = new THREE.Color(0xdadde0); // gray just slightly darker than the belly
 
 // Dorsal-to-ventral body gradient stops (multipliers against the silver base).
 const BACK_COLOR = new THREE.Color(0x3d3f42); // dark neutral gray back + upper fins
