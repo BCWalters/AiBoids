@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import type { Boid } from '../sim/Boid';
 import type { Predator } from '../sim/Predator';
 import type { Simulation } from '../sim/Simulation';
@@ -8,6 +9,16 @@ import { pickStatusPhrase, type CreatureStatusCategory } from './creatureStatusP
 
 /** Exponential-smoothing rate (1/s) for damping the orbit-controls target. */
 const TARGET_DAMP_RATE = 8;
+
+/** Exponential-smoothing rate (1/s) for damping the POV camera position and look target. */
+const POV_CAM_DAMP_RATE = 6;
+
+/**
+ * How far ahead of the creature (in sim-space units) to place the POV
+ * look-ahead target.  Mapped through toRenderedPosition so it is correct
+ * for every scene (fishtank 4× scale is automatic).
+ */
+const POV_LOOK_AHEAD_SIM = 50;
 
 /** CSS-pixel radius within which a pointer-up is considered a stationary click. */
 export const DRAG_THRESHOLD_PX = 5;
@@ -51,11 +62,24 @@ export class FollowCamController {
   private readonly hudLine1: HTMLSpanElement;
   private readonly hudSpeedSpan: HTMLSpanElement;
   private readonly hudPhraseSpan: HTMLSpanElement;
+  // POV toggle button appended to the inspector HUD.
+  private readonly hudPovBtn: HTMLButtonElement;
 
   // Pointer-down coordinates for drag-vs-click discrimination.
   private _pointerDownX = 0;
   private _pointerDownY = 0;
   private _hasPointerDown = false;
+
+  // POV (cockpit) mode state.
+  private _povActive = false;
+  private _povInitialized = false;
+  private readonly _povCamPos = new THREE.Vector3();
+  private readonly _povLookPos = new THREE.Vector3();
+
+  // Latest renderer3D + sim from update() — used by the POV button handler
+  // so the button can act without needing them injected at construction time.
+  private _latestRenderer3D: Renderer3D | null = null;
+  private _latestSim: Simulation | null = null;
 
   constructor(container: HTMLElement) {
     this.hud = document.createElement('div');
@@ -73,6 +97,22 @@ export class FollowCamController {
     this.hud.appendChild(this.hudSpeedSpan);
     this.hud.appendChild(document.createTextNode(' \u00b7 '));
     this.hud.appendChild(this.hudPhraseSpan);
+
+    // POV toggle button — pointer-events restored via CSS so it is clickable
+    // even though the parent HUD has pointer-events: none.
+    this.hudPovBtn = document.createElement('button');
+    this.hudPovBtn.className = 'hud-pov-btn';
+    this.hudPovBtn.textContent = 'Enter POV';
+    this.hudPovBtn.addEventListener('click', () => {
+      if (!this._latestRenderer3D || !this._latestSim) return;
+      if (this._povActive) {
+        this.exitPov(this._latestRenderer3D, this._latestSim);
+      } else {
+        this.enterPov(this._latestRenderer3D);
+      }
+    });
+    this.hud.appendChild(document.createTextNode('\n'));
+    this.hud.appendChild(this.hudPovBtn);
 
     container.appendChild(this.hud);
   }
@@ -143,7 +183,12 @@ export class FollowCamController {
    * is current when OrbitControls.update() runs inside renderOutput().
    */
   update(dt: number, sim: Simulation, renderer3D: Renderer3D): void {
+    // Cache for use by the POV button click handler.
+    this._latestRenderer3D = renderer3D;
+    this._latestSim = sim;
+
     if (params.followCamMode !== 'orbit') {
+      if (this._povActive) this.exitPov(renderer3D, sim);
       this.hud.style.display = 'none';
       return;
     }
@@ -160,15 +205,21 @@ export class FollowCamController {
       return;
     }
 
-    // Exponentially smooth the orbit target toward the selected creature's
-    // render-space position so it stays centred while the user orbits/zooms.
-    const alpha = 1 - Math.exp(-dt * TARGET_DAMP_RATE);
-    const renderedPos = renderer3D.toRenderedPosition(
-      entity.position.x,
-      entity.position.y,
-      entity.position.z,
-    );
-    renderer3D.smoothOrbitTarget(renderedPos.x, renderedPos.y, renderedPos.z, alpha);
+    if (this._povActive) {
+      // POV mode: drive camera directly along the creature's smoothed heading.
+      this.updatePovCamera(entity, dt, renderer3D);
+    } else {
+      // Orbit-lock: exponentially smooth the orbit target toward the selected
+      // creature's render-space position so it stays centred while the user
+      // orbits/zooms.
+      const alpha = 1 - Math.exp(-dt * TARGET_DAMP_RATE);
+      const renderedPos = renderer3D.toRenderedPosition(
+        entity.position.x,
+        entity.position.y,
+        entity.position.z,
+      );
+      renderer3D.smoothOrbitTarget(renderedPos.x, renderedPos.y, renderedPos.z, alpha);
+    }
 
     if (params.showCreatureInspector) {
       this.syncHud(entity, renderer3D);
@@ -182,20 +233,104 @@ export class FollowCamController {
     this.clearSelection(renderer3D, sim);
   }
 
+  /**
+   * Enters first-person / POV mode for the currently selected creature.
+   * No-op if no creature is selected or POV is already active.
+   * POV places the camera at the creature, oriented along its smoothed
+   * `renderHeading`, with exponential position damping for comfort.
+   */
+  enterPov(renderer3D: Renderer3D): void {
+    if (this._povActive || this.selectedId === null) return;
+    this._povActive = true;
+    this._povInitialized = false;
+    renderer3D.enterPovMode();
+    this.hudPovBtn.textContent = 'Exit POV (Esc)';
+  }
+
+  /**
+   * Exits POV mode and returns to orbit-lock on the selected creature,
+   * or to free orbit if the selection has been cleared. No-op when not
+   * in POV mode.
+   */
+  exitPov(renderer3D: Renderer3D, sim: Simulation): void {
+    if (!this._povActive) return;
+    this._povActive = false;
+    this._povInitialized = false;
+    this.hudPovBtn.textContent = 'Enter POV';
+    // Restore orbit centered on the creature (or scene center if gone).
+    const entity = this.resolveSelected(sim);
+    const orbitTarget = entity
+      ? renderer3D.toRenderedPosition(entity.position.x, entity.position.y, entity.position.z)
+      : renderer3D.toRenderedPosition(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    renderer3D.exitPovMode(orbitTarget);
+  }
+
+  /**
+   * Exits POV mode when the Escape key is pressed.
+   * Wire this to a `keydown` event listener on the document in main.ts.
+   */
+  handleEscKey(renderer3D: Renderer3D, sim: Simulation): void {
+    if (this._povActive) this.exitPov(renderer3D, sim);
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
 
   /**
-   * Shared "on deselect" path — clears selection state, hides the HUD, and
-   * resets the OrbitControls target back to the scene center so the user
-   * doesn't orbit around a stale off-centre point after the creature is gone.
+   * Shared "on deselect" path — exits POV if active, clears selection state,
+   * hides the HUD, and resets the OrbitControls target back to the scene
+   * center so the user doesn't orbit around a stale off-centre point after
+   * the creature is gone.
    */
   private clearSelection(renderer3D: Renderer3D, sim: Simulation): void {
+    if (this._povActive) {
+      // Exit POV without full orbit setup — resetOrbitTarget below handles target.
+      this._povActive = false;
+      this._povInitialized = false;
+      this.hudPovBtn.textContent = 'Enter POV';
+      renderer3D.exitPovMode(renderer3D.toRenderedPosition(sim.width / 2, sim.height / 2, params.worldDepth / 2));
+    }
     this.selectedId = null;
     this.selectedIsPredator = false;
     this.hud.style.display = 'none';
     renderer3D.resetOrbitTarget(sim);
+  }
+
+  /**
+   * Per-frame POV camera update: places the camera at the creature's rendered
+   * position and orients it along the smoothed `renderHeading` with exponential
+   * damping. On the first POV frame the camera snaps to the creature
+   * immediately to avoid a visible fly-in animation.
+   */
+  private updatePovCamera(entity: Boid | Predator, dt: number, renderer3D: Renderer3D): void {
+    const renderedPos = renderer3D.toRenderedPosition(
+      entity.position.x,
+      entity.position.y,
+      entity.position.z,
+    );
+    // Map the look-ahead point through toRenderedPosition so fishtank's 4×
+    // scale is applied to both position and direction offset uniformly.
+    const h = entity.renderHeading;
+    const lookAheadRender = renderer3D.toRenderedPosition(
+      entity.position.x + h.x * POV_LOOK_AHEAD_SIM,
+      entity.position.y + h.y * POV_LOOK_AHEAD_SIM,
+      entity.position.z + h.z * POV_LOOK_AHEAD_SIM,
+    );
+
+    if (!this._povInitialized) {
+      // Snap on the very first POV frame so the camera doesn't interpolate
+      // from whatever position it was at in orbit mode.
+      this._povCamPos.copy(renderedPos);
+      this._povLookPos.copy(lookAheadRender);
+      this._povInitialized = true;
+    } else {
+      const alpha = 1 - Math.exp(-dt * POV_CAM_DAMP_RATE);
+      this._povCamPos.lerp(renderedPos, alpha);
+      this._povLookPos.lerp(lookAheadRender, alpha);
+    }
+
+    renderer3D.setPovCamera(this._povCamPos, this._povLookPos);
   }
 
   private buildEntityList(sim: Simulation, renderer3D: Renderer3D): EntityForPicking[] {

@@ -214,6 +214,14 @@ canvas3D.addEventListener('pointerup', (e) => {
   }
 });
 
+// Escape key exits POV mode (if active) without clearing the selection,
+// returning the user to orbit-lock on the same creature.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && renderer3D) {
+    followCamController.handleEscKey(renderer3D, sim);
+  }
+});
+
 let lastTime = performance.now();
 
 function loop(now: number): void {

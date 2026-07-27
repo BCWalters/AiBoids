@@ -14,6 +14,10 @@ export class CameraController {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly controls: OrbitControls;
 
+  // Saved OrbitControls distance bounds, restored when POV mode exits.
+  private _povSavedMinDist = 0;
+  private _povSavedMaxDist = Infinity;
+
   constructor(camera: THREE.PerspectiveCamera, controls: OrbitControls) {
     this.camera = camera;
     this.controls = controls;
@@ -128,5 +132,43 @@ export class CameraController {
   /** Returns the perspective camera — used by the screen-space entity picker. */
   getCamera(): THREE.PerspectiveCamera {
     return this.camera;
+  }
+
+  /**
+   * Enters POV mode: saves OrbitControls distance bounds so they can be
+   * fully restored on exit. While POV is active, Renderer3D skips
+   * OrbitControls.update() so the camera can be driven directly without
+   * the min/max-distance constraints fighting each frame.
+   */
+  enterPovMode(): void {
+    this._povSavedMinDist = this.controls.minDistance;
+    this._povSavedMaxDist = this.controls.maxDistance;
+  }
+
+  /**
+   * Exits POV mode: restores saved distance bounds and sets the orbit
+   * target to `orbitTarget` so OrbitControls resumes orbiting around
+   * the creature (or scene center when the selection is cleared).
+   * Calls controls.update() once to synchronise internal spherical state
+   * from the current camera position before the render loop resumes
+   * normal OrbitControls updates.
+   */
+  exitPovMode(orbitTarget: THREE.Vector3): void {
+    this.controls.minDistance = this._povSavedMinDist;
+    this.controls.maxDistance = this._povSavedMaxDist;
+    this.controls.target.copy(orbitTarget);
+    this.controls.update();
+  }
+
+  /**
+   * Directly positions the camera for POV mode.
+   * OrbitControls.update() must be skipped on the same frame (ensured
+   * by Renderer3D._povActive) so OrbitControls does not immediately
+   * recompute and overwrite the camera position.
+   */
+  setPovCamera(position: THREE.Vector3, lookAt: THREE.Vector3): void {
+    this.camera.position.copy(position);
+    this.camera.lookAt(lookAt);
+    this.camera.updateMatrixWorld();
   }
 }

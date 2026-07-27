@@ -107,6 +107,9 @@ describe('FollowCamController drag-aware selection', () => {
       smoothOrbitTarget,
       resetOrbitTarget: vi.fn(),
       getCreatureLabels: () => ({ boid: {}, predator: {} }),
+      enterPovMode: vi.fn(),
+      exitPovMode: vi.fn(),
+      setPovCamera: vi.fn(),
     } as unknown as Renderer3D;
   });
 
@@ -199,6 +202,9 @@ function makeRenderer(): Renderer3D {
     smoothOrbitTarget: vi.fn(),
     resetOrbitTarget: vi.fn(),
     getCreatureLabels: () => ({ boid: {}, predator: {} }),
+    enterPovMode: vi.fn(),
+    exitPovMode: vi.fn(),
+    setPovCamera: vi.fn(),
   } as unknown as Renderer3D;
 }
 
@@ -261,5 +267,154 @@ describe('FollowCamController deselect → orbit target reset', () => {
 
     expect(renderer.resetOrbitTarget).toHaveBeenCalledOnce();
     expect(renderer.resetOrbitTarget).toHaveBeenCalledWith(sim);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FollowCamController — POV (first-person) mode tests
+// ---------------------------------------------------------------------------
+
+describe('FollowCamController POV mode', () => {
+  let controller: FollowCamController;
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    resetParams();
+    params.followCamMode = 'orbit';
+    params.showCreatureInspector = true;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    controller = new FollowCamController(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+    resetParams();
+    vi.restoreAllMocks();
+  });
+
+  /** Force-select a boid by writing private state directly. */
+  function selectBoid(ctrl: FollowCamController, id: number): void {
+    (ctrl as unknown as { selectedId: number | null }).selectedId = id;
+    (ctrl as unknown as { selectedIsPredator: boolean }).selectedIsPredator = false;
+  }
+
+  it('enterPov() calls renderer3D.enterPovMode() and updates button text', () => {
+    const renderer = makeRenderer();
+    selectBoid(controller, 1);
+    controller.enterPov(renderer);
+
+    expect(renderer.enterPovMode).toHaveBeenCalledOnce();
+    const btn = container.querySelector('.hud-pov-btn') as HTMLButtonElement;
+    expect(btn.textContent).toBe('Exit POV (Esc)');
+  });
+
+  it('enterPov() is a no-op when no creature is selected', () => {
+    const renderer = makeRenderer();
+    // No selection — selectedId is null.
+    controller.enterPov(renderer);
+    expect(renderer.enterPovMode).not.toHaveBeenCalled();
+  });
+
+  it('enterPov() is a no-op when already in POV mode', () => {
+    const renderer = makeRenderer();
+    selectBoid(controller, 1);
+    controller.enterPov(renderer);
+    controller.enterPov(renderer); // second call should no-op
+    expect(renderer.enterPovMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('exitPov() calls renderer3D.exitPovMode() and resets button text', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    selectBoid(controller, 1);
+    controller.enterPov(renderer);
+    controller.exitPov(renderer, sim);
+
+    expect(renderer.exitPovMode).toHaveBeenCalledOnce();
+    const btn = container.querySelector('.hud-pov-btn') as HTMLButtonElement;
+    expect(btn.textContent).toBe('Enter POV');
+  });
+
+  it('exitPov() is a no-op when not in POV mode', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    controller.exitPov(renderer, sim);
+    expect(renderer.exitPovMode).not.toHaveBeenCalled();
+  });
+
+  it('handleEscKey() exits POV mode', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    selectBoid(controller, 1);
+    controller.enterPov(renderer);
+    controller.handleEscKey(renderer, sim);
+    expect(renderer.exitPovMode).toHaveBeenCalledOnce();
+  });
+
+  it('handleEscKey() is a no-op when not in POV mode', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    controller.handleEscKey(renderer, sim);
+    expect(renderer.exitPovMode).not.toHaveBeenCalled();
+  });
+
+  it('update() calls setPovCamera each frame when POV is active', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    selectBoid(controller, 1);
+
+    // Attach renderHeading to the boid stub (matches what Boid has in production).
+    (sim.boids[0] as unknown as { renderHeading: { x: number; y: number; z: number } }).renderHeading = { x: 0, y: 0, z: -1 };
+
+    controller.enterPov(renderer);
+    controller.update(0.016, sim, renderer);
+
+    expect(renderer.setPovCamera).toHaveBeenCalled();
+    // Orbit target smoothing must NOT be called in POV mode.
+    expect(renderer.smoothOrbitTarget).not.toHaveBeenCalled();
+  });
+
+  it('update() exits POV when followCamMode switches to off', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    selectBoid(controller, 1);
+    (sim.boids[0] as unknown as { renderHeading: { x: number; y: number; z: number } }).renderHeading = { x: 0, y: 0, z: -1 };
+
+    controller.enterPov(renderer);
+    params.followCamMode = 'off';
+    controller.update(0.016, sim, renderer);
+
+    expect(renderer.exitPovMode).toHaveBeenCalledOnce();
+  });
+
+  it('creature despawn during POV exits cleanly', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    selectBoid(controller, 1);
+    (sim.boids[0] as unknown as { renderHeading: { x: number; y: number; z: number } }).renderHeading = { x: 0, y: 0, z: -1 };
+
+    controller.enterPov(renderer);
+    // Remove boid 1 from the simulation.
+    const simWithoutBoid1 = { ...sim, boids: [sim.boids[1]], predators: [] } as unknown as Simulation;
+    controller.update(0.016, simWithoutBoid1, renderer);
+
+    // clearSelection is called which resets POV and orbit target.
+    expect(renderer.exitPovMode).toHaveBeenCalledOnce();
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledOnce();
+  });
+
+  it('clearSelection via empty-space click exits POV', () => {
+    const renderer = makeRenderer();
+    const sim = makeSim();
+    selectBoid(controller, 1);
+    (sim.boids[0] as unknown as { renderHeading: { x: number; y: number; z: number } }).renderHeading = { x: 0, y: 0, z: -1 };
+    controller.enterPov(renderer);
+
+    // Simulate deselect.
+    controller.deselect(renderer, sim);
+
+    expect(renderer.exitPovMode).toHaveBeenCalledOnce();
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledOnce();
   });
 });

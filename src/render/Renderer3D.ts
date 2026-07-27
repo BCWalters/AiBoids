@@ -80,6 +80,10 @@ export class Renderer3D {
   private controls: OrbitControls;
   private cameraController: CameraController;
 
+  /** True while POV (cockpit) mode is active — renderOutput() skips
+   *  OrbitControls.update() so camera placement is driven directly. */
+  private _povActive = false;
+
   private ambientLight: THREE.AmbientLight;
   private keyLight: THREE.DirectionalLight;
   private sceneAssets!: RendererSceneAssets;
@@ -773,6 +777,35 @@ export class Renderer3D {
     this.cameraController.smoothOrbitTarget(center.x, center.y, center.z, 1);
   }
 
+  /**
+   * Enters POV (cockpit) mode: saves OrbitControls distance constraints
+   * and sets the internal flag that causes renderOutput() to skip
+   * OrbitControls.update() so direct camera placement takes effect.
+   */
+  enterPovMode(): void {
+    this._povActive = true;
+    this.cameraController.enterPovMode();
+  }
+
+  /**
+   * Exits POV mode: re-enables OrbitControls, restores saved distance
+   * constraints, and snaps the orbit target to `orbitTarget` so the user
+   * continues orbiting around the selected creature (or scene center).
+   */
+  exitPovMode(orbitTarget: THREE.Vector3): void {
+    this._povActive = false;
+    this.cameraController.exitPovMode(orbitTarget);
+  }
+
+  /**
+   * Directly positions the perspective camera for POV mode.
+   * Only effective while POV is active (`enterPovMode()` has been called)
+   * because renderOutput() skips OrbitControls.update() in that state.
+   */
+  setPovCamera(position: THREE.Vector3, lookAt: THREE.Vector3): void {
+    this.cameraController.setPovCamera(position, lookAt);
+  }
+
   private groupBoidsBySpecies(boids: Boid[]): Map<BoidSpecies, Boid[]> {
     const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
     for (const boid of boids) {
@@ -1077,7 +1110,11 @@ export class Renderer3D {
   }
 
   private renderOutput(): void {
-    this.controls.update();
+    // Skip OrbitControls.update() while POV is active — the camera is driven
+    // directly by FollowCamController.setPovCamera() each frame, and calling
+    // controls.update() here would recompute camera position from its stored
+    // spherical state, clobbering the POV placement.
+    if (!this._povActive) this.controls.update();
     this.composer.render();
   }
 
