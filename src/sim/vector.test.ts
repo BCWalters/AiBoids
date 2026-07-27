@@ -83,4 +83,43 @@ describe('vector', () => {
   it('angleBetween returns 0 for a zero-length input rather than NaN', () => {
     expect(V.angleBetween(V.create(0, 0, 0), V.create(1, 0, 0))).toBe(0);
   });
+
+  describe('limitTurn', () => {
+    it('returns the target unchanged when the turn is within the cap', () => {
+      const from = V.create(1, 0, 0);
+      const to = V.create(1, 0.1, 0);
+      // ~5.7° turn, cap of 45° — no clamping.
+      expect(V.limitTurn(from, to, Math.PI / 4)).toEqual(to);
+    });
+
+    it('clamps the heading change to maxAngle, preserving target speed', () => {
+      const from = V.create(1, 0, 0);
+      const to = V.create(0, 5, 0); // 90° turn, speed 5
+      const maxAngle = Math.PI / 6; // 30°
+      const result = V.limitTurn(from, to, maxAngle);
+      // Heading rotated only 30° away from `from`, speed follows `to`.
+      expect(V.angleBetween(from, result)).toBeCloseTo(maxAngle);
+      expect(V.magnitude(result)).toBeCloseTo(5);
+    });
+
+    it('is disabled when maxAngle <= 0 (returns target unchanged)', () => {
+      const from = V.create(1, 0, 0);
+      const to = V.create(0, 1, 0);
+      expect(V.limitTurn(from, to, 0)).toEqual(to);
+      expect(V.limitTurn(from, to, -1)).toEqual(to);
+    });
+
+    it('returns the target when there is no defined prior heading', () => {
+      const to = V.create(0, 3, 0);
+      expect(V.limitTurn(V.create(0, 0, 0), to, Math.PI / 8)).toEqual(to);
+    });
+
+    it('accepts a near-antiparallel target rather than producing NaN', () => {
+      const from = V.create(1, 0, 0);
+      const to = V.create(-2, 0, 0);
+      const result = V.limitTurn(from, to, Math.PI / 6);
+      expect(Number.isNaN(result.x)).toBe(false);
+      expect(result).toEqual(to);
+    });
+  });
 });
