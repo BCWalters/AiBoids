@@ -103,7 +103,7 @@ body {
   color: #c9d1d9;
   font: 13px/1.4 ui-sans-serif, system-ui, sans-serif;
   white-space: pre;
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 5;
 }
 
