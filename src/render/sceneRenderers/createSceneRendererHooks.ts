@@ -70,6 +70,18 @@ export interface MotionConfig {
   worldScale?: number;
   meshScaleBoost?: number;
   preferUpright?: boolean;
+  /**
+   * When true, the render loop clamps the creature's world Y so its lowest
+   * geometry vertex never sinks below the scene floor (render y=0). Needed for
+   * tall, upright creatures whose model origin sits well above their base — the
+   * fishtank seahorse in particular, whose body/tail extend far below the
+   * origin the simulation positions it by, so at low swim heights it otherwise
+   * clips through the tank floor. The clamp only engages near the floor, so the
+   * creature's normal mid-water motion is unchanged. Because the flap pivots
+   * about the vertical (Y) axis, this pure vertical lift leaves the fin
+   * animation arcs untouched.
+   */
+  restOnFloor?: boolean;
 }
 
 const HAWK_PREDATOR_SPECIES: PredatorSpecies = PredatorSpecies.Normal;
