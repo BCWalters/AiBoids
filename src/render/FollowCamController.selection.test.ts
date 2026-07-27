@@ -171,6 +171,30 @@ describe('FollowCamController drag-aware selection', () => {
     controller.update(0.016, sim, renderer3D);
     expect(smoothOrbitTarget).not.toHaveBeenCalled();
   });
+
+  it('does NOT select after pointercancel clears the pointer-down state', () => {
+    // Start a pointer-down gesture near the boid...
+    controller.handlePointerDown(makePointerDownEvent(400, 300));
+    // ...then abort it (e.g. OrbitControls captures the pointer).
+    controller.handlePointerCancel();
+    // A subsequent pointerup within the drag threshold must not trigger selection.
+    controller.handlePointerUp(makePointerEvent(402, 301), canvas, sim, renderer3D);
+
+    controller.update(0.016, sim, renderer3D);
+    expect(smoothOrbitTarget).not.toHaveBeenCalled();
+  });
+
+  it('does NOT select after pointerleave clears the pointer-down state', () => {
+    // Start a pointer-down gesture near the boid...
+    controller.handlePointerDown(makePointerDownEvent(400, 300));
+    // ...then the pointer leaves the canvas element.
+    controller.handlePointerCancel();
+    // A pointerup within the drag threshold must not trigger selection.
+    controller.handlePointerUp(makePointerEvent(401, 300), canvas, sim, renderer3D);
+
+    controller.update(0.016, sim, renderer3D);
+    expect(smoothOrbitTarget).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -213,6 +213,14 @@ canvas3D.addEventListener('pointerup', (e) => {
     followCamController.handlePointerUp(e, canvas3D, sim, renderer3D);
   }
 });
+// Defensive cleanup: cancel or leave events abort any in-flight pointer-down
+// so an OrbitControls-captured gesture cannot be misread as a stationary click.
+canvas3D.addEventListener('pointercancel', () => {
+  followCamController.handlePointerCancel();
+});
+canvas3D.addEventListener('pointerleave', () => {
+  followCamController.handlePointerCancel();
+});
 
 // Escape key exits POV mode (if active) without clearing the selection,
 // returning the user to orbit-lock on the same creature.
