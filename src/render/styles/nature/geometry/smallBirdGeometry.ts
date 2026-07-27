@@ -168,7 +168,7 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   // hand-tuned fresh numbers, so the two requested adjustments stay
   // easy to re-tune independently later.
   const headFrac = (frac: number) => HEAD_START_FRAC + (frac - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE;
-  const profile = [
+  const controlPoints = [
     new THREE.Vector2(scaledWidth * 0.03, -halfLen * 1.0), // tail tip
     new THREE.Vector2(scaledWidth * 0.16, -halfLen * 0.7),
     new THREE.Vector2(scaledWidth * 0.3, -halfLen * 0.25), // belly bulge — slimmer than before
@@ -179,7 +179,11 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
     new THREE.Vector2(scaledWidth * 0.15 * HEAD_NARROW_SCALE, halfLen * headFrac(0.74)), // forehead, narrowing toward the face
     new THREE.Vector2(scaledWidth * 0.075 * HEAD_NARROW_SCALE, halfLen * HEAD_END_FRAC), // face point, where the beak attaches
   ];
-  const body = new THREE.LatheGeometry(profile, 14);
+  // Spline-resample the authored silhouette so the flat-shaded lathe reads
+  // as a smooth surface (many gently-varying facets) instead of a few long
+  // banded ones; raise radial segments to 32 for the same reason.
+  const profile = new THREE.SplineCurve(controlPoints).getPoints(64);
+  const body = new THREE.LatheGeometry(profile, 32);
 
   if (palette?.dorsalGradient) {
     // Bilinear body gradient:
@@ -235,8 +239,14 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   const eyeRadius = scaledWidth * 0.04 * HEAD_NARROW_SCALE;
   const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
+  // Seal the open tail-end lathe ring with a double-sided disc cap so it no
+  // longer reads as a transparent hole when viewed from behind.
+  const tailTip = controlPoints[0];
+  const tailCap = buildTailCapGeometry(tailTip.y, tailTip.x, 32);
+
   return mergeGeometriesWithColor([
     { geometry: body, color: WHITE_VERTEX_COLOR },
+    { geometry: tailCap, color: WHITE_VERTEX_COLOR },
     { geometry: eyes, color: EYE_COLOR },
   ]);
 }
@@ -246,6 +256,32 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
 // correct under any per-species per-instance body tint.
 const EYE_COLOR = new THREE.Color(0x0d0b08);
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
+
+/**
+ * A flat, double-sided disc in the XZ plane at local Y = `y`, used to seal the
+ * open ring the body lathe leaves at the tail tip so it no longer reads as a
+ * see-through hole. Double-sided (each wedge emitted with both windings) so it
+ * looks solid whether the camera sees the tail from behind or inside.
+ */
+function buildTailCapGeometry(y: number, radius: number, segments: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const x0 = Math.cos(a0) * radius;
+    const z0 = Math.sin(a0) * radius;
+    const x1 = Math.cos(a1) * radius;
+    const z1 = Math.sin(a1) * radius;
+    positions.push(
+      0, y, 0, x0, y, z0, x1, y, z1,
+      0, y, 0, x1, y, z1, x0, y, z0,
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
 /**
  * A small solid cone forming the beak — its own separate CreatureGeometries

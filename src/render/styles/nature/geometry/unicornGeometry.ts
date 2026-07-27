@@ -134,10 +134,10 @@ function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGe
 // Gold, to make the horn stand out clearly against the lavender body
 // rather than blending in as just another body-colored bump.
 const UNICORN_HORN_COLOR = new THREE.Color(0xffd54a);
-// Legs stay white (neutral — multiplies harmlessly against the lavender
-// per-instance body tint), hooves are tinted dark gray so they read as a
-// distinct hoof rather than continuing the body's color.
-const UNICORN_LEG_COLOR = new THREE.Color(0xffffff);
+// Legs tinted very light lavender so they harmonise with the lavender
+// per-instance body color without disappearing into it; hooves are tinted
+// dark gray so they read as a distinct hoof rather than continuing the body's color.
+const UNICORN_LEG_COLOR = new THREE.Color(0xd8cef0); // very light lavender
 const UNICORN_HOOF_COLOR = new THREE.Color(0x3a3a3a);
 // Near-black "dark dot" eyes.
 const UNICORN_EYE_COLOR = new THREE.Color(0x101014);
@@ -516,7 +516,7 @@ function buildUnicornLegsGeometry(length: number, width: number): THREE.BufferGe
   // radius width*0.32 — the widest part of the rear body) so the hip
   // socket sits inside/at the body surface.
   const backY = -length * 0.3; // inside the hindquarter bulge
-  const stanceX = width * 0.26;
+  const stanceX = width * 0.19; // pulled in from 0.26 so legs stick out less laterally
   // Legs now emerge a bit lower on the belly (more negative Z, "down")
   // rather than right at the body's central spine axis (z=0) — per
   // direct feedback the legs looked like they came out too high up the

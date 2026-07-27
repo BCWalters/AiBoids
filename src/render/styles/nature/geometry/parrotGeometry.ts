@@ -144,7 +144,7 @@ let ACTIVE_PARROT_PALETTE: ParrotPalette = GREEN_FOCUS_PARROT_PALETTE;
 const EYE_COLOR = new THREE.Color(0x0d0b08);
 const PARROT_EYE_SIDE_ANGLE_DEG = 90;
 const PARROT_EYE_BOTTOM_OUTWARD_CANT_DEG = 18;
-const PARROT_BODY_LATHE_SEGMENTS = 24;
+const PARROT_BODY_LATHE_SEGMENTS = 32;
 const PARROT_BODY_SLIM_SCALE = 0.8;
 const PARROT_HEAD_TILT_RAD = THREE.MathUtils.degToRad(-21);
 const PARROT_HEAD_TILT_BLEND_START_FRAC = 0.3;
@@ -239,7 +239,11 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
     new THREE.Vector2(width * 0.22 * HEAD_NARROW_SCALE, halfLen * headFrac(0.84)), // brow, just above the eyes
     new THREE.Vector2(faceRadius, faceY), // face, where the beak attaches
   ];
-  const torso = new THREE.LatheGeometry(profile, PARROT_BODY_LATHE_SEGMENTS);
+  // Spline-resample the authored silhouette so the flat-shaded lathe reads
+  // as a smooth surface (many gently-varying facets) instead of a few long
+  // banded ones; PARROT_BODY_LATHE_SEGMENTS is already raised to 32.
+  const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
+  const torso = new THREE.LatheGeometry(smoothProfile, PARROT_BODY_LATHE_SEGMENTS);
   tintParrotTorsoRegions(torso, halfLen);
   pitchHeadRegionDown(torso, headTiltBlendStartY, headTiltPivotY, PARROT_HEAD_TILT_RAD);
 

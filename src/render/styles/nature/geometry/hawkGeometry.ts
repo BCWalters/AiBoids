@@ -105,8 +105,10 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   // instead of a smooth (and thus muddy/gray) gradient between them.
   const torsoProfile = profile.slice(0, 6); // through head base
   const headProfile = profile.slice(5); // head base through face (shares the seam vertex)
-  const torso = new THREE.LatheGeometry(torsoProfile, 14);
-  const head = new THREE.LatheGeometry(headProfile, 14);
+  // Spline-resample each sub-profile so the flat-shaded lathes read as
+  // smooth surfaces; raise radial segments to 32 for the same reason.
+  const torso = new THREE.LatheGeometry(new THREE.SplineCurve(torsoProfile).getPoints(48), 32);
+  const head = new THREE.LatheGeometry(new THREE.SplineCurve(headProfile).getPoints(32), 32);
 
   // Straighter beak than a macaw's full curl — a bald eagle's beak is
   // mostly straight along its length with the hook concentrated right

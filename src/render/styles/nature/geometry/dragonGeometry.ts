@@ -262,7 +262,11 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
     new THREE.Vector2(width * 0.08, halfLen * 0.94), // snout mid
     new THREE.Vector2(width * 0.015, halfLen * SNOUT_TIP_FRACTION), // elongated snout tip, past the body's nominal length
   ];
-  const latheGeometry = new THREE.LatheGeometry(profile, 12);
+  // Spline-resample the authored silhouette so the flat-shaded lathe reads
+  // as a smooth surface (many gently-varying facets) instead of a few long
+  // banded ones; raise radial segments to 32 for the same reason.
+  const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
+  const latheGeometry = new THREE.LatheGeometry(smoothProfile, 32);
   const frillGeometry = buildDragonFrillGeometry(length, width, halfLen);
   const faceParts = buildDragonFaceDetailsGeometry(width, halfLen);
   const bodyColor = new THREE.Color(0xffffff);
