@@ -654,7 +654,16 @@ export class Renderer3D {
     for (const catchEvent of sim.catchEvents) {
       if (catchEvent.id <= this.lastSeenCatchId) continue;
       this.lastSeenCatchId = catchEvent.id;
-      this.tmpSpawnPosition.set(catchEvent.position.x, catchEvent.position.y, catchEvent.position.z);
+      // Map the catch position from sim space into render space so the burst
+      // appears where the fish is visually rendered. For nature/arcade this is
+      // an identity mapping; for fishtank it applies the TANK_VISUAL_SCALE
+      // inflation around fishtankCenter.
+      sceneRenderer.mapPositionToRenderSpace(
+        catchEvent.position.x,
+        catchEvent.position.y,
+        catchEvent.position.z,
+        this.tmpSpawnPosition,
+      );
       this.tmpSpawnDirection.set(catchEvent.direction.x, catchEvent.direction.y, catchEvent.direction.z);
       this.sceneAssets.bloodEffects.spawn(this.tmpSpawnPosition, this.tmpSpawnDirection, bloodSplatterScale);
     }
