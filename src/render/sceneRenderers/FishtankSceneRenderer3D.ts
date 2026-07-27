@@ -418,6 +418,9 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           tailSwayPivotY: getBarracudaTailPivotY(FISHTANK_CREATURE_SIZES.barracuda.length),
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_BARRACUDA_MESH_BOOST,
+          // Long lean body: keep its nose/tail from poking through the side
+          // glass when swimming near a wall (issue #167).
+          containWithinTankWalls: true,
         };
 
       case PredatorSpecies.Monster:
@@ -434,6 +437,9 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           tailSwayPivotY: getSharkTailPivotY(SHARK_TAIL_PIVOT_REFERENCE_LENGTH),
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
+          // Long body: keep its nose/tail from poking through the side glass
+          // when swimming near a wall (issue #167).
+          containWithinTankWalls: true,
         };
 
       default:

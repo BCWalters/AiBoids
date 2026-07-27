@@ -109,6 +109,7 @@ interface CreatureInstanceMatrixArgs {
   meshScaleBoost: number;
   uprightStyle: UprightStyle;
   restOnFloor: boolean;
+  containWithinTankWalls: boolean;
 }
 
 interface ResolvedMotionConfig {
@@ -128,6 +129,7 @@ interface ResolvedMotionConfig {
   meshScaleBoost: number;
   preferUpright: boolean;
   restOnFloor: boolean;
+  containWithinTankWalls: boolean;
 }
 
 interface ResolvedColorStrategy {
@@ -178,6 +180,7 @@ interface UpdateCreatureInstanceArgs {
   meshScaleBoost: number;
   preferUpright: boolean;
   restOnFloor: boolean;
+  containWithinTankWalls: boolean;
 }
 type UpdateCreatureSharedArgs = Omit<UpdateCreatureInstanceArgs, 'index' | 'creature'>;
 
@@ -242,6 +245,8 @@ export class CreatureInstanceRenderer {
   private batchModelBox = new WeakMap<BoidRenderBatch, THREE.Box3>();
   /** Scratch corner vector for rotating a batch's bounding box (restOnFloor). */
   private tmpCorner = new THREE.Vector3();
+  /** Reused result box for the current-orientation rotated model AABB (tank clamps). */
+  private rotatedBounds = new THREE.Box3();
 
   private fishtankCenter: THREE.Vector3;
 
@@ -512,8 +517,9 @@ export class CreatureInstanceRenderer {
       meshScaleBoost,
       uprightStyle,
       restOnFloor,
+      containWithinTankWalls,
     } = args;
-    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle, restOnFloor);
+    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle, restOnFloor, containWithinTankWalls);
 
     // Wings: apply an extra local flap rotation around the forward axis.
     const flapAngle = this.computeWingFlapAngle(
@@ -559,6 +565,7 @@ export class CreatureInstanceRenderer {
     meshScaleBoost: number,
     uprightStyle: UprightStyle,
     restOnFloor: boolean,
+    containWithinTankWalls: boolean,
   ): void {
     // Body: just position + orientation, no flap.
     if (worldScale !== 1) {
@@ -571,23 +578,43 @@ export class CreatureInstanceRenderer {
       this.dummy.position.set(pos.x, pos.y, pos.z);
     }
     const bodyScale = entityScale * worldScale * meshScaleBoost;
-    if (restOnFloor) {
-      // Lift the whole instance so its lowest geometry vertex stays on/above the
-      // scene floor (render y=0). The simulation positions this creature by its
-      // model origin, which for the upright seahorse sits well above its base —
-      // without this, low swim heights push its body/tail through the tank
-      // floor. The lift only engages when the bottom would otherwise dip below
-      // the floor, leaving normal mid-water motion untouched.
-      //
-      // The lowest point is computed against the CURRENT body orientation (not
-      // the static model bounds): the seahorse pitches/banks slightly, which
-      // swings its curled tail — the part furthest from the origin — below the
-      // model's un-rotated lowest point. Rotating the combined bounding box by
-      // bodyQuat captures that so the tail no longer dips through the floor.
-      const minRotatedY = this.getRotatedModelMinY(set, this.bodyQuat);
-      const bottomWorldY = this.dummy.position.y + minRotatedY * bodyScale;
-      if (bottomWorldY < 0) {
-        this.dummy.position.y -= bottomWorldY;
+    // Both tank clamps keep the creature's *orientation-rotated* geometry (not
+    // its static model bounds) inside the tank: the simulation positions each
+    // creature by its model origin, but the geometry extends well beyond that
+    // origin (the seahorse's body/tail below it; the shark's nose/tail fore and
+    // aft of it), and the extent that faces a given wall depends on the current
+    // heading. Rotating the cached model bounding box by bodyQuat captures that.
+    // The clamps only engage right at a wall, leaving normal motion untouched.
+    if (restOnFloor || containWithinTankWalls) {
+      const rb = this.computeRotatedModelBounds(set, this.bodyQuat);
+      if (restOnFloor) {
+        // Lift so the lowest rotated vertex stays on/above the floor (render
+        // y=0) — fixes the upright seahorse sinking its body/tail through the
+        // tank floor at low swim heights (see #154).
+        const bottomWorldY = this.dummy.position.y + rb.min.y * bodyScale;
+        if (bottomWorldY < 0) {
+          this.dummy.position.y -= bottomWorldY;
+        }
+      }
+      if (containWithinTankWalls && worldScale !== 1) {
+        // Keep the rotated box within the tank's side glass on X and Z — fixes
+        // the shark's long nose/tail poking through the side walls near the
+        // glass (see #167). The swim region's world image equals the glass
+        // interior, so each inner wall sits at center ± center*worldScale.
+        this.dummy.position.x = this.clampAxisWithinWall(
+          this.dummy.position.x,
+          rb.min.x * bodyScale,
+          rb.max.x * bodyScale,
+          this.fishtankCenter.x,
+          worldScale,
+        );
+        this.dummy.position.z = this.clampAxisWithinWall(
+          this.dummy.position.z,
+          rb.min.z * bodyScale,
+          rb.max.z * bodyScale,
+          this.fishtankCenter.z,
+          worldScale,
+        );
       }
     }
     this.dummy.quaternion.copy(this.bodyQuat);
@@ -600,19 +627,46 @@ export class CreatureInstanceRenderer {
   }
 
   /**
-   * Lowest world-space Y (per unit scale) of a render batch's rigid parts
-   * (body + tail + pectoral fins) once rotated by the given orientation. Used
-   * by the restOnFloor clamp so the lift accounts for the creature's current
-   * pitch/bank — critical for the seahorse, whose curled tail swings below the
-   * un-rotated model minimum. The combined model-space bounding box is cached
+   * Shifts a single world-axis position so the creature's rotated box
+   * `[pos + boxMin, pos + boxMax]` stays within the tank's inner glass on that
+   * axis. The swim region's world image equals the glass interior, and the
+   * shared fishtankCenter sits at the tank's mid-point on X/Z, so the inner
+   * walls are at `center ± center*worldScale`. Only nudges when the box would
+   * otherwise cross a wall; if a (hypothetical) creature were wider than the
+   * tank the far wall wins, which is still inside the glass.
+   */
+  private clampAxisWithinWall(
+    pos: number,
+    boxMin: number,
+    boxMax: number,
+    center: number,
+    worldScale: number,
+  ): number {
+    const halfExtent = center * worldScale;
+    const wallMin = center - halfExtent;
+    const wallMax = center + halfExtent;
+    let p = pos;
+    if (p + boxMin < wallMin) p = wallMin - boxMin;
+    if (p + boxMax > wallMax) p = wallMax - boxMax;
+    return p;
+  }
+
+  /**
+   * Fills and returns `this.rotatedBounds` with the model-space AABB of a
+   * render batch's rigid parts (body + tail + pectoral fins) after rotating by
+   * the given orientation. Used by the tank floor/wall clamps so they account
+   * for the creature's current pitch/bank/heading — e.g. the seahorse's curled
+   * tail swinging below the un-rotated minimum, or the shark's nose/tail
+   * projecting onto whichever wall it faces. The combined model box is cached
    * per batch (computed lazily from geometry so it tracks any future geometry
    * change without a hardcoded constant); only its 8 corners are rotated each
-   * call, which is cheap.
+   * call, which is cheap. Values are in model units — multiply by the body
+   * scale to get world-space offsets.
    */
-  private getRotatedModelMinY(set: BoidRenderBatch, quat: THREE.Quaternion): number {
+  private computeRotatedModelBounds(set: BoidRenderBatch, quat: THREE.Quaternion): THREE.Box3 {
     const box = this.getBatchModelBox(set);
-    if (box.isEmpty()) return 0;
-    let minY = Infinity;
+    this.rotatedBounds.makeEmpty();
+    if (box.isEmpty()) return this.rotatedBounds;
     for (let cx = 0; cx < 2; cx++) {
       for (let cy = 0; cy < 2; cy++) {
         for (let cz = 0; cz < 2; cz++) {
@@ -621,16 +675,16 @@ export class CreatureInstanceRenderer {
             cy === 0 ? box.min.y : box.max.y,
             cz === 0 ? box.min.z : box.max.z,
           ).applyQuaternion(quat);
-          if (this.tmpCorner.y < minY) minY = this.tmpCorner.y;
+          this.rotatedBounds.expandByPoint(this.tmpCorner);
         }
       }
     }
-    return minY;
+    return this.rotatedBounds;
   }
 
   /**
    * Combined model-space bounding box across a render batch's rigid parts
-   * (body + tail + pectoral fins), cached per batch. See getRotatedModelMinY.
+   * (body + tail + pectoral fins), cached per batch. See computeRotatedModelBounds.
    */
   private getBatchModelBox(set: BoidRenderBatch): THREE.Box3 {
     const cached = this.batchModelBox.get(set);
@@ -803,6 +857,7 @@ export class CreatureInstanceRenderer {
       meshScaleBoost = 1,
       preferUpright = false,
       restOnFloor = false,
+      containWithinTankWalls = false,
     } = motion;
 
     return {
@@ -822,6 +877,7 @@ export class CreatureInstanceRenderer {
       meshScaleBoost,
       preferUpright,
       restOnFloor,
+      containWithinTankWalls,
     };
   }
 
@@ -888,6 +944,7 @@ export class CreatureInstanceRenderer {
       meshScaleBoost,
       preferUpright,
       restOnFloor,
+      containWithinTankWalls,
       colorMode,
     } = args;
     const pos = creature.position;
@@ -942,6 +999,7 @@ export class CreatureInstanceRenderer {
       meshScaleBoost,
       uprightStyle,
       restOnFloor,
+      containWithinTankWalls,
     });
 
     this.colorApplicator.apply({
@@ -1014,6 +1072,7 @@ export class CreatureInstanceRenderer {
       meshScaleBoost,
       preferUpright,
       restOnFloor,
+      containWithinTankWalls,
     } = this.resolveMotionConfig(motion);
 
     // Small songbirds (nature) bake a gradient into their geometry. When
@@ -1057,6 +1116,7 @@ export class CreatureInstanceRenderer {
       meshScaleBoost,
       preferUpright,
       restOnFloor,
+      containWithinTankWalls,
       colorMode,
     });
 
