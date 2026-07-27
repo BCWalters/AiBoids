@@ -218,45 +218,63 @@ export class ControlPanel {
     // the 2D canvas renderer, so grey that out whenever 3D mode is active.
     const trailDisabled = params.mode === '3d' && params.visualStyle !== 'arcade';
     const debugDisabled = params.mode === '3d';
-    const visualSettingsChildren = [
-      this.buildSlider(trailSliderSpec, trailDisabled),
-      this.buildDebugToggle(debugDisabled),
-      this.buildRenderingStatsToggle(),
-      this.buildDiagnosticsCaptureToggle(),
-      this.buildDiagnosticsButtons(),
-    ];
-    if (params.mode === '3d' && params.visualStyle !== 'arcade') {
-      visualSettingsChildren.push(this.buildTimeOfDayToggle());
-      visualSettingsChildren.push(this.buildSoftShadowsToggle());
+    // Visual section — one home for every aesthetic control, grouped into
+    // themed subsections (lighting/atmosphere, water, post-processing) so the
+    // distinction between "settings" and "FX" no longer has to be guessed.
+    // Non-aesthetic tooling lives in its own Camera and Diagnostics sections.
+    const is3DScene = params.mode === '3d' && params.visualStyle !== 'arcade';
+    const visualChildren: HTMLElement[] = [this.buildSlider(trailSliderSpec, trailDisabled)];
+    if (is3DScene) {
+      visualChildren.push(this.buildSlider(animationBlendSliderSpec));
       if (params.visualStyle === 'nature') {
-        visualSettingsChildren.push(this.buildParrotReviewHoverToggle());
+        visualChildren.push(this.buildParrotReviewHoverToggle());
       }
-      visualSettingsChildren.push(this.buildLightShaftsToggle());
-      visualSettingsChildren.push(this.buildFogToggle());
-      visualSettingsChildren.push(this.buildSlider(animationBlendSliderSpec));
-      if (params.visualStyle === 'fishtank') visualSettingsChildren.push(this.buildWaterEffectsToggle());
-    }
-    this.container.appendChild(this.buildSection('visualSettings', t('sectionVisualSettings'), visualSettingsChildren, false));
-
-    // Visual FX section — 3D-only. Groups the Creature View follow-cam plus
-    // the post-processing and scene-specific visual toggles. These are the
-    // scaffolded feature flags (see params.ts); scene-specific ones are only
-    // shown for the style they apply to.
-    if (params.mode === '3d') {
-      const visualFxChildren: HTMLElement[] = [
-        this.buildFollowCamModeToggle(),
-        this.buildBooleanToggle('showCreatureInspectorLabel', 'param-show-creature-inspector', 'showCreatureInspector'),
-        this.buildBooleanToggle('colorGradingEnabledLabel', 'param-color-grading-enabled', 'colorGradingEnabled'),
-        this.buildBooleanToggle('depthOfFieldEnabledLabel', 'param-depth-of-field-enabled', 'depthOfFieldEnabled'),
-      ];
+      visualChildren.push(
+        this.buildSubsection(t('subsectionLighting'), [
+          this.buildTimeOfDayToggle(),
+          this.buildSoftShadowsToggle(),
+          this.buildLightShaftsToggle(),
+          this.buildFogToggle(),
+        ]),
+      );
+      const waterChildren: HTMLElement[] = [];
+      if (params.visualStyle === 'fishtank') {
+        waterChildren.push(this.buildWaterEffectsToggle());
+      }
       if (params.visualStyle === 'nature') {
-        visualFxChildren.push(this.buildBooleanToggle('waterWavesEnabledLabel', 'param-water-waves-enabled', 'waterWavesEnabled'));
-        visualFxChildren.push(this.buildBooleanToggle('waterReflectionsEnabledLabel', 'param-water-reflections-enabled', 'waterReflectionsEnabled'));
+        waterChildren.push(this.buildBooleanToggle('waterWavesEnabledLabel', 'param-water-waves-enabled', 'waterWavesEnabled'));
+        waterChildren.push(this.buildBooleanToggle('waterReflectionsEnabledLabel', 'param-water-reflections-enabled', 'waterReflectionsEnabled'));
       }
       if (params.visualStyle === 'fishtank') {
-        visualFxChildren.push(this.buildBooleanToggle('depthMurkEnabledLabel', 'param-depth-murk-enabled', 'depthMurkEnabled'));
+        waterChildren.push(this.buildBooleanToggle('depthMurkEnabledLabel', 'param-depth-murk-enabled', 'depthMurkEnabled'));
       }
-      this.container.appendChild(this.buildSection('visualFx', t('sectionVisualFx'), visualFxChildren, false));
+      if (waterChildren.length > 0) {
+        visualChildren.push(this.buildSubsection(t('subsectionWater'), waterChildren));
+      }
+    }
+    if (params.mode === '3d') {
+      visualChildren.push(
+        this.buildSubsection(t('subsectionPostProcessing'), [
+          this.buildBooleanToggle('colorGradingEnabledLabel', 'param-color-grading-enabled', 'colorGradingEnabled'),
+          this.buildBooleanToggle('depthOfFieldEnabledLabel', 'param-depth-of-field-enabled', 'depthOfFieldEnabled'),
+        ]),
+      );
+    }
+    this.container.appendChild(this.buildSection('visual', t('sectionVisual'), visualChildren, false));
+
+    // Camera section — 3D-only. Creature-follow camera plus the inspector HUD.
+    if (params.mode === '3d') {
+      this.container.appendChild(
+        this.buildSection(
+          'camera',
+          t('sectionCamera'),
+          [
+            this.buildFollowCamModeToggle(),
+            this.buildBooleanToggle('showCreatureInspectorLabel', 'param-show-creature-inspector', 'showCreatureInspector'),
+          ],
+          false,
+        ),
+      );
     }
 
     this.container.appendChild(
@@ -286,6 +304,22 @@ export class ControlPanel {
         ),
       );
     }
+
+    // Diagnostics section — dev tooling (perception radii, render stats,
+    // diagnostics capture). Not aesthetic, so kept out of the Visual section.
+    this.container.appendChild(
+      this.buildSection(
+        'diagnostics',
+        t('sectionDiagnostics'),
+        [
+          this.buildDebugToggle(debugDisabled),
+          this.buildRenderingStatsToggle(),
+          this.buildDiagnosticsCaptureToggle(),
+          this.buildDiagnosticsButtons(),
+        ],
+        false,
+      ),
+    );
 
     this.container.appendChild(this.buildLanguageToggle());
     this.container.appendChild(this.buildButtons());
@@ -810,6 +844,25 @@ export class ControlPanel {
     details.appendChild(body);
 
     return details;
+  }
+
+  /**
+   * Builds a titled, outlined group used to cluster related controls inside a
+   * larger section (e.g. "Lighting & atmosphere" within the Visual section).
+   */
+  private buildSubsection(title: string, children: HTMLElement[]): HTMLElement {
+    const group = document.createElement('div');
+    group.className = 'control-subsection';
+
+    const heading = document.createElement('div');
+    heading.className = 'control-subsection-title';
+    heading.textContent = title;
+    group.appendChild(heading);
+
+    for (const child of children) {
+      group.appendChild(child);
+    }
+    return group;
   }
 
   /** Maps a population slider's param key to a scene-specific creature label when available. */
