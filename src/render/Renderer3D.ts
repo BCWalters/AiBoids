@@ -235,6 +235,10 @@ export class Renderer3D {
       // the horn; this tells the material to read that per-vertex 'color'.
       vertexColors: bodyVertexColors,
     });
+    // Scene-specific shader patch (e.g. fishtank fish-scale pattern). Called
+    // after the material is fully configured but before any InstancedMesh is
+    // created so the material's onBeforeCompile is set before first use.
+    sceneRenderer.patchBodyMaterial?.(bodyMaterial, geometries);
     const wingMaterial = new THREE.MeshStandardMaterial({
       // Monster predators: tint the membrane/tail material darker (multiplies
       // against the per-instance body color) so leathery wings/tail read darker
