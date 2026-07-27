@@ -97,23 +97,32 @@ describe('Simulation predator mouth catches', () => {
   it('scales the effective catch reach with predator body length instead of using one shared distance', () => {
     const shark = FISHTANK_PREDATOR_CATCH_PROFILES[PredatorSpecies.Monster]!;
     const hawk = NATURE_PREDATOR_CATCH_PROFILES[PredatorSpecies.Normal]!;
-    const sharedFrontDistance = 18;
     const sharkReach = shark.bodyLength * (shark.mouthOffsetFraction + shark.biteRadiusFraction);
     const hawkReach = hawk.bodyLength * (hawk.mouthOffsetFraction + hawk.biteRadiusFraction);
 
-    expect(hawkReach).toBeLessThan(sharedFrontDistance);
-    expect(sharkReach).toBeGreaterThan(sharedFrontDistance);
-    expect(sharedFrontDistance).toBeLessThanOrEqual(18);
+    // Absolute anchors, not multiples of the fractions under test, so that
+    // retuning either fraction cannot drag these bounds along with it.
+    // Measured: hawk 20.39 (15.6 body), shark 35.58 (36 body).
+    expect(hawkReach).toBeGreaterThan(18);
+    expect(hawkReach).toBeLessThan(24);
+    expect(sharkReach).toBeGreaterThan(32);
+    expect(sharkReach).toBeLessThan(40);
+    // The whole point: the 36-unit shark reaches substantially further than
+    // the 15.6-unit hawk, rather than both sharing one distance.
+    expect(sharkReach - hawkReach).toBeGreaterThan(10);
 
+    // A boid placed between the two reaches is caught by the shark and missed
+    // by the hawk.
+    const betweenReaches = 28;
     const sharkResult = runSingleCatchCheck({
       species: PredatorSpecies.Monster,
       profile: shark,
-      boidY: sharedFrontDistance,
+      boidY: betweenReaches,
     });
     const hawkResult = runSingleCatchCheck({
       species: PredatorSpecies.Normal,
       profile: hawk,
-      boidY: sharedFrontDistance,
+      boidY: betweenReaches,
     });
 
     expect(sharkResult.boid.dying).toBe(true);
