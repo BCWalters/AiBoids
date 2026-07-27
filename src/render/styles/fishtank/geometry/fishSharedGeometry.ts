@@ -197,11 +197,49 @@ export function bakeUniformColor(geometry: THREE.BufferGeometry, color: THREE.Co
 
 
 /**
+ * Normalised "how far around the body toward the back is this vertex", in
+ * [0,1]: 0 = facing straight down (belly), 0.5 = facing sideways (flank),
+ * 1 = facing straight up (back).
+ *
+ * Derived from the **surface normal's** Z, not the vertex's Z position.
+ * That distinction is the whole point. These bodies are lathes whose radius
+ * shrinks to nearly zero at the snout and at the caudal peduncle, so
+ * normalising `position.z` by the body's overall Z span — its depth at the
+ * *deepest* point — collapses every vertex at either end toward the middle
+ * of the range regardless of which way it actually faces. Dorsoventral
+ * patterns then wash out to a flat back/belly average exactly at the nose
+ * and the tail join. Measured on a goldfish before this change, the dorsal
+ * ridge ran #ff6a00 at mid-body but #ff8929 at the peduncle and #ff8323 at
+ * the snout — a pale smear at both ends of an otherwise solid back.
+ *
+ * The normal is radius-independent: a vertex on top of the body faces up
+ * whether the body is 3 units deep there or 0.1. Same defect and same fix
+ * as #227 on bird bodies.
+ *
+ * Falls back to position-based normalisation only if the geometry carries
+ * no normals at all.
+ *
+ * Note for callers: any non-uniform scale must be applied *before* baking.
+ * `BufferGeometry.scale()` does transform the normal attribute correctly,
+ * but baking first and scaling after would leave these colours keyed to the
+ * pre-scale surface orientation.
+ */
+function dorsalFraction(geo: THREE.BufferGeometry, index: number): number {
+  const normal = geo.attributes.normal;
+  if (normal) return THREE.MathUtils.clamp((normal.getZ(index) + 1) / 2, 0, 1);
+  const pos = geo.attributes.position;
+  geo.computeBoundingBox();
+  const minZ = geo.boundingBox!.min.z;
+  const span = Math.max(1e-6, geo.boundingBox!.max.z - minZ);
+  return THREE.MathUtils.clamp((pos.getZ(index) - minZ) / span, 0, 1);
+}
+
+
+/**
  * Bakes dorsoventral countershading — the near-universal real-fish cue of a
- * darker back fading to a paler belly — into a lathed body by its local Z
- * (the model's up axis): vertices at the top (back) take `backColor`, those
- * at the bottom (belly) take `bellyColor`, lerped by normalized height from
- * the geometry's own Z bounding-box range.
+ * darker back fading to a paler belly — into a lathed body: vertices whose
+ * surface faces up (the back) take `backColor`, those facing down (the
+ * belly) take `bellyColor`, lerped by `dorsalFraction`.
  */
 export function bakeCountershadeColors(
   geometry: THREE.BufferGeometry,
@@ -209,14 +247,9 @@ export function bakeCountershadeColors(
   bellyColor: THREE.Color,
 ): THREE.BufferGeometry {
   const { geo, pos, colors } = beginVertexColorBake(geometry);
-  geo.computeBoundingBox();
-  const minZ = geo.boundingBox!.min.z;
-  const maxZ = geo.boundingBox!.max.z;
-  const span = Math.max(1e-6, maxZ - minZ);
   const tmp = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const zN = THREE.MathUtils.clamp((pos.getZ(i) - minZ) / span, 0, 1);
-    tmp.copy(bellyColor).lerp(backColor, zN);
+    tmp.copy(bellyColor).lerp(backColor, dorsalFraction(geo, i));
     colors[i * 3] = tmp.r;
     colors[i * 3 + 1] = tmp.g;
     colors[i * 3 + 2] = tmp.b;
@@ -275,13 +308,9 @@ export function bakeUpperFlankMarkColors(
   options: { zFrom: number; lengthFrom: number; lengthTo: number },
 ): THREE.BufferGeometry {
   const { geo, pos, colors } = beginVertexColorBake(geometry);
-  geo.computeBoundingBox();
-  const minZ = geo.boundingBox!.min.z;
-  const maxZ = geo.boundingBox!.max.z;
-  const span = Math.max(1e-6, maxZ - minZ);
   for (let i = 0; i < pos.count; i++) {
     const t = THREE.MathUtils.clamp((pos.getY(i) + halfLen) / (2 * halfLen), 0, 1);
-    const zN = THREE.MathUtils.clamp((pos.getZ(i) - minZ) / span, 0, 1);
+    const zN = dorsalFraction(geo, i);
     const inMark = zN >= options.zFrom && t >= options.lengthFrom && t <= options.lengthTo;
     const color = inMark ? markColor : bodyColor;
     colors[i * 3] = color.r;
