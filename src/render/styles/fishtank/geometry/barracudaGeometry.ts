@@ -34,10 +34,10 @@ const EYE_COLOR = new THREE.Color(0x08070a);
 const MOUTH_CAVITY_COLOR = new THREE.Color(0x0b0d10); // dark open-mouth interior
 const FANG_COLOR = new THREE.Color(0xffffff); // small white teeth
 const FLANK_MARK_COLOR = new THREE.Color(0xffffff); // pale rectangular flank marks
-const LOWER_JAW_COLOR = new THREE.Color(0x8a949e); // gray underslung lower jaw
+const LOWER_JAW_COLOR = new THREE.Color(0xdadde0); // gray just slightly darker than the belly
 
 // Dorsal-to-ventral body gradient stops (multipliers against the silver base).
-const BACK_COLOR = new THREE.Color(0x4a5764); // dark steel back + upper fins
+const BACK_COLOR = new THREE.Color(0x3d3f42); // dark neutral gray back + upper fins
 const FLANK_COLOR = new THREE.Color(0xdfe6ec); // bright silver flank
 const BELLY_COLOR = new THREE.Color(0xffffff); // pale silver belly
 
@@ -46,7 +46,7 @@ const TAIL_ROOT_COLOR = new THREE.Color(0x9aa6b0);
 const TAIL_TIP_COLOR = new THREE.Color(0x121417);
 
 // Root of the caudal fin (local Y), as a fraction of raw input length.
-const BARRACUDA_TAIL_PIVOT_FRACTION = -0.985 * 0.5 * BARRACUDA_LENGTH_SCALE;
+const BARRACUDA_TAIL_PIVOT_FRACTION = -0.88 * 0.5 * BARRACUDA_LENGTH_SCALE;
 
 export function getBarracudaTailPivotY(rawLength: number): number {
   return BARRACUDA_TAIL_PIVOT_FRACTION * rawLength;
@@ -71,7 +71,7 @@ export function createBarracudaGeometries(rawLength: number, width: number): Cre
  * Authored tail(-Y) → nose(+Y).
  */
 function buildBarracudaBodyProfile(halfLen: number, width: number): THREE.Vector2[] {
-  return [
+  const controlPoints = [
     new THREE.Vector2(0, -halfLen * 1.0),
     new THREE.Vector2(width * 0.05, -halfLen * 0.9),
     new THREE.Vector2(width * 0.1, -halfLen * 0.72),
@@ -85,17 +85,30 @@ function buildBarracudaBodyProfile(halfLen: number, width: number): THREE.Vector
     new THREE.Vector2(width * 0.04, halfLen * 0.92),
     new THREE.Vector2(0, halfLen * 1.0),
   ];
+  // Resample the authored silhouette along a smooth spline so the flat-shaded
+  // lathe has many closely-spaced, gently-varying facets instead of a few long
+  // banded ones. getPoints(n) returns n+1 points passing through the controls.
+  return new THREE.SplineCurve(controlPoints).getPoints(66);
 }
 
 function buildBarracudaBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = buildBarracudaBodyProfile(halfLen, width);
-  const body = new THREE.LatheGeometry(profile, 16);
+  const body = new THREE.LatheGeometry(profile, 32);
   body.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
 
   const dorsalFins = buildDorsalFinsGeometry(length, width, profile);
+  // Base the countershading gradient on the BODY's own vertical extent, not the
+  // merged shell: the dorsal fins rise well above the back, and if their tips
+  // set maxZ the body gets squeezed into the pale belly→flank half and never
+  // reaches the dark back color. Fins above the body's back simply clamp to it.
+  body.computeBoundingBox();
+  const bodyMinZ = body.boundingBox!.min.z;
+  const bodyMaxZ = body.boundingBox!.max.z;
   const shell = bakeDorsalVentralGradient(
     mergePositionOnlyGeometries([body, dorsalFins]),
+    bodyMinZ,
+    bodyMaxZ,
   );
 
   const lowerJaw = buildLowerJawGeometry(length, width, profile);
@@ -125,13 +138,9 @@ function buildBarracudaBodyGeometry(length: number, width: number): THREE.Buffer
  * color gradient onto a lathed body (plus its upper dorsal fins and jaws), so
  * the countershaded silver look survives the per-instance base-color multiply.
  */
-function bakeDorsalVentralGradient(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+function bakeDorsalVentralGradient(geometry: THREE.BufferGeometry, minZ: number, maxZ: number): THREE.BufferGeometry {
   const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
   const position = nonIndexed.getAttribute('position');
-  nonIndexed.computeBoundingBox();
-  const box = nonIndexed.boundingBox!;
-  const minZ = box.min.z;
-  const maxZ = box.max.z;
   const span = maxZ - minZ || 1;
   const colors = new Float32Array(position.count * 3);
   const tmp = new THREE.Color();
@@ -153,34 +162,55 @@ function bakeDorsalVentralGradient(geometry: THREE.BufferGeometry): THREE.Buffer
 
 /**
  * Two small, spiky, widely-separated dorsal fins — a short first dorsal near
- * mid-body and a smaller second dorsal set well back toward the tail. Both are
- * modest spikes rather than the shark's single tall triangular sail.
+ * mid-body and a smaller second dorsal set well back toward the tail — each
+ * mirrored onto the belly. All are modest spikes rather than the shark's
+ * single tall triangular sail. Kept in one merged body geometry so the
+ * dorsal-ventral gradient bakes dark-gray tops and pale bellies onto them.
  */
 function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const bury = 0.9;
 
   const firstFrontY = halfLen * 0.12;
-  const firstBackY = -halfLen * 0.02;
+  const firstBackY = -halfLen * 0.16;
   const firstFrontZ = latheBodyRadiusAt(firstFrontY, profile) * BODY_HEIGHT_STRETCH * bury;
   const firstBackZ = latheBodyRadiusAt(firstBackY, profile) * BODY_HEIGHT_STRETCH * bury;
-  const firstTip = new THREE.Vector3(0, halfLen * 0.05, firstFrontZ + width * 0.26);
+  const firstTip = new THREE.Vector3(0, -halfLen * 0.15, firstBackZ + width * 0.195);
   const firstFin = extrudeRingGeometryAlongX(
     [new THREE.Vector3(0, firstFrontY, firstFrontZ), new THREE.Vector3(0, firstBackY, firstBackZ), firstTip],
     width * 0.05,
   );
+  // Mirror the first dorsal onto the belly (negate Z). Kept in the same merged
+  // body geometry so the dorsal-ventral gradient bakes belly colors onto it.
+  const firstBellyFin = extrudeRingGeometryAlongX(
+    [
+      new THREE.Vector3(0, firstFrontY, -firstFrontZ),
+      new THREE.Vector3(0, firstBackY, -firstBackZ),
+      new THREE.Vector3(0, firstTip.y, -firstTip.z),
+    ],
+    width * 0.05,
+  );
 
   const secondFrontY = -halfLen * 0.5;
-  const secondBackY = -halfLen * 0.64;
+  const secondBackY = -halfLen * 0.78;
   const secondFrontZ = latheBodyRadiusAt(secondFrontY, profile) * BODY_HEIGHT_STRETCH * bury;
   const secondBackZ = latheBodyRadiusAt(secondBackY, profile) * BODY_HEIGHT_STRETCH * bury;
-  const secondTip = new THREE.Vector3(0, -halfLen * 0.57, secondFrontZ + width * 0.17);
+  const secondTip = new THREE.Vector3(0, -halfLen * 0.76, secondBackZ + width * 0.1275);
   const secondFin = extrudeRingGeometryAlongX(
     [new THREE.Vector3(0, secondFrontY, secondFrontZ), new THREE.Vector3(0, secondBackY, secondBackZ), secondTip],
     width * 0.045,
   );
+  // Mirror the second dorsal onto the belly (negate Z).
+  const secondBellyFin = extrudeRingGeometryAlongX(
+    [
+      new THREE.Vector3(0, secondFrontY, -secondFrontZ),
+      new THREE.Vector3(0, secondBackY, -secondBackZ),
+      new THREE.Vector3(0, secondTip.y, -secondTip.z),
+    ],
+    width * 0.045,
+  );
 
-  return mergePositionOnlyGeometries([firstFin, secondFin]);
+  return mergePositionOnlyGeometries([firstFin, firstBellyFin, secondFin, secondBellyFin]);
 }
 
 // ---------------------------------------------------------------------------
@@ -378,13 +408,13 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
  */
 function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const peduncleY = -halfLen * 0.985;
+  const peduncleY = -halfLen * 0.88;
   const root = new THREE.Vector3(0, peduncleY, 0);
-  const upperTip = new THREE.Vector3(0, -halfLen * 1.52, width * 0.72);
-  const notch = new THREE.Vector3(0, -halfLen * 1.14, 0);
-  const lowerTip = new THREE.Vector3(0, -halfLen * 1.52, -width * 0.72);
+  const upperTip = new THREE.Vector3(0, -halfLen * 1.46, width * 0.36);
+  const notch = new THREE.Vector3(0, -halfLen * 1.32, 0);
+  const lowerTip = new THREE.Vector3(0, -halfLen * 1.46, -width * 0.36);
   const fin = extrudeRingGeometryAlongX([root, upperTip, notch, lowerTip], width * 0.05);
-  return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.52);
+  return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.46);
 }
 
 /**

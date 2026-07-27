@@ -42,7 +42,7 @@ const FISHTANK_DEFAULT_POPULATION: PopulationSnapshot = {
   goldCount: 20,
   redCount: 20,
   blueCount: 20,
-  predatorCount: 0,
+  predatorCount: 2,
   monsterCount: 1,
   horseCount: 2,
 };
