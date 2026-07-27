@@ -297,8 +297,10 @@ function buildDragonBodyProfile(halfLen: number, width: number): THREE.Vector2[]
  * vertex flush with the skull surface rather than at a hardcoded offset that
  * can drift out of agreement with the profile shape — the root cause that made
  * ~69 % of pupil vertices sit inside the skull (#201 follow-up).
+ * Exported for use in conformance tests.
  */
-function dragonBodyRadiusAtY(y: number, halfLen: number, width: number): number {
+export const EYE_STANDOFF_SCALE = 0.012; // standoff fraction of width
+export function dragonBodyRadiusAtY(y: number, halfLen: number, width: number): number {
   const profile = buildDragonBodyProfile(halfLen, width);
   const samples = new THREE.SplineCurve(profile).getPoints(128);
   // Profile Y increases monotonically (rump → snout), so a simple linear scan
@@ -393,12 +395,16 @@ function buildDragonFaceDetailsGeometry(
   // to world Y (head-forward) — so scaling local Y by eyeElong before rotation
   // elongates the eye along the head-forward ("horizontal") direction.
   //
-  // Each disc vertex's X is set to the body-profile surface radius at that
-  // vertex's own Y coordinate plus a small standoff (see dragonBodyRadiusAtY).
-  // A constant eyeX would drift out of agreement with the profile's curvature:
-  // the skull bulges widest near the eye centre, so a flat disc at one constant
-  // X intersects the skull there while its fore/aft tips float in air — the
-  // fix that #201 needed but that #201 didn't deliver.
+  // Each disc vertex's X is derived from the body-profile surface AT that
+  // vertex's own (Y, Z) coordinates plus a small standoff. Two-dimensional
+  // conforming is required:
+  //   - Y conforming: dragonBodyRadiusAtY(y) gives the lathe radius r at y.
+  //   - Z conforming: the body cross-section at height z is a circle of radius r,
+  //     so the surface sits at x = sqrt(r² − z²), not just r. Without this
+  //     second step the eye disc is flush at z = 0 but floats far off the skull
+  //     at the brow ridge (#201 follow-up measured 5× standoff at the top edge).
+  // The translate(0, eyeY, eyeZ) happens AFTER the loop, so the vertex's final
+  // world Z must be computed as pos.getZ(i) + eyeZ here.
   const irisRadius = width * 0.085;
   const pupilRadius = irisRadius * 0.48;
   const eyeElong = 1.35; // horizontal stretch: almond/cat-eye shape
@@ -407,7 +413,7 @@ function buildDragonFaceDetailsGeometry(
   // Small standoff beyond the profile surface — enough to ensure no vertex
   // is ever inside even with floating-point rounding, but small enough that
   // the disc isn't visibly hovering at grazing angles.
-  const eyeStandoff = width * 0.012;
+  const eyeStandoff = width * EYE_STANDOFF_SCALE;
   // Additional tiny offset for the pupil to prevent z-fighting against the iris.
   const pupilOffset = width * 0.003;
 
@@ -421,32 +427,36 @@ function buildDragonFaceDetailsGeometry(
     const rotAngle = side * Math.PI / 2;
     const rotMat = new THREE.Matrix4().makeRotationY(rotAngle);
 
-    // Iris — after rotateY(±π/2), every vertex has X = 0 and Y = r·sin(θ)·eyeElong.
-    // We replace X with the profile surface radius at (eyeY + vertex.Y) + standoff
-    // so the disc hugs the skull rather than intersecting it.
+    // Iris — after rotateY(±π/2) all vertices have X = 0. We set X to the
+    // true skull-surface distance at each vertex's own (Y, Z), so the disc
+    // conforms to the skull in both head-forward and up-down directions.
     const iris = new THREE.CircleGeometry(irisRadius, 16);
     iris.scale(1, eyeElong, 1);
     iris.applyMatrix4(rotMat);
     {
       const pos = iris.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < pos.count; i++) {
-        const r = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
-        pos.setX(i, side * (r + eyeStandoff));
+        const r  = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
+        const vz = pos.getZ(i) + eyeZ; // final world Z after translate
+        const surfaceX = Math.sqrt(Math.max(0, r * r - vz * vz));
+        pos.setX(i, side * (surfaceX + eyeStandoff));
       }
       pos.needsUpdate = true;
     }
     iris.translate(0, eyeY, eyeZ);
 
-    // Pupil — same surface-conforming treatment, plus pupilOffset so it sits
-    // just proud of the iris (z-fighting prevention only, not a depth cue).
+    // Pupil — same two-dimensional surface-conforming treatment plus pupilOffset
+    // so it sits just proud of the iris (z-fighting prevention, not a depth cue).
     const pupil = new THREE.CircleGeometry(pupilRadius, 12);
     pupil.scale(1, eyeElong * 0.85, 1);
     pupil.applyMatrix4(rotMat);
     {
       const pos = pupil.getAttribute('position') as THREE.BufferAttribute;
       for (let i = 0; i < pos.count; i++) {
-        const r = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
-        pos.setX(i, side * (r + eyeStandoff + pupilOffset));
+        const r  = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
+        const vz = pos.getZ(i) + eyeZ; // final world Z after translate
+        const surfaceX = Math.sqrt(Math.max(0, r * r - vz * vz));
+        pos.setX(i, side * (surfaceX + eyeStandoff + pupilOffset));
       }
       pos.needsUpdate = true;
     }

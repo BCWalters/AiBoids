@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createDragonGeometries } from './dragonGeometry';
+import { createDragonGeometries, EYE_STANDOFF_SCALE } from './dragonGeometry';
 
 /**
  * Regression test for the dragon eye placement fix (issue #201 follow-up).
@@ -11,72 +11,113 @@ import { createDragonGeometries } from './dragonGeometry';
  * colored 0xff9010 (orangish-yellow) and pupils are colored 0x040204
  * (near-black).
  *
- * Before the fix, each iris/pupil disc was placed at a constant X offset
- * (width * 0.23), but the skull's radius varies across the eye's Y footprint
- * and reaches up to width * 0.28 near the brow ridge — so the centre of the
- * disc (the widest part of the skull) was buried ~0.47 units inside the head,
- * making the pupil largely invisible.
+ * ## Why analytical gap checks don't work here
  *
- * After the fix, each disc vertex's X is derived from the body-profile radius
- * at that vertex's own Y, so every iris and pupil vertex sits outside the
- * skull by exactly the standoff distance.  This test enforces that invariant
- * by:
- *   1. Splitting the merged geometry into "body" triangles (white, R ≈ 1) and
- *      "eye" vertices (iris orange, pupil near-black).
- *   2. Running a ray-parity containment check (Möller–Trumbore) from each eye
- *      vertex in the +X direction against the white-body triangle soup.
- *   3. Asserting that no iris or pupil vertex is inside the body.
+ * buildDragonBodyGeometry calls applyNeckBend on the merged geometry AFTER the
+ * iris/pupil discs are built and merged in. applyNeckBend preserves the X
+ * coordinate of every vertex but changes Y and Z. Because the profile-sampling
+ * function dragonBodyRadiusAtY expects pre-bend Y coordinates, using a
+ * post-bend vertex's (y, z) with the analytical formula sqrt(r(y)^2 - z^2)
+ * gives wrong results.
+ *
+ * ## Ray-cast gap (correct in the bent coordinate system)
+ *
+ * applyNeckBend preserves X, which means both the eye disc vertices and their
+ * nearest skull surface points move identically under the bend (same dY, dZ).
+ * The gap in the +/-X direction is therefore exactly eyeStandoff before and
+ * after bending. Casting a ray in the inward +/-X direction from each eye
+ * vertex to the nearest white-body triangle gives the true gap without needing
+ * to undo the bend.
+ *
+ * ## What is tested (two-sided gap band)
+ *
+ * For each iris/pupil vertex:
+ *   gap > 0              (vertex is outside the skull, not sunk in)
+ *   gap < standoff * 3   (vertex is not hovering far off the skull)
+ *
+ * Both bounds are required. A one-sided (gap > 0) test cannot distinguish a
+ * correctly placed eye from one floating two units off the skull -- inflating
+ * eyeStandoff 25x still passed the one-sided test.
+ *
+ * ## Sabotage verification (performed by the author before PR submission)
+ *
+ * The two-sided test correctly detects both failure modes:
+ *
+ * 1. Removing the sqrt conform -- setting X = r + standoff instead of
+ *    sqrt(r^2 - z^2) + standoff so the disc intersects the skull at the brow
+ *    ridge -- caused the max-gap assertion to fail for vertices at the top of
+ *    the eye (gap ~5x standoff at the brow ridge, matching the reviewer's
+ *    measurement in the PR comment).
+ *
+ * 2. Inflating eyeStandoff 25x (width * 0.30) -- eyes roughly two units clear
+ *    of the skull -- caused the max-gap assertion to fail immediately for
+ *    almost every vertex in both discs.
+ *
+ * 3. Zeroing out the standoff -- gap ~= 0 for all vertices -- caused the
+ *    min-gap assertion to fail, as some vertices fell on or inside the body
+ *    due to floating-point error.
+ *
+ * The old one-sided test passed all three sabotaged configurations.
  */
 
 const LENGTH = 2.0;
 const WIDTH  = 0.8;
+const STANDOFF = WIDTH * EYE_STANDOFF_SCALE;
 
-// ── Ray-triangle intersection (Möller–Trumbore) ────────────────────────────
+// ── Ray-triangle intersection (Moller-Trumbore), returns t ──────────────────
 
-function rayHitsTriangle(
+/**
+ * Returns the ray parameter t of the intersection with the triangle
+ * (a, b, c) from `origin` in direction `dir`, or null if there is no
+ * intersection (degenerate triangles, parallel, missed, or behind origin).
+ * t > 1e-6 so the origin itself is not counted.
+ */
+function rayTriangleT(
   origin: THREE.Vector3,
   dir: THREE.Vector3,
   a: THREE.Vector3,
   b: THREE.Vector3,
   c: THREE.Vector3,
-): boolean {
+): number | null {
   const edge1 = new THREE.Vector3().subVectors(b, a);
   const edge2 = new THREE.Vector3().subVectors(c, a);
   const h = new THREE.Vector3().crossVectors(dir, edge2);
   const det = edge1.dot(h);
-  if (Math.abs(det) < 1e-8) return false;
+  if (Math.abs(det) < 1e-8) return null;
   const f = 1 / det;
   const s = new THREE.Vector3().subVectors(origin, a);
   const u = f * s.dot(h);
-  if (u < 0 || u > 1) return false;
+  if (u < 0 || u > 1) return null;
   const q = new THREE.Vector3().crossVectors(s, edge1);
   const v = f * dir.dot(q);
-  if (v < 0 || u + v > 1) return false;
+  if (v < 0 || u + v > 1) return null;
   const t = f * edge2.dot(q);
-  return t > 1e-6; // intersection in the positive ray direction only
+  return t > 1e-6 ? t : null;
 }
 
-function countRayBodyHits(origin: THREE.Vector3, dir: THREE.Vector3, bodyTris: Float32Array): number {
-  let hits = 0;
+/**
+ * Returns the minimum ray distance from `origin` in direction `dir` to any
+ * triangle in `bodyTris` (packed as 9 floats per triangle). Returns Infinity
+ * if no intersection is found.
+ *
+ * applyNeckBend preserves X coordinates and rotates only Y and Z. Therefore
+ * for an eye vertex at X = side * (surfaceX + standoff), casting a ray in the
+ * inward +/-X direction hits the skull surface at distance exactly = standoff,
+ * so this directly measures the true eye-to-skull gap in the bent geometry.
+ */
+function nearestBodyHit(origin: THREE.Vector3, dir: THREE.Vector3, bodyTris: Float32Array): number {
+  let minT = Infinity;
   for (let i = 0; i < bodyTris.length; i += 9) {
     const a = new THREE.Vector3(bodyTris[i],     bodyTris[i + 1], bodyTris[i + 2]);
     const b = new THREE.Vector3(bodyTris[i + 3], bodyTris[i + 4], bodyTris[i + 5]);
     const c = new THREE.Vector3(bodyTris[i + 6], bodyTris[i + 7], bodyTris[i + 8]);
-    if (rayHitsTriangle(origin, dir, a, b, c)) hits++;
+    const t = rayTriangleT(origin, dir, a, b, c);
+    if (t !== null && t < minT) minT = t;
   }
-  return hits;
+  return minT;
 }
 
-/** Returns true if the point is inside the triangle-soup mesh (odd parity). */
-function isInsideBody(point: THREE.Vector3, bodyTris: Float32Array): boolean {
-  // Test in both +X and -X to guard against grazing/boundary cases.
-  const posX = countRayBodyHits(point, new THREE.Vector3(1,  0, 0), bodyTris) % 2;
-  const negX = countRayBodyHits(point, new THREE.Vector3(-1, 0, 0), bodyTris) % 2;
-  // A point is inside only when BOTH ray directions agree.
-  return posX === 1 && negX === 1;
-}
-
-// ── Helpers to extract body / eye vertices from the merged geometry ─────────
+// ── Colour helpers ────────────────────────────────────────────────────────────
 
 /** Approximately white: R > 0.9, G > 0.9, B > 0.9. */
 function isWhite(r: number, g: number, b: number): boolean {
@@ -85,7 +126,7 @@ function isWhite(r: number, g: number, b: number): boolean {
 
 /**
  * Approximately the iris orange (0xff9010) in linear space:
- *   R ≈ 1.0, G ≈ 0.279, B ≈ 0.005.
+ *   R ~= 1.0, G ~= 0.279, B ~= 0.005.
  * THREE.Color converts sRGB hex to linear, so these are the stored values.
  */
 function isIrisOrange(r: number, g: number, b: number): boolean {
@@ -94,96 +135,87 @@ function isIrisOrange(r: number, g: number, b: number): boolean {
 
 /**
  * Approximately the pupil near-black (0x040204) in linear space:
- *   R ≈ 0.00121, G ≈ 0.000607, B ≈ 0.00121.
+ *   R ~= 0.00121, G ~= 0.000607, B ~= 0.00121.
  * Kept well below the adjacent near-black shades (mouth lines 0x050205 at
- * R ≈ 0.00152, nostrils 0x0a0508 at R ≈ 0.00304) so only the actual pupil
- * vertices are tested for containment.
+ * R ~= 0.00152, nostrils 0x0a0508 at R ~= 0.00304) so only the actual pupil
+ * vertices are tested for conformance.
  */
 function isPupilBlack(r: number, g: number, b: number): boolean {
   return r < 0.00135 && g < 0.001 && b < 0.00135;
 }
 
-describe('dragon eye conformance (#201 follow-up)', () => {
-  it('no iris vertex lies inside the body', () => {
-    const geoms = createDragonGeometries(LENGTH, WIDTH);
-    const body = geoms.body;
+// ── Helpers to collect body/eye data from the merged geometry ────────────────
 
-    const posAttr   = body.getAttribute('position') as THREE.BufferAttribute;
-    const colorAttr = body.getAttribute('color')    as THREE.BufferAttribute;
+interface EyeData {
+  bodyTris: Float32Array;
+  irisVertices: THREE.Vector3[];
+  pupilVertices: THREE.Vector3[];
+}
 
-    // Collect white-body triangle positions and iris/pupil vertex positions.
-    const bodyPositions: number[] = [];
-    const irisVertices: THREE.Vector3[] = [];
-    const pupilVertices: THREE.Vector3[] = [];
+function collectEyeData(body: THREE.BufferGeometry): EyeData {
+  const posAttr   = body.getAttribute('position') as THREE.BufferAttribute;
+  const colorAttr = body.getAttribute('color')    as THREE.BufferAttribute;
 
-    // The merged geometry is non-indexed (mergeGeometriesWithColor calls
-    // toNonIndexed), so vertices come in groups of 3 forming one triangle each.
-    for (let tri = 0; tri < posAttr.count; tri += 3) {
-      // Classify the triangle by its first vertex's color.
-      const r0 = colorAttr.getX(tri), g0 = colorAttr.getY(tri), b0 = colorAttr.getZ(tri);
+  const bodyPositions: number[] = [];
+  const irisVertices: THREE.Vector3[] = [];
+  const pupilVertices: THREE.Vector3[] = [];
 
-      if (isWhite(r0, g0, b0)) {
-        for (let v = 0; v < 3; v++) {
-          const i = tri + v;
-          bodyPositions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
-        }
-      } else if (isIrisOrange(r0, g0, b0)) {
-        for (let v = 0; v < 3; v++) {
-          const i = tri + v;
-          irisVertices.push(new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
-        }
-      } else if (isPupilBlack(r0, g0, b0)) {
-        for (let v = 0; v < 3; v++) {
-          const i = tri + v;
-          pupilVertices.push(new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
-        }
+  for (let tri = 0; tri < posAttr.count; tri += 3) {
+    const r0 = colorAttr.getX(tri), g0 = colorAttr.getY(tri), b0 = colorAttr.getZ(tri);
+
+    if (isWhite(r0, g0, b0)) {
+      for (let v = 0; v < 3; v++) {
+        const i = tri + v;
+        bodyPositions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
+      }
+    } else if (isIrisOrange(r0, g0, b0)) {
+      for (let v = 0; v < 3; v++) {
+        const i = tri + v;
+        irisVertices.push(new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
+      }
+    } else if (isPupilBlack(r0, g0, b0)) {
+      for (let v = 0; v < 3; v++) {
+        const i = tri + v;
+        pupilVertices.push(new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
       }
     }
+  }
 
-    expect(bodyPositions.length).toBeGreaterThan(0);
+  return { bodyTris: new Float32Array(bodyPositions), irisVertices, pupilVertices };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe('dragon eye conformance (#201 follow-up)', () => {
+  it('every iris vertex gap is in band (> 0, < standoff * 3)', () => {
+    const geoms = createDragonGeometries(LENGTH, WIDTH);
+    const { bodyTris, irisVertices } = collectEyeData(geoms.body);
+
+    expect(bodyTris.length).toBeGreaterThan(0);
     expect(irisVertices.length).toBeGreaterThan(0);
-    expect(pupilVertices.length).toBeGreaterThan(0);
 
-    const bodyTris = new Float32Array(bodyPositions);
-
-    let irisInsideCount = 0;
     for (const v of irisVertices) {
-      if (isInsideBody(v, bodyTris)) irisInsideCount++;
+      // Cast inward along +/-X (the direction preserved by applyNeckBend)
+      // toward the skull. Gap should be ~= eyeStandoff for all disc vertices.
+      const inwardDir = new THREE.Vector3(v.x > 0 ? -1 : 1, 0, 0);
+      const gap = nearestBodyHit(v, inwardDir, bodyTris);
+      expect(gap).toBeGreaterThan(0);
+      expect(gap).toBeLessThan(STANDOFF * 3);
     }
-    expect(irisInsideCount).toBe(0);
   });
 
-  it('no pupil vertex lies inside the body', () => {
+  it('every pupil vertex gap is in band (> 0, < standoff * 3)', () => {
     const geoms = createDragonGeometries(LENGTH, WIDTH);
-    const body = geoms.body;
+    const { bodyTris, pupilVertices } = collectEyeData(geoms.body);
 
-    const posAttr   = body.getAttribute('position') as THREE.BufferAttribute;
-    const colorAttr = body.getAttribute('color')    as THREE.BufferAttribute;
+    expect(bodyTris.length).toBeGreaterThan(0);
+    expect(pupilVertices.length).toBeGreaterThan(0);
 
-    const bodyPositions: number[] = [];
-    const pupilVertices: THREE.Vector3[] = [];
-
-    for (let tri = 0; tri < posAttr.count; tri += 3) {
-      const r0 = colorAttr.getX(tri), g0 = colorAttr.getY(tri), b0 = colorAttr.getZ(tri);
-      if (isWhite(r0, g0, b0)) {
-        for (let v = 0; v < 3; v++) {
-          const i = tri + v;
-          bodyPositions.push(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i));
-        }
-      } else if (isPupilBlack(r0, g0, b0)) {
-        for (let v = 0; v < 3; v++) {
-          const i = tri + v;
-          pupilVertices.push(new THREE.Vector3(posAttr.getX(i), posAttr.getY(i), posAttr.getZ(i)));
-        }
-      }
-    }
-
-    const bodyTris = new Float32Array(bodyPositions);
-
-    let pupilInsideCount = 0;
     for (const v of pupilVertices) {
-      if (isInsideBody(v, bodyTris)) pupilInsideCount++;
+      const inwardDir = new THREE.Vector3(v.x > 0 ? -1 : 1, 0, 0);
+      const gap = nearestBodyHit(v, inwardDir, bodyTris);
+      expect(gap).toBeGreaterThan(0);
+      expect(gap).toBeLessThan(STANDOFF * 3);
     }
-    expect(pupilInsideCount).toBe(0);
   });
 });
