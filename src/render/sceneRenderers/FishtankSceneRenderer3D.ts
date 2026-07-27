@@ -46,16 +46,19 @@ const fishtankSize = createCreatureSizer(FISHTANK_BASE_CREATURE);
 export const FISHTANK_CREATURE_SIZES = {
   fish: fishtankSize(1),
   butterflyfish: fishtankSize(1),
-  // The four small aquarium fish (Fish / Goldfish / Clownfish / Blue Tang) are
-  // sized from these factors. Body-depth (back-to-belly, −25%) and flank-to-
-  // flank width (narrower, −25%) are handled as shape proportions in
-  // smallFishGeometry.ts (SMALL_FISH_BODY_DEPTH_SCALE / SMALL_FISH_SIDE_SQUASH_SCALE)
-  // so they don't also rescale the fins.
+  // The five small aquarium fish (Tetra / Goldfish / Clownfish / Blue Tang /
+  // Butterflyfish) are sized from these factors. Body-depth (back-to-belly,
+  // −25%) and flank-to-flank width (narrower, −25%) are handled as shape
+  // proportions in smallFishGeometry.ts (SMALL_FISH_BODY_DEPTH_SCALE /
+  // SMALL_FISH_SIDE_SQUASH_SCALE) so they don't also rescale the fins.
   //
-  // Goldfish / Clownfish / Blue Tang — previously the standard fish size (×1).
+  // Clownfish / Blue Tang — shared small-fish size factor.
   smallFish: fishtankSize(0.75),
-  // Plain "Fish" — a smaller darting sparrow reskin; previously ×0.525 uniform.
-  plainFish: fishtankSize(0.525 * 0.75),
+  // Goldfish — half the smallFish factor so it reads as noticeably smaller.
+  goldfish: fishtankSize(0.75 * 0.5),
+  // Plain "Tetra" — doubled from the original sparrow-derived size so it
+  // reads more visibly in the tank; previously ×0.525 × 0.75.
+  plainFish: fishtankSize(0.525 * 0.75 * 2),
   // Barracuda (normal predator) — long/lean but clearly smaller than the monster shark.
   barracuda: fishtankSize(27 / FISHTANK_BASE_CREATURE.length, 9.6 / FISHTANK_BASE_CREATURE.width),
   // Shark — a large torpedo-shaped hunter, 36 x 15.84 world units.
@@ -182,10 +185,10 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
 
   constructor(deps: FishtankSceneRendererDependencies) {
     this.deps = deps;
-    // Plain "Fish" stays small/darting (sparrow-derived size); the named
-    // aquarium species use the shared small-fish size.
+    // Plain "Tetra" uses its own doubled size; Goldfish its own halved size;
+    // Clownfish and Blue Tang share the unchanged smallFish factor.
     this.plainFishGeometries = createPlainFishGeometries(FISHTANK_CREATURE_SIZES.plainFish.length, FISHTANK_CREATURE_SIZES.plainFish.width);
-    this.goldfishGeometries = createGoldfishGeometries(FISHTANK_CREATURE_SIZES.smallFish.length, FISHTANK_CREATURE_SIZES.smallFish.width);
+    this.goldfishGeometries = createGoldfishGeometries(FISHTANK_CREATURE_SIZES.goldfish.length, FISHTANK_CREATURE_SIZES.goldfish.width);
     this.clownfishGeometries = createClownfishGeometries(FISHTANK_CREATURE_SIZES.smallFish.length, FISHTANK_CREATURE_SIZES.smallFish.width);
     this.blueTangGeometries = createBlueTangGeometries(FISHTANK_CREATURE_SIZES.smallFish.length, FISHTANK_CREATURE_SIZES.smallFish.width);
     this.butterflyfishGeometries = createButterflyfishGeometries(FISHTANK_CREATURE_SIZES.butterflyfish.length, FISHTANK_CREATURE_SIZES.butterflyfish.width);
@@ -475,7 +478,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
         colorMode: 'speciesTint',
       };
     }
-    // The four small fish (Fish / Goldfish / Clownfish / Blue Tang) bake their
+    // The five small fish (Tetra / Goldfish / Clownfish / Blue Tang / Butterflyfish) bake their
     // full multi-hue colors into their geometry, so the instance color just
     // passes white through (small-bird color path) to show the baked pattern.
     return {
@@ -592,7 +595,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   getCreatureLabels(): CreatureLabels {
     return {
       boid: {
-        normal: 'Fish',
+        normal: 'Tetra',
         multicolor: 'Butterflyfish',
         gold: 'Goldfish',
         red: 'Clownfish',
