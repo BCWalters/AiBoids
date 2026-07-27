@@ -5,6 +5,7 @@ import { Predator, PredatorSpecies } from './Predator';
 import { clampToBounds, type WorldBounds } from './boundary';
 import { UFO, createUFO } from './UFO';
 import { SpatialGrid } from './spatialGrid';
+import type { PredatorCatchProfile, PredatorCatchProfiles } from './predatorCatchProfiles';
 
 /** A single "predator caught a boid" moment — read by renderers to spawn a one-shot cartoony blood-splatter effect. Capped/pruned so the array never grows unbounded. */
 export interface CatchEvent {
@@ -13,12 +14,10 @@ export interface CatchEvent {
   direction: V.Vec3;
 }
 
-// How close a predator must get to a boid to catch it. Deliberately a
-// fixed sim-space distance (not tied to any renderer's visual predator
-// size, since "dragon" predators are just a cosmetic geometry swap) —
-// roughly on the same order as the boids' own separation radius, so a
-// predator has to really close the gap, not just graze the flock.
-const CATCH_RADIUS = 18;
+// Legacy fallback used until a scene supplies per-predator catch profiles.
+// Kept for tests/callers that construct Simulation directly without wiring
+// scene-owned mouth offsets in, but the live app immediately overrides this.
+const DEFAULT_CATCH_RADIUS = 18;
 // Bounded so a long-idle tab doesn't let this grow forever.
 const MAX_CATCH_EVENTS = 16;
 
@@ -59,6 +58,7 @@ export class Simulation {
   /** Boids abducted by the UFO, waiting on their delayed coop respawn. Read by the UI to enable a manual "respawn now" action. */
   pendingRespawns: PendingRespawn[] = [];
   private nextCatchId = 1;
+  private predatorCatchProfiles: PredatorCatchProfiles = {};
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -69,6 +69,10 @@ export class Simulation {
   resize(width: number, height: number): void {
     this.width = width;
     this.height = height;
+  }
+
+  setPredatorCatchProfiles(profiles: PredatorCatchProfiles): void {
+    this.predatorCatchProfiles = profiles;
   }
 
   /** Current world bounds box, used for 3D wall steer-away. */
@@ -262,15 +266,36 @@ export class Simulation {
     else if (pos.y >= this.height) pos.y -= this.height;
   }
 
+  private getPredatorCatchProfile(predator: Predator): PredatorCatchProfile | null {
+    return this.predatorCatchProfiles[predator.species] ?? null;
+  }
+
+  private getPredatorCatchDirection(predator: Predator): V.Vec3 {
+    const speed = V.magnitude(predator.velocity);
+    return speed > 1e-6 ? V.scale(predator.velocity, 1 / speed) : V.create(0, 0, 1);
+  }
+
+  private getPredatorCatchPoint(predator: Predator, direction: V.Vec3): V.Vec3 {
+    const profile = this.getPredatorCatchProfile(predator);
+    if (!profile) return { ...predator.position };
+    return V.add(predator.position, V.scale(direction, profile.bodyLength * profile.mouthOffsetFraction));
+  }
+
+  private getPredatorCatchRadius(predator: Predator): number {
+    const profile = this.getPredatorCatchProfile(predator);
+    return profile ? profile.bodyLength * profile.biteRadiusFraction : DEFAULT_CATCH_RADIUS;
+  }
+
   /**
-   * Any predator within CATCH_RADIUS of a (not-already-dying) boid catches
-   * it: the boid enters its shrink-and-slide "swallowed" animation (see
-   * Boid.update) and a CatchEvent is recorded for the renderers to spawn a
-   * one-shot blood-splatter effect at. The catching predator then enters
-   * its own "digesting" state (see Predator.updateDigesting) instead of
-   * immediately continuing the hunt. Skipped entirely if the user has
-   * turned off predatorCatchEnabled, and a predator that's already
-   * digesting can't catch again until it resumes hunting.
+   * Any predator whose mouth-point bite radius reaches a (not-already-dying)
+   * boid catches it: the boid enters its shrink-and-slide "swallowed"
+   * animation (see Boid.update) and a CatchEvent is recorded for the
+   * renderers to spawn a one-shot blood-splatter effect at. The catching
+   * predator then enters its own "digesting" state (see
+   * Predator.updateDigesting) instead of immediately continuing the hunt.
+   * Skipped entirely if the user has turned off predatorCatchEnabled, and a
+   * predator that's already digesting can't catch again until it resumes
+   * hunting.
    */
   private checkCatches(): void {
     if (!params.predatorCatchEnabled) return;
@@ -280,16 +305,17 @@ export class Simulation {
       // Predator.species doc comment.
       if (predator.species === PredatorSpecies.Horse) continue;
       if (predator.digesting) continue;
+      const direction = this.getPredatorCatchDirection(predator);
+      const catchPoint = this.getPredatorCatchPoint(predator, direction);
+      const catchRadius = this.getPredatorCatchRadius(predator);
       for (const boid of this.boids) {
         if (boid.dying) continue;
-        if (V.distanceSq(predator.position, boid.position) > CATCH_RADIUS * CATCH_RADIUS) continue;
+        if (V.distanceSq(catchPoint, boid.position) > catchRadius * catchRadius) continue;
 
         boid.dying = true;
         boid.dyingElapsed = 0;
-        boid.deathTarget = { ...predator.position };
+        boid.deathTarget = { ...catchPoint };
 
-        const speed = V.magnitude(predator.velocity);
-        const direction = speed > 1e-6 ? V.scale(predator.velocity, 1 / speed) : V.create(0, 0, 1);
         this.catchEvents.push({ id: this.nextCatchId++, position: { ...boid.position }, direction });
         if (this.catchEvents.length > MAX_CATCH_EVENTS) {
           this.catchEvents.splice(0, this.catchEvents.length - MAX_CATCH_EVENTS);

@@ -6,6 +6,7 @@ import { ControlPanel } from './ui/ControlPanel';
 import { Diagnostics } from './diagnostics/Diagnostics';
 import { CreatureGalleryController } from './gallery/CreatureGalleryController';
 import { FollowCamController } from './render/FollowCamController';
+import { getPredatorCatchProfilesForStyle } from './render/sceneRenderers/predatorCatchProfiles';
 import { params, type SimMode } from './sim/params';
 import { onLanguageChange, getLanguage, setLanguage, SUPPORTED_LANGUAGES, type Language } from './i18n/language';
 import { t } from './i18n/translations';
@@ -80,6 +81,7 @@ function setupHeaderLanguageSelector(): void {
 setupHeaderLanguageSelector();
 
 const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight || 600);
+sim.setPredatorCatchProfiles(getPredatorCatchProfilesForStyle(params.visualStyle));
 const diagnostics = new Diagnostics(sim, canvasStack);
 
 let renderer2D: Renderer | null = null;
@@ -231,6 +233,13 @@ document.addEventListener('keydown', (e) => {
 });
 
 let lastTime = performance.now();
+let lastPredatorCatchStyle = params.visualStyle;
+
+function syncPredatorCatchProfiles(): void {
+  if (lastPredatorCatchStyle === params.visualStyle) return;
+  sim.setPredatorCatchProfiles(getPredatorCatchProfilesForStyle(params.visualStyle));
+  lastPredatorCatchStyle = params.visualStyle;
+}
 
 function loop(now: number): void {
   const rawFrameMs = Math.max(0, now - lastTime);
@@ -243,6 +252,7 @@ function loop(now: number): void {
   // gallery/CreatureGalleryController). Runs before sim.update so the isolated
   // population is in place for this frame.
   creatureGallery.applySelectionChanges();
+  syncPredatorCatchProfiles();
 
   const simStart = performance.now();
   sim.update(dt);
