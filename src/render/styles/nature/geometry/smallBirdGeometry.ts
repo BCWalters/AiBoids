@@ -244,9 +244,22 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   const tailTip = controlPoints[0];
   const tailCap = buildTailCapGeometry(tailTip.y, tailTip.x, 32);
 
+  // When a dorsal gradient is baked, the body vertices at the tail tip blend
+  // between tailBelly (ventral) and tailBack (dorsal). The cap sits at tY≈1
+  // and tZ≈0.5 (center of the disc), so the closest match is the midpoint
+  // between the two tail-end palette colors — avoiding the white/grey cap
+  // that was visible against colored plumage (e.g. grey cap on a red cardinal).
+  const tailCapColor = palette?.dorsalGradient
+    ? new THREE.Color(
+        (palette.tailBelly.r + palette.tailBack.r) * 0.5,
+        (palette.tailBelly.g + palette.tailBack.g) * 0.5,
+        (palette.tailBelly.b + palette.tailBack.b) * 0.5,
+      )
+    : WHITE_VERTEX_COLOR;
+
   return mergeGeometriesWithColor([
     { geometry: body, color: WHITE_VERTEX_COLOR },
-    { geometry: tailCap, color: WHITE_VERTEX_COLOR },
+    { geometry: tailCap, color: tailCapColor },
     { geometry: eyes, color: EYE_COLOR },
   ]);
 }
