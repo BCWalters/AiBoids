@@ -77,9 +77,23 @@ const SMALL_FISH_DORSAL_HEIGHT_SCALE = 0.75;
 
 /** Builds the shared lathe body (nose at +Y, peduncle at -Y) with the given
  * profile and lateral-compression proportions. The caller bakes the body's
- * color pattern before it is merged with the dorsal fin and eyes. */
+ * color pattern before it is merged with the dorsal fin and eyes.
+ *
+ * Spline-resamples the authored control points before lathing (the same
+ * pattern used by the shark, barracuda, and dragon) so the body reads as
+ * smooth along its length instead of visibly creased between the raw
+ * control points.  24 radial segments matches typical viewing distance for
+ * these small creatures (15° per face; imperceptible at the distances they
+ * swim).  Together these replace the prior 8-point / 16-segment config that
+ * was the only fish body below 32 radial segments.
+ */
 function buildLatheBody(profile: THREE.Vector2[], proportions: BodyProportions): THREE.BufferGeometry {
-  const body = new THREE.LatheGeometry(profile, 16);
+  // Clamp radius ≥ 0 so a Catmull-Rom overshoot at a zero-radius pole
+  // (tail / nose tip) never produces a negative-radius lathe ring.
+  const smoothProfile = new THREE.SplineCurve(profile)
+    .getPoints(32)
+    .map((p) => new THREE.Vector2(Math.max(0, p.x), p.y));
+  const body = new THREE.LatheGeometry(smoothProfile, 24);
   body.scale(proportions.sideSquash, 1, proportions.heightStretch);
   return body;
 }
