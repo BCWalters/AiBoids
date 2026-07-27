@@ -37,7 +37,7 @@ const FLANK_MARK_COLOR = new THREE.Color(0xffffff); // pale rectangular flank ma
 const LOWER_JAW_COLOR = new THREE.Color(0x8a949e); // gray underslung lower jaw
 
 // Dorsal-to-ventral body gradient stops (multipliers against the silver base).
-const BACK_COLOR = new THREE.Color(0x4a5764); // dark steel back + upper fins
+const BACK_COLOR = new THREE.Color(0x3d3f42); // dark neutral gray back + upper fins
 const FLANK_COLOR = new THREE.Color(0xdfe6ec); // bright silver flank
 const BELLY_COLOR = new THREE.Color(0xffffff); // pale silver belly
 
