@@ -101,3 +101,40 @@ export function angleBetween(a: Vec3, b: Vec3): number {
   const cos = Math.min(1, Math.max(-1, dot(a, b) / (ma * mb)));
   return Math.acos(cos);
 }
+
+/**
+ * Rotate the direction of `from` toward the direction of `to` by at most
+ * `maxAngle` radians, returning a vector whose magnitude equals `|to|`.
+ *
+ * This is a turn-rate limiter: the *speed* follows the freshly-computed
+ * velocity (`to`), but the *heading* is only allowed to slew by `maxAngle`
+ * per call. Used to damp the high-frequency direction jitter that boid
+ * steering produces (neighbors popping in/out of perception, alignment vs
+ * cohesion fighting) without changing the flock's overall behavior.
+ *
+ * `maxAngle <= 0` disables the limit (returns `to` unchanged), as does the
+ * degenerate case where either vector is ~zero (no defined heading yet).
+ */
+export function limitTurn(from: Vec3, to: Vec3, maxAngle: number): Vec3 {
+  if (maxAngle <= 0) return { x: to.x, y: to.y, z: to.z };
+
+  const targetSpeed = magnitude(to);
+  const fromMag = magnitude(from);
+  if (targetSpeed < 1e-9 || fromMag < 1e-9) return { x: to.x, y: to.y, z: to.z };
+
+  const phi = angleBetween(from, to);
+  if (phi <= maxAngle) return { x: to.x, y: to.y, z: to.z };
+
+  const sinPhi = Math.sin(phi);
+  // Near-parallel (already returned) or near-antiparallel: slerp is
+  // ill-conditioned, so accept the target rather than divide by ~0.
+  if (sinPhi < 1e-6) return { x: to.x, y: to.y, z: to.z };
+
+  const uf = normalize(from);
+  const ut = normalize(to);
+  const t = maxAngle / phi;
+  const wf = Math.sin((1 - t) * phi) / sinPhi;
+  const wt = Math.sin(t * phi) / sinPhi;
+  const dir = add(scale(uf, wf), scale(ut, wt));
+  return setMagnitude(dir, targetSpeed);
+}

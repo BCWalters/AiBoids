@@ -41,6 +41,15 @@ export interface SimParams {
   predatorMaxSpeed: number;
   maxForce: number; // steering force clamp, shared by boids and predators
 
+  // Turn-rate limit (boids only): the maximum rate, in degrees per second, at
+  // which a boid's direction of travel may rotate. Steering can produce rapid,
+  // high-frequency heading reversals (neighbors popping in/out of perception,
+  // alignment vs cohesion fighting) that read as a wobbly flight path — this
+  // caps how fast the heading can change, smoothing the path without altering
+  // the flocking rules themselves. Speed is unaffected; only heading is slewed.
+  // Set to 0 to disable (unlimited turn rate, original behavior).
+  boidTurnRateDeg: number;
+
   // Perception (boids)
   perceptionRadius: number;
   perceptionAngleDeg: number; // full field-of-view angle, centered on heading
@@ -180,7 +189,7 @@ export const defaultParams: SimParams = {
   boidMaxSpeed: 120,
   predatorMaxSpeed: 150,
   maxForce: 250,
-
+  boidTurnRateDeg: 150,
   perceptionRadius: 70,
   perceptionAngleDeg: 270,
 
