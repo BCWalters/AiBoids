@@ -1,7 +1,7 @@
 import { params, resetParams, type SimParams, type SimMode, type VisualStyle, type GalleryCreature, type TimeOfDayPreset, type FollowCamMode } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
-import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES, type Language } from '../i18n/language';
+import { onLanguageChange } from '../i18n/language';
 import { t, type TranslationKey } from '../i18n/translations';
 import type { CreatureLabels } from '../render/sceneRenderers/createSceneRendererHooks';
 
@@ -289,17 +289,12 @@ export class ControlPanel {
     if (params.mode === '3d') {
       this.container.appendChild(
         this.buildSection(
-          '3dSettings',
-          t('section3DSettings'),
-          threeDSliderSpecs.map((spec) => this.buildSlider(spec)),
-          false,
-        ),
-      );
-      this.container.appendChild(
-        this.buildSection(
-          'boundaryBehavior',
-          t('sectionBoundaryBehavior'),
-          boundarySliderSpecs.map((spec) => this.buildSlider(spec)),
+          'worldBoundaries',
+          t('sectionWorldBoundaries'),
+          [
+            ...threeDSliderSpecs.map((spec) => this.buildSlider(spec)),
+            ...boundarySliderSpecs.map((spec) => this.buildSlider(spec)),
+          ],
           false,
         ),
       );
@@ -321,40 +316,7 @@ export class ControlPanel {
       ),
     );
 
-    this.container.appendChild(this.buildLanguageToggle());
     this.container.appendChild(this.buildButtons());
-  }
-
-  private buildLanguageToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row';
-
-    const labelRow = document.createElement('div');
-    labelRow.className = 'control-label-row';
-    const label = document.createElement('label');
-    label.textContent = t('languageLabel');
-    labelRow.appendChild(label);
-    wrapper.appendChild(labelRow);
-
-    const select = document.createElement('select');
-    select.id = 'param-language';
-    const currentLanguage = getLanguage();
-    for (const { value, nativeName } of SUPPORTED_LANGUAGES) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = nativeName;
-      if (value === currentLanguage) option.selected = true;
-      select.appendChild(option);
-    }
-    select.addEventListener('change', () => {
-      setLanguage(select.value as Language);
-      // No explicit render() call here — setLanguage() notifies the
-      // onLanguageChange subscription set up in the constructor, which
-      // re-renders the whole panel (and main.ts's own static strings).
-    });
-
-    wrapper.appendChild(select);
-    return wrapper;
   }
 
   private buildModeToggle(): HTMLElement {

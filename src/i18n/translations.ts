@@ -36,7 +36,7 @@ const en = {
   boidMaxSpeed: 'Boid max speed',
   predatorMaxSpeed: 'Predator max speed',
 
-  sectionBehavior: 'Behavior',
+  sectionBehavior: 'Creature Behavior',
   perceptionRadius: 'Perception radius',
   perceptionAngleDeg: 'Perception angle (°)',
   separationWeight: 'Separation weight',
@@ -49,10 +49,9 @@ const en = {
   fleeWeight: 'Flee weight',
   predatorCatchLabel: 'Predators can catch prey',
 
-  section3DSettings: '3D settings',
   worldDepth: 'World depth (z)',
 
-  sectionBoundaryBehavior: 'Boundary behavior',
+  sectionWorldBoundaries: 'World & Boundaries',
   boundaryMargin: 'Wall steer-away margin',
   boundaryWeight: 'Wall steer-away strength',
   centerPullWeight: 'Center pull (avoids corner-camping)',
@@ -165,7 +164,7 @@ const es: TranslationDict = {
   boidMaxSpeed: 'Velocidad máxima de los boids',
   predatorMaxSpeed: 'Velocidad máxima de los depredadores',
 
-  sectionBehavior: 'Comportamiento',
+  sectionBehavior: 'Comportamiento de las criaturas',
   perceptionRadius: 'Radio de percepción',
   perceptionAngleDeg: 'Ángulo de percepción (°)',
   separationWeight: 'Peso de separación',
@@ -178,10 +177,9 @@ const es: TranslationDict = {
   fleeWeight: 'Peso de huida',
   predatorCatchLabel: 'Los depredadores pueden atrapar presas',
 
-  section3DSettings: 'Ajustes 3D',
   worldDepth: 'Profundidad del mundo (z)',
 
-  sectionBoundaryBehavior: 'Comportamiento en los límites',
+  sectionWorldBoundaries: 'Mundo y límites',
   boundaryMargin: 'Margen de alejamiento de paredes',
   boundaryWeight: 'Fuerza de alejamiento de paredes',
   centerPullWeight: 'Atracción al centro (evita acumularse en esquinas)',
@@ -286,7 +284,7 @@ const fr: TranslationDict = {
   boidMaxSpeed: 'Vitesse maximale des boids',
   predatorMaxSpeed: 'Vitesse maximale des prédateurs',
 
-  sectionBehavior: 'Comportement',
+  sectionBehavior: 'Comportement des créatures',
   perceptionRadius: 'Rayon de perception',
   perceptionAngleDeg: 'Angle de perception (°)',
   separationWeight: 'Poids de séparation',
@@ -299,10 +297,9 @@ const fr: TranslationDict = {
   fleeWeight: 'Poids de fuite',
   predatorCatchLabel: 'Les prédateurs peuvent attraper des proies',
 
-  section3DSettings: 'Paramètres 3D',
   worldDepth: 'Profondeur du monde (z)',
 
-  sectionBoundaryBehavior: 'Comportement aux limites',
+  sectionWorldBoundaries: 'Monde et limites',
   boundaryMargin: "Marge d'évitement des murs",
   boundaryWeight: "Force d'évitement des murs",
   centerPullWeight: "Attraction vers le centre (évite l'entassement dans les coins)",
