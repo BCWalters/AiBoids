@@ -63,3 +63,5 @@ requirements, and the required CI check.
 ## License
 
 [MIT](./LICENSE)
+
+<!-- ci trigger verification probe -->
