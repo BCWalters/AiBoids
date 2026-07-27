@@ -9,6 +9,7 @@ import {
   computeTailSwayPhase,
   flapAngleFromPhase,
   initialFlapPhase,
+  SYMMETRIC_DOWNSTROKE_FRACTION,
   tailSwayAngleFromPhase,
   type FlapStateWeights,
 } from './flapMath';
@@ -192,6 +193,120 @@ describe('flapAngleFromPhase', () => {
       const angle = flapAngleFromPhase({ phase, amplitude: 0.6, restBiasRad: 0.1 });
       expect(angle).toBeGreaterThanOrEqual(0.1 - 0.6 - 1e-9);
       expect(angle).toBeLessThanOrEqual(0.1 + 0.6 + 1e-9);
+    }
+  });
+});
+
+describe('asymmetric wingbeat', () => {
+  const AMPLITUDE = 0.6;
+  const sample = (phase: number, downstrokeFraction?: number) =>
+    flapAngleFromPhase({ phase, amplitude: AMPLITUDE, restBiasRad: 0, downstrokeFraction });
+
+  it('defaults to a pure sine, so scenes that opt out are unchanged', () => {
+    for (let i = 0; i <= 64; i += 1) {
+      const phase = (i / 64) * Math.PI * 2;
+      expect(sample(phase)).toBeCloseTo(Math.sin(phase) * AMPLITUDE);
+      expect(sample(phase, SYMMETRIC_DOWNSTROKE_FRACTION)).toBeCloseTo(Math.sin(phase) * AMPLITUDE);
+    }
+  });
+
+  it('spends less of the cycle sweeping downward when the downstroke is shortened', () => {
+    // The downstroke is the motion from the top extreme to the bottom one —
+    // i.e. where the angle is increasing (positive is model-down). Measuring
+    // "angle > 0" instead would always give half the cycle, by symmetry.
+    const steps = 4000;
+    const sweepingDownFraction = (downstrokeFraction: number) => {
+      let n = 0;
+      for (let i = 0; i < steps; i += 1) {
+        const phase = (i / steps) * Math.PI * 2;
+        const next = ((i + 1) / steps) * Math.PI * 2;
+        if (sample(next, downstrokeFraction) > sample(phase, downstrokeFraction)) n += 1;
+      }
+      return n / steps;
+    };
+    expect(sweepingDownFraction(SYMMETRIC_DOWNSTROKE_FRACTION)).toBeCloseTo(0.5, 2);
+    expect(sweepingDownFraction(0.35)).toBeCloseTo(0.35, 2);
+    expect(sweepingDownFraction(0.3)).toBeLessThan(sweepingDownFraction(0.45));
+  });
+
+  it('sweeps down faster than it recovers', () => {
+    const downstrokeFraction = 0.3;
+    const peakSpeed = (from: number, to: number) => {
+      let fastest = 0;
+      const steps = 2000;
+      for (let i = 0; i < steps; i += 1) {
+        const a = from + ((to - from) * i) / steps;
+        const b = from + ((to - from) * (i + 1)) / steps;
+        fastest = Math.max(fastest, Math.abs(sample(b, downstrokeFraction) - sample(a, downstrokeFraction)) / (b - a));
+      }
+      return fastest;
+    };
+    // Downstroke occupies the first 30% of the cycle, recovery the rest.
+    const down = peakSpeed(-Math.PI / 2, Math.PI * 2 * downstrokeFraction - Math.PI / 2);
+    const up = peakSpeed(Math.PI * 2 * downstrokeFraction - Math.PI / 2, Math.PI * 1.5);
+    expect(down).toBeGreaterThan(up * 1.5);
+  });
+
+  it('still reaches the full stroke extremes', () => {
+    const steps = 4000;
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < steps; i += 1) {
+      const angle = sample((i / steps) * Math.PI * 2, 0.3);
+      min = Math.min(min, angle);
+      max = Math.max(max, angle);
+    }
+    expect(max).toBeCloseTo(AMPLITUDE, 3);
+    expect(min).toBeCloseTo(-AMPLITUDE, 3);
+  });
+
+  it('stays periodic over 2*PI', () => {
+    for (let i = 0; i < 16; i += 1) {
+      const phase = (i / 16) * Math.PI * 2;
+      expect(sample(phase + Math.PI * 2, 0.32)).toBeCloseTo(sample(phase, 0.32));
+      expect(sample(phase - Math.PI * 2, 0.32)).toBeCloseTo(sample(phase, 0.32));
+    }
+  });
+
+  it('has no positional jump at the segment seams', () => {
+    // The warp is piecewise, so guard against a visible snap where the two
+    // segments meet by checking the stroke is continuous everywhere.
+    const steps = 20000;
+    const step = (Math.PI * 2) / steps;
+    let previous = sample(0, 0.3);
+    let largestJump = 0;
+    for (let i = 1; i <= steps; i += 1) {
+      const angle = sample(i * step, 0.3);
+      largestJump = Math.max(largestJump, Math.abs(angle - previous));
+      previous = angle;
+    }
+    // A continuous stroke moves at most ~amplitude * segmentRate * step per sample.
+    expect(largestJump).toBeLessThan(0.01);
+  });
+
+  it('eases through the seams rather than changing speed abruptly', () => {
+    // Seams sit at the stroke extremes, where angular velocity is zero on both
+    // sides, so speed matches across them even though the warp rate jumps.
+    const downstrokeFraction = 0.3;
+    const eps = 1e-4;
+    // Bottom extreme: phase where the warped stroke hits +PI/2.
+    const bottom = Math.PI * 2 * (downstrokeFraction - 0.25);
+    const before = sample(bottom - eps, downstrokeFraction);
+    const at = sample(bottom, downstrokeFraction);
+    const after = sample(bottom + eps, downstrokeFraction);
+    expect(at).toBeCloseTo(AMPLITUDE, 6);
+    // Velocity vanishes on both sides of the seam.
+    expect(Math.abs(at - before) / eps).toBeLessThan(1e-2);
+    expect(Math.abs(after - at) / eps).toBeLessThan(1e-2);
+  });
+
+  it('clamps absurd downstroke fractions instead of collapsing the stroke', () => {
+    for (const downstrokeFraction of [0, -5, 1, 12, Number.MIN_VALUE]) {
+      for (let i = 0; i <= 32; i += 1) {
+        const angle = sample((i / 32) * Math.PI * 2, downstrokeFraction);
+        expect(Number.isFinite(angle)).toBe(true);
+        expect(Math.abs(angle)).toBeLessThanOrEqual(AMPLITUDE + 1e-9);
+      }
     }
   });
 });

@@ -63,6 +63,8 @@ export interface MotionConfig {
   uprightStyle?: 'dragon' | 'unicorn' | 'shark';
   bankScale?: number;
   finRestBiasRad?: number;
+  /** Fraction of the wingbeat spent on the downstroke; <0.5 snaps down and eases up. */
+  flapDownstrokeFraction?: number;
   tailSwayAxis?: THREE.Vector3;
   tailSwayAmplitude?: number;
   tailSwayFrequency?: number;

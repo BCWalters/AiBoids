@@ -171,17 +171,62 @@ export function advanceFlapPhase({
   return previousPhase + frequency * dt;
 }
 
-/** Wing rotation angle (radians) about the model's forward axis. */
+/**
+ * Fraction of the wingbeat spent on the downstroke. 0.5 is a pure sine — equal
+ * time down and up. Real birds spend less time on the power stroke than on the
+ * recovery, so values below 0.5 give the characteristic snap-down/glide-up
+ * beat. Clamped: at the extremes one half of the stroke gets so short it reads
+ * as a teleport.
+ */
+export const SYMMETRIC_DOWNSTROKE_FRACTION = 0.5;
+const DOWNSTROKE_FRACTION_MIN = 0.15;
+const DOWNSTROKE_FRACTION_MAX = 0.85;
+
+const TWO_PI = Math.PI * 2;
+const HALF_PI = Math.PI / 2;
+
+/**
+ * Warps a linear flap clock so the downstroke takes `downstrokeFraction` of the
+ * cycle instead of half of it.
+ *
+ * The cycle is split at the two stroke *extremes* (top and bottom of the beat)
+ * rather than at the mid-stroke zero crossings. That placement matters: the
+ * warp is piecewise-linear, so its rate changes abruptly at the seam, but at an
+ * extreme the wing's angular velocity is already zero on both sides (cos is 0
+ * there). The speed-up therefore eases in from a standstill and no kink is
+ * visible. Splitting at the zero crossings instead would change speed at the
+ * exact moment the wing is sweeping fastest, which reads as a stutter.
+ *
+ * Phase is offset by a quarter cycle so that u = 0 is the top of the stroke;
+ * this makes downstrokeFraction = 0.5 reproduce sin(phase) exactly.
+ */
+function warpStrokePhase(phase: number, downstrokeFraction: number): number {
+  const down = clamp(downstrokeFraction, DOWNSTROKE_FRACTION_MIN, DOWNSTROKE_FRACTION_MAX);
+  let u = (phase / TWO_PI + 0.25) % 1;
+  if (u < 0) u += 1;
+  // First segment sweeps top -> bottom (the downstroke), second bottom -> top.
+  return u < down
+    ? -HALF_PI + Math.PI * (u / down)
+    : HALF_PI + Math.PI * ((u - down) / (1 - down));
+}
+
+/**
+ * Wing rotation angle (radians) about the model's forward axis. Positive is a
+ * downstroke: the left wing's tip sits on +X and rotating about the forward
+ * axis by a positive angle carries it toward -Z, which is model-down.
+ */
 export function flapAngleFromPhase({
   phase,
   amplitude,
   restBiasRad,
+  downstrokeFraction = SYMMETRIC_DOWNSTROKE_FRACTION,
 }: {
   phase: number;
   amplitude: number;
   restBiasRad: number;
+  downstrokeFraction?: number;
 }): number {
-  return amplitude * Math.sin(phase) + restBiasRad;
+  return amplitude * Math.sin(warpStrokePhase(phase, downstrokeFraction)) + restBiasRad;
 }
 
 /**
