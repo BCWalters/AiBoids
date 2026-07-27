@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import type { CreatureGeometries, CreatureLegPart } from '../../../geometry/sharedGeometry';
 import {
+  jointBarrelForBoxSection,
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
+  pushJointBarrel,
 } from '../../../geometry/sharedGeometry';
 import type { PartDrive, Triple } from '../../../motion/rig';
 import { buildFingeredWingGeometry } from './birdSharedGeometry';
@@ -552,6 +554,33 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
     // Thigh: rotates about the hip.
     sink = upperBuffer;
     pushBoxSegment(hip, knee, legHalfWidth, legHalfDepth, true, false, UNICORN_LEG_COLOR);
+
+    // Knee barrel, covering the wedge that opens between the thigh's flat
+    // end face and the cannon bone's flat top face once the knee bends.
+    //
+    // A cylinder about the hinge axis, not a sphere. Both are invariant
+    // under the knee's rotation, but a sphere large enough to swallow the
+    // moving face's corners carries that radius through the middle of the
+    // joint too, where nothing needs covering — which reads as a knee pad
+    // rather than a knee. Sized off the cannon bone's half-depth, the
+    // barrel comes out slimmer fore-aft than the thigh itself, so it
+    // vanishes into the leg's existing silhouette.
+    //
+    // It goes in the *upper* buffer deliberately. Its axis is the knee's
+    // rotation axis, so the knee's own bend cannot move it — but it must
+    // still follow the thigh when the hip swings, which is what living in
+    // the thigh's part gives us.
+    const kneeBarrel = jointBarrelForBoxSection({
+      movingHalfDepth: legHalfDepth * 0.85,
+      widestHalfWidth: legHalfWidth,
+    });
+    pushJointBarrel(sink, {
+      center: knee,
+      axis: new THREE.Vector3(1, 0, 0),
+      radius: kneeBarrel.radius,
+      halfLength: kneeBarrel.halfLength,
+      color: UNICORN_LEG_COLOR,
+    });
 
     // Cannon bone and hoof: rotate about the knee, on top of whatever the
     // thigh above them is doing. Capping the top of the lower segment keeps
