@@ -67,9 +67,12 @@ export const FISHTANK_CREATURE_SIZES = {
   seahorse: fishtankSize(36 / FISHTANK_BASE_CREATURE.length, 14.85 / FISHTANK_BASE_CREATURE.width),
 } as const;
 
-// Blood-splatter burst world size for fishtank catches. Owned per-scene so it
-// can be tuned independently of the other scenes.
-const FISHTANK_BLOOD_SPLATTER_SCALE = 6.3;
+// Blood-splatter burst world size for fishtank catches. Scaled by
+// TANK_VISUAL_SCALE so the burst appears the same on-screen size as it does in
+// the nature scene — the fishtank camera is TANK_VISUAL_SCALE times farther
+// away from the fish (everything in render space is inflated by that factor),
+// so sprites at the nature-scene scale (6.3) would appear 4× too small.
+const FISHTANK_BLOOD_SPLATTER_SCALE = 6.3 * TANK_VISUAL_SCALE;
 
 // --- Fishtank style color constants
 // Butterflyfish (parrot reskin) color patterns: real-world butterflyfish often use
