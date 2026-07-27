@@ -158,8 +158,10 @@ function bakeDorsalVentralGradient(geometry: THREE.BufferGeometry, minZ: number,
 
 /**
  * Two small, spiky, widely-separated dorsal fins — a short first dorsal near
- * mid-body and a smaller second dorsal set well back toward the tail. Both are
- * modest spikes rather than the shark's single tall triangular sail.
+ * mid-body and a smaller second dorsal set well back toward the tail — each
+ * mirrored onto the belly. All are modest spikes rather than the shark's
+ * single tall triangular sail. Kept in one merged body geometry so the
+ * dorsal-ventral gradient bakes dark-gray tops and pale bellies onto them.
  */
 function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
   const halfLen = length * 0.5;
@@ -174,6 +176,16 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
     [new THREE.Vector3(0, firstFrontY, firstFrontZ), new THREE.Vector3(0, firstBackY, firstBackZ), firstTip],
     width * 0.05,
   );
+  // Mirror the first dorsal onto the belly (negate Z). Kept in the same merged
+  // body geometry so the dorsal-ventral gradient bakes belly colors onto it.
+  const firstBellyFin = extrudeRingGeometryAlongX(
+    [
+      new THREE.Vector3(0, firstFrontY, -firstFrontZ),
+      new THREE.Vector3(0, firstBackY, -firstBackZ),
+      new THREE.Vector3(0, firstTip.y, -firstTip.z),
+    ],
+    width * 0.05,
+  );
 
   const secondFrontY = -halfLen * 0.5;
   const secondBackY = -halfLen * 0.78;
@@ -184,8 +196,17 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
     [new THREE.Vector3(0, secondFrontY, secondFrontZ), new THREE.Vector3(0, secondBackY, secondBackZ), secondTip],
     width * 0.045,
   );
+  // Mirror the second dorsal onto the belly (negate Z).
+  const secondBellyFin = extrudeRingGeometryAlongX(
+    [
+      new THREE.Vector3(0, secondFrontY, -secondFrontZ),
+      new THREE.Vector3(0, secondBackY, -secondBackZ),
+      new THREE.Vector3(0, secondTip.y, -secondTip.z),
+    ],
+    width * 0.045,
+  );
 
-  return mergePositionOnlyGeometries([firstFin, secondFin]);
+  return mergePositionOnlyGeometries([firstFin, firstBellyFin, secondFin, secondBellyFin]);
 }
 
 // ---------------------------------------------------------------------------
