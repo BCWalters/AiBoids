@@ -19,6 +19,8 @@ import { extrudeRingGeometry } from '../../../geometry/sharedGeometry';
 export interface TailGradient {
   root: THREE.Color;
   tip: THREE.Color;
+  interpolation?: 'rgb' | 'hsl';
+  rootHold?: number;
 }
 
 /** Rear-most Y of the shared lathed bird body profile (tail attachment point). */
@@ -255,23 +257,39 @@ export function buildTailGeometry(
   const geo = extrudeRingGeometry([root, leftTip, backCenter, rightTip], thickness);
 
   if (opts?.gradient) {
-    const { root: rootColor, tip: tipColor } = opts.gradient;
-    // Y-axis root→tip gradient: maxY at the fan root, minY at the rear tip.
+    const { root: rootColor, tip: tipColor, interpolation = 'rgb', rootHold = 0 } = opts.gradient;
+    // Y-axis root->tip gradient: max Y at the fan root, min Y at the rear tip.
     geo.computeBoundingBox();
-    const maxY = geo.boundingBox!.max.y;
-    const minY = geo.boundingBox!.min.y;
-    const ySpan = Math.max(1e-5, maxY - minY);
+    const gradientRootY = geo.boundingBox!.max.y;
+    const gradientTipY = geo.boundingBox!.min.y;
+    const ySpan = Math.max(1e-5, gradientRootY - gradientTipY);
+    const hold = THREE.MathUtils.clamp(rootHold, 0, 0.95);
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
+    const rootHSL = { h: 0, s: 0, l: 0 };
+    const tipHSL = { h: 0, s: 0, l: 0 };
+    if (interpolation === 'hsl') {
+      rootColor.getHSL(rootHSL);
+      tipColor.getHSL(tipHSL);
+    }
     for (let vi = 0; vi < pos.count; vi++) {
-      const t = THREE.MathUtils.smoothstep(
-        THREE.MathUtils.clamp((maxY - pos.getY(vi)) / ySpan, 0, 1),
-        0.05,
-        0.95,
-      );
-      colors[vi * 3]     = THREE.MathUtils.lerp(rootColor.r, tipColor.r, t);
-      colors[vi * 3 + 1] = THREE.MathUtils.lerp(rootColor.g, tipColor.g, t);
-      colors[vi * 3 + 2] = THREE.MathUtils.lerp(rootColor.b, tipColor.b, t);
+      const linearT = THREE.MathUtils.clamp((gradientRootY - pos.getY(vi)) / ySpan, 0, 1);
+      const heldT = THREE.MathUtils.clamp((linearT - hold) / (1 - hold), 0, 1);
+      const t = THREE.MathUtils.smoothstep(heldT, 0, 1);
+      if (interpolation === 'hsl') {
+        const color = new THREE.Color().setHSL(
+          THREE.MathUtils.lerp(rootHSL.h, tipHSL.h, t),
+          THREE.MathUtils.lerp(rootHSL.s, tipHSL.s, t),
+          THREE.MathUtils.lerp(rootHSL.l, tipHSL.l, t),
+        );
+        colors[vi * 3] = color.r;
+        colors[vi * 3 + 1] = color.g;
+        colors[vi * 3 + 2] = color.b;
+      } else {
+        colors[vi * 3]     = THREE.MathUtils.lerp(rootColor.r, tipColor.r, t);
+        colors[vi * 3 + 1] = THREE.MathUtils.lerp(rootColor.g, tipColor.g, t);
+        colors[vi * 3 + 2] = THREE.MathUtils.lerp(rootColor.b, tipColor.b, t);
+      }
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   }

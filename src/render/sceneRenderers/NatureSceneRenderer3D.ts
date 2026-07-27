@@ -182,6 +182,9 @@ interface SmallBirdPalette {
   dorsalGradient: boolean;
   wingGradient: boolean;
   tailGradient: boolean;
+  tailGradientRootColor?: THREE.Color;
+  tailGradientInterpolation?: 'rgb' | 'hsl';
+  tailGradientRootHold?: number;
 }
 
 const SPARROW_NATURE_PALETTE: SmallBirdPalette = {
@@ -198,18 +201,24 @@ const SPARROW_NATURE_PALETTE: SmallBirdPalette = {
   tailGradient:   true,
 };
 
+const GOLDFINCH_BACK_PLUMAGE_NEAR_TAIL = new THREE.Color(0x1c1c1c);
+const GOLDFINCH_TAIL_REAR_TIP = new THREE.Color(0x000000);
+
 const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
   headBack:  new THREE.Color(0xf5d327), // bright yellow on crown/back
-  tailBack:  new THREE.Color(0x1c1c1c), // black at rump
+  tailBack:  GOLDFINCH_BACK_PLUMAGE_NEAR_TAIL, // black at rump
   headBelly: new THREE.Color(0xf5d327), // yellow near the breast
   tailBelly: new THREE.Color(0xf8ec80), // lighter/paler yellow toward lower belly
   wing:    new THREE.Color(0xf5d327), // gold at wing root (matches back/belly color)
   wingTip: new THREE.Color(0x151505), // near-black at wing tip
   tail:    new THREE.Color(0x3a3a3a), // dark gray tail base (not pure black)
-  tailTip: new THREE.Color(0x0d0d0d), // near-black tail tip
+  tailTip: GOLDFINCH_TAIL_REAR_TIP, // black tail tip
   dorsalGradient: true,
   wingGradient:   true, // yellow→black gradient on wings
-  tailGradient:   true, // dark gray→black gradient on tail
+  tailGradient:   true, // darkening back→black gradient on tail
+  tailGradientRootColor: GOLDFINCH_BACK_PLUMAGE_NEAR_TAIL,
+  tailGradientInterpolation: 'hsl',
+  tailGradientRootHold: 0.08,
 };
 
 const CARDINAL_NATURE_PALETTE: SmallBirdPalette = {
