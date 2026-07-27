@@ -7,7 +7,7 @@ import { Diagnostics } from './diagnostics/Diagnostics';
 import { CreatureGalleryController } from './gallery/CreatureGalleryController';
 import { FollowCamController } from './render/FollowCamController';
 import { params, type SimMode } from './sim/params';
-import { onLanguageChange } from './i18n/language';
+import { onLanguageChange, getLanguage, setLanguage, SUPPORTED_LANGUAGES, type Language } from './i18n/language';
 import { t } from './i18n/translations';
 
 const canvas2D = document.querySelector<HTMLCanvasElement>('#sim-canvas-2d')!;
@@ -19,6 +19,7 @@ const canvasStack = document.querySelector<HTMLElement>('#canvas-stack')!;
 const appTitle = document.querySelector<HTMLElement>('#app-title')!;
 const appSubtitle = document.querySelector<HTMLElement>('#app-subtitle')!;
 const controlPanelHeading = document.querySelector<HTMLElement>('#control-panel-heading')!;
+const appHeader = document.querySelector<HTMLElement>('#app-header')!;
 
 function getAppTitle(): string {
   const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
@@ -43,6 +44,40 @@ function applyStaticTranslations(): void {
 
 applyStaticTranslations();
 onLanguageChange(applyStaticTranslations);
+
+/**
+ * Builds the compact language selector in the app header and keeps it
+ * in sync when the language changes. The <select id="param-language"> id
+ * is stable so the e2e suite can target it reliably.
+ */
+function setupHeaderLanguageSelector(): void {
+  const wrapper = document.createElement('div');
+  wrapper.id = 'header-lang-wrapper';
+
+  const select = document.createElement('select');
+  select.id = 'param-language';
+  const currentLanguage = getLanguage();
+  for (const { value, nativeName } of SUPPORTED_LANGUAGES) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = nativeName;
+    if (value === currentLanguage) option.selected = true;
+    select.appendChild(option);
+  }
+  select.addEventListener('change', () => {
+    setLanguage(select.value as Language);
+  });
+
+  wrapper.appendChild(select);
+  appHeader.appendChild(wrapper);
+
+  // Keep the selected option in sync if language changes via another path.
+  onLanguageChange(() => {
+    select.value = getLanguage();
+  });
+}
+
+setupHeaderLanguageSelector();
 
 const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight || 600);
 const diagnostics = new Diagnostics(sim, canvasStack);
