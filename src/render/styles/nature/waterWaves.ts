@@ -93,7 +93,7 @@ varying vec3 vWaterWorldPos;
 
         // Wave 1 — dominant long swell
         {
-          float k = 1.795; float A = 0.0025; float spd = 0.4;
+          float k = 1.795; float A = 0.0038; float spd = 0.4;
           float p = ( 0.96 * wx + 0.28 * wz ) * k + uTime * spd;
           _waveY += A * sin( p );
           _dx    += A * cos( p ) * k * 0.96;
@@ -101,7 +101,7 @@ varying vec3 vWaterWorldPos;
         }
         // Wave 2 — cross swell
         {
-          float k = 2.731; float A = 0.0015; float spd = 0.55;
+          float k = 2.731; float A = 0.0023; float spd = 0.55;
           float p = ( 0.37 * wx + 0.93 * wz ) * k + uTime * spd;
           _waveY += A * sin( p );
           _dx    += A * cos( p ) * k * 0.37;
@@ -109,7 +109,7 @@ varying vec3 vWaterWorldPos;
         }
         // Wave 3 — choppy cross-run
         {
-          float k = 4.488; float A = 0.0008; float spd = 0.85;
+          float k = 4.488; float A = 0.0012; float spd = 0.85;
           float p = ( -0.71 * wx + 0.71 * wz ) * k + uTime * spd;
           _waveY += A * sin( p );
           _dx    += A * cos( p ) * k * ( -0.71 );
@@ -117,7 +117,7 @@ varying vec3 vWaterWorldPos;
         }
         // Wave 4 — fine surface ripple
         {
-          float k = 7.854; float A = 0.0004; float spd = 1.3;
+          float k = 7.854; float A = 0.0006; float spd = 1.3;
           float p = ( 0.2 * wx + ( -0.98 ) * wz ) * k + uTime * spd;
           _waveY += A * sin( p );
           _dx    += A * cos( p ) * k * 0.2;
@@ -175,8 +175,8 @@ varying vec3  vWaterWorldPos;
         // Fresnel: grazing angles pick up more sky tint
         float fresnel = pow( 1.0 - NdotV, 4.0 );
         // Sky-reflection approximation (calm blue-grey sky tone)
-        vec3 skyTint = vec3( 0.48, 0.68, 0.88 ) * fresnel * 0.28;
-        outgoingLight += uSunColor * spec * 0.65 + skyTint;
+        vec3 skyTint = vec3( 0.48, 0.68, 0.88 ) * fresnel * 0.19;
+        outgoingLight += uSunColor * spec * 0.45 + skyTint;
       }
       #include <opaque_fragment>
       `,
