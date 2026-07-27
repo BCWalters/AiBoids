@@ -401,9 +401,12 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     maxDim: number,
     wasFishtank: boolean,
   ): void {
-    this.deps.controls.maxDistance = maxDim * 3.5;
+    this.deps.controls.maxDistance = maxDim * 2.5;
     this.deps.controls.minPolarAngle = 0;
-    this.deps.controls.maxPolarAngle = Math.PI;
+    // Prevent the camera from orbiting far below the horizon — extreme
+    // sub-ground angles expose the terrain plane's edge from beneath.
+    // PI * 0.75 = 135° from zenith, i.e. 45° below the horizon.
+    this.deps.controls.maxPolarAngle = Math.PI * 0.75;
     if (!wasFishtank) return;
     const center = new THREE.Vector3(sim.width / 2, sim.height / 2, params.worldDepth / 2);
     this.deps.camera.position.set(
