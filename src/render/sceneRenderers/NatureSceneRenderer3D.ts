@@ -297,8 +297,12 @@ interface NatureSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   driftingClouds: DriftingClouds;
-  fishtankEnv: { setVisible: (visible: boolean) => void };
-  natureEnv: NatureEnvironment;
+  /**
+   * Lazy getter for the active NatureEnvironment.  Returns null when nature
+   * is not the active style (env is disposed).  All methods that touch the
+   * env must null-guard before use.
+   */
+  getNatureEnv: () => NatureEnvironment | null;
   fireBreathEffects: FireBreathEffects;
 }
 
@@ -377,8 +381,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 
   setStyleVisibility(): void {
-    this.deps.natureEnv.setVisible(true);
-    this.deps.fishtankEnv.setVisible(false);
+    // The nature env is created and revealed by LazyEnvProvider on switch.
+    // The fishtank env has been disposed (null); nothing to hide here.
     this.deps.driftingClouds.setVisible(true);
   }
 
@@ -419,7 +423,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 
   updateEnvironment(elapsed: number): void {
-    this.deps.natureEnv.update(elapsed);
+    this.deps.getNatureEnv()?.update(elapsed);
   }
 
   updateSpecialCreatureEffects(
@@ -436,7 +440,13 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 
   configureEnvironmentAnchors(_sim: Simulation, center: THREE.Vector3, maxDim: number): void {
-    placeNatureEnvironment(this.deps.natureEnv, center, maxDim * 30);
+    const env = this.deps.getNatureEnv();
+    if (env) {
+      placeNatureEnvironment(env, center, maxDim * 30);
+    }
+    // Always configure drifting clouds regardless of whether the nature env
+    // exists — clouds are always-resident and need positioning for when nature
+    // is next activated.
     this.deps.driftingClouds.configure(center, maxDim);
   }
 
@@ -445,13 +455,17 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   updateCameraClamp(_sim: Simulation): void {}
 
   applyEnvironmentToggles(toggles: SceneEnvironmentToggles): void {
-    this.deps.natureEnv.setFogEnabled(toggles.fogEnabled);
-    this.deps.natureEnv.setTimeOfDay(toggles.timeOfDay);
-    this.deps.natureEnv.setLightShaftsEnabled(toggles.lightShaftsEnabled);
+    const env = this.deps.getNatureEnv();
+    if (!env) return;
+    env.setFogEnabled(toggles.fogEnabled);
+    env.setTimeOfDay(toggles.timeOfDay);
+    env.setLightShaftsEnabled(toggles.lightShaftsEnabled);
   }
 
   setShadowsEnabled(enabled: boolean): void {
-    this.deps.natureEnv.sunLight.castShadow = enabled;
+    const env = this.deps.getNatureEnv();
+    if (!env) return;
+    env.sunLight.castShadow = enabled;
   }
 
   setGalleryCreatureActive(_active: boolean): void {}
@@ -724,7 +738,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   }
 
   dispose(): void {
-    this.deps.natureEnv.dispose();
+    // The nature env is owned by LazyEnvProvider and disposed there — do not
+    // call dispose() on it here to avoid a double-dispose.
     this.deps.driftingClouds.dispose();
     disposeCreatureGeometries(this.boidGeometries);
     disposeCreatureGeometries(this.sparrowGeometries);

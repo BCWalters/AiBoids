@@ -173,6 +173,10 @@ export function createGroundGeometry(): THREE.PlaneGeometry {
   const uv = geometry.attributes.uv as THREE.BufferAttribute;
   const colors = new Float32Array(position.count * 3);
 
+  // Neutral white used to fade biome tints to nothing in the outer zone,
+  // so the shader-driven horizon color has a clean surface to work with.
+  const neutralWhite = new THREE.Color(1, 1, 1);
+
   for (let i = 0; i < position.count; i++) {
     const lx = position.getX(i);
     const ly = position.getY(i);
@@ -196,6 +200,18 @@ export function createGroundGeometry(): THREE.PlaneGeometry {
     position.setZ(i, terrainHeightAt(fx, fy) / GROUND_UNIT_SCALE);
 
     const tint = biomeTintAt(fx, fy);
+
+    // Fade vertex colors to neutral white beyond the mountain ring so
+    // the grass biome tints don't bleed through the outer sea/horizon
+    // zone.  The mountain ring's outer edge sits at world radius
+    // ~6.1×flockScale; after the 1.6× skirt scale that corresponds to
+    // local geometry radius ~0.127.  We start fading slightly before it
+    // (0.10) and finish just after (0.17) to create a smooth handoff
+    // to the shader-driven horizon color below.
+    const localRadius = Math.sqrt(lx * lx + ly * ly);
+    const outerFade = THREE.MathUtils.smoothstep(localRadius, 0.10, 0.17);
+    if (outerFade > 0) tint.lerp(neutralWhite, outerFade);
+
     colors[i * 3] = tint.r;
     colors[i * 3 + 1] = tint.g;
     colors[i * 3 + 2] = tint.b;
@@ -561,17 +577,36 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
       '#include <map_fragment>',
       `
       #ifdef USE_MAP
+        // Radial horizon vignette: beyond the mountain ring (UV radius ~15.24
+        // from center, where center = vec2(60,60) for repeat=120) the grass
+        // texture and blotches fade out, replaced by a flat blue-grey
+        // sea/horizon color that dissolves into the fog haze at the far edge.
+        // Derivation: mountain outer radius 6.1 flock-units / 30 / 1.6 * 120 ≈ 15.24.
+        float uvRadius = length( vMapUv - vec2( ${(GROUND_TEXTURE_REPEAT / 2).toFixed(1)}, ${(GROUND_TEXTURE_REPEAT / 2).toFixed(1)} ) );
+        float horizonBlend = smoothstep( 14.0, 26.0, uvRadius );
+        float horizonDepth = smoothstep( 14.0, 28.0, uvRadius );
+        // Blue-grey sea color at the inner transition edge, fading toward the
+        // pale fog-matching haze color (0xf2f5f4) at the outer limit — no hard
+        // seam even when scene fog is disabled.
+        vec3 horizonSeaColor = mix( vec3( 0.58, 0.70, 0.73 ), vec3( 0.949, 0.961, 0.957 ), horizonDepth );
+
         vec4 sampledDiffuseColor = texture2D( map, groundBombUV( vMapUv ) );
         #ifdef DECODE_VIDEO_TEXTURE
           sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
         #endif
         diffuseColor *= sampledDiffuseColor;
 
+        // Scale blotch intensity to zero in the outer zone so no grass-colored
+        // patches bleed through the horizon override.
+        float innerMask = 1.0 - horizonBlend;
         vec4 groundBigBlotch = groundBigBlotchField( vMapUv * ${bigBlotchCellsPerRepeat.toFixed(8)} );
-        diffuseColor.rgb = mix( diffuseColor.rgb, groundBigBlotch.rgb, groundBigBlotch.a * 0.45 );
+        diffuseColor.rgb = mix( diffuseColor.rgb, groundBigBlotch.rgb, groundBigBlotch.a * 0.45 * innerMask );
 
         vec4 groundBlotch = groundBlotchField( vMapUv * ${blotchCellsPerRepeat.toFixed(8)} );
-        diffuseColor.rgb = mix( diffuseColor.rgb, groundBlotch.rgb, groundBlotch.a * 0.6 );
+        diffuseColor.rgb = mix( diffuseColor.rgb, groundBlotch.rgb, groundBlotch.a * 0.6 * innerMask );
+
+        // Replace grass with the sea/horizon color in the outer zone.
+        diffuseColor.rgb = mix( diffuseColor.rgb, horizonSeaColor, horizonBlend );
       #endif
       `
     );
