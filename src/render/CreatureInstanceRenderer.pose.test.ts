@@ -160,6 +160,12 @@ describe('CreatureInstanceRenderer pose state', () => {
 
     expect(maxAbsBank).toBeLessThanOrEqual(MAX_BANK_RADIANS + 1e-6);
     expect(maxAbsBank).toBeGreaterThan(MAX_BANK_RADIANS * 0.9);
+
+    // Both bounds above are expressed relative to MAX_BANK_RADIANS, so they stay
+    // green even if the constant is retuned past vertical. Anchor them to an
+    // absolute limit: a bank at or beyond 90 degrees means the creature is inverted.
+    expect(MAX_BANK_RADIANS).toBeLessThan(Math.PI / 2);
+    expect(maxAbsBank).toBeLessThan(Math.PI / 2);
   });
 
   it('keeps left and right wing matrices mirrored across the body plane', () => {
