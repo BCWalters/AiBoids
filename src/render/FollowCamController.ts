@@ -5,7 +5,7 @@ import type { Simulation } from '../sim/Simulation';
 import type { Renderer3D } from './Renderer3D';
 import { params } from '../sim/params';
 import { pickEntity, type EntityForPicking } from './EntityPicker';
-import { pickStatusPhrase, type CreatureStatusCategory } from './creatureStatusPhrases';
+import { CreatureHud } from './CreatureHud';
 
 /** Exponential-smoothing rate (1/s) for damping the orbit-controls target. */
 const TARGET_DAMP_RATE = 8;
@@ -57,13 +57,7 @@ export function isDragMove(
 export class FollowCamController {
   private selectedId: number | null = null;
   private selectedIsPredator = false;
-  private readonly hud: HTMLElement;
-  // Stable child elements updated each frame by syncHud.
-  private readonly hudLine1: HTMLSpanElement;
-  private readonly hudSpeedSpan: HTMLSpanElement;
-  private readonly hudPhraseSpan: HTMLSpanElement;
-  // POV toggle button appended to the inspector HUD.
-  private readonly hudPovBtn: HTMLButtonElement;
+  private readonly hud: CreatureHud;
 
   // Pointer-down coordinates for drag-vs-click discrimination.
   private _pointerDownX = 0;
@@ -82,28 +76,7 @@ export class FollowCamController {
   private _latestSim: Simulation | null = null;
 
   constructor(container: HTMLElement) {
-    this.hud = document.createElement('div');
-    this.hud.id = 'creature-inspector';
-    this.hud.setAttribute('aria-live', 'polite');
-    this.hud.style.display = 'none';
-
-    // Build child structure once; syncHud only updates textContent each frame.
-    this.hudLine1 = document.createElement('span');
-    this.hudSpeedSpan = document.createElement('span');
-    this.hudSpeedSpan.className = 'hud-speed';
-    this.hudPhraseSpan = document.createElement('span');
-    this.hud.appendChild(this.hudLine1);
-    this.hud.appendChild(document.createTextNode('\n'));
-    this.hud.appendChild(this.hudSpeedSpan);
-    this.hud.appendChild(document.createTextNode(' \u00b7 '));
-    this.hud.appendChild(this.hudPhraseSpan);
-
-    // POV toggle button — pointer-events restored via CSS so it is clickable
-    // even though the parent HUD has pointer-events: none.
-    this.hudPovBtn = document.createElement('button');
-    this.hudPovBtn.className = 'hud-pov-btn';
-    this.hudPovBtn.textContent = 'Enter POV';
-    this.hudPovBtn.addEventListener('click', () => {
+    this.hud = new CreatureHud(container, () => {
       if (!this._latestRenderer3D || !this._latestSim) return;
       if (this._povActive) {
         this.exitPov(this._latestRenderer3D, this._latestSim);
@@ -111,10 +84,6 @@ export class FollowCamController {
         this.enterPov(this._latestRenderer3D);
       }
     });
-    this.hud.appendChild(document.createTextNode('\n'));
-    this.hud.appendChild(this.hudPovBtn);
-
-    container.appendChild(this.hud);
   }
 
   /**
@@ -189,7 +158,7 @@ export class FollowCamController {
 
     if (params.followCamMode !== 'orbit') {
       if (this._povActive) this.exitPov(renderer3D, sim);
-      this.hud.style.display = 'none';
+      this.hud.hide();
       return;
     }
 
@@ -201,7 +170,7 @@ export class FollowCamController {
         // orbiting an off-centre point near the boundary.
         this.clearSelection(renderer3D, sim);
       }
-      this.hud.style.display = 'none';
+      this.hud.hide();
       return;
     }
 
@@ -222,9 +191,9 @@ export class FollowCamController {
     }
 
     if (params.showCreatureInspector) {
-      this.syncHud(entity, renderer3D);
+      this.hud.sync(entity, this.selectedIsPredator, renderer3D);
     } else {
-      this.hud.style.display = 'none';
+      this.hud.hide();
     }
   }
 
@@ -244,7 +213,7 @@ export class FollowCamController {
     this._povActive = true;
     this._povInitialized = false;
     renderer3D.enterPovMode();
-    this.hudPovBtn.textContent = 'Exit POV (Esc)';
+    this.hud.setPovButtonText('Exit POV (Esc)');
   }
 
   /**
@@ -256,7 +225,7 @@ export class FollowCamController {
     if (!this._povActive) return;
     this._povActive = false;
     this._povInitialized = false;
-    this.hudPovBtn.textContent = 'Enter POV';
+    this.hud.setPovButtonText('Enter POV');
     // Restore orbit centered on the creature (or scene center if gone).
     const entity = this.resolveSelected(sim);
     const orbitTarget = entity
@@ -288,12 +257,12 @@ export class FollowCamController {
       // Exit POV without full orbit setup — resetOrbitTarget below handles target.
       this._povActive = false;
       this._povInitialized = false;
-      this.hudPovBtn.textContent = 'Enter POV';
+      this.hud.setPovButtonText('Enter POV');
       renderer3D.exitPovMode(renderer3D.toRenderedPosition(sim.width / 2, sim.height / 2, params.worldDepth / 2));
     }
     this.selectedId = null;
     this.selectedIsPredator = false;
-    this.hud.style.display = 'none';
+    this.hud.hide();
     renderer3D.resetOrbitTarget(sim);
   }
 
@@ -352,29 +321,5 @@ export class FollowCamController {
       return sim.predators.find((p) => p.id === this.selectedId) ?? null;
     }
     return sim.boids.find((b) => b.id === this.selectedId) ?? null;
-  }
-
-  private syncHud(entity: Boid | Predator, renderer3D: Renderer3D): void {
-    const labels = renderer3D.getCreatureLabels();
-    const v = entity.velocity;
-    const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-
-    let speciesLabel: string;
-    let category: CreatureStatusCategory;
-
-    if (this.selectedIsPredator) {
-      const pred = entity as Predator;
-      speciesLabel = labels.predator[pred.species] ?? pred.species;
-      category = pred.digesting ? 'digesting' : pred.huntIntensity > 0.5 ? 'hunting' : 'searching';
-    } else {
-      const boid = entity as Boid;
-      speciesLabel = labels.boid[boid.species] ?? boid.species;
-      category = boid.panicLevel > 0.5 ? 'fleeing' : 'flocking';
-    }
-
-    this.hud.style.display = 'block';
-    this.hudLine1.textContent = speciesLabel;
-    this.hudSpeedSpan.textContent = `${Math.round(speed)} u/s`;
-    this.hudPhraseSpan.textContent = pickStatusPhrase(category, entity.id, performance.now());
   }
 }
