@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { jitterHSL } from './colorJitter';
 import type { CreatureInstanceColorArgs } from './creatureColorApplication';
+import { applyLegChainColor } from './legColorApplication';
 
 /**
  * Owns the nature parrot color path — pulled out of the generic creature color
@@ -60,7 +61,7 @@ export class ParrotColorApplicator {
     const preserveTailPalette = preserveWingPalette
       && !!set.tail?.geometry.getAttribute('color');
     const preserveLegPalette = preserveWingPalette
-      && !!set.legs?.geometry.getAttribute('color');
+      && !!set.legs?.some((part) => part.mesh.geometry.getAttribute('color'));
 
     // Species with their own distinct wing/tail base colors keep those hues
     // rather than just darkening the body color.
@@ -80,15 +81,14 @@ export class ParrotColorApplicator {
       set.tail.setColorAt(index, this.tailColor);
     }
 
-    if (set.legs) {
-      if (preserveLegPalette || set.legs.geometry.getAttribute('color')) {
-        // Parrot legs: baked palette feet color, pass through with white.
-        this.legsColor.setRGB(1, 1, 1);
-      } else {
-        this.legsColor.copy(this.stateColor);
-      }
-      set.legs.setColorAt(index, this.legsColor);
-    }
+    // Parrot legs: baked palette feet color, pass through with white.
+    applyLegChainColor({
+      set,
+      index,
+      scratch: this.legsColor,
+      flatColor: this.stateColor,
+      forceWhite: preserveLegPalette,
+    });
 
     if (set.beak && beakColor) {
       // Small per-individual jitter so a flock's beaks aren't all the exact

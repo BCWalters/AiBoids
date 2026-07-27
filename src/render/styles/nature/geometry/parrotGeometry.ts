@@ -4,6 +4,7 @@ import {
   mergeGeometriesWithColor,
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
+  singleLegPart,
 } from '../../../geometry/sharedGeometry';
 
 /**
@@ -179,7 +180,7 @@ export function createParrotGeometries(
     const tail = buildParrotTailGeometry(length, width);
     const legs = buildParrotLegsGeometry(length, width);
 
-    return { body, wingLeft, wingRight, tail, legs };
+    return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
   } finally {
     ACTIVE_PARROT_PALETTE = previousPalette;
   }

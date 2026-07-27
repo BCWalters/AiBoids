@@ -34,7 +34,8 @@ import {
   legSwingAngleFromPhase,
   tailSwayAngleFromPhase,
 } from './motion/flapMath';
-import { composePartArticulation } from './motion/partTransform';
+import { composeArticulationChain, composePartArticulation } from './motion/partTransform';
+import { resolveDriveAngle, type RigPartDeclaration } from './motion/rig';
 
 /** One creature's instanced meshes: a body plus optional wing/tail/legs/beak parts. */
 export interface BoidRenderBatch {
@@ -42,9 +43,18 @@ export interface BoidRenderBatch {
   wingLeft: THREE.InstancedMesh;
   wingRight: THREE.InstancedMesh;
   tail?: THREE.InstancedMesh;
-  legs?: THREE.InstancedMesh;
+  /**
+   * The leg chain, ordered root-first so each part is posed after its parent.
+   * One entry for most creatures; several for creatures with jointed legs.
+   */
+  legs?: LegPartMesh[];
   /** Small-bird-only: see CreatureGeometries.beak's doc comment. */
   beak?: THREE.InstancedMesh;
+}
+
+/** A rig part declaration bound to the InstancedMesh that draws it. */
+export interface LegPartMesh extends RigPartDeclaration {
+  mesh: THREE.InstancedMesh;
 }
 
 // Wing-flap and tail-sway math lives in ./motion/flapMath — pure functions with
@@ -214,9 +224,13 @@ export class CreatureInstanceRenderer {
   private partPivotToOrigin = new THREE.Matrix4();
   private partOriginToPivot = new THREE.Matrix4();
   private tmpPivot = new THREE.Vector3();
-  /** Hip pivot per legs geometry — see legHipPivotZ. Keyed by geometry so all
-   *  creatures sharing a legs mesh share one measurement. */
-  private legHipPivotByGeometry = new WeakMap<THREE.BufferGeometry, number>();
+  private tmpAxis = new THREE.Vector3();
+  // Model-space articulation of each link in the leg chain, plus the running
+  // product applied to the body transform. Sized to the deepest chain we build
+  // (hip -> knee -> hoof) and grown on demand rather than allocated per frame.
+  private chainLinks: THREE.Matrix4[] = [];
+  private chainOrder: THREE.Matrix4[] = [];
+  private chainProduct = new THREE.Matrix4();
   private rollQuat = new THREE.Quaternion();
   private tmpForward = new THREE.Vector3();
   private tmpRight = new THREE.Vector3();
@@ -489,9 +503,9 @@ export class CreatureInstanceRenderer {
       set.tail.instanceMatrix.needsUpdate = true;
       if (set.tail.instanceColor) set.tail.instanceColor.needsUpdate = true;
     }
-    if (set.legs) {
-      set.legs.instanceMatrix.needsUpdate = true;
-      if (set.legs.instanceColor) set.legs.instanceColor.needsUpdate = true;
+    for (const part of set.legs ?? []) {
+      part.mesh.instanceMatrix.needsUpdate = true;
+      if (part.mesh.instanceColor) part.mesh.instanceColor.needsUpdate = true;
     }
     if (set.beak) {
       set.beak.instanceMatrix.needsUpdate = true;
@@ -816,14 +830,13 @@ export class CreatureInstanceRenderer {
    * objects, not a bespoke matrix sequence per part.
    */
   /**
-   * Swings the legs fore/aft about the hip instead of leaving them welded to
-   * the body. Scenes that give a creature no leg motion (legSwingAmplitude and
-   * legTuckRad both 0) keep the rigid body matrix, so this is opt-in.
+   * Poses the leg chain: each part swings about its own declared pivot and
+   * inherits every rotation applied to its ancestors, so a lower segment
+   * follows the joint above it instead of sliding away from it.
    *
-   * The whole leg group shares one mesh, so all four legs swing together — a
-   * gait with the fore and hind pairs in opposition needs them split into
-   * separate meshes first (#188/#191). This is the trailing/tucking motion of
-   * a creature in flight, which is what these creatures are actually doing.
+   * Pivots come from the rig the geometry builder emitted, not from scene
+   * config — a joint's position is expressed in that creature's model units,
+   * which the scene renderers have no way to know.
    *
    * There is deliberately no rigid-legs branch: with both amplitude and tuck at
    * zero the angle is exactly zero, and articulating by zero reproduces the
@@ -847,39 +860,73 @@ export class CreatureInstanceRenderer {
     legSwingAmplitude: number;
     legTuckRad: number;
   }): void {
-    if (!set.legs) return;
-    const angle = legSwingAngleFromPhase({
-      phase: this.flapPhase.get(creature) ?? initialFlapPhase(creature.id),
-      amplitude: legSwingAmplitude,
-      tuckRad: legTuckRad,
-      speedFraction: computeSpeedFraction({ speed, maxSpeed }),
-    });
-    this.tmpPivot.set(0, 0, this.legHipPivotZ(set.legs.geometry));
-    this.applyArticulatedPartMatrix({
-      mesh: set.legs,
-      index,
-      axis: MODEL_RIGHT_AXIS,
-      angle,
-      pivot: this.tmpPivot,
-    });
+    if (!set.legs || set.legs.length === 0) return;
+    const phase = this.flapPhase.get(creature) ?? initialFlapPhase(creature.id);
+    const speedFraction = computeSpeedFraction({ speed, maxSpeed });
+
+    for (let p = 0; p < set.legs.length; p += 1) {
+      const part = set.legs[p];
+      const { drive } = part;
+      const baseAngle = drive.source === 'static'
+        ? 0
+        : legSwingAngleFromPhase({
+          phase: phase * (drive.frequencyScale ?? 1) + (drive.phaseOffsetRad ?? 0),
+          amplitude: legSwingAmplitude,
+          tuckRad: legTuckRad,
+          speedFraction,
+        });
+      const angle = resolveDriveAngle({ drive, baseAngle });
+
+      this.tmpPivot.set(part.pivot[0], part.pivot[1], part.pivot[2]);
+      this.tmpAxis.set(part.axis[0], part.axis[1], part.axis[2]);
+      composePartArticulation({
+        target: this.legLinkMatrix(p),
+        axis: this.tmpAxis,
+        angle,
+        pivot: this.tmpPivot,
+        scratchQuat: this.partQuat,
+        scratchToOrigin: this.partPivotToOrigin,
+        scratchToPivot: this.partOriginToPivot,
+      });
+
+      // Gather this part's ancestors root-first, then compose the chain so it
+      // inherits every rotation above it. Chains are two or three links deep,
+      // so rebuilding the product per part beats caching world matrices.
+      this.collectChain(set.legs, p);
+      composeArticulationChain({ target: this.chainProduct, chain: this.chainOrder });
+
+      // Re-derive the body transform first: every part articulates off the
+      // body, not off whichever sibling happened to be posed before it.
+      this.dummy.quaternion.copy(this.bodyQuat);
+      this.dummy.updateMatrix();
+      this.dummy.matrix.multiply(this.chainProduct);
+      part.mesh.setMatrixAt(index, this.dummy.matrix);
+    }
   }
 
   /**
-   * Model-space Z of the hip line the legs pivot about.
+   * Fills chainOrder with the link matrices from the root down to part `p`.
    *
-   * Derived from the geometry rather than configured per scene: legs are built
-   * hanging along -Z, so the top of their bounding box *is* where they meet the
-   * body. A per-scene constant would have to be expressed in each creature's
-   * model units, which the scene renderers don't know — and getting it wrong
-   * detaches the legs from the body instead of swinging them.
+   * Ancestors are walked upward then reversed, since a part stores its parent
+   * rather than its children. Reuses the array so a per-frame, per-instance
+   * traversal allocates nothing.
    */
-  private legHipPivotZ(geometry: THREE.BufferGeometry): number {
-    const cached = this.legHipPivotByGeometry.get(geometry);
-    if (cached !== undefined) return cached;
-    if (!geometry.boundingBox) geometry.computeBoundingBox();
-    const pivotZ = geometry.boundingBox?.max.z ?? 0;
-    this.legHipPivotByGeometry.set(geometry, pivotZ);
-    return pivotZ;
+  private collectChain(parts: readonly LegPartMesh[], p: number): void {
+    this.chainOrder.length = 0;
+    for (let cursor: number | undefined = p; cursor !== undefined; cursor = parts[cursor].parent) {
+      this.chainOrder.push(this.legLinkMatrix(cursor));
+    }
+    this.chainOrder.reverse();
+  }
+
+  /** Scratch matrix for chain link `i`, grown on demand and reused per frame. */
+  private legLinkMatrix(i: number): THREE.Matrix4 {
+    let m = this.chainLinks[i];
+    if (!m) {
+      m = new THREE.Matrix4();
+      this.chainLinks[i] = m;
+    }
+    return m;
   }
 
   private applyArticulatedPartMatrix({

@@ -90,18 +90,24 @@ const BIRD_DOWNSTROKE_FRACTION = 0.37;
 const DRAGON_DOWNSTROKE_FRACTION = 0.43;
 const UNICORN_DOWNSTROKE_FRACTION = 0.42;
 /**
- * Legs were welded rigidly to the body. These give them a small fore/aft swing
- * off the flap clock plus a speed-proportional backward tuck, so a creature at
+ * Legs were welded rigidly to the body. These give them a fore/aft swing off
+ * the flap clock plus a speed-proportional backward tuck, so a creature at
  * cruise draws its legs up instead of dangling them. Birds tuck hard (it's most
- * of what real birds do with their legs in flight); the unicorn barely tucks,
- * since a horse's legs stay down.
+ * of what real birds do with their legs in flight).
+ *
+ * The unicorn tucks nearly as hard despite being a horse, because it *flies* —
+ * a galloping gait would read as wrong on a creature that never touches the
+ * ground, so it retracts like landing gear instead. Its legs are a jointed
+ * chain (see unicornGeometry's rig), and the knee amplifies whatever the hip
+ * does, so these values produce a noticeably larger fold than the raw numbers
+ * suggest.
  */
 const BIRD_LEG_SWING_AMPLITUDE = 0.1;
 const BIRD_LEG_TUCK_RAD = 0.34;
 const DRAGON_LEG_SWING_AMPLITUDE = 0.13;
 const DRAGON_LEG_TUCK_RAD = 0.22;
-const UNICORN_LEG_SWING_AMPLITUDE = 0.16;
-const UNICORN_LEG_TUCK_RAD = 0.06;
+const UNICORN_LEG_SWING_AMPLITUDE = 0.13;
+const UNICORN_LEG_TUCK_RAD = 0.3;
 const DRAGON_FLAP_FREQUENCY = 2.15;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;

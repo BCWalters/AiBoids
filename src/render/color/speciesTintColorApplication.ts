@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { CreatureInstanceColorArgs } from './creatureColorApplication';
 import { jitterHSL } from './colorJitter';
+import { applyLegChainColor } from './legColorApplication';
 
 /**
  * Owns the "species tint" color class — creatures that carry a per-species
@@ -76,16 +77,9 @@ export class SpeciesTintColorApplicator {
       set.tail.setColorAt(index, this.tailColor);
     }
 
-    if (set.legs) {
-      // Hooves / talons bake their own vertex color — pass white so it shows
-      // through; otherwise use the body's state color.
-      if (set.legs.geometry.getAttribute('color')) {
-        this.legsColor.setRGB(1, 1, 1);
-      } else {
-        this.legsColor.copy(this.bodyColor);
-      }
-      set.legs.setColorAt(index, this.legsColor);
-    }
+    // Hooves / talons bake their own vertex color — pass white so it shows
+    // through; otherwise use the body's state color.
+    applyLegChainColor({ set, index, scratch: this.legsColor, flatColor: this.bodyColor });
 
     if (set.beak && beakColor) {
       // Small per-individual jitter so a school doesn't share one exact beak

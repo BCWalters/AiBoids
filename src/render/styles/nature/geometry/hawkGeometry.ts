@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry } from '../../../geometry/sharedGeometry';
+import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry, singleLegPart } from '../../../geometry/sharedGeometry';
 import { buildFingeredWingGeometry, buildTailGeometry, buildHookedBeakGeometry } from './birdSharedGeometry';
 
 /**
@@ -54,7 +54,7 @@ export function createHawkGeometries(length: number, width: number): CreatureGeo
   const tail = buildTailGeometry(length * 1.1, width, { halfWidth: width * 0.9 });
   const legs = buildHawkLegsGeometry(length, width);
 
-  return { body, wingLeft, wingRight, tail, legs };
+  return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
 }
 
 /**

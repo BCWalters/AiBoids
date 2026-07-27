@@ -37,7 +37,7 @@ import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSce
 import { isReducedGraphics } from './graphicsQuality';
 import { UfoRenderer } from './UfoRenderer';
 import { CameraController } from './CameraController';
-import { CreatureInstanceRenderer, type BoidRenderBatch } from './CreatureInstanceRenderer';
+import { CreatureInstanceRenderer, type BoidRenderBatch, type LegPartMesh } from './CreatureInstanceRenderer';
 
 /**
  * Profile name for the "neutral" (non-focus-pattern) Multicolor boid batch —
@@ -289,18 +289,22 @@ export class Renderer3D {
       this.scene.add(tail);
     }
 
-    let legs: THREE.InstancedMesh | undefined;
-    if (geometries.legs) {
+    let legs: LegPartMesh[] | undefined;
+    if (geometries.legs?.length) {
       // Legs are scaly like the body, not membranous like wings/tail, so
       // clone the body material (not the wing material) to pick up matching
-      // per-instance scale-color tinting.
-      const legsMaterial = bodyMaterial.clone();
-      legs = new THREE.InstancedMesh(geometries.legs, legsMaterial, Math.max(count, 1));
-      legs.count = count;
-      legs.frustumCulled = false;
-      legs.castShadow = true;
-      legs.receiveShadow = true;
-      this.scene.add(legs);
+      // per-instance scale-color tinting. Each rig part gets its own mesh so
+      // it can be posed about its own joint.
+      legs = geometries.legs.map((part) => {
+        const legsMaterial = bodyMaterial.clone();
+        const mesh = new THREE.InstancedMesh(part.geometry, legsMaterial, Math.max(count, 1));
+        mesh.count = count;
+        mesh.frustumCulled = false;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.scene.add(mesh);
+        return { ...part, mesh };
+      });
     }
 
     let beak: THREE.InstancedMesh | undefined;
@@ -329,7 +333,7 @@ export class Renderer3D {
       set.wingLeft,
       set.wingRight,
       ...(set.tail ? [set.tail] : []),
-      ...(set.legs ? [set.legs] : []),
+      ...(set.legs ?? []).map((part) => part.mesh),
       ...(set.beak ? [set.beak] : []),
     ];
     for (const mesh of meshes) {
@@ -738,7 +742,14 @@ export class Renderer3D {
     // All parts share the same single-instance local space, so they combine
     // directly.
     const box = new THREE.Box3();
-    for (const mesh of [set.body, set.wingLeft, set.wingRight, set.tail, set.legs, set.beak]) {
+    for (const mesh of [
+      set.body,
+      set.wingLeft,
+      set.wingRight,
+      set.tail,
+      ...(set.legs ?? []).map((part) => part.mesh),
+      set.beak,
+    ]) {
       if (!mesh) continue;
       const geometry = mesh.geometry;
       if (!geometry.boundingBox) geometry.computeBoundingBox();
