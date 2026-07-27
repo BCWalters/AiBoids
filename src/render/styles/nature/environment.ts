@@ -66,7 +66,8 @@ export interface NatureEnvironment {
 // Placed opposite the small lake's forward direction (see
 // placeNatureEnvironment) so the two water features don't visually compete.
 const OCEAN_GAP_ANGLE = Math.atan2(0.83, 0.55);
-const OCEAN_GAP_HALF_WIDTH = 0.5; // radians, ~29° half-width (~57° full notch)
+const OCEAN_GAP_HALF_WIDTH = 0.64; // radians, ~37° half-width (~73° full notch)
+const OCEAN_ANGLE_SPAN_MULTIPLIER = 1.95;
 
 // Several small lakes rather than just one, each in its own compass
 // direction (forwardX/forwardZ, a unit-ish vector) at its own distance
@@ -99,7 +100,7 @@ function rockDef(angleDeg: number, distanceScale: number, sizeScale: number): Ro
 // far shoreline (real shorelines often expose rock right where the bank
 // rises) and along the outer hillside approaching the mountain ring
 // (real slopes shed scree/boulders as they steepen). Angles are chosen
-// to stay well clear of the ocean's bay opening (~10-105°, see
+// to stay well clear of the ocean's bay opening (roughly 345-130°, see
 // OCEAN_GAP_ANGLE/OCEAN_GAP_HALF_WIDTH) so nothing appears to float on
 // open water, and distanceScale keeps every cluster outside the play
 // area (>= ~2) so they never clutter the flock's own airspace.
@@ -233,7 +234,7 @@ function forestPatchDef(angleDeg: number, distanceScale: number, sizeScale: numb
 // units) to clear every lake's shoreline by a healthy margin — an
 // earlier pass placed a couple of patches close enough to a lake's own
 // angle that they visibly overlapped the water. Angles avoid the
-// ocean's bay opening (~10-105°, see OCEAN_GAP_ANGLE/OCEAN_GAP_HALF_WIDTH).
+// ocean's bay opening (roughly 345-130°, see OCEAN_GAP_ANGLE/OCEAN_GAP_HALF_WIDTH).
 //
 // sizeScale was originally tiered up to ~2.08 (bigger than the mountain
 // ring's own inner radius of 5.4!) — direct visual QA showed the
@@ -1427,7 +1428,7 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocean: THRE
   // edges even at a distance; finer subdivision plus the per-angle
   // jitter below (a natural, uneven coastline rather than dead-straight
   // wedge facets) reads much more like a real receding coastline.
-  const angleSpan = gapHalfWidth * 1.75;
+  const angleSpan = gapHalfWidth * OCEAN_ANGLE_SPAN_MULTIPLIER;
   const angularSegments = 96;
   const radialBands = 9;
   // Starts just inside the mountain ring's own inner/ridge radius (5.4)
@@ -1441,7 +1442,7 @@ function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocean: THRE
   // eases the deep-water color into the fog tone right at the edge so
   // there's no hard seam even where the fog itself is turned off.
   const innerRadius = 5.1;
-  const outerRadius = 12;
+  const outerRadius = 12.8;
   // Lighter, more sky-reflective blues than the old shore/deep pair
   // (0x5fa3bd/0x0f2e46) — the deep color in particular was dark enough
   // to read as a flat near-black slab once fog dimmed the little bit of
@@ -1805,6 +1806,22 @@ function createSunHaloMaterial(): THREE.SpriteMaterial {
   });
 }
 
+function pushDirectionOutsideOceanOpening(
+  forwardX: number,
+  forwardZ: number,
+  openingHalfWidth: number,
+): [number, number] {
+  const angle = Math.atan2(forwardZ, forwardX);
+  let delta = angle - OCEAN_GAP_ANGLE;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  if (Math.abs(delta) <= openingHalfWidth) {
+    const boundary = OCEAN_GAP_ANGLE + Math.sign(delta || 1) * openingHalfWidth;
+    return [Math.cos(boundary), Math.sin(boundary)];
+  }
+  return [forwardX, forwardZ];
+}
+
 /** Repositions the sky dome and ground plane to surround/underlie a given world center + size. */
 export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vector3, groundSize: number): void {
   env.sky.position.set(center.x, 0, center.z);
@@ -1844,7 +1861,7 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // the "solid wall blocking the ocean" bug doesn't return.
   const flockScale = groundSize / 30;
   env.fog.near = flockScale * 3.5;
-  env.fog.far = flockScale * 13.5;
+  env.fog.far = flockScale * 14.2;
 
   // Mountain ring geometry is authored in flock-scale units (radius ~6),
   // so a straight uniform scale places it just inside the fog's far
@@ -1864,10 +1881,16 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // top (to avoid z-fighting with the grass) keeps it sitting right on
   // the surface everywhere.
   const waterLift = Math.max(1, flockScale * 0.02);
+  const oceanOpeningHalfWidth = OCEAN_GAP_HALF_WIDTH * OCEAN_ANGLE_SPAN_MULTIPLIER + 0.12;
   env.lakes.forEach((lake, i) => {
     const def = LAKE_DEFS[i];
-    const fx = def.forwardX * def.distanceScale;
-    const fy = def.forwardZ * def.distanceScale;
+    const [safeForwardX, safeForwardZ] = pushDirectionOutsideOceanOpening(
+      def.forwardX,
+      def.forwardZ,
+      oceanOpeningHalfWidth,
+    );
+    const fx = safeForwardX * def.distanceScale;
+    const fy = safeForwardZ * def.distanceScale;
     // World-space terrain height at this point = terrainHeightAt() *
     // flockScale (matches the ground mesh's own local-Z / GROUND_UNIT_SCALE
     // correction in createGroundGeometry — see that function's comment).
@@ -1909,8 +1932,13 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // into a hill.
   env.rocks.forEach((rock, i) => {
     const def = ROCK_CLUSTER_DEFS[i];
-    const fx = def.forwardX * def.distanceScale;
-    const fy = def.forwardZ * def.distanceScale;
+    const [safeForwardX, safeForwardZ] = pushDirectionOutsideOceanOpening(
+      def.forwardX,
+      def.forwardZ,
+      oceanOpeningHalfWidth,
+    );
+    const fx = safeForwardX * def.distanceScale;
+    const fy = safeForwardZ * def.distanceScale;
     const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale;
     rock.position.set(
       center.x + fx * flockScale,
@@ -1929,8 +1957,13 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // perfectly flat underneath it.
   env.forestPatches.forEach((patch, i) => {
     const def = FOREST_PATCH_DEFS[i];
-    const fx = def.forwardX * def.distanceScale;
-    const fy = def.forwardZ * def.distanceScale;
+    const [safeForwardX, safeForwardZ] = pushDirectionOutsideOceanOpening(
+      def.forwardX,
+      def.forwardZ,
+      oceanOpeningHalfWidth + Math.min(0.22, def.sizeScale * 0.45),
+    );
+    const fx = safeForwardX * def.distanceScale;
+    const fy = safeForwardZ * def.distanceScale;
     const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale;
     patch.position.set(
       center.x + fx * flockScale,
