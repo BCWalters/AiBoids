@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { createRealisticBirdGeometries, type SmallBirdPalette } from './smallBirdGeometry';
+import { GOLDFINCH_NATURE_PALETTE } from '../../../sceneRenderers/NatureSceneRenderer3D';
 
 const LENGTH = 1.0;
 const WIDTH = 0.5;
@@ -53,5 +54,17 @@ describe('small-bird goldfinch tail gradient', () => {
     }
     expect(rootCount).toBeGreaterThan(0);
     expect(tipCount).toBeGreaterThan(0);
+  });
+
+  // The test above uses a local palette copy, so it only proves buildTailGeometry
+  // honours the options - it would keep passing if the real goldfinch config lost
+  // them. Bind the assertions to the shipped palette so the feature can't rot into
+  // dead config the way the bird tail sway amplitudes did (#210).
+  it('ships a goldfinch palette whose tail root matches its own back plumage', () => {
+    const p = GOLDFINCH_NATURE_PALETTE;
+    expect(p.tailGradient).toBe(true);
+    expect(p.tailGradientRootColor).toBeDefined();
+    expect(p.tailGradientRootColor!.getHex()).toBe(p.tailBack.getHex());
+    expect(p.tailTip.getHex()).toBe(0x000000);
   });
 });

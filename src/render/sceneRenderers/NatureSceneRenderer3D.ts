@@ -204,7 +204,7 @@ const SPARROW_NATURE_PALETTE: SmallBirdPalette = {
 const GOLDFINCH_BACK_PLUMAGE_NEAR_TAIL = new THREE.Color(0x1c1c1c);
 const GOLDFINCH_TAIL_REAR_TIP = new THREE.Color(0x000000);
 
-const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
+export const GOLDFINCH_NATURE_PALETTE: SmallBirdPalette = {
   headBack:  new THREE.Color(0xf5d327), // bright yellow on crown/back
   tailBack:  GOLDFINCH_BACK_PLUMAGE_NEAR_TAIL, // black at rump
   headBelly: new THREE.Color(0xf5d327), // yellow near the breast
