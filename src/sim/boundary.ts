@@ -65,12 +65,8 @@ export function clampToBounds(position: Vec3, bounds: WorldBounds): void {
 
 /**
  * Counts how many axes (0-3) `position` is currently within `margin` of a
- * wall on. 2+ means the entity is genuinely wedged into a corner/edge
- * rather than just grazing a single wall — used to detect predators (or
- * anything else) that have reached a stable "pinned in a corner"
- * equilibrium, where wall-avoidance alone isn't reliably winning out
- * against another steering force (e.g. chasing prey that's itself
- * cornered).
+ * wall on. Callers can treat 1 wall as a simple boundary graze or a real
+ * single-wall trap, and 2+ walls as a true corner/edge wedge.
  */
 export function nearWallAxisCount(position: Vec3, bounds: WorldBounds, margin: number): number {
   if (margin <= 0) return 0;
@@ -81,4 +77,3 @@ export function nearWallAxisCount(position: Vec3, bounds: WorldBounds, margin: n
   if (near(position.z, bounds.depth)) count++;
   return count;
 }
-

@@ -117,16 +117,12 @@ export class Predator {
 
   /**
    * How long (seconds) this predator has continuously been within
-   * boundaryMargin of 2+ walls at once (i.e. genuinely wedged in a
-   * corner/edge, not just briefly grazing one wall). A predator chasing
-   * prey that's itself cornered can otherwise reach a stable equilibrium
-   * there indefinitely: pursuit steering (up to maxForce) toward prey
-   * sitting right in the corner can outweigh the wall-avoidance push
-   * (which maxes out well under maxForce even right at a true corner),
-   * so nothing ever breaks the tie — reported as predators/dragons
-   * getting "stuck in corners". Tracked so update() can force a brief,
-   * decisive escape push once this drags on too long, rather than
-   * fighting it out with pursuit forever.
+   * boundaryMargin of any wall. A chase can reach the same stable
+   * equilibrium against a single wall as it can in a true corner —
+   * pursuit keeps pressing inward while wall-avoidance keeps pushing
+   * back out, so nothing ever breaks the tie. Tracked so update() can
+   * force a brief, decisive escape push once this drags on too long,
+   * rather than fighting it out with pursuit forever.
    */
   private cornerStuckTime = 0;
 
@@ -242,11 +238,11 @@ export class Predator {
     this.huntIntensity += (targetIntensity - this.huntIntensity) * huntSmoothing;
 
     if (p.mode === '3d') {
-      // Track how long we've been genuinely wedged in a corner/edge (2+
-      // walls at once) — see cornerStuckTime's doc comment. Decays twice
-      // as fast as it builds so a predator that only clips a corner
-      // briefly while maneuvering doesn't trigger the escape override.
-      if (nearWallAxisCount(this.position, bounds, p.boundaryMargin) >= 2) {
+      // Track how long we've been pinned in any boundary layer — see
+      // cornerStuckTime's doc comment. Decays twice as fast as it builds
+      // so a predator that only clips a wall briefly while maneuvering
+      // doesn't trigger the escape override.
+      if (nearWallAxisCount(this.position, bounds, p.boundaryMargin) >= 1) {
         this.cornerStuckTime += dt;
       } else {
         this.cornerStuckTime = Math.max(0, this.cornerStuckTime - dt * 2);
@@ -268,14 +264,14 @@ export class Predator {
         }
       }
 
-      // Genuinely wedged for too long (prey sitting right in the corner
-      // can otherwise make chasing it indefinitely outweigh wall
+      // Boundary-stuck for too long (prey sitting against even a single
+      // wall can otherwise make chasing it indefinitely outweigh wall
       // avoidance, a stable equilibrium that never resolves on its own):
       // override every other steering force just for this frame with a
       // decisive push straight back toward the world center. Once clear
-      // of the corner, cornerStuckTime decays and normal pursuit takes
-      // back over — reads as a brief "break off and reposition" rather
-      // than a permanent behavior change.
+      // of the boundary layer, cornerStuckTime decays and normal pursuit
+      // takes back over — reads as a brief "break off and reposition"
+      // rather than a permanent behavior change.
       const CORNER_STUCK_ESCAPE_THRESHOLD = 1.2;
       if (this.cornerStuckTime > CORNER_STUCK_ESCAPE_THRESHOLD) {
         const center = V.create(bounds.width / 2, bounds.height / 2, bounds.depth / 2);
