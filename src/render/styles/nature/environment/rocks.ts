@@ -8,6 +8,11 @@ export interface RockClusterDef {
   sizeScale: number;
 }
 
+// Approximate outer radius of the authored cluster in its own local units,
+// used by placeNatureEnvironment when sampling terrain across the cluster's
+// footprint so the downhill edge doesn't float above sloped ground.
+export const ROCK_CLUSTER_FOOTPRINT_RADIUS = 1.1;
+
 // Angle-based helper (degrees, converted once at module load) — easier
 // to reason about compass placement than raw forwardX/forwardZ pairs,
 // while still producing the same shape of def the placement code below
@@ -112,34 +117,58 @@ function applyFaceColorVariation(geometry: THREE.BufferGeometry, variance: numbe
   colorAttr.needsUpdate = true;
 }
 
+function randomRockColor(): THREE.Color {
+  return ROCK_COLOR_A.clone().lerp(ROCK_COLOR_B, Math.random());
+}
+
 /**
- * A small cluster of 2–4 boulders grouped around a shared origin (rather
- * than a single boulder per cluster def) so each rock formation reads as
- * an irregular outcrop instead of one obviously-lone rock. Built once in
- * "cluster-local" units and later uniformly positioned/scaled per
- * ROCK_CLUSTER_DEFS entry in placeNatureEnvironment, exactly like
- * createWaterPatch's lakes.
+ * A small, solid-feeling rock outcrop: one buried central core boulder,
+ * several heavily-overlapping outer stones, a small top cap, and a broad
+ * sunken base blob. Building the formation around an opaque core means any
+ * residual surface pocket still reveals rock behind it rather than green
+ * terrain through the whole mass.
  */
 export function createRockCluster(): THREE.Mesh {
-  const boulderCount = 2 + Math.floor(Math.random() * 3); // 2–4
   const parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
+  const coreRadius = 0.38 + Math.random() * 0.16;
+
+  const coreGeometry = buildBoulderGeometry(coreRadius);
+  coreGeometry.rotateY(Math.random() * Math.PI * 2);
+  coreGeometry.translate(0, -coreRadius * 0.08, 0);
+  parts.push({ geometry: coreGeometry, color: randomRockColor() });
+
+  const baseGeometry = buildBoulderGeometry(coreRadius * (1.28 + Math.random() * 0.14));
+  baseGeometry.scale(1.12, 0.42, 1.12);
+  baseGeometry.rotateY(Math.random() * Math.PI * 2);
+  baseGeometry.translate(0, -coreRadius * 0.62, 0);
+  parts.push({ geometry: baseGeometry, color: randomRockColor() });
+
+  const topGeometry = buildBoulderGeometry(coreRadius * (0.5 + Math.random() * 0.12));
+  topGeometry.rotateY(Math.random() * Math.PI * 2);
+  topGeometry.translate(
+    (Math.random() - 0.5) * coreRadius * 0.18,
+    coreRadius * (0.36 + Math.random() * 0.06),
+    (Math.random() - 0.5) * coreRadius * 0.18,
+  );
+  parts.push({ geometry: topGeometry, color: randomRockColor() });
+
+  const boulderCount = 3 + Math.floor(Math.random() * 2); // 3–4 outer stones
+  const angleStep = (Math.PI * 2) / boulderCount;
+  const angleBase = Math.random() * Math.PI * 2;
   for (let i = 0; i < boulderCount; i++) {
-    const radius = 0.2 + Math.random() * 0.35;
+    const radius = coreRadius * (0.58 + Math.random() * 0.24);
     const geometry = buildBoulderGeometry(radius);
-    const offsetAngle = Math.random() * Math.PI * 2;
-    // Tighter offset (was 0.6–1.2×r) so boulders substantially overlap
-    // rather than just touching — interpenetrating geometry ensures no
-    // terrain-coloured gap is visible between adjacent stones.
-    const offsetDist = i === 0 ? 0 : radius * (0.3 + Math.random() * 0.4);
-    // Lift each boulder's center only partway above its own radius so
-    // the lower portion sits embedded in the terrain rather than
-    // perched exactly on top of it — reads as a real half-buried rock
-    // instead of a pebble resting on the grass.
-    const lift = radius * (0.25 + Math.random() * 0.25);
-    geometry.translate(Math.cos(offsetAngle) * offsetDist, lift, Math.sin(offsetAngle) * offsetDist);
     geometry.rotateY(Math.random() * Math.PI * 2);
-    const color = ROCK_COLOR_A.clone().lerp(ROCK_COLOR_B, Math.random());
-    parts.push({ geometry, color });
+    const offsetAngle = angleBase + angleStep * i + (Math.random() - 0.5) * angleStep * 0.28;
+    // Offset from the shared core, not from each boulder's own radius, so
+    // every outer stone interpenetrates the center mass instead of merely
+    // brushing its neighbors and leaving open windows through the cluster.
+    const offsetDist = Math.min(radius, coreRadius) * (0.32 + Math.random() * 0.12);
+    // Sink the outer stones slightly into the core/base so the cluster reads
+    // as a half-buried formation rather than separate rocks balanced on grass.
+    const lift = coreRadius * (0.03 + Math.random() * 0.06) - radius * (0.12 + Math.random() * 0.1);
+    geometry.translate(Math.cos(offsetAngle) * offsetDist, lift, Math.sin(offsetAngle) * offsetDist);
+    parts.push({ geometry, color: randomRockColor() });
   }
   const merged = mergePositionAndColorGeometries(parts);
   parts.forEach((p) => p.geometry.dispose());

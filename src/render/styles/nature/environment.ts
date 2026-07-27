@@ -7,7 +7,7 @@ import {
   updateWaterUniforms,
 } from './waterWaves';
 import { createGroundGeometry, configureGroundTexture, terrainHeightAt } from './environment/terrain';
-import { createRockCluster, ROCK_CLUSTER_DEFS } from './environment/rocks';
+import { createRockCluster, ROCK_CLUSTER_DEFS, ROCK_CLUSTER_FOOTPRINT_RADIUS } from './environment/rocks';
 import { createForestPatch, FOREST_PATCH_DEFS } from './environment/forest';
 import { createMountainRing } from './environment/mountains';
 import {
@@ -373,6 +373,24 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   // facets — while still keeping far out near the ocean's true edge so
   // the "solid wall blocking the ocean" bug doesn't return.
   const flockScale = groundSize / 30;
+  const sampleLowestRockFootprintHeight = (fx: number, fy: number, footprintRadius: number): number => {
+    const sampleOffsets = [
+      [0, 0],
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+      [0.7, 0.7],
+      [0.7, -0.7],
+      [-0.7, 0.7],
+      [-0.7, -0.7],
+    ] as const;
+    let lowest = Infinity;
+    sampleOffsets.forEach(([ox, oy]) => {
+      lowest = Math.min(lowest, terrainHeightAt(fx + ox * footprintRadius, fy + oy * footprintRadius));
+    });
+    return lowest * flockScale;
+  };
   env.fog.near = flockScale * 3.5;
   env.fog.far = flockScale * 14.2;
 
@@ -452,7 +470,11 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
     );
     const fx = safeForwardX * def.distanceScale;
     const fy = safeForwardZ * def.distanceScale;
-    const terrainWorldHeight = terrainHeightAt(fx, fy) * flockScale;
+    const terrainWorldHeight = sampleLowestRockFootprintHeight(
+      fx,
+      fy,
+      ROCK_CLUSTER_FOOTPRINT_RADIUS * def.sizeScale,
+    );
     rock.position.set(
       center.x + fx * flockScale,
       terrainWorldHeight,
