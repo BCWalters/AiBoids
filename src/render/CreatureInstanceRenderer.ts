@@ -108,6 +108,7 @@ interface CreatureInstanceMatrixArgs {
   worldScale: number;
   meshScaleBoost: number;
   uprightStyle: UprightStyle;
+  restOnFloor: boolean;
 }
 
 interface ResolvedMotionConfig {
@@ -126,6 +127,7 @@ interface ResolvedMotionConfig {
   worldScale: number;
   meshScaleBoost: number;
   preferUpright: boolean;
+  restOnFloor: boolean;
 }
 
 interface ResolvedColorStrategy {
@@ -175,6 +177,7 @@ interface UpdateCreatureInstanceArgs {
   worldScale: number;
   meshScaleBoost: number;
   preferUpright: boolean;
+  restOnFloor: boolean;
 }
 type UpdateCreatureSharedArgs = Omit<UpdateCreatureInstanceArgs, 'index' | 'creature'>;
 
@@ -230,6 +233,15 @@ export class CreatureInstanceRenderer {
   };
   /** Per-creature accumulated flap phase (radians), integrated every frame. */
   private flapPhase = new WeakMap<Boid | Predator, number>();
+
+  /**
+   * Cached combined model-space bounding box per render batch (see
+   * getBatchModelBox), used by the restOnFloor clamp. Keyed weakly so stale
+   * batches don't leak.
+   */
+  private batchModelBox = new WeakMap<BoidRenderBatch, THREE.Box3>();
+  /** Scratch corner vector for rotating a batch's bounding box (restOnFloor). */
+  private tmpCorner = new THREE.Vector3();
 
   private fishtankCenter: THREE.Vector3;
 
@@ -499,8 +511,9 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       uprightStyle,
+      restOnFloor,
     } = args;
-    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle);
+    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle, restOnFloor);
 
     // Wings: apply an extra local flap rotation around the forward axis.
     const flapAngle = this.computeWingFlapAngle(
@@ -545,6 +558,7 @@ export class CreatureInstanceRenderer {
     worldScale: number,
     meshScaleBoost: number,
     uprightStyle: UprightStyle,
+    restOnFloor: boolean,
   ): void {
     // Body: just position + orientation, no flap.
     if (worldScale !== 1) {
@@ -556,13 +570,81 @@ export class CreatureInstanceRenderer {
     } else {
       this.dummy.position.set(pos.x, pos.y, pos.z);
     }
+    const bodyScale = entityScale * worldScale * meshScaleBoost;
+    if (restOnFloor) {
+      // Lift the whole instance so its lowest geometry vertex stays on/above the
+      // scene floor (render y=0). The simulation positions this creature by its
+      // model origin, which for the upright seahorse sits well above its base —
+      // without this, low swim heights push its body/tail through the tank
+      // floor. The lift only engages when the bottom would otherwise dip below
+      // the floor, leaving normal mid-water motion untouched.
+      //
+      // The lowest point is computed against the CURRENT body orientation (not
+      // the static model bounds): the seahorse pitches/banks slightly, which
+      // swings its curled tail — the part furthest from the origin — below the
+      // model's un-rotated lowest point. Rotating the combined bounding box by
+      // bodyQuat captures that so the tail no longer dips through the floor.
+      const minRotatedY = this.getRotatedModelMinY(set, this.bodyQuat);
+      const bottomWorldY = this.dummy.position.y + minRotatedY * bodyScale;
+      if (bottomWorldY < 0) {
+        this.dummy.position.y -= bottomWorldY;
+      }
+    }
     this.dummy.quaternion.copy(this.bodyQuat);
-    this.dummy.scale.setScalar(entityScale * worldScale * meshScaleBoost);
+    this.dummy.scale.setScalar(bodyScale);
     this.dummy.updateMatrix();
     set.body.setMatrixAt(i, this.dummy.matrix);
     if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
     if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
     if (set.tail && !usesTailSwayMatrix(uprightStyle)) set.tail.setMatrixAt(i, this.dummy.matrix);
+  }
+
+  /**
+   * Lowest world-space Y (per unit scale) of a render batch's rigid parts
+   * (body + tail + pectoral fins) once rotated by the given orientation. Used
+   * by the restOnFloor clamp so the lift accounts for the creature's current
+   * pitch/bank — critical for the seahorse, whose curled tail swings below the
+   * un-rotated model minimum. The combined model-space bounding box is cached
+   * per batch (computed lazily from geometry so it tracks any future geometry
+   * change without a hardcoded constant); only its 8 corners are rotated each
+   * call, which is cheap.
+   */
+  private getRotatedModelMinY(set: BoidRenderBatch, quat: THREE.Quaternion): number {
+    const box = this.getBatchModelBox(set);
+    if (box.isEmpty()) return 0;
+    let minY = Infinity;
+    for (let cx = 0; cx < 2; cx++) {
+      for (let cy = 0; cy < 2; cy++) {
+        for (let cz = 0; cz < 2; cz++) {
+          this.tmpCorner.set(
+            cx === 0 ? box.min.x : box.max.x,
+            cy === 0 ? box.min.y : box.max.y,
+            cz === 0 ? box.min.z : box.max.z,
+          ).applyQuaternion(quat);
+          if (this.tmpCorner.y < minY) minY = this.tmpCorner.y;
+        }
+      }
+    }
+    return minY;
+  }
+
+  /**
+   * Combined model-space bounding box across a render batch's rigid parts
+   * (body + tail + pectoral fins), cached per batch. See getRotatedModelMinY.
+   */
+  private getBatchModelBox(set: BoidRenderBatch): THREE.Box3 {
+    const cached = this.batchModelBox.get(set);
+    if (cached !== undefined) return cached;
+    const box = new THREE.Box3();
+    box.makeEmpty();
+    for (const mesh of [set.body, set.tail, set.wingLeft, set.wingRight]) {
+      if (!mesh) continue;
+      const geom = mesh.geometry;
+      if (!geom.boundingBox) geom.computeBoundingBox();
+      if (geom.boundingBox) box.union(geom.boundingBox);
+    }
+    this.batchModelBox.set(set, box);
+    return box;
   }
 
   private computeWingFlapAngle(
@@ -720,6 +802,7 @@ export class CreatureInstanceRenderer {
       worldScale = 1,
       meshScaleBoost = 1,
       preferUpright = false,
+      restOnFloor = false,
     } = motion;
 
     return {
@@ -738,6 +821,7 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       preferUpright,
+      restOnFloor,
     };
   }
 
@@ -803,6 +887,7 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       preferUpright,
+      restOnFloor,
       colorMode,
     } = args;
     const pos = creature.position;
@@ -856,6 +941,7 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       uprightStyle,
+      restOnFloor,
     });
 
     this.colorApplicator.apply({
@@ -927,6 +1013,7 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       preferUpright,
+      restOnFloor,
     } = this.resolveMotionConfig(motion);
 
     // Small songbirds (nature) bake a gradient into their geometry. When
@@ -969,6 +1056,7 @@ export class CreatureInstanceRenderer {
       worldScale,
       meshScaleBoost,
       preferUpright,
+      restOnFloor,
       colorMode,
     });
 

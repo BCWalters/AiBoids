@@ -398,6 +398,10 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
+          // The upright seahorse's model origin sits well above its base, so at
+          // low swim heights its body/tail would otherwise clip through the tank
+          // floor (issue #154). Clamp its rendered bottom to the floor.
+          restOnFloor: true,
         };
 
       case PredatorSpecies.Normal:
