@@ -203,6 +203,36 @@ export function extrudeRingGeometry(ring: THREE.Vector3[], thickness: number): T
 
 
 /**
+ * A flat, double-sided disc in the XZ plane at local Y = `y`, used to seal the
+ * open ring a body-lathe leaves at its end tip so it no longer reads as a
+ * see-through hole. Double-sided (each wedge emitted with both windings) so it
+ * looks solid whether the camera sees the tip from behind or inside.
+ *
+ * Used to cap the tail end of both the small-bird body and the hawk body.
+ * Shared here so neither geometry file needs to duplicate the function.
+ */
+export function buildTailCapGeometry(y: number, radius: number, segments: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const x0 = Math.cos(a0) * radius;
+    const z0 = Math.sin(a0) * radius;
+    const x1 = Math.cos(a1) * radius;
+    const z1 = Math.sin(a1) * radius;
+    positions.push(
+      0, y, 0, x0, y, z0, x1, y, z1,
+      0, y, 0, x1, y, z1, x0, y, z0,
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+
+/**
  * A small paired-dot eye (two tiny spheres mirrored across the X axis) —
  * same technique as unicornGeometry.ts's buildUnicornEyesGeometry, shared
  * here so small-bird/hawk geometry can use it too. Baked as a near-black
