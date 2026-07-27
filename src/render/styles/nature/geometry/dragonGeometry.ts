@@ -28,6 +28,14 @@ export function createDragonGeometries(length: number, width: number): CreatureG
   return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
 }
 
+export function dragonTailRootY(length: number): number {
+  return -length * 0.25;
+}
+
+export function dragonTailRootZ(length: number): number {
+  return length * 0.02;
+}
+
 // --- Shared volumetric helpers -------------------------------------------
 
 /**
@@ -275,9 +283,11 @@ export function computeDragonMouthTransform(length: number): {
 
 function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
+  const rearY = -halfLen * 0.88;
+  const rearRadius = width * 0.5;
   const profile = [
-    new THREE.Vector2(width * 0.04, -halfLen * 1.0), // tail root
-    new THREE.Vector2(width * 0.24, -halfLen * 0.68),
+    new THREE.Vector2(rearRadius, rearY), // blunt rump cap anchor (issue #206)
+    new THREE.Vector2(width * 0.4, -halfLen * 0.68),
     new THREE.Vector2(width * 0.52, -halfLen * 0.32), // haunch bulge (bulkier than hawk)
     new THREE.Vector2(width * 0.46, halfLen * 0.02), // chest
     new THREE.Vector2(width * 0.28, halfLen * 0.24), // neck taper start
@@ -294,6 +304,9 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   // banded ones; raise radial segments to 32 for the same reason.
   const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
   const latheGeometry = new THREE.LatheGeometry(smoothProfile, 32);
+  // Seal the rump-side lathe ring so the body rear is closed (no hole) and
+  // reads as a blunt haunch instead of a point.
+  const rearCap = buildSnoutCapGeometry(rearY, rearRadius, 24);
   // Seal the open snout-tip lathe ring with a double-sided disc cap so it no
   // longer reads as a see-through hole when viewed straight on from the front.
   // The snout tip is the last profile point: radius = width * 0.015, Y = halfLen * SNOUT_TIP_FRACTION.
@@ -303,11 +316,13 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   const bodyColor = new THREE.Color(0xffffff);
   const merged = mergeGeometriesWithColor([
     { geometry: latheGeometry, color: bodyColor },
+    { geometry: rearCap, color: bodyColor },
     { geometry: snoutCap, color: bodyColor },
     { geometry: frillGeometry, color: bodyColor },
     ...faceParts,
   ]);
   latheGeometry.dispose();
+  rearCap.dispose();
   snoutCap.dispose();
   frillGeometry.dispose();
   for (const part of faceParts) part.geometry.dispose();
@@ -612,11 +627,10 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
 function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeometry {
   const positions: number[] = [];
 
-  // Tail root sits at the body's rump (Y = -halfLen = -length*0.5) and
-  // slightly below the body's belly axis (Z = -length*0.08), so it
-  // projects rearward from the haunch rather than from the body's center.
-  const yOffset = -length * 0.25;
-  const zOffset = length * 0.02; // slight lift, pulled back down from 0.06
+  // Tail root remains a fixed attachment point keyed to length (not to the
+  // body rear profile), so rump reshaping does not shift tail articulation.
+  const yOffset = dragonTailRootY(length);
+  const zOffset = dragonTailRootZ(length); // slight lift, pulled back down from 0.06
 
   // Walk from the body root (t=0) to the tip (t=1), each entry giving a
   // tapering half-width (used as the tube radius) and a curved (x, y, z)
