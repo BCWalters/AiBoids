@@ -21,6 +21,18 @@ import {
   UNICORN_PREDATOR_SPECIES,
 } from './sceneRenderers/createSceneRendererHooks';
 import { CreatureColorApplicator } from './color/creatureColorApplication';
+import {
+  advanceFlapPhase,
+  computeClimbFraction,
+  computeFlapAmplitude,
+  computeFlapStateMultipliers,
+  computeSpeedFraction,
+  computeTailSwayPhase,
+  flapAngleFromPhase,
+  initialFlapPhase,
+  tailSwayAngleFromPhase,
+} from './motion/flapMath';
+import { composePartArticulation } from './motion/partTransform';
 
 /** One creature's instanced meshes: a body plus optional wing/tail/legs/beak parts. */
 export interface BoidRenderBatch {
@@ -33,25 +45,11 @@ export interface BoidRenderBatch {
   beak?: THREE.InstancedMesh;
 }
 
-// Wing-flap tuning. NOTE: the actual flap frequency/amplitude values are owned
-// per-scene (each scene's MotionConfig provides them); only the shared
-// flap-state-blend response constants below live here since they describe the
-// one shared animation algorithm and are not varied per scene.
-const CLIMB_FLAP_FREQ_BOOST = 0.12;
-const DIVE_FLAP_FREQ_CUT = 0.1;
-const TURN_FLAP_FREQ_BOOST = 0.06;
-const PANIC_FLAP_FREQ_BOOST = 0.1;
-const CLIMB_FLAP_AMP_BOOST = 0.12;
-const DIVE_FLAP_AMP_BOOST = 0.08;
-const TURN_FLAP_AMP_BOOST = 0.1;
-const PANIC_FLAP_AMP_BOOST = 0.12;
+// Wing-flap and tail-sway math lives in ./motion/flapMath — pure functions with
+// their own unit tests. The per-scene frequency/amplitude values are supplied by
+// each scene's MotionConfig; this file only composes the resulting angles into
+// instance matrices.
 const STATE_PITCH_SCALE = THREE.MathUtils.degToRad(18);
-
-// Tail-sway phase offset: creatures with a swaying tail (dragons, sharks —
-// see usesTailSwayMatrix) drive the tail from the wing flap phase, offset so
-// it lags/leads rather than mirroring it. Amplitude/axis are per-scene
-// (MotionConfig); only this shared phase relationship lives here.
-const TAIL_SWAY_PHASE_OFFSET = Math.PI * 0.6; // lags the wingbeat rather than mirroring it exactly
 
 // Three.js cones/octahedra/lathes point along +Y by default; that's "forward".
 const FORWARD_AXIS = new THREE.Vector3(0, 1, 0);
@@ -196,15 +194,15 @@ type UpdateCreatureSharedArgs = Omit<UpdateCreatureInstanceArgs, 'index' | 'crea
 export class CreatureInstanceRenderer {
   private dummy = new THREE.Object3D();
   private bodyQuat = new THREE.Quaternion();
-  private flapQuat = new THREE.Quaternion();
-  private tailSwayQuat = new THREE.Quaternion();
   private pitchQuat = new THREE.Quaternion();
-  // Scratch objects for composing "rotate the tail around its own
-  // attachment point rather than the model's shared local origin" (see
-  // tailSwayPivotY's doc comment on updateInstances).
-  private tailPivotMatrix = new THREE.Matrix4();
-  private tailPivotToOrigin = new THREE.Matrix4();
-  private tailOriginToPivot = new THREE.Matrix4();
+  // Scratch objects for articulated parts (wings, tail, and any future
+  // jaw/neck/leg) — see applyArticulatedPartMatrix. Shared by every part
+  // because parts are posed one at a time within a single instance update.
+  private partQuat = new THREE.Quaternion();
+  private partPivotMatrix = new THREE.Matrix4();
+  private partPivotToOrigin = new THREE.Matrix4();
+  private partOriginToPivot = new THREE.Matrix4();
+  private tmpPivot = new THREE.Vector3();
   private rollQuat = new THREE.Quaternion();
   private tmpForward = new THREE.Vector3();
   private tmpRight = new THREE.Vector3();
@@ -719,49 +717,90 @@ export class CreatureInstanceRenderer {
     finRestBiasRad: number,
     uprightStyle: UprightStyle,
   ): number {
-    const speedFrac = maxSpeed > 0 ? Math.min(1, speed / maxSpeed) : 0;
-    const amplitudeBase = flapIdleAmplitude + flapSpeedAmplitude * speedFrac;
-    const stateResponse = 0.55;
-    const stateFrequencyMultRaw =
-      1
-      + blendStrength * stateResponse * (
-        climbWeight * CLIMB_FLAP_FREQ_BOOST
-        - diveWeight * DIVE_FLAP_FREQ_CUT
-        + turnWeight * TURN_FLAP_FREQ_BOOST
-        + panicWeight * PANIC_FLAP_FREQ_BOOST
-        - cruiseWeight * 0.04
-      );
-    const stateAmplitudeMultRaw =
-      1
-      + blendStrength * stateResponse * (
-        climbWeight * CLIMB_FLAP_AMP_BOOST
-        + diveWeight * DIVE_FLAP_AMP_BOOST
-        + turnWeight * TURN_FLAP_AMP_BOOST
-        + panicWeight * PANIC_FLAP_AMP_BOOST
-        - cruiseWeight * 0.06
-      );
-    const stateFrequencyMult = THREE.MathUtils.clamp(stateFrequencyMultRaw, 0.8, 1.18);
-    const stateAmplitudeMult = THREE.MathUtils.clamp(stateAmplitudeMultRaw, 0.82, 1.24);
-    const amplitude = amplitudeBase * stateAmplitudeMult;
-    const climbFrac = maxSpeed > 0 ? THREE.MathUtils.clamp(vel.y / maxSpeed, -1, 1) : 0;
+    const { frequencyMultiplier, amplitudeMultiplier } = computeFlapStateMultipliers({
+      blendStrength,
+      climbWeight,
+      diveWeight,
+      turnWeight,
+      panicWeight,
+      cruiseWeight,
+    });
+    const amplitude = computeFlapAmplitude({
+      idleAmplitude: flapIdleAmplitude,
+      speedAmplitude: flapSpeedAmplitude,
+      speedFraction: computeSpeedFraction({ speed, maxSpeed }),
+      stateAmplitudeMultiplier: amplitudeMultiplier,
+    });
+    const climbFrac = computeClimbFraction({ verticalVelocity: vel.y, maxSpeed });
     const uprightFrequencyMultiplier = getUprightFlapFrequencyMultiplier(uprightStyle, climbFrac);
-    const effectiveFrequency = flapFrequency * stateFrequencyMult * uprightFrequencyMultiplier;
-    const prevPhase = this.flapPhase.get(creature) ?? creature.id * 1.7;
-    const phase = prevPhase + effectiveFrequency * dt;
+    const phase = advanceFlapPhase({
+      previousPhase: this.flapPhase.get(creature) ?? initialFlapPhase(creature.id),
+      frequency: flapFrequency * frequencyMultiplier * uprightFrequencyMultiplier,
+      dt,
+    });
     this.flapPhase.set(creature, phase);
-    return amplitude * Math.sin(phase) + finRestBiasRad;
+    return flapAngleFromPhase({ phase, amplitude, restBiasRad: finRestBiasRad });
+  }
+
+  /**
+   * Poses one articulated part: the body transform with an extra local
+   * rotation of `angle` about `axis`, applied around `pivot` (model space)
+   * rather than the model origin.
+   *
+   * Relies on `this.dummy` still holding the position/scale written by
+   * applyCreatureBodyMatrices, and on scale being uniform — a uniform scale
+   * commutes with rotation, so pivoting about the origin (pivot = null) is
+   * exactly `bodyQuat * partQuat`, and the same code path serves both.
+   *
+   * Every moving part (wings, tail, and any future jaw/neck/leg) should go
+   * through here so articulation is one behaviour with one set of scratch
+   * objects, not a bespoke matrix sequence per part.
+   */
+  private applyArticulatedPartMatrix({
+    mesh,
+    index,
+    axis,
+    angle,
+    pivot,
+  }: {
+    mesh: THREE.InstancedMesh;
+    index: number;
+    axis: THREE.Vector3;
+    angle: number;
+    pivot: THREE.Vector3 | null;
+  }): void {
+    this.partQuat.setFromAxisAngle(axis, angle);
+    this.dummy.quaternion.copy(this.bodyQuat);
+    this.dummy.updateMatrix();
+    composePartArticulation({
+      target: this.partPivotMatrix,
+      axis,
+      angle,
+      pivot,
+      scratchQuat: this.partQuat,
+      scratchToOrigin: this.partPivotToOrigin,
+      scratchToPivot: this.partOriginToPivot,
+    });
+    this.dummy.matrix.multiply(this.partPivotMatrix);
+    mesh.setMatrixAt(index, this.dummy.matrix);
   }
 
   private applyWingFlapMatrices(set: BoidRenderBatch, i: number, flapAngle: number): void {
-    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, flapAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-    this.dummy.updateMatrix();
-    set.wingLeft.setMatrixAt(i, this.dummy.matrix);
-
-    this.flapQuat.setFromAxisAngle(FORWARD_AXIS, -flapAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.flapQuat);
-    this.dummy.updateMatrix();
-    set.wingRight.setMatrixAt(i, this.dummy.matrix);
+    // Wings mirror each other around the model's forward axis.
+    this.applyArticulatedPartMatrix({
+      mesh: set.wingLeft,
+      index: i,
+      axis: FORWARD_AXIS,
+      angle: flapAngle,
+      pivot: null,
+    });
+    this.applyArticulatedPartMatrix({
+      mesh: set.wingRight,
+      index: i,
+      axis: FORWARD_AXIS,
+      angle: -flapAngle,
+      pivot: null,
+    });
   }
 
   private applyCreatureTailSwayMatrix(
@@ -779,22 +818,19 @@ export class CreatureInstanceRenderer {
     // Tail sway (dragons/sharks only).
     if (!set.tail) return;
     if (!usesTailSwayMatrix(uprightStyle)) return;
-    const tailPhase = elapsed * (tailSwayFrequency ?? flapFrequency) + creature.id * 1.7 + TAIL_SWAY_PHASE_OFFSET;
-    const tailSwayAngle = tailSwayAmplitude * Math.sin(tailPhase);
-    this.tailSwayQuat.setFromAxisAngle(tailSwayAxis, tailSwayAngle);
-    this.dummy.quaternion.copy(this.bodyQuat).multiply(this.tailSwayQuat);
-    this.dummy.updateMatrix();
-    if (tailSwayPivotY !== 0) {
-      this.dummy.quaternion.copy(this.bodyQuat);
-      this.dummy.updateMatrix();
-      this.tailPivotToOrigin.makeTranslation(0, -tailSwayPivotY, 0);
-      this.tailOriginToPivot.makeTranslation(0, tailSwayPivotY, 0);
-      this.tailPivotMatrix.makeRotationFromQuaternion(this.tailSwayQuat);
-      this.tailPivotMatrix.premultiply(this.tailOriginToPivot);
-      this.tailPivotMatrix.multiply(this.tailPivotToOrigin);
-      this.dummy.matrix.multiply(this.tailPivotMatrix);
-    }
-    set.tail.setMatrixAt(i, this.dummy.matrix);
+    const tailPhase = computeTailSwayPhase({
+      elapsed,
+      frequency: tailSwayFrequency ?? flapFrequency,
+      creatureId: creature.id,
+    });
+    this.tmpPivot.set(0, tailSwayPivotY, 0);
+    this.applyArticulatedPartMatrix({
+      mesh: set.tail,
+      index: i,
+      axis: tailSwayAxis,
+      angle: tailSwayAngleFromPhase({ phase: tailPhase, amplitude: tailSwayAmplitude }),
+      pivot: this.tmpPivot,
+    });
   }
 
   private applyCreatureOrientationAndMotion(
