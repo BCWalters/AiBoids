@@ -198,17 +198,26 @@ export interface SceneCreatureMaterialDefaults {
   wingColor: (isMonster: boolean, isFishtank: boolean) => number;
 }
 
+export interface FishUndulationConfig {
+  amplitudeFraction: number;
+  wavesPerBody: number;
+  baseOmega: number;
+  speedOmegaScale: number;
+}
+
 export interface SceneBoidInstanceConfig {
   geometries: CreatureGeometries;
   bodyVertexColors: boolean;
   /** Optional per-species emissive color override (used by arcade for neon glow). */
   bodyEmissiveOverride?: THREE.Color;
+  fishUndulation?: FishUndulationConfig;
 }
 
 export interface ScenePredatorInstanceConfig {
   geometries: CreatureGeometries;
   rainbowWings: boolean;
   bodyVertexColors: boolean;
+  fishUndulation?: FishUndulationConfig;
 }
 
 /** Scene-specific display names for all canonical sim creature types.

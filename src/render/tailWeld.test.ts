@@ -4,6 +4,7 @@ import type { Boid } from '../sim/Boid';
 import { CreatureInstanceRenderer, type BoidRenderBatch } from './CreatureInstanceRenderer';
 import type { ColorStrategy, MotionConfig } from './sceneRenderers/createSceneRendererHooks';
 import { swayingTailRig } from './geometry/sharedGeometry';
+import type { FishUndulationInstanceState } from './styles/fishtank/fishUndulationShader';
 
 function makeCreature(id: number): Boid {
   return {
@@ -50,6 +51,18 @@ const birdLikeMotion: MotionConfig = {
   preferUpright: true,
 };
 
+function makeFishUndulationState(instanceCount: number): FishUndulationInstanceState {
+  return {
+    phaseAttribute: new THREE.InstancedBufferAttribute(new Float32Array(instanceCount), 1),
+    baseOmega: 3.2,
+    speedOmegaScale: 0.6,
+    headPosition: 1.2,
+    tailPosition: -1.8,
+    amplitude: 0.3,
+    waveNumber: 1.7,
+  };
+}
+
 function poseOnce(set: BoidRenderBatch, motion: MotionConfig): { body: THREE.Matrix4; tail: THREE.Matrix4 } {
   const renderer = new CreatureInstanceRenderer(new THREE.Vector3());
   renderer.updateInstances(set, [makeCreature(9)], 2, 0.5, 1 / 60, colors, motion);
@@ -92,5 +105,27 @@ describe('tail weld (regression from #200)', () => {
     const onBody = probe.clone().applyMatrix4(body);
     const onTail = probe.clone().applyMatrix4(tail);
     expect(onTail.distanceTo(onBody)).toBeGreaterThan(1e-3);
+  });
+
+  it('keeps a rigless tail matrix welded to the body while fish undulation phases advance', () => {
+    const set: BoidRenderBatch = {
+      body: mesh(1),
+      wingLeft: mesh(1),
+      wingRight: mesh(1),
+      tail: mesh(1),
+      fishUndulation: makeFishUndulationState(1),
+    };
+    const creature = makeCreature(13);
+    creature.velocity = { x: 0, y: 1, z: 0 };
+    const renderer = new CreatureInstanceRenderer(new THREE.Vector3());
+    const bodyMatrix = new THREE.Matrix4();
+    const tailMatrix = new THREE.Matrix4();
+
+    for (let step = 0; step < 6; step++) {
+      renderer.updateInstances(set, [creature], 2, step * 0.15, 0.15, colors, birdLikeMotion);
+      set.body.getMatrixAt(0, bodyMatrix);
+      set.tail!.getMatrixAt(0, tailMatrix);
+      expect(tailMatrix.elements).toEqual(bodyMatrix.elements);
+    }
   });
 });

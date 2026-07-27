@@ -41,6 +41,7 @@ import {
   type ScenePredatorInstanceConfig,
   type SpeciesColorSet,
   type CreatureLabels,
+  type FishUndulationConfig,
 } from './createSceneRendererHooks';
 
 // --- Fishtank creature sizing: every fishtank creature is a factor of this
@@ -154,6 +155,24 @@ const BARRACUDA_FLAP_SPEED_AMPLITUDE = 0.08;
 const BARRACUDA_TAIL_SWAY_AMPLITUDE = 0.44;
 const BARRACUDA_TAIL_SWAY_FREQUENCY = 3.9;
 const BARRACUDA_FIN_REST_TILT_RAD = 0.32;
+const FISHTANK_BOID_FISH_UNDULATION: FishUndulationConfig = {
+  amplitudeFraction: 0.033,
+  wavesPerBody: 0.65,
+  baseOmega: 3.4,
+  speedOmegaScale: 1.2,
+};
+const FISHTANK_BARRACUDA_UNDULATION: FishUndulationConfig = {
+  amplitudeFraction: 0.03,
+  wavesPerBody: 0.45,
+  baseOmega: 2.9,
+  speedOmegaScale: 1.0,
+};
+const FISHTANK_SHARK_UNDULATION: FishUndulationConfig = {
+  amplitudeFraction: 0.027,
+  wavesPerBody: 0.45,
+  baseOmega: 2.6,
+  speedOmegaScale: 0.9,
+};
 // Utility function for deterministic per-creature hashing (used for variant selection)
 function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
@@ -549,21 +568,21 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getParrotProfileInstanceConfig(_profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
-    return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
+    return { geometries: this.butterflyfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
   }
 
   getBoidInstanceConfig(species: BoidSpecies, _flags: StyleFlags): SceneBoidInstanceConfig {
     switch (species) {
       case BoidSpecies.Gold:
-        return { geometries: this.goldfishGeometries, bodyVertexColors: true };
+        return { geometries: this.goldfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       case BoidSpecies.Red:
-        return { geometries: this.clownfishGeometries, bodyVertexColors: true };
+        return { geometries: this.clownfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       case BoidSpecies.Blue:
-        return { geometries: this.blueTangGeometries, bodyVertexColors: true };
+        return { geometries: this.blueTangGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       case BoidSpecies.Multicolor:
-        return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
+        return { geometries: this.butterflyfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       default:
-        return { geometries: this.plainFishGeometries, bodyVertexColors: true };
+        return { geometries: this.plainFishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
     }
   }
 
@@ -578,12 +597,14 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           geometries: this.barracudaPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
+          fishUndulation: FISHTANK_BARRACUDA_UNDULATION,
         };
       case PredatorSpecies.Monster:
         return {
           geometries: this.sharkPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
+          fishUndulation: FISHTANK_SHARK_UNDULATION,
         };
       case PredatorSpecies.Horse:
         return {
