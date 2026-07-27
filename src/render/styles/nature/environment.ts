@@ -361,14 +361,14 @@ export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vec
   //
   // Far was previously kept just past the mountain ring's own radius
   // (7.2x) to avoid a "visible flat plain beyond the ridge" gap — but
-  // the ocean wedge (createOceanPatch) actually extends out to radius
-  // 12x flockScale, so most of the ocean's surface (everything past
-  // 7.2x) sat beyond fog.far and rendered as a completely solid wall of
-  // fog color. Pushing far out to just past the ocean's own outer edge
-  // (~13x) lets its already-built-in shore->deep->horizon color gradient
-  // (see createOceanPatch) do the final blend into the sky, with engine
-  // fog only adding gentle atmospheric haze on top rather than a hard
-  // cutoff.
+  // the ocean wedge (createOceanPatch) extends past fog.far (its outer
+  // edge is 16x flockScale vs fog.far 14.2x), so the sea itself is what
+  // finally dissolves into the horizon haze. fog.far sits a little
+  // inside the ocean's edge so engine fog adds gentle atmospheric haze
+  // that fully absorbs the water's far rim — its already-built-in
+  // shore->deep->horizon color gradient (see createOceanPatch) reaches
+  // the fog-matching horizon tone right around fog.far, so there's no
+  // hard cutoff and no ring of ground visible between sea and sky.
   //
   // But pulling near out to 6.5x (past the mountain ring's own 5.4-6.1x
   // radius) left the ring with *zero* haze at all — crisp enough that

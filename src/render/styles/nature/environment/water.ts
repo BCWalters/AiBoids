@@ -43,7 +43,11 @@ export function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocea
   // wedge facets) reads much more like a real receding coastline.
   const angleSpan = gapHalfWidth * OCEAN_ANGLE_SPAN_MULTIPLIER;
   const angularSegments = 96;
-  const radialBands = 9;
+  // More radial bands than before (was 9) since the wedge now runs much
+  // farther out (outerRadius 26) — keeps the color gradient smooth and
+  // gives the organic tangential bow (see the angleJitter below) enough
+  // geometry to read as a curved, uneven coastline rather than facets.
+  const radialBands = 14;
   // Starts just inside the mountain ring's own inner/ridge radius (5.4)
   // so it tucks under the ground right where the ring's gap begins,
   // with no seam/sliver of grass. Extended out closer to fog.far (see
@@ -55,7 +59,15 @@ export function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocea
   // eases the deep-water color into the fog tone right at the edge so
   // there's no hard seam even where the fog itself is turned off.
   const innerRadius = 5.1;
-  const outerRadius = 12.8;
+  // Extend the sea's outer edge all the way out to the ground plane's own
+  // visible edge so the WATER — not a fog/haze belt or the ground beyond
+  // it — is what reaches the horizon even with engine fog turned off. The
+  // ground plane's world half-extent is 24 x flockScale (groundSize 30 x
+  // 1.6 x 0.5) and the ocean is scaled by flockScale, so 26 pushes the
+  // wedge's far rim just past the ground edge in the bay direction: with
+  // fog off you see blue sea meeting the sky, with fog on the far reaches
+  // still haze out naturally.
+  const outerRadius = 26.0;
   // Lighter, more sky-reflective blues than the old shore/deep pair
   // (0x5fa3bd/0x0f2e46) — the deep color in particular was dark enough
   // to read as a flat near-black slab once fog dimmed the little bit of
@@ -64,12 +76,13 @@ export function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocea
   // the small lake in createWaterPatch.
   const shoreColor = new THREE.Color(0x6fb0c9);
   const deepColor = new THREE.Color(0x1d4a63);
-  // Pale, slightly blue-grey horizon tone close to the sky/fog color —
-  // the final stretch of ocean eases toward this instead of staying a
-  // saturated deep blue right up to its (otherwise arbitrary) edge, so
-  // the sea visually dissolves into the sky at the horizon exactly like
-  // the ground/mountains do, with or without fog enabled.
-  const horizonColor = new THREE.Color(0xd7e0e2);
+  // Soft, sky-tinted BLUE horizon tone (not a pale grey) so the far
+  // stretch of sea eases toward the color of the sky at the horizon and
+  // reads as open water dissolving into the sky — rather than a grey
+  // haze/fog belt between the blue water and the sky when engine fog is
+  // off. Kept light and slightly desaturated so it still blends cleanly
+  // into the fog color when fog IS on.
+  const horizonColor = new THREE.Color(0x9dc2d8);
 
   // Smoothed per-angular-vertex radius jitter, applied consistently
   // across every radial band (rather than independently per band) so
@@ -87,6 +100,21 @@ export function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocea
     return (prev + v * 2 + next) / 4;
   });
 
+  // A second, independently smoothed jitter used to bow each radial grid
+  // line TANGENTIALLY (sideways) by an amount that grows with distance
+  // from shore. Without it the wedge's two side edges are dead-straight
+  // radial lines and the whole sea reads as a rectangle/triangle through
+  // the mountain gap; letting the sides (and the grid between them) wander
+  // sideways more the farther out they go makes the water body read as an
+  // organic, uneven inlet rather than a ruler-straight wedge.
+  const rawAngleJitter: number[] = [];
+  for (let i = 0; i < jitterCount; i++) rawAngleJitter.push((Math.random() - 0.5) * 2);
+  const angleJitter = rawAngleJitter.map((v, i) => {
+    const prev = rawAngleJitter[Math.max(0, i - 1)];
+    const next = rawAngleJitter[Math.min(jitterCount - 1, i + 1)];
+    return (prev + v * 2 + next) / 4;
+  });
+
   const positions: number[] = [];
   const colors: number[] = [];
   const pushTri = (a: number[], b: number[], c: number[], ca: THREE.Color, cb: THREE.Color, cc: THREE.Color) => {
@@ -94,13 +122,50 @@ export function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocea
     colors.push(ca.r, ca.g, ca.b, cb.r, cb.g, cb.b, cc.r, cc.g, cc.b);
   };
 
-  // Shore -> deep for the first 55% of the span, then deep -> horizon
-  // haze for the remaining 45%, so distant water genuinely fades to sky
-  // tone instead of holding a hard deep-blue color all the way to the
-  // (invisible) mesh edge.
+  // Shore -> deep across the near third, hold the deep sea blue across the
+  // mid-field, then ease deep -> sky-blue horizon only over the far third.
+  // Because the wedge now runs all the way to the ground edge (outerRadius
+  // 26) most of its visible surface stays a believable sea blue, and only
+  // the far rim near the horizon lightens toward the sky — so with fog off
+  // there is no grey belt, just blue water fading into blue sky.
   const colorAt = (t: number): THREE.Color => {
-    if (t < 0.55) return shoreColor.clone().lerp(deepColor, t / 0.55);
-    return deepColor.clone().lerp(horizonColor, (t - 0.55) / 0.45);
+    if (t < 0.32) return shoreColor.clone().lerp(deepColor, t / 0.32);
+    if (t < 0.62) return deepColor.clone();
+    return deepColor.clone().lerp(horizonColor, (t - 0.62) / 0.38);
+  };
+
+  // Half-width of the wedge as a function of the normalized radial
+  // distance t. Rather than a constant angular half-width (which makes the
+  // two side edges dead-straight radial lines that read as a rectangle/
+  // triangle), the width follows a smootherstep S-curve: it starts as a
+  // narrow cove mouth at the shore and flares out to the full span toward
+  // the horizon, with zero slope at both ends. Because each radial grid
+  // line (constant seg) is laid across this growing width, the side edges
+  // trace a smooth convex curve — a rounded, gradually-opening bay instead
+  // of a straight-sided wedge.
+  const SHORE_WIDTH_FRAC = 0.5;
+  const halfWidthFrac = (t: number): number => {
+    const s = t * t * t * (t * (t * 6 - 15) + 10); // smootherstep(0,1,t)
+    return SHORE_WIDTH_FRAC + (1 - SHORE_WIDTH_FRAC) * s;
+  };
+
+  // Build each vertex from its angular index and radius. On top of the
+  // flared half-width above, two organic distortions are layered, BOTH
+  // scaled by t so they vanish at the shore (t=0) — keeping the ocean's
+  // inner edge perfectly aligned with the beach strip, which reuses the
+  // same `jitter` array at 0.05 amplitude and the same shore half-width
+  // with no tangential offset:
+  //   - radius jitter amplitude grows 0.05 -> ~0.16, so the coastline is
+  //     only gently uneven near shore but the far reaches wander much
+  //     more, avoiding a clean geometric arc.
+  //   - a tangential (sideways) offset from `angleJitter` bows each radial
+  //     grid line further so the curved sides also read as irregular.
+  const vertex = (seg: number, r: number, t: number): number[] => {
+    const half = angleSpan * halfWidthFrac(t);
+    const baseA = gapAngle - half + (2 * half * seg) / angularSegments;
+    const a = baseA + angleJitter[seg] * 0.07 * t;
+    const rr = r * (1 + jitter[seg] * (0.05 + 0.11 * t));
+    return [Math.cos(a) * rr, 0, Math.sin(a) * rr];
   };
 
   for (let band = 0; band < radialBands; band++) {
@@ -115,14 +180,10 @@ export function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocea
     const c1 = colorAt(t1);
 
     for (let seg = 0; seg < angularSegments; seg++) {
-      const a0 = gapAngle - angleSpan + (2 * angleSpan * seg) / angularSegments;
-      const a1 = gapAngle - angleSpan + (2 * angleSpan * (seg + 1)) / angularSegments;
-      const j0 = 1 + jitter[seg] * 0.05;
-      const j1 = 1 + jitter[seg + 1] * 0.05;
-      const p00 = [Math.cos(a0) * r0 * j0, 0, Math.sin(a0) * r0 * j0];
-      const p01 = [Math.cos(a1) * r0 * j1, 0, Math.sin(a1) * r0 * j1];
-      const p10 = [Math.cos(a0) * r1 * j0, 0, Math.sin(a0) * r1 * j0];
-      const p11 = [Math.cos(a1) * r1 * j1, 0, Math.sin(a1) * r1 * j1];
+      const p00 = vertex(seg, r0, t0);
+      const p01 = vertex(seg + 1, r0, t0);
+      const p10 = vertex(seg, r1, t1);
+      const p11 = vertex(seg + 1, r1, t1);
       pushTri(p00, p10, p11, c0, c1, c1);
       pushTri(p00, p11, p01, c0, c1, c0);
     }
@@ -148,29 +209,77 @@ export function createOceanPatch(gapAngle: number, gapHalfWidth: number): { ocea
     side: THREE.DoubleSide,
   });
   const ocean = new THREE.Mesh(geometry, material);
-  const beach = createBeachStrip(gapAngle, angleSpan, angularSegments, jitter, innerRadius);
+
+  // The beach must hug the ACTUAL coastline, which is NOT a constant-radius
+  // arc: straight out through the cove mouth the water starts at innerRadius,
+  // but past the mouth the only water at a given angle sits farther out on
+  // the flared side edges. waterEdgeRadius(|φ|) returns that land/water
+  // radius for any angular offset φ from the gap centre — so the sand can
+  // follow the coast the whole way round the bay and up to the headlands,
+  // instead of a wide flat arc that strands sand on bare grass past the
+  // cove mouth (the previous "beach floating in the grass" bug).
+  const shoreHalf = angleSpan * halfWidthFrac(0);
+  const waterEdgeRadius = (phi: number): number => {
+    if (phi <= shoreHalf) return innerRadius;
+    const frac = phi / angleSpan; // target halfWidthFrac value, in (0.5, 1]
+    if (frac >= 1) return outerRadius;
+    // Invert the smootherstep flare numerically: find the innermost band t
+    // whose half-width reaches this angle. That band's radius is where the
+    // flared side edge first meets land at angle φ.
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      if (halfWidthFrac(mid) < frac) lo = mid;
+      else hi = mid;
+    }
+    const t = (lo + hi) / 2;
+    return innerRadius + (outerRadius - innerRadius) * t * t;
+  };
+  // Match the beach's water-side jitter to the ocean's inner-arc jitter
+  // (vertex() at t=0 offsets by jitter[seg] * 0.05) across the cove mouth so
+  // the two edges undulate together rather than drifting apart.
+  const shoreJitter = (phi: number): number => {
+    const f = Math.min(1, Math.max(0, (phi + shoreHalf) / (2 * shoreHalf)));
+    return 1 + jitter[Math.round(f * angularSegments)] * 0.05;
+  };
+  // Sweep the sand from the cove mouth up to (just under) the mountain bases
+  // (gapHalfWidth is the mountains' fully-open core; +0.05 tucks the ends a
+  // hair beneath the rising headlands) — following the water edge the whole
+  // way so the shore reads as one continuous curved beach wrapping the bay
+  // and meeting the mountains, with no bare-grass gap or floating sand.
+  const beach = createBeachStrip(
+    gapAngle,
+    gapHalfWidth + 0.05,
+    angularSegments,
+    waterEdgeRadius,
+    shoreJitter,
+  );
   return { ocean, beach };
 }
 
 /**
- * A narrow strip of tan sand tracking the ocean's shoreline, sitting
- * just outside the water's inner edge (innerRadius) on the land side.
- * Reuses the exact same per-angle jitter array as the ocean wedge (see
- * createOceanPatch) so the beach's water-side edge follows the ocean's
- * actual undulating shore precisely instead of drifting apart from it.
+ * A narrow strip of tan sand tracking the ocean's shoreline. Rather than a
+ * fixed-radius arc, its water-side edge follows waterEdgeRadius(|φ|) — the
+ * true land/water boundary — so it hugs the near-shore arc through the cove
+ * mouth and then curves outward along the flared sides up to the mountain
+ * bases, keeping sand against water the whole way round the bay instead of
+ * stranding it on grass past the mouth.
  */
 function createBeachStrip(
   gapAngle: number,
-  angleSpan: number,
+  phiMax: number,
   angularSegments: number,
-  jitter: number[],
-  shoreRadius: number,
+  waterEdgeRadius: (phi: number) => number,
+  shoreJitter: (phi: number) => number,
 ): THREE.Mesh {
-  // Deliberately narrow relative to the ocean's own scale (shoreRadius
+  // Deliberately narrow relative to the ocean's own scale (shore radius
   // ~5.1) — a "beach line" rather than a wide coastal plain.
   const beachWidth = 0.32;
-  const innerRadius = shoreRadius - beachWidth;
-  const outerRadius = shoreRadius;
+  // Push the water-side edge a touch PAST the water edge so the sand always
+  // tucks slightly under the water; the beach sits a hair higher than the
+  // ocean (polygonOffset below) so it draws cleanly on top with no sliver.
+  const overlap = 0.1;
 
   // Wet sand (darker, closer to the water) grading to dry sand (lighter,
   // closer to the grass) so the strip itself reads as a gradient rather
@@ -200,20 +309,21 @@ function createBeachStrip(
   };
 
   for (let seg = 0; seg < angularSegments; seg++) {
-    const a0 = gapAngle - angleSpan + (2 * angleSpan * seg) / angularSegments;
-    const a1 = gapAngle - angleSpan + (2 * angleSpan * (seg + 1)) / angularSegments;
-    const j0 = 1 + jitter[seg] * 0.05;
-    const j1 = 1 + jitter[seg + 1] * 0.05;
-    // Gentle, smoothed extra width jitter on the grass-side edge only
-    // (the water-side edge already tracks the ocean's own jitter
-    // exactly) so the beach's width varies a little along the shore
-    // without a jagged, sawtooth boundary.
+    const phi0 = -phiMax + (2 * phiMax * seg) / angularSegments;
+    const phi1 = -phiMax + (2 * phiMax * (seg + 1)) / angularSegments;
+    const a0 = gapAngle + phi0;
+    const a1 = gapAngle + phi1;
+    // Gentle, smoothed extra width jitter on the grass-side edge only (the
+    // water-side edge already tracks the water) so the beach's width varies
+    // a little along the shore without a jagged, sawtooth boundary.
     const wobble0 = 1 + innerJitter[seg] * 0.12;
     const wobble1 = 1 + innerJitter[seg + 1] * 0.12;
-    const rOuter0 = outerRadius * j0;
-    const rOuter1 = outerRadius * j1;
-    const rInner0 = innerRadius * j0 * wobble0;
-    const rInner1 = innerRadius * j1 * wobble1;
+    // Water-side edge = the actual coastline radius at this angle (+overlap),
+    // so the sand rises outward along the flared sides exactly with the water.
+    const rOuter0 = waterEdgeRadius(Math.abs(phi0)) * shoreJitter(phi0) + overlap;
+    const rOuter1 = waterEdgeRadius(Math.abs(phi1)) * shoreJitter(phi1) + overlap;
+    const rInner0 = rOuter0 - beachWidth * wobble0;
+    const rInner1 = rOuter1 - beachWidth * wobble1;
     const pInner0 = [Math.cos(a0) * rInner0, 0, Math.sin(a0) * rInner0];
     const pInner1 = [Math.cos(a1) * rInner1, 0, Math.sin(a1) * rInner1];
     const pOuter0 = [Math.cos(a0) * rOuter0, 0, Math.sin(a0) * rOuter0];

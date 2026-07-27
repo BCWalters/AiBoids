@@ -122,7 +122,13 @@ export function createMountainRing(gapAngle: number, gapHalfWidth: number): THRE
   // sighting report was tracking down. Giving the core a genuine flat
   // factor=1 plateau across gapHalfWidth, with the smoothstep blend only
   // in a short zone beyond it, produces a true fully-open notch.
-  const transitionWidth = gapHalfWidth * 0.6;
+  // Shortened from 0.6 so the range climbs back to full height quickly once
+  // past the open core. With the longer ramp the headlands flanking the bay
+  // were still barely above sea level exactly where they met the shoreline,
+  // so instead of mountains running down into the water you saw a low, flat
+  // shelf there. A steeper ramp gives the bay actual headlands standing at
+  // the waterline.
+  const transitionWidth = gapHalfWidth * 0.35;
   function angleDelta(a: number): number {
     let d = a - gapAngle;
     while (d > Math.PI) d -= Math.PI * 2;
@@ -136,6 +142,26 @@ export function createMountainRing(gapAngle: number, gapHalfWidth: number): THRE
     const t = 1 - (d - gapHalfWidth) / transitionWidth;
     // smoothstep for a gentle transition rather than a hard edge
     return t * t * (3 - 2 * t);
+  }
+
+  // Near the bay the ring's foot is pulled radially INWARD, from its normal
+  // outerRadius (6.1) down to footRadius (5.05 — just inside the beach's own
+  // landward edge). The ocean's shoreline beside the bay mouth sits at radius
+  // ~5.6, well inside the mountains' normal base, which left a wedge of bare
+  // grass showing between the sand and the foot of the range on both flanks.
+  // Extending only the foot (the ridge line stays put) makes the slope lean
+  // away from the viewer as it climbs — reading as a hillside running down
+  // into the water — without the peaks bulging inward and eating into the
+  // open view of the sea through the notch.
+  const footRadius = 5.05;
+  // How far past the height-transition zone the foot keeps reaching inward
+  // before easing back to the normal ring radius, so the headlands meet the
+  // water over a broad, natural arc rather than a sharp local dent.
+  const footReach = 0.6;
+  function footRadiusAt(a: number): number {
+    const proximity =
+      1 - THREE.MathUtils.smoothstep(angleDelta(a), gapHalfWidth, gapHalfWidth + transitionWidth + footReach);
+    return THREE.MathUtils.lerp(outerRadius, footRadius, proximity);
   }
 
   const positions: number[] = [];
@@ -170,20 +196,26 @@ export function createMountainRing(gapAngle: number, gapHalfWidth: number): THRE
     // mountainColorAt. Real per-step samples let color vary up the
     // slope itself, not just around the ring.
     const radialSteps = 5;
+    // Per-angle base radius so the foot can reach inward to the waterline
+    // beside the bay (see footRadiusAt) while the ridge line stays fixed.
+    const base0 = footRadiusAt(a0);
+    const base1 = footRadiusAt(a1);
     for (let s = 0; s < radialSteps; s++) {
       const tA = s / radialSteps;
       const tB = (s + 1) / radialSteps;
-      const rA = THREE.MathUtils.lerp(outerRadius, innerRadius, tA);
-      const rB = THREE.MathUtils.lerp(outerRadius, innerRadius, tB);
+      const rA0 = THREE.MathUtils.lerp(base0, innerRadius, tA);
+      const rB0 = THREE.MathUtils.lerp(base0, innerRadius, tB);
+      const rA1 = THREE.MathUtils.lerp(base1, innerRadius, tA);
+      const rB1 = THREE.MathUtils.lerp(base1, innerRadius, tB);
       const hA0 = h0 * tA;
       const hB0 = h0 * tB;
       const hA1 = h1 * tA;
       const hB1 = h1 * tB;
 
-      const p00 = [Math.cos(a0) * rA, hA0, Math.sin(a0) * rA];
-      const p01 = [Math.cos(a1) * rA, hA1, Math.sin(a1) * rA];
-      const p10 = [Math.cos(a0) * rB, hB0, Math.sin(a0) * rB];
-      const p11 = [Math.cos(a1) * rB, hB1, Math.sin(a1) * rB];
+      const p00 = [Math.cos(a0) * rA0, hA0, Math.sin(a0) * rA0];
+      const p01 = [Math.cos(a1) * rA1, hA1, Math.sin(a1) * rA1];
+      const p10 = [Math.cos(a0) * rB0, hB0, Math.sin(a0) * rB0];
+      const p11 = [Math.cos(a1) * rB1, hB1, Math.sin(a1) * rB1];
 
       const c00 = mountainColorAt(a0, hA0);
       const c01 = mountainColorAt(a1, hA1);
