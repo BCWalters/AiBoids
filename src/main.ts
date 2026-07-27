@@ -165,11 +165,17 @@ window.addEventListener('resize', () => {
   resizeCanvases();
 });
 
-// Creature View: left-click on the 3D canvas selects the nearest creature
-// (only active when followCamMode === 'orbit'; inert otherwise).
-canvas3D.addEventListener('click', (e) => {
+// Creature View: pointer-aware selection on the 3D canvas.
+// pointerdown records the start position; pointerup selects only when the
+// pointer has not moved beyond the drag threshold (stationary click).
+// Drags used to orbit/pan the camera are silently ignored.
+// (Only active when followCamMode === 'orbit'; inert otherwise.)
+canvas3D.addEventListener('pointerdown', (e) => {
+  followCamController.handlePointerDown(e);
+});
+canvas3D.addEventListener('pointerup', (e) => {
   if (renderer3D) {
-    followCamController.handleCanvasClick(e, canvas3D, sim, renderer3D);
+    followCamController.handlePointerUp(e, canvas3D, sim, renderer3D);
   }
 });
 

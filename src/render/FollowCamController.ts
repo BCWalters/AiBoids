@@ -8,6 +8,27 @@ import { pickEntity, type EntityForPicking } from './EntityPicker';
 /** Exponential-smoothing rate (1/s) for damping the orbit-controls target. */
 const TARGET_DAMP_RATE = 8;
 
+/** CSS-pixel radius within which a pointer-up is considered a stationary click. */
+export const DRAG_THRESHOLD_PX = 5;
+
+/**
+ * Returns true when the pointer moved more than `thresholdPx` CSS pixels
+ * between a pointerdown and the matching pointerup.
+ *
+ * Pure function — no DOM dependencies, safe to unit-test directly.
+ */
+export function isDragMove(
+  downX: number,
+  downY: number,
+  upX: number,
+  upY: number,
+  thresholdPx = DRAG_THRESHOLD_PX,
+): boolean {
+  const dx = upX - downX;
+  const dy = upY - downY;
+  return dx * dx + dy * dy > thresholdPx * thresholdPx;
+}
+
 /**
  * Implements the Creature View (Lane A, Tier 1 "orbit-lock") follow-cam
  * feature. When `params.followCamMode === 'orbit'`:
@@ -26,6 +47,11 @@ export class FollowCamController {
   private selectedIsPredator = false;
   private readonly hud: HTMLElement;
 
+  // Pointer-down coordinates for drag-vs-click discrimination.
+  private _pointerDownX = 0;
+  private _pointerDownY = 0;
+  private _hasPointerDown = false;
+
   constructor(container: HTMLElement) {
     this.hud = document.createElement('div');
     this.hud.id = 'creature-inspector';
@@ -35,9 +61,42 @@ export class FollowCamController {
   }
 
   /**
-   * Call from a 'click' event listener on the 3D canvas.
+   * Call from a `pointerdown` event listener on the 3D canvas.
+   * Records the start position for drag-vs-click discrimination.
+   * Only the primary (left) button participates.
+   */
+  handlePointerDown(event: PointerEvent): void {
+    if (event.button !== 0) return;
+    this._pointerDownX = event.clientX;
+    this._pointerDownY = event.clientY;
+    this._hasPointerDown = true;
+  }
+
+  /**
+   * Call from a `pointerup` event listener on the 3D canvas.
+   * Runs the creature-selection path only when the pointer has not moved
+   * beyond `DRAG_THRESHOLD_PX` since the matching `handlePointerDown`.
+   * Movements above the threshold (orbit/pan drags) leave the current
+   * selection untouched.
+   */
+  handlePointerUp(
+    event: PointerEvent,
+    canvas: HTMLCanvasElement,
+    sim: Simulation,
+    renderer3D: Renderer3D,
+  ): void {
+    if (event.button !== 0 || !this._hasPointerDown) return;
+    this._hasPointerDown = false;
+    if (isDragMove(this._pointerDownX, this._pointerDownY, event.clientX, event.clientY)) return;
+    this.handleCanvasClick(event, canvas, sim, renderer3D);
+  }
+
+  /**
    * Picks the creature nearest the pointer (within the default threshold)
    * or deselects if the pointer is too far from any entity.
+   *
+   * Called internally by `handlePointerUp` for stationary clicks.
+   * May also be called directly when drag detection is handled upstream.
    */
   handleCanvasClick(
     event: MouseEvent,
