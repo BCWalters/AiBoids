@@ -218,7 +218,7 @@ export const defaultParams: SimParams = {
 
   // Visual FX feature flags — default off/neutral (no visual change until a
   // feature lane wires up the reads).
-  followCamMode: 'off',
+  followCamMode: 'orbit',
   showCreatureInspector: true,
   colorGradingEnabled: false,
   depthOfFieldEnabled: false,
