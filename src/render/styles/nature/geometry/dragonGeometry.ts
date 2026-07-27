@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { mergeGeometriesWithColor, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
+import { buildDiscCapGeometry, mergeGeometriesWithColor, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
 
 /**
  * "Dragon" predator geometry: a bulkier, longer-necked lathed body with a
@@ -121,33 +121,6 @@ function buildTube(path: THREE.Vector3[], radii: number[], sides = 6): number[] 
   }
 
   return positions;
-}
-
-/**
- * A flat, double-sided disc in the XY plane at local Y = `y`, used to
- * seal the open ring the body lathe leaves at the snout tip so it no
- * longer reads as a see-through hole. Double-sided (each wedge emitted
- * with both windings) so it looks solid from both in front and inside.
- * Same pattern as buildTailCapGeometry in smallBirdGeometry.ts.
- */
-function buildSnoutCapGeometry(y: number, radius: number, segments: number): THREE.BufferGeometry {
-  const positions: number[] = [];
-  for (let i = 0; i < segments; i++) {
-    const a0 = (i / segments) * Math.PI * 2;
-    const a1 = ((i + 1) / segments) * Math.PI * 2;
-    const x0 = Math.cos(a0) * radius;
-    const z0 = Math.sin(a0) * radius;
-    const x1 = Math.cos(a1) * radius;
-    const z1 = Math.sin(a1) * radius;
-    positions.push(
-      0, y, 0, x0, y, z0, x1, y, z1,
-      0, y, 0, x1, y, z1, x0, y, z0,
-    );
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.computeVertexNormals();
-  return geometry;
 }
 
 /**
@@ -288,11 +261,22 @@ export function computeDragonMouthTransform(length: number): {
   };
 }
 
-function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeometry {
-  const halfLen = length * 0.5;
-  const profile = [
-    new THREE.Vector2(width * 0.04, -halfLen * 1.0), // tail root
-    new THREE.Vector2(width * 0.24, -halfLen * 0.68),
+// Body rump constants — used by both buildDragonBodyGeometry (profile endpoints
+// + rear cap) and by the eye-conforming code (profile sampling), so defined
+// here rather than inlined in each call site.
+const RUMP_Y_FRACTION = 0.70; // body ends at -halfLen * 0.70 (tail root at 0.5 is buried ~0.2*halfLen inside)
+const RUMP_R_SCALE    = 0.26; // rump cross-section radius as a fraction of width — broad disc, not a near-point
+
+/**
+ * The authored silhouette control points for the body lathe, extracted as a
+ * named function so both buildDragonBodyGeometry (which builds the lathe) and
+ * dragonBodyRadiusAtY (which samples the profile for eye placement) work from
+ * exactly the same source — keeping them in sync automatically rather than
+ * relying on two independently-maintained copies that can drift apart.
+ */
+function buildDragonBodyProfile(halfLen: number, width: number): THREE.Vector2[] {
+  return [
+    new THREE.Vector2(width * RUMP_R_SCALE, -halfLen * RUMP_Y_FRACTION), // rump (#206: broad disc, shortened taper)
     new THREE.Vector2(width * 0.52, -halfLen * 0.32), // haunch bulge (bulkier than hawk)
     new THREE.Vector2(width * 0.46, halfLen * 0.02), // chest
     new THREE.Vector2(width * 0.28, halfLen * 0.24), // neck taper start
@@ -302,28 +286,62 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
     new THREE.Vector2(width * 0.22, halfLen * 0.68), // undercut behind the nostril bump — breaks up the smooth beak curve
     new THREE.Vector2(width * 0.14, halfLen * 0.8), // snout base — narrows sharply, no round head bulge
     new THREE.Vector2(width * 0.08, halfLen * 0.94), // snout mid
-    new THREE.Vector2(width * 0.015, halfLen * SNOUT_TIP_FRACTION), // elongated snout tip, past the body's nominal length
+    new THREE.Vector2(width * 0.015, halfLen * SNOUT_TIP_FRACTION), // elongated snout tip
   ];
+}
+
+/**
+ * Samples the body lathe profile to return the radius (X half-width of the
+ * lathe at that Y cross-section) at the given pre-neck-bend Y coordinate.
+ * Used by buildDragonFaceDetailsGeometry to position each iris/pupil disc
+ * vertex flush with the skull surface rather than at a hardcoded offset that
+ * can drift out of agreement with the profile shape — the root cause that made
+ * ~69 % of pupil vertices sit inside the skull (#201 follow-up).
+ */
+function dragonBodyRadiusAtY(y: number, halfLen: number, width: number): number {
+  const profile = buildDragonBodyProfile(halfLen, width);
+  const samples = new THREE.SplineCurve(profile).getPoints(128);
+  // Profile Y increases monotonically (rump → snout), so a simple linear scan
+  // works; binary search would be faster but the 17 iris+pupil vertices per
+  // side call this at most ~34 times per geometry build, so it is not a hotspot.
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i].y >= y) {
+      const s0 = samples[i - 1], s1 = samples[i];
+      const span = s1.y - s0.y;
+      const t = Math.abs(span) < 1e-8 ? 0 : THREE.MathUtils.clamp((y - s0.y) / span, 0, 1);
+      return THREE.MathUtils.lerp(s0.x, s1.x, t);
+    }
+  }
+  return samples[samples.length - 1].x;
+}
+
+function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeometry {
+  const halfLen = length * 0.5;
+  const profile = buildDragonBodyProfile(halfLen, width);
   // Spline-resample the authored silhouette so the flat-shaded lathe reads
   // as a smooth surface (many gently-varying facets) instead of a few long
   // banded ones; raise radial segments to 32 for the same reason.
   const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
   const latheGeometry = new THREE.LatheGeometry(smoothProfile, 32);
-  // Seal the open snout-tip lathe ring with a double-sided disc cap so it no
-  // longer reads as a see-through hole when viewed straight on from the front.
-  // The snout tip is the last profile point: radius = width * 0.015, Y = halfLen * SNOUT_TIP_FRACTION.
-  const snoutCap = buildSnoutCapGeometry(halfLen * SNOUT_TIP_FRACTION, width * 0.015, 16);
+  // Seal the open snout-tip lathe ring with a disc cap so it no longer reads
+  // as a see-through hole viewed straight on from the front.
+  const snoutCap = buildDiscCapGeometry(halfLen * SNOUT_TIP_FRACTION, width * 0.015, 16);
+  // Seal the open rump lathe ring with a disc cap (#206: broad end-disc so
+  // the butt doesn't read as a see-through hole from behind).
+  const rumpCap = buildDiscCapGeometry(-halfLen * RUMP_Y_FRACTION, width * RUMP_R_SCALE, 16);
   const frillGeometry = buildDragonFrillGeometry(length, width, halfLen);
   const faceParts = buildDragonFaceDetailsGeometry(width, halfLen);
   const bodyColor = new THREE.Color(0xffffff);
   const merged = mergeGeometriesWithColor([
     { geometry: latheGeometry, color: bodyColor },
     { geometry: snoutCap, color: bodyColor },
+    { geometry: rumpCap, color: bodyColor },
     { geometry: frillGeometry, color: bodyColor },
     ...faceParts,
   ]);
   latheGeometry.dispose();
   snoutCap.dispose();
+  rumpCap.dispose();
   frillGeometry.dispose();
   for (const part of faceParts) part.geometry.dispose();
 
@@ -349,13 +367,12 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
  * (iris + pupil), a pair of nostril bumps near the snout tip, and a pair
  * of short mouth-line accents below the snout tip to suggest a closed jaw.
  *
- * Eyes (#201): flat co-planar CircleGeometry discs facing outward along ±X.
- * The iris (orangish-yellow) is slightly elongated along the head's
- * forward axis (Y) to give an almond/cat-eye shape. The pupil (black) sits
- * on top with a tiny outward X-offset (width * 0.001) to avoid z-fighting
- * without any visible gap — chosen over the spherical-cap approach because
- * it is simpler to reason about and introduces zero polygon-offset
- * state changes into the shared render pipeline.
+ * Eyes (#201 + follow-up): flat co-planar CircleGeometry discs facing outward
+ * along ±X. The iris (orangish-yellow) is slightly elongated along the head's
+ * forward axis (Y) to give an almond/cat-eye shape. Each vertex's X coordinate
+ * is derived from the body profile radius at that vertex's own Y (not from a
+ * constant offset), so the disc conforms to the skull's curvature rather than
+ * cutting through it where the skull bulges widest.
  *
  * Snout (#202): nostrils are positioned close to the snout tip and are kept
  * small so they read as dark accents without creating holes of their own.
@@ -375,16 +392,24 @@ function buildDragonFaceDetailsGeometry(
   // rotateY(±π/2) the normal maps to ±X (outward) and the disc's local Y maps
   // to world Y (head-forward) — so scaling local Y by eyeElong before rotation
   // elongates the eye along the head-forward ("horizontal") direction.
-  const irisRadius = width * 0.085; // slightly larger than the old icosahedra eye
+  //
+  // Each disc vertex's X is set to the body-profile surface radius at that
+  // vertex's own Y coordinate plus a small standoff (see dragonBodyRadiusAtY).
+  // A constant eyeX would drift out of agreement with the profile's curvature:
+  // the skull bulges widest near the eye centre, so a flat disc at one constant
+  // X intersects the skull there while its fore/aft tips float in air — the
+  // fix that #201 needed but that #201 didn't deliver.
+  const irisRadius = width * 0.085;
   const pupilRadius = irisRadius * 0.48;
   const eyeElong = 1.35; // horizontal stretch: almond/cat-eye shape
-  const eyeX = width * 0.23; // pushed slightly outward from the skull surface
   const eyeY = halfLen * 0.585; // forward of the jaw hinge / brow ridge
   const eyeZ = width * 0.07; // slightly above the head's centre-line
-  // Tiny outward offset (along ±X) keeps the pupil disc above the iris without
-  // any visible gap — prevents z-fighting for co-planar discs sharing the same
-  // centre and orientation.
-  const pupilOffset = width * 0.001;
+  // Small standoff beyond the profile surface — enough to ensure no vertex
+  // is ever inside even with floating-point rounding, but small enough that
+  // the disc isn't visibly hovering at grazing angles.
+  const eyeStandoff = width * 0.012;
+  // Additional tiny offset for the pupil to prevent z-fighting against the iris.
+  const pupilOffset = width * 0.003;
 
   const irisColor = new THREE.Color(0xff9010); // orangish-yellow
   const pupilColor = new THREE.Color(0x040204); // near-black
@@ -392,22 +417,40 @@ function buildDragonFaceDetailsGeometry(
   const parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
 
   for (const side of [-1, 1] as const) {
-    const sx = side * eyeX;
     // rotateY(+π/2) → face +X (right eye outward); rotateY(-π/2) → face -X (left eye outward)
     const rotAngle = side * Math.PI / 2;
     const rotMat = new THREE.Matrix4().makeRotationY(rotAngle);
 
-    // Iris
+    // Iris — after rotateY(±π/2), every vertex has X = 0 and Y = r·sin(θ)·eyeElong.
+    // We replace X with the profile surface radius at (eyeY + vertex.Y) + standoff
+    // so the disc hugs the skull rather than intersecting it.
     const iris = new THREE.CircleGeometry(irisRadius, 16);
-    iris.scale(1, eyeElong, 1); // elongate local Y → world Y (head-forward) after rotation
+    iris.scale(1, eyeElong, 1);
     iris.applyMatrix4(rotMat);
-    iris.translate(sx, eyeY, eyeZ);
+    {
+      const pos = iris.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const r = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
+        pos.setX(i, side * (r + eyeStandoff));
+      }
+      pos.needsUpdate = true;
+    }
+    iris.translate(0, eyeY, eyeZ);
 
-    // Pupil — slightly smaller, tiny outward (±X) offset to prevent z-fighting
+    // Pupil — same surface-conforming treatment, plus pupilOffset so it sits
+    // just proud of the iris (z-fighting prevention only, not a depth cue).
     const pupil = new THREE.CircleGeometry(pupilRadius, 12);
-    pupil.scale(1, eyeElong * 0.85, 1); // slightly less elongated (more round pupil)
+    pupil.scale(1, eyeElong * 0.85, 1);
     pupil.applyMatrix4(rotMat);
-    pupil.translate(sx + side * pupilOffset, eyeY, eyeZ);
+    {
+      const pos = pupil.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        const r = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
+        pos.setX(i, side * (r + eyeStandoff + pupilOffset));
+      }
+      pos.needsUpdate = true;
+    }
+    pupil.translate(0, eyeY, eyeZ);
 
     parts.push(
       { geometry: iris, color: irisColor },

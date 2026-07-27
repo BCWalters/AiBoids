@@ -4,7 +4,7 @@ import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
   buildEyeDotsGeometry,
-  buildTailCapGeometry,
+  buildDiscCapGeometry,
   singleLegPart,
   swayingTailRig,
 } from '../../../geometry/sharedGeometry';
@@ -247,7 +247,7 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   // Seal the open tail-end lathe ring with a double-sided disc cap so it no
   // longer reads as a transparent hole when viewed from behind.
   const tailTip = controlPoints[0];
-  const tailCap = buildTailCapGeometry(tailTip.y, tailTip.x, 32);
+  const tailCap = buildDiscCapGeometry(tailTip.y, tailTip.x, 32);
 
   // When a dorsal gradient is baked, the body vertices at the tail tip blend
   // between tailBelly (ventral) and tailBack (dorsal). The cap sits at tY≈1
