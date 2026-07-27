@@ -316,14 +316,26 @@ const CREATURE_TABLE: CreatureCase[] = [
 
 describe('part proximity invariant — every part stays near its body', () => {
   for (const creature of CREATURE_TABLE) {
-    it(`${creature.name}: all parts within 3× body-radius after ${FRAMES} frames`, () => {
+    it(`${creature.name}: all parts within 0.25× body-radius after ${FRAMES} frames`, () => {
       const geom = creature.makeGeometries();
       const batch = makeBatch(geom);
       const radius = bodyRadius(geom);
-      /** Parts may legitimately sit up to 3 body-radii from the body center
-       * (e.g. spread wings, dangling legs).  A part at (0,0,0) while the body
-       * is at (200,100,150) is 271 units away — always beyond this tolerance. */
-      const tolerance = radius * 3;
+      /**
+       * Tolerance: 0.25× the body's bounding-sphere radius.
+       *
+       * This checks that every part's **instance matrix translation** stays
+       * close to the body's instance matrix translation — i.e. the transform
+       * written by updateInstances is anchored to the creature's world
+       * position. It does not assert geometry separation or visual
+       * interpenetration.
+       *
+       * Calibration: the worst observed distance/radius ratio across all 29
+       * part checks is ≈ 0.029 (unicorn hoof after 30 frames of leg swing),
+       * giving ~8× headroom at this multiplier. A tail that reverts to the
+       * identity matrix sits ~271 units from the creature at BODY_POSITION —
+       * always beyond this threshold regardless of creature size.
+       */
+      const tolerance = radius * 0.25;
 
       const boid = makeCreature(creature.name.charCodeAt(0));
       const renderer = new CreatureInstanceRenderer(new THREE.Vector3());
@@ -345,7 +357,7 @@ describe('part proximity invariant — every part stays near its body', () => {
       batch.body.getMatrixAt(0, bodyMat);
       const bodyPos = new THREE.Vector3().setFromMatrixPosition(bodyMat);
 
-      // Assert every part is close to the body.
+      // Assert every part's instance matrix translation is close to the body's.
       for (const { label, mesh } of collectParts(batch)) {
         const partMat = new THREE.Matrix4();
         mesh.getMatrixAt(0, partMat);
@@ -353,7 +365,7 @@ describe('part proximity invariant — every part stays near its body', () => {
         const dist = partPos.distanceTo(bodyPos);
         expect(
           dist,
-          `part '${label}' in '${creature.name}': distance ${dist.toFixed(2)} exceeds tolerance ${tolerance.toFixed(2)} (bodyRadius=${radius.toFixed(2)} × 3)`,
+          `part '${label}' in '${creature.name}': distance ${dist.toFixed(4)} exceeds tolerance ${tolerance.toFixed(4)} (bodyRadius=${radius.toFixed(4)} × 0.25)`,
         ).toBeLessThan(tolerance);
       }
     });
