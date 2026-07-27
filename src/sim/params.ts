@@ -216,11 +216,11 @@ export const defaultParams: SimParams = {
   // feature lane wires up the reads).
   followCamMode: 'orbit',
   showCreatureInspector: true,
-  colorGradingEnabled: false,
-  depthOfFieldEnabled: false,
-  waterWavesEnabled: false,
-  waterReflectionsEnabled: false,
-  depthMurkEnabled: false,
+  colorGradingEnabled: true,
+  depthOfFieldEnabled: true,
+  waterWavesEnabled: true,
+  waterReflectionsEnabled: true,
+  depthMurkEnabled: true,
   enableDiagnosticsCapture: false,
   predatorCatchEnabled: true,
 

@@ -225,6 +225,22 @@ body {
   margin-bottom: 12px;
 }
 
+.control-subsection {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 8px 0;
+  margin-bottom: 12px;
+}
+
+.control-subsection-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
 .control-label-row {
   display: flex;
   justify-content: space-between;
