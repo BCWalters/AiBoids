@@ -254,8 +254,6 @@ export class ControlPanel {
         visualFxChildren.push(this.buildBooleanToggle('waterReflectionsEnabledLabel', 'param-water-reflections-enabled', 'waterReflectionsEnabled'));
       }
       if (params.visualStyle === 'fishtank') {
-        visualFxChildren.push(this.buildBooleanToggle('tankDecorEnabledLabel', 'param-tank-decor-enabled', 'tankDecorEnabled'));
-        visualFxChildren.push(this.buildBooleanToggle('bubblesEnabledLabel', 'param-bubbles-enabled', 'bubblesEnabled'));
         visualFxChildren.push(this.buildBooleanToggle('depthMurkEnabledLabel', 'param-depth-murk-enabled', 'depthMurkEnabled'));
       }
       this.container.appendChild(this.buildSection('visualFx', t('sectionVisualFx'), visualFxChildren, false));
