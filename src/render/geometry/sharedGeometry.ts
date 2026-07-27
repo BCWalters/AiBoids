@@ -12,8 +12,14 @@ import type { RigPartDeclaration } from '../motion/rig';
  * Keeping this split clean lets multiple agents/contributors work on
  * separate creatures/scenes without colliding in one giant module.
  */
-export interface CreatureGeometries {
-  body: THREE.BufferGeometry;
+/**
+ * Fraction of a legs geometry's height treated as the attachment slice when
+ * locating the hip. Wide enough to catch the whole top ring of vertices,
+ * narrow enough not to drift down the leg toward the foot.
+ */
+const ATTACHMENT_BAND_FRACTION = 0.15;
+
+export interface CreatureGeometries {  body: THREE.BufferGeometry;
   wingLeft: THREE.BufferGeometry;
   wingRight: THREE.BufferGeometry;
   tail?: THREE.BufferGeometry;
@@ -48,23 +54,63 @@ export interface CreatureLegPart extends RigPartDeclaration {
 }
 
 /**
- * Wraps a single merged legs geometry as a one-part rig, pivoting about the top
- * of its own bounding box.
+ * Wraps a single merged legs geometry as a one-part rig, pivoting about the
+ * point where the legs actually meet the body.
  *
- * Legs are modelled hanging along -Z, so the top of that box is where they meet
- * the body — measuring it beats asking each scene for a hip coordinate in model
- * units it has no way to know. Creatures that want a real jointed leg declare
- * their pivots explicitly instead of calling this.
+ * Both coordinates are measured off the geometry rather than configured.
+ * Legs are modelled hanging along -Z, so the top of the bounding box gives
+ * the height of the attachment; the mean Y of the vertices up at that
+ * height gives its fore-aft position. Measuring beats asking each scene for
+ * a hip coordinate in model units it has no way to know.
+ *
+ * The Y term matters more than it looks. It was originally left at 0, on the
+ * assumption that a hip sits near the model origin. Birds' legs attach well
+ * behind it - around y = -0.5 on a body of length 2.2 - so the hinge ran
+ * about half a body-length in front of the real hip, turning a short leg
+ * into a long lever. The foot sat 0.51 from that axis fore-aft but only 0.09
+ * below it, so the speed-proportional tuck swung the feet up through an arc
+ * of the wrong radius and buried them inside the body. Deriving Y shortens
+ * the lever back to the leg's own length, which is what makes the tuck read
+ * as a tuck instead of a retraction.
+ *
+ * Creatures that want a real jointed leg declare their pivots explicitly
+ * instead of calling this.
  */
 export function singleLegPart(geometry: THREE.BufferGeometry): CreatureLegPart[] {
   if (!geometry.boundingBox) geometry.computeBoundingBox();
-  const hipZ = geometry.boundingBox?.max.z ?? 0;
+  const bounds = geometry.boundingBox;
+  // An empty geometry yields a bounding box of +/-Infinity rather than a
+  // degenerate one, which would otherwise propagate a non-finite pivot into
+  // the matrix chain and blank the creature out.
+  const hasBounds = bounds != null && Number.isFinite(bounds.max.z) && Number.isFinite(bounds.min.z);
+  const hipZ = hasBounds ? bounds.max.z : 0;
+
+  // Average across the topmost slice rather than taking a single extreme
+  // vertex, so a lone spur or a stray cap vertex can't drag the hinge off
+  // to one side.
+  let hipY = 0;
+  const position = geometry.getAttribute('position');
+  if (hasBounds && position) {
+    const band = (bounds.max.z - bounds.min.z) * ATTACHMENT_BAND_FRACTION;
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < position.count; i++) {
+      if (position.getZ(i) >= hipZ - band) {
+        sum += position.getY(i);
+        count++;
+      }
+    }
+    if (count > 0) hipY = sum / count;
+  }
+
   return [
     {
       role: 'legs',
       group: 'legs',
       geometry,
-      pivot: [0, 0, hipZ],
+      // X stays 0: the swing axis *is* X, so left and right legs share one
+      // hinge line however far apart they are stood.
+      pivot: [0, hipY, hipZ],
       axis: [1, 0, 0],
       drive: { source: 'legSwing' },
     },
