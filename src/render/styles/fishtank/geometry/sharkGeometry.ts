@@ -83,7 +83,7 @@ const BODY_HEIGHT_STRETCH = 1.08; // very slightly taller dorsal-to-ventral
 // estimate, so there's no visible gap/floating seam between fin base
 // and body surface.
 function buildSharkBodyProfile(halfLen: number, width: number): THREE.Vector2[] {
-  return [
+  const controlPoints = [
     new THREE.Vector2(width * 0.015, -halfLen * 1.0), // peduncle tip, where the caudal fin attaches
     new THREE.Vector2(width * 0.07, -halfLen * 0.8), // slender peduncle
     new THREE.Vector2(width * 0.19, -halfLen * 0.52), // rear body widening
@@ -92,30 +92,71 @@ function buildSharkBodyProfile(halfLen: number, width: number): THREE.Vector2[] 
     new THREE.Vector2(width * 0.24, halfLen * 0.32), // shoulder, head taper begins
     new THREE.Vector2(width * 0.15, halfLen * 0.56), // snout base
     new THREE.Vector2(width * 0.07, halfLen * 0.78), // snout narrows further
-    new THREE.Vector2(width * 0.01, halfLen * 0.97), // pointed snout tip
+    new THREE.Vector2(width * 0.01, halfLen * 0.97), // snout tip (open lathe ring — capped by a disc below)
   ];
+  // Resample the authored silhouette along a smooth spline so the flat-shaded
+  // lathe reads as a smooth surface with many gently-varying facets instead of
+  // a few long banded ones (matches the barracuda body treatment).
+  return new THREE.SplineCurve(controlPoints).getPoints(66);
 }
 
 function buildSharkBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = buildSharkBodyProfile(halfLen, width);
-  const body = new THREE.LatheGeometry(profile, 14);
-  body.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
+  const body = new THREE.LatheGeometry(profile, 32);
+  // The lathe leaves the snout profile's final ring open (a small hole at the
+  // tip) which reads as a transparent see-through dot. Seal it with a flat
+  // disc matching that ring, merged before the squash/stretch so the cap
+  // inherits the body's elliptical cross-section.
+  const tip = profile[profile.length - 1];
+  const snoutCap = buildSnoutCapGeometry(tip.y, tip.x, 32);
+  const bodyShell = mergePositionOnlyGeometries([body, snoutCap]);
+  bodyShell.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
 
   const dorsalFins = buildDorsalFinsGeometry(length, width, profile);
-  const gillSlits = buildGillSlitsGeometry(length, width);
+  const gillSlits = buildGillSlitsGeometry(length, width, profile);
 
   const eyeY = halfLen * 0.48;
-  const eyeX = width * 0.17 * BODY_SIDE_SQUASH;
-  const eyeZ = width * 0.01 * BODY_HEIGHT_STRETCH;
   const eyeRadius = width * 0.04;
+  // Sink the eye sphere so its center sits just inside the body surface at its
+  // row — only a small cap pokes out as the eye, instead of the whole sphere
+  // standing proud of the head.
+  const eyeSurfaceX = latheBodyRadiusAt(eyeY, profile) * BODY_SIDE_SQUASH;
+  const eyeX = eyeSurfaceX - eyeRadius * 0.5;
+  const eyeZ = width * 0.01 * BODY_HEIGHT_STRETCH;
   const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
 
   return mergeGeometriesWithColor([
-    { geometry: mergePositionOnlyGeometries([body, dorsalFins]), color: WHITE_VERTEX_COLOR },
+    { geometry: mergePositionOnlyGeometries([bodyShell, dorsalFins]), color: WHITE_VERTEX_COLOR },
     { geometry: gillSlits, color: GILL_SLIT_COLOR },
     { geometry: eyes, color: EYE_COLOR },
   ]);
+}
+
+/**
+ * A flat, double-sided disc in the XZ plane at local Y = `y`, used to seal the
+ * open ring the lathe leaves at the snout tip so it no longer reads as a
+ * see-through hole. Double-sided (each wedge emitted with both windings) so it
+ * looks solid whether the camera sees the snout from in front or behind.
+ */
+function buildSnoutCapGeometry(y: number, radius: number, segments: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const x0 = Math.cos(a0) * radius;
+    const z0 = Math.sin(a0) * radius;
+    const x1 = Math.cos(a1) * radius;
+    const z1 = Math.sin(a1) * radius;
+    positions.push(
+      0, y, 0, x0, y, z0, x1, y, z1,
+      0, y, 0, x1, y, z1, x0, y, z0,
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 // Near-black accents baked onto the shark's head/flank — stay visually
@@ -153,7 +194,7 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const mainTipY = -halfLen * 0.08;
   const mainRootZ = latheBodyRadiusAt(mainRootY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
   const mainBackZ = latheBodyRadiusAt(mainBackY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
-  const mainFinHeight = width * 0.85;
+  const mainFinHeight = width * 0.6375;
   const mainRoot = new THREE.Vector3(0, mainRootY, mainRootZ);
   const mainBack = new THREE.Vector3(0, mainBackY, mainBackZ);
   const mainTip = new THREE.Vector3(0, mainTipY, mainRootZ + mainFinHeight);
@@ -165,7 +206,7 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const secondTipY = -halfLen * 0.63;
   const secondRootZ = latheBodyRadiusAt(secondRootY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
   const secondBackZ = latheBodyRadiusAt(secondBackY, profile) * BODY_HEIGHT_STRETCH * DORSAL_FIN_BURY_FRACTION;
-  const secondFinHeight = width * 0.3;
+  const secondFinHeight = width * 0.225;
   const secondRoot = new THREE.Vector3(0, secondRootY, secondRootZ);
   const secondBack = new THREE.Vector3(0, secondBackY, secondBackZ);
   const secondTip = new THREE.Vector3(0, secondTipY, secondRootZ + secondFinHeight);
@@ -185,7 +226,7 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
  * dark smear instead of clean slits) and kept short/shallow so it just
  * grazes the flank as a subtle accent.
  */
-function buildGillSlitsGeometry(length: number, width: number): THREE.BufferGeometry {
+function buildGillSlitsGeometry(length: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const slitCount = 5;
   const slitY = halfLen * 0.22; // just behind the head/shoulder taper, clear of the dorsal fin base
@@ -193,14 +234,15 @@ function buildGillSlitsGeometry(length: number, width: number): THREE.BufferGeom
   const slitHeight = width * 0.16 * BODY_HEIGHT_STRETCH;
   const slitWidthY = length * 0.008;
   const slitDepthX = width * 0.03;
-  // Body radius here (see the profile in buildSharkBodyGeometry) is
-  // roughly 0.24-0.31*width; push the slits' inner edge past that so
-  // they sit proud of the surface instead of half-buried in it.
-  const flankX = width * 0.34 * BODY_SIDE_SQUASH;
 
   const slits: THREE.BufferGeometry[] = [];
   for (let i = 0; i < slitCount; i++) {
     const y = slitY - i * slitSpacingY;
+    // Anchor each slit to the body's actual (squashed) surface radius at its
+    // own Y so the row hugs the tapering flank instead of floating off it,
+    // pulled in just slightly (0.97) so the slits sit a touch tighter to the
+    // body as a subtle accent.
+    const flankX = latheBodyRadiusAt(y, profile) * BODY_SIDE_SQUASH * 0.95;
     for (const side of [1, -1] as const) {
       const slit = new THREE.BoxGeometry(slitDepthX, slitWidthY, slitHeight);
       slit.translate(flankX * side, y, 0);
