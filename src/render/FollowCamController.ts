@@ -20,6 +20,14 @@ const POV_CAM_DAMP_RATE = 6;
  */
 const POV_LOOK_AHEAD_SIM = 50;
 
+/**
+ * Fraction of the creature's forward (nose) extent to push the POV camera past
+ * the model origin, so it sits just ahead of the head looking out — rather than
+ * rendering from inside the body (issue #159). Slightly >1 keeps a small margin
+ * so the beak/snout never pokes into the camera's near plane.
+ */
+const POV_NOSE_FORWARD_FACTOR = 1.1;
+
 /** CSS-pixel radius within which a pointer-up is considered a stationary click. */
 export const DRAG_THRESHOLD_PX = 5;
 
@@ -267,10 +275,12 @@ export class FollowCamController {
   }
 
   /**
-   * Per-frame POV camera update: places the camera at the creature's rendered
-   * position and orients it along the smoothed `renderHeading` with exponential
-   * damping. On the first POV frame the camera snaps to the creature
-   * immediately to avoid a visible fly-in animation.
+   * Per-frame POV camera update: rigidly locks the camera to the creature's
+   * rendered nose (so it always looks out from the head, never from inside or
+   * behind the body — issue #159) and orients it along the smoothed
+   * `renderHeading`. Only the look-ahead target is exponentially damped, which
+   * smooths turning without letting the camera lag behind the body. On the first
+   * POV frame the look target snaps so there is no visible fly-in.
    */
   private updatePovCamera(entity: Boid | Predator, dt: number, renderer3D: Renderer3D): void {
     const renderedPos = renderer3D.toRenderedPosition(
@@ -278,9 +288,28 @@ export class FollowCamController {
       entity.position.y,
       entity.position.z,
     );
+    // Push the camera from the model origin (body centre) forward to the
+    // creature's nose so it looks out from the head instead of from inside the
+    // body (issue #159). renderHeading is a unit direction that is identical in
+    // sim and render space (scene worldScale is uniform), and getCreatureForwardExtent
+    // already returns the nose offset in world units, so we can add it directly.
+    const h = entity.renderHeading;
+    const entityScale = 'scale' in entity ? entity.scale : 1;
+    const noseOffset =
+      renderer3D.getCreatureForwardExtent(entity.species, this.selectedIsPredator, entityScale) *
+      POV_NOSE_FORWARD_FACTOR;
+    // Camera position is rigid (no damping): the creature moves smoothly from
+    // the sim and renderHeading is already smoothed, so locking the camera to
+    // the nose every frame keeps the body consistently behind the camera. Any
+    // position damping here lets the body pull ahead of the lagging camera,
+    // which is exactly what showed the bird's beak/interior.
+    this._povCamPos.set(
+      renderedPos.x + h.x * noseOffset,
+      renderedPos.y + h.y * noseOffset,
+      renderedPos.z + h.z * noseOffset,
+    );
     // Map the look-ahead point through toRenderedPosition so fishtank's 4×
     // scale is applied to both position and direction offset uniformly.
-    const h = entity.renderHeading;
     const lookAheadRender = renderer3D.toRenderedPosition(
       entity.position.x + h.x * POV_LOOK_AHEAD_SIM,
       entity.position.y + h.y * POV_LOOK_AHEAD_SIM,
@@ -288,14 +317,12 @@ export class FollowCamController {
     );
 
     if (!this._povInitialized) {
-      // Snap on the very first POV frame so the camera doesn't interpolate
-      // from whatever position it was at in orbit mode.
-      this._povCamPos.copy(renderedPos);
+      // Snap the look target on the very first POV frame so the camera doesn't
+      // interpolate its aim from whatever it was in orbit mode.
       this._povLookPos.copy(lookAheadRender);
       this._povInitialized = true;
     } else {
       const alpha = 1 - Math.exp(-dt * POV_CAM_DAMP_RATE);
-      this._povCamPos.lerp(renderedPos, alpha);
       this._povLookPos.lerp(lookAheadRender, alpha);
     }
 

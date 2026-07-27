@@ -470,6 +470,11 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     return 1;
   }
 
+  getCreatureMeshScaleBoost(): number {
+    // Nature renders creatures at their base geometry scale (no per-species boost).
+    return 1;
+  }
+
   getBloodSplatterScale(): number {
     return NATURE_BLOOD_SPLATTER_SCALE;
   }
