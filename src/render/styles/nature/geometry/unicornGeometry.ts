@@ -1,11 +1,36 @@
 import * as THREE from 'three';
-import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
+import type { CreatureGeometries, CreatureLegPart } from '../../../geometry/sharedGeometry';
 import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
-  singleLegPart,
 } from '../../../geometry/sharedGeometry';
+import type { PartDrive, Triple } from '../../../motion/rig';
 import { buildFingeredWingGeometry } from './birdSharedGeometry';
+
+/**
+ * How the cannon bone folds relative to the thigh above it.
+ *
+ * The unicorn flies rather than runs, so its legs shouldn't gallop — they
+ * should retract like landing gear as it picks up speed and hang loose when it
+ * slows. The shared leg drive already produces exactly that shape (an
+ * oscillation plus a speed-proportional draw-back), so the knee reuses it with
+ * two changes:
+ *
+ *  - it bends *further* than the hip swings, because in a real fold the lower
+ *    leg closes up more than the thigh rotates, and that closing is what reads
+ *    as a joint rather than a stiff plank
+ *  - it lags slightly behind the hip, since a limb segment is dragged by the
+ *    one above it rather than moving in lockstep with it
+ *
+ * There is deliberately no rest offset: the resting bend is already baked into
+ * the geometry, so leaving this at zero keeps a stationary unicorn posed
+ * exactly as it was before it could bend at all.
+ */
+const UNICORN_KNEE_DRIVE: PartDrive = {
+  source: 'legSwing',
+  amplitudeScale: 1.35,
+  phaseOffsetRad: -0.45,
+};
 
 // Rainbow vertex-color gradients used only by the unicorn's pegasus
 // wings and rainbow tail (violet at the root, red at the tip), read by a
@@ -91,9 +116,9 @@ export function createUnicornGeometries(length: number, width: number): Creature
   wingRight.translate(0, -wingBackOffset, 0);
 
   const tail = buildUnicornTailGeometry(length, width);
-  const legs = buildUnicornLegsGeometry(length, width);
+  const legs = buildUnicornLegParts(length, width);
 
-  return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
+  return { body, wingLeft, wingRight, tail, legs };
 }
 
 
@@ -419,13 +444,29 @@ function buildUnicornEyesGeometry(headTopY: number, headTopZ: number, headTopRad
  * degrees, the lower segment (below the hock) swings forward again to
  * about 30 degrees off vertical (not all the way back to vertical), and
  * the hoof bends backward, same as the front.
+ *
+ * That resting bend used to be purely cosmetic: all four legs shared one mesh,
+ * so they could only rotate as a single rigid unit and the knee angle never
+ * changed — a bend painted onto a plank. The legs are emitted as a four-part
+ * rig instead (front/rear x thigh/lower), so the joints actually articulate.
+ *
+ * Four parts rather than eight because left and right legs of a pair differ
+ * only in X, and the swing axis *is* X — so a single pivot line serves both.
  */
-function buildUnicornLegsGeometry(length: number, width: number): THREE.BufferGeometry {
-  const positions: number[] = [];
-  const colors: number[] = [];
+function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] {
+  // One buffer per rig part rather than one merged buffer for all four legs.
+  // A part can only rotate as a unit, so a segment that needs to bend
+  // independently needs its own vertices.
+  type Buffer = { positions: number[]; colors: number[] };
+  const newBuffer = (): Buffer => ({ positions: [], colors: [] });
+  const frontUpper = newBuffer();
+  const frontLower = newBuffer();
+  const rearUpper = newBuffer();
+  const rearLower = newBuffer();
+  let sink: Buffer = frontUpper;
   const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, color: THREE.Color) => {
-    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-    colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
+    sink.positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    sink.colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
   };
 
   // Outward-normal-safe box segment between two points, with a
@@ -485,7 +526,16 @@ function buildUnicornLegsGeometry(length: number, width: number): THREE.BufferGe
     return { dy: Math.sin(rad) * segLength, dz: -Math.cos(rad) * segLength };
   }
 
-  function buildLeg(hipX: number, hipY: number, hipZ: number, upperAngleDeg: number, lowerAngleDeg: number, hoofAngleDeg: number) {
+  function buildLeg(
+    hipX: number,
+    hipY: number,
+    hipZ: number,
+    upperAngleDeg: number,
+    lowerAngleDeg: number,
+    hoofAngleDeg: number,
+    upperBuffer: Buffer,
+    lowerBuffer: Buffer,
+  ): THREE.Vector3 {
     const legLength = length * 0.38;
     const legHalfWidth = width * 0.09;
     const legHalfDepth = width * 0.07;
@@ -499,12 +549,21 @@ function buildUnicornLegsGeometry(length: number, width: number): THREE.BufferGe
     const hoof = jointOffset(hoofAngleDeg, legLength * 0.16);
     const hoofTip = new THREE.Vector3(flareX, hoofTop.y + hoof.dy, hoofTop.z + hoof.dz);
 
+    // Thigh: rotates about the hip.
+    sink = upperBuffer;
     pushBoxSegment(hip, knee, legHalfWidth, legHalfDepth, true, false, UNICORN_LEG_COLOR);
-    pushBoxSegment(knee, hoofTop, legHalfWidth * 0.85, legHalfDepth * 0.85, false, false, UNICORN_LEG_COLOR);
+
+    // Cannon bone and hoof: rotate about the knee, on top of whatever the
+    // thigh above them is doing. Capping the top of the lower segment keeps
+    // the joint from showing a hollow end once it bends away from the thigh.
+    sink = lowerBuffer;
+    pushBoxSegment(knee, hoofTop, legHalfWidth * 0.85, legHalfDepth * 0.85, true, false, UNICORN_LEG_COLOR);
     // Small squared-off hoof block, tinted dark gray to read as a hoof
     // distinct from the rest of the leg, instead of the dragon's fanned
     // claws.
     pushBoxSegment(hoofTop, hoofTip, legHalfWidth * 0.7, legHalfDepth * 0.7, false, true, UNICORN_HOOF_COLOR);
+
+    return knee;
   }
 
   const frontY = length * 0.02; // near the chest
@@ -526,22 +585,66 @@ function buildUnicornLegsGeometry(length: number, width: number): THREE.BufferGe
 
   // Front legs: jut forward (+35 deg), lower leg sweeps back just past
   // vertical (-15 deg), hoof bends back further (-35 deg).
-  buildLeg(-stanceX, frontY, hipZ, 35, -15, -35);
-  buildLeg(stanceX, frontY, hipZ, 35, -15, -35);
+  const frontKnee = buildLeg(-stanceX, frontY, hipZ, 35, -15, -35, frontUpper, frontLower);
+  buildLeg(stanceX, frontY, hipZ, 35, -15, -35, frontUpper, frontLower);
   // Rear legs: thigh angles back further (-58 deg, was -45 — "top of the
   // leg should point farther backward"), and the hock/knee bend is wider
   // now so the lower leg swings only slightly forward of vertical
   // (-10 deg, was +30 — "bottom half of the legs point slightly
   // backward" instead of forward), hoof bends back (-35 deg) same as
   // the front.
-  buildLeg(-stanceX, backY, hipZ, -58, -10, -35);
-  buildLeg(stanceX, backY, hipZ, -58, -10, -35);
+  const rearKnee = buildLeg(-stanceX, backY, hipZ, -58, -10, -35, rearUpper, rearLower);
+  buildLeg(stanceX, backY, hipZ, -58, -10, -35, rearUpper, rearLower);
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-  geometry.computeVertexNormals();
-  return geometry;
+  const toGeometry = (buffer: Buffer): THREE.BufferGeometry => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buffer.positions), 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(buffer.colors), 3));
+    geometry.computeVertexNormals();
+    return geometry;
+  };
+
+  // Left and right legs of a pair share a part. The swing axis is model-X and
+  // the two differ only in X, so one pivot *line* serves both — which is why
+  // four parts buy a fully jointed leg rather than eight.
+  const swingAxis: Triple = [1, 0, 0];
+
+  return [
+    {
+      role: 'legUpperFront',
+      group: 'legs',
+      geometry: toGeometry(frontUpper),
+      pivot: [0, frontY, hipZ],
+      axis: swingAxis,
+      drive: { source: 'legSwing' },
+    },
+    {
+      role: 'legLowerFront',
+      group: 'legs',
+      geometry: toGeometry(frontLower),
+      pivot: [0, frontKnee.y, frontKnee.z],
+      axis: swingAxis,
+      parent: 0,
+      drive: UNICORN_KNEE_DRIVE,
+    },
+    {
+      role: 'legUpperRear',
+      group: 'legs',
+      geometry: toGeometry(rearUpper),
+      pivot: [0, backY, hipZ],
+      axis: swingAxis,
+      drive: { source: 'legSwing' },
+    },
+    {
+      role: 'legLowerRear',
+      group: 'legs',
+      geometry: toGeometry(rearLower),
+      pivot: [0, rearKnee.y, rearKnee.z],
+      axis: swingAxis,
+      parent: 2,
+      drive: UNICORN_KNEE_DRIVE,
+    },
+  ];
 }
 
 

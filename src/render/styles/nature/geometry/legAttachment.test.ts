@@ -58,4 +58,23 @@ describe('leg attachment convention', () => {
       expect(findRigOrderingViolation(legs)).toBeNull();
     });
   }
+
+  it('gives the unicorn a jointed leg whose lower segment hangs off a knee', () => {
+    const legs = createUnicornGeometries(1, 0.4).legs;
+    expect(legs).toBeTruthy();
+    if (!legs) return;
+
+    // A horse's legs read as stiff unless the knee actually changes angle, and
+    // a part can only rotate as a unit — so the lower segments must be their
+    // own parts, parented to the thigh above them. Collapsing this back into
+    // one mesh would silently restore the rigid-plank look.
+    const jointed = legs.filter((part) => part.parent !== undefined);
+    expect(jointed.length).toBeGreaterThanOrEqual(2);
+
+    for (const part of jointed) {
+      const thigh = legs[part.parent as number];
+      // The knee must sit below the hip it hangs from, or the chain is inverted.
+      expect(part.pivot[2], `${part.role} pivot vs ${thigh.role}`).toBeLessThan(thigh.pivot[2]);
+    }
+  });
 });
