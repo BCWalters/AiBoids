@@ -37,6 +37,9 @@ export interface SmallBirdPalette {
   dorsalGradient: boolean;
   wingGradient: boolean;
   tailGradient: boolean;
+  tailGradientRootColor?: THREE.Color;
+  tailGradientInterpolation?: 'rgb' | 'hsl';
+  tailGradientRootHold?: number;
 }
 
 /**
@@ -116,7 +119,14 @@ export function createRealisticBirdGeometries(
 
   const tail = buildTailGeometry(length, width, {
     narrowScale: BODY_NARROW_SCALE,
-    gradient: palette?.tailGradient ? { root: palette.tail, tip: palette.tailTip } : undefined,
+    gradient: palette?.tailGradient
+      ? {
+          root: palette.tailGradientRootColor ?? palette.tail,
+          tip: palette.tailTip,
+          interpolation: palette.tailGradientInterpolation,
+          rootHold: palette.tailGradientRootHold,
+        }
+      : undefined,
   });
   const legs = buildSmallBirdLegsGeometry(length, width, legsColor);
   const tailRig = swayingTailRig({ pivot: [0, getBirdBodyRearTipY(length), 0], axis: [1, 0, 0] });
