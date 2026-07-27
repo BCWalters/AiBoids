@@ -295,6 +295,18 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     return TANK_VISUAL_SCALE;
   }
 
+  getCreatureMeshScaleBoost(species: PredatorSpecies | BoidSpecies, isPredator: boolean): number {
+    // Mirrors the meshScaleBoost values in getPredatorMotionConfig /
+    // getBoidMotionConfig. `isPredator` disambiguates the shared 'normal'
+    // species string (a barracuda predator vs the standard fish boid).
+    if (isPredator) {
+      if (species === PredatorSpecies.Normal) return FISHTANK_FISH_MESH_BOOST * FISHTANK_BARRACUDA_MESH_BOOST;
+      if (species === PredatorSpecies.Monster) return FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST;
+    }
+    // Horse predator and every boid use the base fish boost.
+    return FISHTANK_FISH_MESH_BOOST;
+  }
+
   getBloodSplatterScale(): number {
     return FISHTANK_BLOOD_SPLATTER_SCALE;
   }

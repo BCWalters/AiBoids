@@ -110,6 +110,7 @@ describe('FollowCamController drag-aware selection', () => {
       enterPovMode: vi.fn(),
       exitPovMode: vi.fn(),
       setPovCamera: vi.fn(),
+      getCreatureForwardExtent: () => 0,
     } as unknown as Renderer3D;
   });
 
@@ -229,6 +230,7 @@ function makeRenderer(): Renderer3D {
     enterPovMode: vi.fn(),
     exitPovMode: vi.fn(),
     setPovCamera: vi.fn(),
+    getCreatureForwardExtent: () => 0,
   } as unknown as Renderer3D;
 }
 

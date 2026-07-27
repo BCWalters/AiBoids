@@ -314,10 +314,16 @@ export class Boid {
     }
 
     // --- Integrate ---
-    this.velocity = V.limit(
+    const newVelocity = V.limit(
       V.add(this.velocity, V.scale(acceleration, dt)),
       p.boidMaxSpeed,
     );
+    // Turn-rate limit: cap how fast the heading may rotate this step so that
+    // high-frequency steering noise doesn't read as a wobbly flight path.
+    // Speed follows newVelocity; only the direction is slewed. dt keeps the
+    // cap framerate-independent (degrees/sec → radians this frame).
+    const maxTurn = (p.boidTurnRateDeg * Math.PI) / 180 * dt;
+    this.velocity = V.limitTurn(this.velocity, newVelocity, maxTurn);
     this.position = V.add(this.position, V.scale(this.velocity, dt));
   }
 }

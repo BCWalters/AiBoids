@@ -237,6 +237,14 @@ export interface SceneRendererHooks {
   setGalleryCreatureActive: (active: boolean) => void;
   getPresentationSettings: () => ScenePresentationSettings;
   getWorldScale: () => number;
+  /**
+   * Per-creature mesh-scale boost applied on top of `getWorldScale()` and the
+   * entity's own scale when rendering (see MotionConfig.meshScaleBoost). Needed
+   * by the POV camera to place itself at the creature's rendered nose instead of
+   * inside its body (issue #159). `isPredator` disambiguates species strings that
+   * collide between boids and predators (e.g. both have a `'normal'`).
+   */
+  getCreatureMeshScaleBoost: (species: PredatorSpecies | BoidSpecies, isPredator: boolean) => number;
   /** World-space scale for the blood-splatter burst spawned when a predator
    * catches prey in this scene. Owned per-scene so each can tune it (or size
    * it relative to that scene's base creature). */

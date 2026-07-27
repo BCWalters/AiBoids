@@ -236,6 +236,11 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     return 1;
   }
 
+  getCreatureMeshScaleBoost(): number {
+    // Arcade renders creatures at their base geometry scale (no per-species boost).
+    return 1;
+  }
+
   getBloodSplatterScale(): number {
     return ARCADE_BLOOD_SPLATTER_SCALE;
   }
