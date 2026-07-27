@@ -19,6 +19,7 @@ const behaviorSpecs: SliderSpec[] = [
   { key: 'perceptionRadius',        labelKey: 'perceptionRadius',        min: 10, max: 200,  step: 5   },
   { key: 'perceptionAngleDeg',      labelKey: 'perceptionAngleDeg',      min: 30, max: 360,  step: 10  },
   { key: 'boidTurnRateDeg',         labelKey: 'boidTurnRateDeg',         min: 0,  max: 720,  step: 10  },
+  { key: 'boidAccelSmoothingTau',   labelKey: 'boidAccelSmoothingTau',   min: 0,  max: 0.5,  step: 0.02 },
   { key: 'separationWeight',        labelKey: 'separationWeight',        min: 0,  max: 4,    step: 0.1 },
   { key: 'alignmentWeight',         labelKey: 'alignmentWeight',         min: 0,  max: 4,    step: 0.1 },
   { key: 'cohesionWeight',          labelKey: 'cohesionWeight',          min: 0,  max: 4,    step: 0.1 },

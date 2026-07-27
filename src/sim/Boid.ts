@@ -59,6 +59,18 @@ export class Boid {
   panicLevel = 0;
 
   /**
+   * Low-pass-filtered steering acceleration (Option B path smoothing). The
+   * raw per-frame steering force jumps around as neighbors pop in and out of
+   * perception and as alignment/cohesion trade off; integrating that noise
+   * directly is a second source of the wobbly flight path (beyond the
+   * turn-rate limit). This carries the smoothed acceleration between frames
+   * so the velocity responds to a filtered force rather than the raw one.
+   * Bypassed (snapped to the raw value) while fleeing so predator escapes
+   * stay instant. Zeroed here and re-derived each frame from params.
+   */
+  private accelSmoothed: Vec3 = { x: 0, y: 0, z: 0 };
+
+  /**
    * Set true the instant a predator catches this boid (see
    * Simulation.checkCatches). While dying, the boid ignores all normal
    * flocking/steering and instead animates a brief "swallowed" sequence:
@@ -314,8 +326,25 @@ export class Boid {
     }
 
     // --- Integrate ---
+    // Option B: low-pass-filter the steering acceleration so high-frequency
+    // force jitter (neighbors popping in/out of perception, alignment vs
+    // cohesion fighting) doesn't drive the velocity directly. Exponential
+    // smoothing toward the raw acceleration with a time constant tau
+    // (framerate-independent). While fleeing we bypass the filter (snap to
+    // the raw force) so predator escapes stay instant, and doing so leaves
+    // accelSmoothed primed at the true force for a seamless resume afterward.
+    if (p.boidAccelSmoothingTau > 0 && fleeCount === 0) {
+      const a = 1 - Math.exp(-dt / p.boidAccelSmoothingTau);
+      this.accelSmoothed = V.add(
+        this.accelSmoothed,
+        V.scale(V.sub(acceleration, this.accelSmoothed), a),
+      );
+    } else {
+      this.accelSmoothed = { x: acceleration.x, y: acceleration.y, z: acceleration.z };
+    }
+
     const newVelocity = V.limit(
-      V.add(this.velocity, V.scale(acceleration, dt)),
+      V.add(this.velocity, V.scale(this.accelSmoothed, dt)),
       p.boidMaxSpeed,
     );
     // Turn-rate limit: cap how fast the heading may rotate this step so that

@@ -128,4 +128,37 @@ describe('Boid.update', () => {
     a.update(1, [a, neighbor], [], bounds);
     expect(distance(create(0, 0, 0), a.velocity)).toBeLessThanOrEqual(params.boidMaxSpeed + 1e-6);
   });
+
+  it('acceleration smoothing damps the first-frame steering response', () => {
+    const cohesionResponse = (tau: number) => {
+      const a = new Boid(create(0, 0, 0), create(0, 0, 0));
+      const neighbor = new Boid(create(40, 0, 0), create(0, 0, 0));
+      params.boidAccelSmoothingTau = tau;
+      a.update(1 / 60, [a, neighbor], [], bounds);
+      return a.velocity.x;
+    };
+    const smoothed = cohesionResponse(0.12);
+    const raw = cohesionResponse(0);
+    // Same direction (toward the neighbor), but the low-pass filter lets
+    // only a fraction of the force through on the first frame.
+    expect(raw).toBeGreaterThan(0);
+    expect(smoothed).toBeGreaterThan(0);
+    expect(smoothed).toBeLessThan(raw);
+  });
+
+  it('acceleration smoothing is bypassed while fleeing so escapes stay instant', () => {
+    const fleeResponse = (tau: number) => {
+      const a = new Boid(create(0, 0, 0), create(0, 0, 0));
+      const predator = new Predator(create(20, 0, 0), create(0, 0, 0), PredatorSpecies.Normal);
+      params.boidAccelSmoothingTau = tau;
+      a.update(1 / 60, [a], [predator], bounds);
+      return a.velocity.x;
+    };
+    const smoothed = fleeResponse(0.5);
+    const raw = fleeResponse(0);
+    // Fleeing bypasses the filter entirely, so the escape response is the
+    // same full-strength push regardless of the smoothing time constant.
+    expect(smoothed).toBeLessThan(0);
+    expect(smoothed).toBeCloseTo(raw);
+  });
 });
