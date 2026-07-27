@@ -151,6 +151,30 @@ AiBoids/
   `applyLegChainColor`, so splitting a creature's legs into more parts doesn't
   ripple back into six colour strategies that don't care how many parts there
   are.
+- **Hinges use matrices; continuous bending uses the vertex shader**: a joint
+  that pivots — leg, knee, jaw, wing, tail — is a rig part posed by
+  `applyArticulatedPartMatrix`. A body that *bends along its length* — a fish
+  spine undulating head-to-tail, a fin trailing, a wing membrane billowing —
+  is displaced per-vertex in a shader patched in via `onBeforeCompile`, with
+  the phase supplied as a per-instance attribute. Splitting a fish body into
+  enough rigid segments to look smooth costs a draw call per segment and still
+  shows seams at the joints, while a shader deforms one mesh at any resolution
+  for roughly nothing at our instance counts.
+
+  The cost is real and worth stating: **GPU displacement is invisible to the
+  CPU.** Pose tests, `EntityPicker` raycasting, and follow-cam framing all see
+  the undeformed mesh. That is acceptable for undulation, where the deformation
+  is small and oscillates about the rest pose, and unacceptable for a hinge,
+  where the limb's actual position is the whole point. Note this cuts against
+  our testing story — a rendering bug that CI could not see is exactly how
+  every tail came to render at the world origin — so keep the amplitude bounded
+  and keep the rest pose meaningful.
+
+  Corollary worth knowing before reaching for a shader: **a fan rooted at a
+  point flares identically under a non-uniform scale as under real per-feather
+  rotation**, because both map the root to itself and spread the free edge
+  proportionally. Bird tail flare therefore needs no shader and no split mesh.
+  Check for that kind of equivalence first.
 
 ## Where to look for common tasks
 
@@ -165,5 +189,6 @@ AiBoids/
 | Tune how creatures move (flap, tail sway) | `src/render/motion/flapMath.ts` |
 | Change where a limb bends | that creature's geometry file (its rig declaration) |
 | Add a new animated body part | `src/render/CreatureInstanceRenderer.ts` (`applyArticulatedPartMatrix`) |
+| Bend a body along its length (undulation, fin flex) | vertex shader via `onBeforeCompile` — not a rig part |
 | Add a new control-panel slider | `src/sim/params.ts` + `src/ui/ControlPanel.ts` |
 | Add a new special event (like the alien invasion) | `src/sim/UFO.ts` + `src/render/ufoEffects.ts` as a template |
