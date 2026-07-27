@@ -278,15 +278,16 @@ export function extrudeRingGeometry(ring: THREE.Vector3[], thickness: number): T
 
 
 /**
- * A flat, double-sided disc in the XZ plane at local Y = `y`, used to seal the
- * open ring a body-lathe leaves at its end tip so it no longer reads as a
- * see-through hole. Double-sided (each wedge emitted with both windings) so it
- * looks solid whether the camera sees the tip from behind or inside.
+ * A flat, double-sided disc cap in the XZ plane at local Y = `y`, used to
+ * seal the open ring a lathe geometry leaves at its end so it no longer reads
+ * as a see-through hole when viewed straight on. Each wedge is emitted with
+ * both windings so it looks solid from both directions (front and inside).
  *
- * Used to cap the tail end of both the small-bird body and the hawk body.
- * Shared here so neither geometry file needs to duplicate the function.
+ * This is the canonical shared implementation of the pattern that also
+ * appears in small-bird tail caps, shark snout caps, and dragon snout/rump
+ * caps - keeping it here prevents the fourth (and fifth) local copy.
  */
-export function buildTailCapGeometry(y: number, radius: number, segments: number): THREE.BufferGeometry {
+export function buildDiscCapGeometry(y: number, radius: number, segments: number): THREE.BufferGeometry {
   const positions: number[] = [];
   for (let i = 0; i < segments; i++) {
     const a0 = (i / segments) * Math.PI * 2;

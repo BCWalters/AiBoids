@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry, buildTailCapGeometry, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
+import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry, buildDiscCapGeometry, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
 import { buildFingeredWingGeometry, buildTailGeometry, buildHookedBeakGeometry, getBirdBodyRearTipY } from './birdSharedGeometry';
 
 /**
@@ -124,7 +124,7 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   // Seal the open tail-end lathe ring with a double-sided disc cap so it no
   // longer reads as a transparent hole when viewed from behind. Colored to
   // match the back plumage so it reads as continuous dark feathering.
-  const tailCap = buildTailCapGeometry(bodyRearY, width * 0.04, 32);
+  const tailCap = buildDiscCapGeometry(bodyRearY, width * 0.04, 32);
 
   // Straighter beak than a macaw's full curl — a bald eagle's beak is
   // mostly straight along its length with the hook concentrated right
