@@ -68,6 +68,14 @@ AiBoids/
       Renderer3D.ts         # shared three.js renderer: scene setup,
                             # instanced meshes, camera/controls,
                             # post-processing, style switching
+      CreatureInstanceRenderer.ts
+                            # poses + colors one creature render batch per
+                            # frame (orientation, flap, tail sway, banking)
+      motion/               # pure creature-motion math (no THREE state):
+                            # flapMath.ts, partTransform.ts — unit tested
+      color/                # per-species color applicators
+      creatureUprightTuning.ts
+                            # per-upright-style tuning tables
       geometry/             # shared geometry helpers
       styles/
         nature/             # outdoor 3D scene
@@ -116,6 +124,19 @@ AiBoids/
   ground texture work extends three.js's built-in `MeshStandardMaterial`
   shader (patching `#include` chunks) rather than writing a full custom
   material, so lighting/shadows/fog integration is inherited for free.
+- **Creature motion math is pure and separate from the renderer**:
+  `src/render/motion/` holds plain functions (flap phase/amplitude, state
+  blending, pivot articulation) with no THREE state and no `this`, unit
+  tested without a WebGL context. `CreatureInstanceRenderer` keeps only the
+  stateful parts — accumulated per-creature phase, scratch objects, matrix
+  composition. Tuning how something moves shouldn't require editing the
+  1000+ line renderer, which also keeps parallel work on different creatures
+  out of the same file.
+- **All articulated parts share one poser**: wings, tails, and any future
+  jaw/neck/leg go through `applyArticulatedPartMatrix`, which rotates a part
+  about an arbitrary model-space pivot. Rotating about the origin is the
+  same code path with a null pivot, so there is one articulation behaviour
+  rather than a bespoke matrix sequence per part.
 
 ## Where to look for common tasks
 
@@ -125,6 +146,9 @@ AiBoids/
 | Change predator/dragon behavior | `src/sim/Predator.ts` |
 | Tweak 3D nature visuals (sky/ground/fog/lakes) | `src/render/styles/nature/environment.ts` |
 | Tweak 3D fishtank visuals (tank/room/props) | `src/render/styles/fishtank/environment.ts` |
-| Change bird/dragon appearance | `src/render/birdGeometry.ts` |
+| Change bird/dragon appearance | `src/render/styles/nature/geometry/` |
+| Change fish/shark appearance | `src/render/styles/fishtank/geometry/` |
+| Tune how creatures move (flap, tail sway) | `src/render/motion/flapMath.ts` |
+| Add a new animated body part | `src/render/CreatureInstanceRenderer.ts` (`applyArticulatedPartMatrix`) |
 | Add a new control-panel slider | `src/sim/params.ts` + `src/ui/ControlPanel.ts` |
 | Add a new special event (like the alien invasion) | `src/sim/UFO.ts` + `src/render/ufoEffects.ts` as a template |
