@@ -134,13 +134,9 @@ function buildBarracudaBodyGeometry(length: number, width: number): THREE.Buffer
  * color gradient onto a lathed body (plus its upper dorsal fins and jaws), so
  * the countershaded silver look survives the per-instance base-color multiply.
  */
-function bakeDorsalVentralGradient(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+function bakeDorsalVentralGradient(geometry: THREE.BufferGeometry, minZ: number, maxZ: number): THREE.BufferGeometry {
   const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
   const position = nonIndexed.getAttribute('position');
-  nonIndexed.computeBoundingBox();
-  const box = nonIndexed.boundingBox!;
-  const minZ = box.min.z;
-  const maxZ = box.max.z;
   const span = maxZ - minZ || 1;
   const colors = new Float32Array(position.count * 3);
   const tmp = new THREE.Color();
