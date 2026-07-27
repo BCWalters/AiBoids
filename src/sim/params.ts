@@ -50,6 +50,16 @@ export interface SimParams {
   // Set to 0 to disable (unlimited turn rate, original behavior).
   boidTurnRateDeg: number;
 
+  // Steering-acceleration smoothing (boids only): the time constant, in
+  // seconds, of a low-pass filter applied to each boid's steering force
+  // before it's integrated into velocity. Complements boidTurnRateDeg — the
+  // turn-rate limit caps how fast the *heading* rotates, while this softens
+  // the high-frequency *magnitude/direction* jitter in the underlying force
+  // (neighbors popping in/out of perception, alignment vs cohesion fighting).
+  // Larger = smoother but more sluggish response. Bypassed while a boid is
+  // fleeing a predator so escapes stay instant. Set to 0 to disable.
+  boidAccelSmoothingTau: number;
+
   // Perception (boids)
   perceptionRadius: number;
   perceptionAngleDeg: number; // full field-of-view angle, centered on heading
@@ -189,7 +199,8 @@ export const defaultParams: SimParams = {
   boidMaxSpeed: 120,
   predatorMaxSpeed: 150,
   maxForce: 250,
-  boidTurnRateDeg: 150,
+  boidTurnRateDeg: 100,
+  boidAccelSmoothingTau: 0.04,
   perceptionRadius: 70,
   perceptionAngleDeg: 270,
 
