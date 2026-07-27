@@ -1,115 +1,18 @@
-import { params, resetParams, type SimParams, type SimMode, type VisualStyle, type GalleryCreature, type TimeOfDayPreset, type FollowCamMode } from '../sim/params';
+import { params, resetParams, type SimMode } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { MAX_CONCURRENT_UFOS } from '../sim/Simulation';
 import { onLanguageChange } from '../i18n/language';
 import { t, type TranslationKey } from '../i18n/translations';
 import type { CreatureLabels } from '../render/sceneRenderers/createSceneRendererHooks';
-
-// Keys of SimParams whose value is a boolean — used by buildBooleanToggle so
-// a single helper can bind any on/off feature flag without per-flag builders.
-type BooleanParamKey = {
-  [K in keyof SimParams]: SimParams[K] extends boolean ? K : never;
-}[keyof SimParams];
-
-interface SliderSpec {
-  key: keyof SimParams;
-  labelKey: TranslationKey;
-  min: number;
-  max: number;
-  step: number;
-}
-
-// Population/speed: the settings the user tunes most often — shown
-// ungrouped at the top (always visible, not tucked behind a collapsible
-// section) rather than folded away with everything else.
-const boidPopulationSpecs: SliderSpec[] = [
-  { key: 'boidCount', labelKey: 'boidCount', min: 0, max: 500, step: 1 },
-  { key: 'multicolorCount', labelKey: 'multicolorCount', min: 0, max: 300, step: 1 },
-  { key: 'goldCount', labelKey: 'goldCount', min: 0, max: 300, step: 1 },
-  { key: 'redCount', labelKey: 'redCount', min: 0, max: 300, step: 1 },
-  { key: 'blueCount', labelKey: 'blueCount', min: 0, max: 300, step: 1 },
-  { key: 'boidMaxSpeed', labelKey: 'boidMaxSpeed', min: 20, max: 300, step: 5 },
-];
-const predatorPopulationSpecs: SliderSpec[] = [
-  { key: 'predatorCount', labelKey: 'predatorCount', min: 0, max: 25, step: 1 },
-  { key: 'monsterCount', labelKey: 'monsterCount', min: 0, max: 25, step: 1 },
-  { key: 'horseCount', labelKey: 'horseCount', min: 0, max: 25, step: 1 },
-  { key: 'predatorMaxSpeed', labelKey: 'predatorMaxSpeed', min: 20, max: 350, step: 5 },
-];
-
-// Flocking-rule tuning: perception, the three classic boid rule weights,
-// and predator-panic response. Collapsed by default — fiddly to tune but
-// nowhere near as frequently touched as population/speed.
-const behaviorSpecs: SliderSpec[] = [
-  { key: 'perceptionRadius', labelKey: 'perceptionRadius', min: 10, max: 200, step: 5 },
-  { key: 'perceptionAngleDeg', labelKey: 'perceptionAngleDeg', min: 30, max: 360, step: 10 },
-  { key: 'separationWeight', labelKey: 'separationWeight', min: 0, max: 4, step: 0.1 },
-  { key: 'alignmentWeight', labelKey: 'alignmentWeight', min: 0, max: 4, step: 0.1 },
-  { key: 'cohesionWeight', labelKey: 'cohesionWeight', min: 0, max: 4, step: 0.1 },
-  { key: 'separationRadius', labelKey: 'separationRadius', min: 5, max: 100, step: 1 },
-  { key: 'interspeciesAvoidWeight', labelKey: 'interspeciesAvoidWeight', min: 0, max: 4, step: 0.1 },
-  { key: 'interspeciesAvoidRadius', labelKey: 'interspeciesAvoidRadius', min: 5, max: 150, step: 1 },
-  { key: 'panicRadius', labelKey: 'panicRadius', min: 10, max: 300, step: 5 },
-  { key: 'fleeWeight', labelKey: 'fleeWeight', min: 0, max: 8, step: 0.1 },
-];
-
-// 3D-mode-only world settings, kept separate from the wall/boundary
-// steer-away tuning below since they're conceptually different (world
-// size vs. how entities react near its edges). Just world depth for now
-// — room to grow without cluttering the population/speed section.
-const threeDSliderSpecs: SliderSpec[] = [{ key: 'worldDepth', labelKey: 'worldDepth', min: 100, max: 1500, step: 50 }];
-
-// 3D-only: bounded-box wall steer-away behavior.
-const boundarySliderSpecs: SliderSpec[] = [
-  { key: 'boundaryMargin', labelKey: 'boundaryMargin', min: 10, max: 300, step: 10 },
-  { key: 'boundaryWeight', labelKey: 'boundaryWeight', min: 0, max: 10, step: 0.5 },
-  { key: 'centerPullWeight', labelKey: 'centerPullWeight', min: 0, max: 0.5, step: 0.01 },
-];
-
-// Cosmetic motion-trail effect (afterimage fade) — not a "behavior" setting,
-// kept ungrouped near the top alongside the mode/style toggles.
-const trailSliderSpec: SliderSpec = { key: 'trailAmount', labelKey: 'trailAmount', min: 0, max: 0.95, step: 0.01 };
-const animationBlendSliderSpec: SliderSpec = { key: 'animationBlendStrength', labelKey: 'animationBlendStrength', min: 0, max: 1, step: 0.05 };
-
-// Fishtank swims with a much smaller population than the wide-open
-// outdoor styles by default — a giant public-aquarium tank reads oddly
-// crowded at the same counts that look right scattered across an open
-// sky/field. Snapshotted alongside savedOutdoorPopulation below so each
-// style's own counts (including any manual tweaks) are preserved across
-// repeated switches, without ever touching defaultParams itself (the
-// "outdoor" default counts must stay exactly as they were).
-type PopulationSnapshot = Pick<
-  SimParams,
-  'boidCount' | 'multicolorCount' | 'goldCount' | 'redCount' | 'blueCount' | 'predatorCount' | 'monsterCount' | 'horseCount'
->;
-const POPULATION_KEYS: (keyof PopulationSnapshot)[] = [
-  'boidCount',
-  'multicolorCount',
-  'goldCount',
-  'redCount',
-  'blueCount',
-  'predatorCount',
-  'monsterCount',
-  'horseCount',
-];
-const FISHTANK_DEFAULT_POPULATION: PopulationSnapshot = {
-  boidCount: 40,
-  multicolorCount: 20,
-  goldCount: 20,
-  redCount: 20,
-  blueCount: 20,
-  predatorCount: 0,
-  monsterCount: 1,
-  horseCount: 2,
-};
-let savedOutdoorPopulation: PopulationSnapshot | null = null;
-let savedFishtankPopulation: PopulationSnapshot | null = null;
-
-function snapshotPopulation(): PopulationSnapshot {
-  const snapshot = {} as PopulationSnapshot;
-  for (const key of POPULATION_KEYS) snapshot[key] = params[key];
-  return snapshot;
-}
+import type { BooleanParamKey, SliderSpec, SectionContext } from './sections/sectionContext';
+import { buildModeToggle, buildVisualStyleToggle } from './sections/simulationSection';
+import { buildCreatureGallerySection } from './sections/creatureGallerySection';
+import { buildPopulationSection } from './sections/populationSection';
+import { buildVisualSection } from './sections/visualSection';
+import { buildCameraSection } from './sections/cameraSection';
+import { buildBehaviorSection } from './sections/behaviorSection';
+import { buildWorldBoundariesSection } from './sections/worldBoundariesSection';
+import { buildDiagnosticsSection } from './sections/diagnosticsSection';
 
 export class ControlPanel {
   private container: HTMLElement;
@@ -174,541 +77,54 @@ export class ControlPanel {
     this.render();
   }
 
+  private buildContext(): SectionContext {
+    return {
+      buildSection: (key, title, children, defaultOpen) => this.buildSection(key, title, children, defaultOpen),
+      buildSubsection: (title, children) => this.buildSubsection(title, children),
+      buildSlider: (spec, disabled, labelOverride) => this.buildSlider(spec, disabled, labelOverride),
+      buildBooleanToggle: (labelKey, id, key) => this.buildBooleanToggle(labelKey, id, key),
+      flashButtonLabel: (btn, def, flash) => this.flashButtonLabel(btn, def, flash),
+      sim: this.sim,
+      onModeChange: this.onModeChange,
+      getDeepLinkURL: this.getDeepLinkURL,
+      onDownloadDiagnostics: this.onDownloadDiagnostics,
+      onClearDiagnostics: this.onClearDiagnostics,
+      getCreatureLabels: this.getCreatureLabels,
+      render: () => this.render(),
+      setAlienButton: (btn) => { this.alienButton = btn; },
+      setRespawnButton: (btn) => { this.respawnButton = btn; },
+    };
+  }
+
   private render(): void {
     this.container.innerHTML = '';
     this.lastAlienButtonState = null;
     this.lastRespawnPendingCount = null;
 
-    this.container.appendChild(this.buildModeToggle());
+    const ctx = this.buildContext();
+
+    this.container.appendChild(buildModeToggle(ctx));
 
     if (params.mode === '3d') {
-      this.container.appendChild(this.buildVisualStyleToggle());
-      this.container.appendChild(this.buildSection('creatureGallery', t('sectionCreatureGallery'), [this.buildCreatureGalleryDropdown()], false));
+      this.container.appendChild(buildVisualStyleToggle(ctx));
+      this.container.appendChild(buildCreatureGallerySection(ctx));
     }
 
-    // Population sliders are greyed out (not removed) while the Creature
-    // Gallery has isolated a single creature — main.ts zeroes these
-    // params itself while active, so a live slider drag would otherwise
-    // silently fight the isolation until Gallery is exited.
-    const galleryActive = params.galleryCreature !== null;
-    const creatureLabels = this.getCreatureLabels();
-    const boidGroup = this.buildPopulationGroup(
-      boidPopulationSpecs,
-      galleryActive,
-      creatureLabels,
-    );
-    const predatorGroup = this.buildPopulationGroup(
-      predatorPopulationSpecs,
-      galleryActive,
-      creatureLabels,
-    );
-    this.container.appendChild(
-      this.buildSection(
-        'populationSpeed',
-        t('sectionPopulationSpeed'),
-        [boidGroup, predatorGroup, this.buildAlienInvasionButton()],
-        true,
-      ),
-    );
-
-    // Motion trail only has a visible effect in 2D and 3D-arcade — the
-    // nature style's afterimage/bloom pass is disabled outright (see
-    // Renderer3D's currentStyle switch), so grey it out there rather than
-    // let it silently do nothing. Perception/panic radii are drawn only by
-    // the 2D canvas renderer, so grey that out whenever 3D mode is active.
-    const trailDisabled = params.mode === '3d' && params.visualStyle !== 'arcade';
-    const debugDisabled = params.mode === '3d';
-    // Visual section — one home for every aesthetic control, grouped into
-    // themed subsections (lighting/atmosphere, water, post-processing) so the
-    // distinction between "settings" and "FX" no longer has to be guessed.
-    // Non-aesthetic tooling lives in its own Camera and Diagnostics sections.
-    const is3DScene = params.mode === '3d' && params.visualStyle !== 'arcade';
-    const visualChildren: HTMLElement[] = [this.buildSlider(trailSliderSpec, trailDisabled)];
-    if (is3DScene) {
-      visualChildren.push(this.buildSlider(animationBlendSliderSpec));
-      if (params.visualStyle === 'nature') {
-        visualChildren.push(this.buildParrotReviewHoverToggle());
-      }
-      visualChildren.push(
-        this.buildSubsection(t('subsectionLighting'), [
-          this.buildTimeOfDayToggle(),
-          this.buildSoftShadowsToggle(),
-          this.buildLightShaftsToggle(),
-          this.buildFogToggle(),
-        ]),
-      );
-      const waterChildren: HTMLElement[] = [];
-      if (params.visualStyle === 'fishtank') {
-        waterChildren.push(this.buildWaterEffectsToggle());
-      }
-      if (params.visualStyle === 'nature') {
-        waterChildren.push(this.buildBooleanToggle('waterWavesEnabledLabel', 'param-water-waves-enabled', 'waterWavesEnabled'));
-        waterChildren.push(this.buildBooleanToggle('waterReflectionsEnabledLabel', 'param-water-reflections-enabled', 'waterReflectionsEnabled'));
-      }
-      if (params.visualStyle === 'fishtank') {
-        waterChildren.push(this.buildBooleanToggle('depthMurkEnabledLabel', 'param-depth-murk-enabled', 'depthMurkEnabled'));
-      }
-      if (waterChildren.length > 0) {
-        visualChildren.push(this.buildSubsection(t('subsectionWater'), waterChildren));
-      }
-    }
-    if (params.mode === '3d') {
-      visualChildren.push(
-        this.buildSubsection(t('subsectionPostProcessing'), [
-          this.buildBooleanToggle('colorGradingEnabledLabel', 'param-color-grading-enabled', 'colorGradingEnabled'),
-          this.buildBooleanToggle('depthOfFieldEnabledLabel', 'param-depth-of-field-enabled', 'depthOfFieldEnabled'),
-        ]),
-      );
-    }
-    this.container.appendChild(this.buildSection('visual', t('sectionVisual'), visualChildren, false));
-
-    // Camera section — 3D-only. Creature-follow camera plus the inspector HUD.
-    if (params.mode === '3d') {
-      this.container.appendChild(
-        this.buildSection(
-          'camera',
-          t('sectionCamera'),
-          [
-            this.buildFollowCamModeToggle(),
-            this.buildBooleanToggle('showCreatureInspectorLabel', 'param-show-creature-inspector', 'showCreatureInspector'),
-          ],
-          false,
-        ),
-      );
-    }
-
-    this.container.appendChild(
-      this.buildSection(
-        'behavior',
-        t('sectionBehavior'),
-        [this.buildPredatorCatchToggle(), ...behaviorSpecs.map((spec) => this.buildSlider(spec))],
-        false,
-      ),
-    );
+    this.container.appendChild(buildPopulationSection(ctx));
+    this.container.appendChild(buildVisualSection(ctx));
 
     if (params.mode === '3d') {
-      this.container.appendChild(
-        this.buildSection(
-          'worldBoundaries',
-          t('sectionWorldBoundaries'),
-          [
-            ...threeDSliderSpecs.map((spec) => this.buildSlider(spec)),
-            ...boundarySliderSpecs.map((spec) => this.buildSlider(spec)),
-          ],
-          false,
-        ),
-      );
+      this.container.appendChild(buildCameraSection(ctx));
     }
 
-    // Diagnostics section — dev tooling (perception radii, render stats,
-    // diagnostics capture). Not aesthetic, so kept out of the Visual section.
-    this.container.appendChild(
-      this.buildSection(
-        'diagnostics',
-        t('sectionDiagnostics'),
-        [
-          this.buildDebugToggle(debugDisabled),
-          this.buildRenderingStatsToggle(),
-          this.buildDiagnosticsCaptureToggle(),
-          this.buildDiagnosticsButtons(),
-        ],
-        false,
-      ),
-    );
+    this.container.appendChild(buildBehaviorSection(ctx));
 
+    if (params.mode === '3d') {
+      this.container.appendChild(buildWorldBoundariesSection(ctx));
+    }
+
+    this.container.appendChild(buildDiagnosticsSection(ctx));
     this.container.appendChild(this.buildButtons());
-  }
-
-  private buildModeToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row';
-
-    const labelRow = document.createElement('div');
-    labelRow.className = 'control-label-row';
-    const label = document.createElement('label');
-    label.textContent = t('modeLabel');
-    labelRow.appendChild(label);
-    wrapper.appendChild(labelRow);
-
-    const select = document.createElement('select');
-    select.id = 'param-mode';
-    for (const mode of ['2d', '3d'] as SimMode[]) {
-      const option = document.createElement('option');
-      option.value = mode;
-      option.textContent = mode === '2d' ? t('mode2d') : t('mode3d');
-      if (mode === params.mode) option.selected = true;
-      select.appendChild(option);
-    }
-    select.addEventListener('change', () => {
-      params.mode = select.value as SimMode;
-      this.sim.reset();
-      this.onModeChange(params.mode);
-      this.render();
-    });
-
-    wrapper.appendChild(select);
-    return wrapper;
-  }
-
-  private buildVisualStyleToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row';
-
-    const labelRow = document.createElement('div');
-    labelRow.className = 'control-label-row';
-    const label = document.createElement('label');
-    label.textContent = t('visualStyleLabel');
-    labelRow.appendChild(label);
-    wrapper.appendChild(labelRow);
-
-    const select = document.createElement('select');
-    select.id = 'param-visual-style';
-    const options: { value: VisualStyle; textKey: TranslationKey }[] = [
-      { value: 'arcade', textKey: 'visualStyleArcade' },
-      { value: 'nature', textKey: 'visualStyleNature' },
-      { value: 'fishtank', textKey: 'visualStyleFishtank' },
-    ];
-    for (const opt of options) {
-      const option = document.createElement('option');
-      option.value = opt.value;
-      option.textContent = t(opt.textKey);
-      if (opt.value === params.visualStyle) option.selected = true;
-      select.appendChild(option);
-    }
-    select.addEventListener('change', () => {
-      const newStyle = select.value as VisualStyle;
-      const oldStyle = params.visualStyle;
-      if (newStyle !== oldStyle) {
-        if (oldStyle === 'fishtank' && newStyle !== 'fishtank') {
-          savedFishtankPopulation = snapshotPopulation();
-          if (savedOutdoorPopulation) Object.assign(params, savedOutdoorPopulation);
-        } else if (oldStyle !== 'fishtank' && newStyle === 'fishtank') {
-          savedOutdoorPopulation = snapshotPopulation();
-          Object.assign(params, savedFishtankPopulation ?? FISHTANK_DEFAULT_POPULATION);
-        }
-      }
-      params.visualStyle = newStyle;
-      // Re-render so the dragon-predators toggle (nature-only) appears/
-      // disappears immediately, and so the population sliders reflect
-      // the just-swapped-in per-style counts above.
-      this.render();
-    });
-
-    wrapper.appendChild(select);
-    return wrapper;
-  }
-
-  /**
-   * Creature Gallery: isolates a single creature front-and-center (all
-   * other populations temporarily zeroed, sim frozen, camera framed on
-   * it), for inspecting/orbiting/screenshotting one model's geometry
-   * cleanly — reused across creature kinds so any future addition (e.g.
-   * dragons being iterated on in parallel) gets this for free. Picking
-   * "None" restores exactly the population/mode/style params that were
-   * active before entering (see main.ts's enterGallery/exitGallery).
-   */
-  private buildCreatureGalleryDropdown(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row';
-
-    const labelRow = document.createElement('div');
-    labelRow.className = 'control-label-row';
-    const label = document.createElement('label');
-    label.textContent = t('galleryLabel');
-    labelRow.appendChild(label);
-    wrapper.appendChild(labelRow);
-
-    const select = document.createElement('select');
-    select.id = 'param-gallery-creature';
-    const sceneLabels = this.getCreatureLabels();
-    const galleryLabel = (key: GalleryCreature | 'none', textKey: TranslationKey): string => {
-      if (!sceneLabels || key === 'none') return t(textKey);
-      if (key === 'monster')     return sceneLabels.predator.monster;
-      if (key === 'predator')    return sceneLabels.predator.normal;
-      if (key === 'horse')       return sceneLabels.predator.horse;
-      if (key === 'normal')      return sceneLabels.boid.normal;
-      if (key === 'multicolor')  return sceneLabels.boid.multicolor;
-      if (key === 'gold')        return sceneLabels.boid.gold;
-      if (key === 'red')         return sceneLabels.boid.red;
-      if (key === 'blue')        return sceneLabels.boid.blue;
-      return t(textKey);
-    };
-    const options: { value: GalleryCreature | 'none'; textKey: TranslationKey }[] = [
-      { value: 'none', textKey: 'galleryNone' },
-      { value: 'horse', textKey: 'galleryHorse' },
-      { value: 'monster', textKey: 'galleryMonster' },
-      { value: 'predator', textKey: 'galleryPredator' },
-      { value: 'normal', textKey: 'galleryNormal' },
-      { value: 'multicolor', textKey: 'galleryMulticolor' },
-      { value: 'gold', textKey: 'galleryGold' },
-      { value: 'red', textKey: 'galleryRed' },
-      { value: 'blue', textKey: 'galleryBlue' },
-    ];
-    for (const opt of options) {
-      const option = document.createElement('option');
-      option.value = opt.value;
-      option.textContent = galleryLabel(opt.value, opt.textKey);
-      if (opt.value === (params.galleryCreature ?? 'none')) option.selected = true;
-      select.appendChild(option);
-    }
-    select.addEventListener('change', () => {
-      // main.ts's per-frame loop notices this change and does the actual
-      // snapshot/isolate (or restore) + camera framing work — this
-      // control only ever writes the one param.
-      params.galleryCreature = select.value === 'none' ? null : (select.value as GalleryCreature);
-    });
-
-    wrapper.appendChild(select);
-    return wrapper;
-  }
-
-  /** Builds an outlined group of population sliders with a visible border. */
-  private buildPopulationGroup(
-    specs: SliderSpec[],
-    galleryActive: boolean,
-    creatureLabels: CreatureLabels | null,
-  ): HTMLElement {
-    const group = document.createElement('div');
-    group.className = 'population-group';
-    for (const spec of specs) {
-      group.appendChild(this.buildSlider(spec, galleryActive, this.resolvePopulationSliderLabel(spec, creatureLabels)));
-    }
-    return group;
-  }
-
-  private buildParrotReviewHoverToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('multicolorReviewHoverLabel');
-    label.htmlFor = 'param-multicolor-review-hover';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-multicolor-review-hover';
-    input.checked = params.galleryCreature === 'multicolor';
-    input.addEventListener('change', () => {
-      if (input.checked) params.galleryCreature = 'multicolor';
-      else if (params.galleryCreature === 'multicolor') params.galleryCreature = null;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildFogToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('fogEnabledLabel');
-    label.htmlFor = 'param-fog-enabled';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-fog-enabled';
-    input.checked = params.fogEnabled;
-    input.addEventListener('change', () => {
-      params.fogEnabled = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildTimeOfDayToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row';
-
-    const labelRow = document.createElement('div');
-    labelRow.className = 'control-label-row';
-    const label = document.createElement('label');
-    label.textContent = t('timeOfDayLabel');
-    labelRow.appendChild(label);
-    wrapper.appendChild(labelRow);
-
-    const select = document.createElement('select');
-    select.id = 'param-time-of-day';
-    const options: { value: TimeOfDayPreset; textKey: TranslationKey }[] = [
-      { value: 'dawn', textKey: 'timeOfDayDawn' },
-      { value: 'noon', textKey: 'timeOfDayNoon' },
-      { value: 'sunset', textKey: 'timeOfDaySunset' },
-      { value: 'night', textKey: 'timeOfDayNight' },
-    ];
-    for (const opt of options) {
-      const option = document.createElement('option');
-      option.value = opt.value;
-      option.textContent = t(opt.textKey);
-      if (opt.value === params.timeOfDay) option.selected = true;
-      select.appendChild(option);
-    }
-    select.addEventListener('change', () => {
-      params.timeOfDay = select.value as TimeOfDayPreset;
-    });
-
-    wrapper.appendChild(select);
-    return wrapper;
-  }
-
-  private buildSoftShadowsToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('softShadowsLabel');
-    label.htmlFor = 'param-soft-shadows-enabled';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-soft-shadows-enabled';
-    input.checked = params.softShadowsEnabled;
-    input.addEventListener('change', () => {
-      params.softShadowsEnabled = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildLightShaftsToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('lightShaftsLabel');
-    label.htmlFor = 'param-light-shafts-enabled';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-light-shafts-enabled';
-    input.checked = params.lightShaftsEnabled;
-    input.addEventListener('change', () => {
-      params.lightShaftsEnabled = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildWaterEffectsToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('waterEffectsLabel');
-    label.htmlFor = 'param-water-effects-enabled';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-water-effects-enabled';
-    input.checked = params.waterEffectsEnabled;
-    input.addEventListener('change', () => {
-      params.waterEffectsEnabled = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  /**
-   * Generic boolean checkbox toggle bound to a boolean-valued SimParams key.
-   * Reduces duplication for the growing set of on/off visual feature flags.
-   */
-  private buildBooleanToggle(labelKey: TranslationKey, id: string, key: BooleanParamKey): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t(labelKey);
-    label.htmlFor = id;
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = id;
-    input.checked = params[key];
-    input.addEventListener('change', () => {
-      params[key] = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildFollowCamModeToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row';
-
-    const labelRow = document.createElement('div');
-    labelRow.className = 'control-label-row';
-    const label = document.createElement('label');
-    label.textContent = t('followCamModeLabel');
-    labelRow.appendChild(label);
-    wrapper.appendChild(labelRow);
-
-    const select = document.createElement('select');
-    select.id = 'param-follow-cam-mode';
-    const options: { value: FollowCamMode; textKey: TranslationKey }[] = [
-      { value: 'off', textKey: 'followCamModeOff' },
-      { value: 'orbit', textKey: 'followCamModeOrbit' },
-    ];
-    for (const opt of options) {
-      const option = document.createElement('option');
-      option.value = opt.value;
-      option.textContent = t(opt.textKey);
-      if (opt.value === params.followCamMode) option.selected = true;
-      select.appendChild(option);
-    }
-    select.addEventListener('change', () => {
-      params.followCamMode = select.value as FollowCamMode;
-    });
-
-    wrapper.appendChild(select);
-    return wrapper;
-  }
-
-  private buildAlienInvasionButton(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-buttons';
-
-    const button = document.createElement('button');
-    button.textContent = t('alienInvasionButton');
-    button.addEventListener('click', () => {
-      this.sim.spawnUFO();
-      // Immediate, unmistakable feedback that the click registered —
-      // the saucer itself takes a moment to descend into view, and the
-      // button doesn't visibly grey out until the cap is reached, so without
-      // this a click can otherwise feel like it did nothing.
-      button.classList.remove('button-pulse');
-      // Force a reflow so re-adding the class restarts the animation
-      // even on rapid repeated clicks.
-      void button.offsetWidth;
-      button.classList.add('button-pulse');
-      this.syncAlienInvasionButton();
-    });
-    this.alienButton = button;
-    wrapper.appendChild(button);
-
-    // Abducted boids wait out a delay before flying back out of the coop
-    // (see Simulation.pendingRespawns) — this lets the user skip the wait
-    // instead of only ever watching a timer. Greyed out/disabled whenever
-    // nothing is currently pending.
-    const respawnButton = document.createElement('button');
-    respawnButton.addEventListener('click', () => {
-      this.sim.respawnPendingNow();
-    });
-    this.respawnButton = respawnButton;
-    wrapper.appendChild(respawnButton);
-
-    this.syncAlienInvasionButton();
-    this.syncRespawnButton();
-    return wrapper;
   }
 
   /**
@@ -766,27 +182,6 @@ export class ControlPanel {
     button.title = pendingCount > 0 ? t('respawnTitlePending') : t('respawnTitleIdle');
   }
 
-  private buildPredatorCatchToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('predatorCatchLabel');
-    label.htmlFor = 'param-predator-catch';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-predator-catch';
-    input.checked = params.predatorCatchEnabled;
-    input.addEventListener('change', () => {
-      params.predatorCatchEnabled = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
   /** A native <details>/<summary> collapsible group — no extra JS state, resets to defaultOpen on full re-render. */
   private buildSection(sectionKey: string, title: string, children: HTMLElement[], defaultOpen: boolean): HTMLElement {
     const details = document.createElement('details');
@@ -827,23 +222,6 @@ export class ControlPanel {
     return group;
   }
 
-  /** Maps a population slider's param key to a scene-specific creature label when available. */
-  private resolvePopulationSliderLabel(spec: SliderSpec, labels: CreatureLabels | null): string | undefined {
-    if (!labels) return undefined;
-    const count = (text: string) => `${text} count`;
-    switch (spec.key) {
-      case 'boidCount':        return count(labels.boid.normal);
-      case 'multicolorCount':  return count(labels.boid.multicolor);
-      case 'goldCount':        return count(labels.boid.gold);
-      case 'redCount':         return count(labels.boid.red);
-      case 'blueCount':        return count(labels.boid.blue);
-      case 'predatorCount':    return count(labels.predator.normal);
-      case 'monsterCount':     return count(labels.predator.monster);
-      case 'horseCount':       return count(labels.predator.horse);
-      default:                 return undefined;
-    }
-  }
-
   private buildSlider(spec: SliderSpec, disabled: boolean = false, labelOverride?: string): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'control-row';
@@ -880,6 +258,31 @@ export class ControlPanel {
 
     wrapper.appendChild(labelRow);
     wrapper.appendChild(input);
+    return wrapper;
+  }
+
+  /**
+   * Generic boolean checkbox toggle bound to a boolean-valued SimParams key.
+   * Reduces duplication for the growing set of on/off visual feature flags.
+   */
+  private buildBooleanToggle(labelKey: TranslationKey, id: string, key: BooleanParamKey): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'control-row control-checkbox-row';
+
+    const label = document.createElement('label');
+    label.textContent = t(labelKey);
+    label.htmlFor = id;
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = id;
+    input.checked = params[key];
+    input.addEventListener('change', () => {
+      params[key] = input.checked;
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(label);
     return wrapper;
   }
 
@@ -978,98 +381,6 @@ export class ControlPanel {
         reject(err);
       }
     });
-  }
-
-  private buildDebugToggle(disabled: boolean = false): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-    if (disabled) wrapper.classList.add('control-row-disabled');
-
-    const label = document.createElement('label');
-    label.textContent = t('debugToggleLabel');
-    label.htmlFor = 'param-debug';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-debug';
-    input.checked = params.showDebugOverlay;
-    input.disabled = disabled;
-    input.addEventListener('change', () => {
-      params.showDebugOverlay = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildRenderingStatsToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('showRenderingStatsLabel');
-    label.htmlFor = 'param-rendering-stats';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-rendering-stats';
-    input.checked = params.showRenderingStats;
-    input.addEventListener('change', () => {
-      params.showRenderingStats = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildDiagnosticsCaptureToggle(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-row control-checkbox-row';
-
-    const label = document.createElement('label');
-    label.textContent = t('enableDiagnosticsCaptureLabel');
-    label.htmlFor = 'param-diagnostics-capture';
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.id = 'param-diagnostics-capture';
-    input.checked = params.enableDiagnosticsCapture;
-    input.addEventListener('change', () => {
-      params.enableDiagnosticsCapture = input.checked;
-    });
-
-    wrapper.appendChild(input);
-    wrapper.appendChild(label);
-    return wrapper;
-  }
-
-  private buildDiagnosticsButtons(): HTMLElement {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'control-buttons';
-
-    const downloadButton = document.createElement('button');
-    const downloadDefault = t('downloadDiagnosticsButton');
-    downloadButton.textContent = downloadDefault;
-    downloadButton.addEventListener('click', () => {
-      const result = this.onDownloadDiagnostics();
-      if (result === 'downloaded') this.flashButtonLabel(downloadButton, downloadDefault, t('diagnosticsDownloaded'));
-      else if (result === 'no_data') this.flashButtonLabel(downloadButton, downloadDefault, t('diagnosticsNoData'));
-      else this.flashButtonLabel(downloadButton, downloadDefault, t('diagnosticsDownloadFailed'));
-    });
-
-    const clearButton = document.createElement('button');
-    const clearDefault = t('clearDiagnosticsButton');
-    clearButton.textContent = clearDefault;
-    clearButton.addEventListener('click', () => {
-      const cleared = this.onClearDiagnostics();
-      this.flashButtonLabel(clearButton, clearDefault, t('diagnosticsCleared', { count: cleared }));
-    });
-
-    wrapper.appendChild(downloadButton);
-    wrapper.appendChild(clearButton);
-    return wrapper;
   }
 
   private flashButtonLabel(button: HTMLButtonElement, defaultLabel: string, flashLabel: string): void {
