@@ -5,9 +5,13 @@ import { resetParams, params } from './params';
 import { Simulation } from './Simulation';
 import { create } from './vector';
 import {
+  ARCADE_PREDATOR_CATCH_PROFILES,
   FISHTANK_PREDATOR_CATCH_PROFILES,
   NATURE_PREDATOR_CATCH_PROFILES,
 } from '../render/sceneRenderers/predatorCatchProfiles';
+import { ARCADE_CREATURE_SIZES } from '../render/sceneRenderers/ArcadeSceneRenderer3D';
+import { FISHTANK_CREATURE_SIZES } from '../render/sceneRenderers/FishtankSceneRenderer3D';
+import { NATURE_CREATURE_SIZES } from '../render/sceneRenderers/NatureSceneRenderer3D';
 import type { PredatorCatchProfile, PredatorCatchProfiles } from './predatorCatchProfiles';
 
 function createManualSimulation(profiles: PredatorCatchProfiles): Simulation {
@@ -114,5 +118,35 @@ describe('Simulation predator mouth catches', () => {
 
     expect(sharkResult.boid.dying).toBe(true);
     expect(hawkResult.boid.dying).toBe(false);
+  });
+
+  it('keeps every scene bite radius at least as large as that scene’s largest prey half-length', () => {
+    const cases = [
+      {
+        name: 'arcade',
+        largestPreyHalfLength: Math.max(ARCADE_CREATURE_SIZES.boid.length, ARCADE_CREATURE_SIZES.parrot.length) / 2,
+        profiles: ARCADE_PREDATOR_CATCH_PROFILES,
+      },
+      {
+        name: 'fishtank',
+        largestPreyHalfLength:
+          Math.max(FISHTANK_CREATURE_SIZES.fish.length, FISHTANK_CREATURE_SIZES.butterflyfish.length) / 2,
+        profiles: FISHTANK_PREDATOR_CATCH_PROFILES,
+      },
+      {
+        name: 'nature',
+        largestPreyHalfLength: Math.max(NATURE_CREATURE_SIZES.boid.length, NATURE_CREATURE_SIZES.parrot.length) / 2,
+        profiles: NATURE_PREDATOR_CATCH_PROFILES,
+      },
+    ] as const;
+
+    for (const { name, largestPreyHalfLength, profiles } of cases) {
+      for (const [species, profile] of Object.entries(profiles)) {
+        expect(
+          profile!.bodyLength * profile!.biteRadiusFraction,
+          `${name} ${species} bite radius must reach the largest prey half-length`,
+        ).toBeGreaterThanOrEqual(largestPreyHalfLength);
+      }
+    }
   });
 });
