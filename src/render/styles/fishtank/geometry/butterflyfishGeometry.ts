@@ -97,12 +97,21 @@ const STRIPE_COUNT = 8;
 
 function buildButterflyfishBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const profile = buildButterflyfishBodyProfile(halfLen, width);
-  const body = new THREE.LatheGeometry(profile, 16);
+  // Keep the raw control profile for fin-rooting (latheBodyRadiusAt uses
+  // linear interpolation between the authored control points, which is correct
+  // for placing fins flush against the body surface).
+  const controlProfile = buildButterflyfishBodyProfile(halfLen, width);
+  // Spline-resample the authored silhouette so the lathe reads smooth along
+  // its length (same treatment as shark/barracuda/dragon); clamp radius ≥ 0
+  // to guard against Catmull-Rom overshoot at zero-radius pole points.
+  const smoothProfile = new THREE.SplineCurve(controlProfile)
+    .getPoints(32)
+    .map((p) => new THREE.Vector2(Math.max(0, p.x), p.y));
+  const body = new THREE.LatheGeometry(smoothProfile, 24);
   body.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
 
-  const dorsalFin = buildDorsalFinGeometry(halfLen, width, profile);
-  const analFin = buildAnalFinGeometry(halfLen, width, profile);
+  const dorsalFin = buildDorsalFinGeometry(halfLen, width, controlProfile);
+  const analFin = buildAnalFinGeometry(halfLen, width, controlProfile);
 
   // Stripes are baked across body + fins together (rather than the body
   // alone) so the banding reads as continuing naturally into the
