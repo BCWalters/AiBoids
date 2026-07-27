@@ -72,11 +72,17 @@ export class LazyEnvProvider {
       this._fishtankEnv = null;
     }
 
-    // Create the env for the new style (arcade has neither)
+    // Create the env for the new style (arcade has neither).  The env
+    // factories build every mesh with visible=false, so the newly-created
+    // env must be explicitly revealed here — this is the single source of
+    // truth for making the active environment (and, for nature, its fog)
+    // visible.  Scene renderers no longer toggle env visibility themselves.
     if (style === 'nature' && this._natureEnv === null) {
       this._natureEnv = this._makeNatureEnv(this._scene, this._renderer);
+      this._natureEnv.setVisible(true);
     } else if (style === 'fishtank' && this._fishtankEnv === null) {
       this._fishtankEnv = this._makeFishtankEnv(this._scene);
+      this._fishtankEnv.setVisible(true);
     }
 
     this._activeStyle = style;

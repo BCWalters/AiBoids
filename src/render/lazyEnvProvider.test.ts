@@ -18,6 +18,9 @@ function makeNatureEnvFactory() {
     createCount.value++;
     const sentinel = new THREE.Object3D();
     sentinel.name = 'nature-sentinel';
+    // Mirror the real factory: meshes are built hidden and only revealed by
+    // an explicit setVisible(true) call.
+    sentinel.visible = false;
     scene.add(sentinel);
     return {
       sky: {} as ReturnType<typeof Object>,
@@ -31,7 +34,9 @@ function makeNatureEnvFactory() {
       forestPatches: [],
       sunSprite: {} as THREE.Sprite,
       update: vi.fn(),
-      setVisible: vi.fn(),
+      setVisible: vi.fn((visible: boolean) => {
+        sentinel.visible = visible;
+      }),
       setFogEnabled: vi.fn(),
       setTimeOfDay: vi.fn(),
       setLightShaftsEnabled: vi.fn(),
@@ -53,10 +58,15 @@ function makeFishtankEnvFactory() {
     createCount.value++;
     const sentinel = new THREE.Object3D();
     sentinel.name = 'fishtank-sentinel';
+    // Mirror the real factory: room meshes are built hidden and only revealed
+    // by an explicit setVisible(true) call.
+    sentinel.visible = false;
     scene.add(sentinel);
     return {
       keyLight: new THREE.DirectionalLight(),
-      setVisible: vi.fn(),
+      setVisible: vi.fn((visible: boolean) => {
+        sentinel.visible = visible;
+      }),
       setFogEnabled: vi.fn(),
       setTimeOfDay: vi.fn(),
       setWaterEffectsEnabled: vi.fn(),
@@ -78,6 +88,16 @@ function countSentinels(scene: THREE.Scene): { nature: number; fishtank: number 
   scene.traverse((obj) => {
     if (obj.name === 'nature-sentinel') nature++;
     if (obj.name === 'fishtank-sentinel') fishtank++;
+  });
+  return { nature, fishtank };
+}
+
+function countVisibleSentinels(scene: THREE.Scene): { nature: number; fishtank: number } {
+  let nature = 0;
+  let fishtank = 0;
+  scene.traverse((obj) => {
+    if (obj.name === 'nature-sentinel' && obj.visible) nature++;
+    if (obj.name === 'fishtank-sentinel' && obj.visible) fishtank++;
   });
   return { nature, fishtank };
 }
@@ -108,6 +128,19 @@ describe('LazyEnvProvider', () => {
     expect(provider.getNatureEnv()).toBeNull();
     expect(provider.getFishtankEnv()).toBeNull();
     expect(countSentinels(scene)).toEqual({ nature: 0, fishtank: 0 });
+  });
+
+  it('reveals the freshly-built env (factories build meshes hidden)', () => {
+    // Regression: the env factories construct every mesh with visible=false;
+    // switchToStyle must explicitly reveal the newly-created env, otherwise the
+    // scene renders empty/dark even though the meshes are in the scene graph.
+    provider.switchToStyle('nature');
+    expect(natFactory.factory.mock.results[0].value.setVisible).toHaveBeenCalledWith(true);
+    expect(countVisibleSentinels(scene)).toEqual({ nature: 1, fishtank: 0 });
+
+    provider.switchToStyle('fishtank');
+    expect(tankFactory.factory.mock.results[0].value.setVisible).toHaveBeenCalledWith(true);
+    expect(countVisibleSentinels(scene)).toEqual({ nature: 0, fishtank: 1 });
   });
 
   it('creates the nature env and adds it to the scene on switchToStyle("nature")', () => {

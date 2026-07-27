@@ -202,9 +202,8 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   setStyleVisibility(): void {
-    // The fishtank env was just created by LazyEnvProvider — it's naturally
-    // visible.  The nature env has been disposed (null); no setVisible(false)
-    // is needed since it no longer exists in the scene graph.
+    // The fishtank env is created and revealed by LazyEnvProvider on switch.
+    // The nature env has been disposed (null); nothing to hide here.
     this.deps.driftingClouds.setVisible(false);
   }
 
