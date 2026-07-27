@@ -339,7 +339,13 @@ export function createNatureEnvironment(scene: THREE.Scene, renderer: THREE.WebG
 export function placeNatureEnvironment(env: NatureEnvironment, center: THREE.Vector3, groundSize: number): void {
   env.sky.position.set(center.x, 0, center.z);
   env.ground.position.set(center.x, 0, center.z);
-  env.ground.scale.setScalar(groundSize);
+  // Extend the ground plane's XZ footprint 1.6× beyond the base groundSize so
+  // its square boundary is always farther from the camera than fog.far, hiding
+  // the hard edge at any legal camera distance or orbit angle.  Only X/Y of
+  // the local PlaneGeometry are widened; the local-Z scale (world-Y height,
+  // via the -90° X rotation) is left at the original groundSize so terrain
+  // displacement amplitude is unchanged.
+  env.ground.scale.set(groundSize * 1.6, groundSize * 1.6, groundSize);
 
   const SUN_DISTANCE = 15000;
   env.sunSprite.position.copy(env.sunDirection).multiplyScalar(SUN_DISTANCE).add(center);

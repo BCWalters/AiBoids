@@ -8,7 +8,7 @@ import * as THREE from 'three';
 // Placed opposite the small lake's forward direction (see
 // placeNatureEnvironment) so the two water features don't visually compete.
 export const OCEAN_GAP_ANGLE = Math.atan2(0.83, 0.55);
-export const OCEAN_GAP_HALF_WIDTH = 0.64; // radians, ~37° half-width (~73° full notch)
+export const OCEAN_GAP_HALF_WIDTH = 0.95; // radians, ~54° half-width (~109° full notch)
 export const OCEAN_ANGLE_SPAN_MULTIPLIER = 1.95;
 
 // Several small lakes rather than just one, each in its own compass
