@@ -4,7 +4,7 @@ import * as THREE from 'three';
  * A cartoony red particle-splatter effect spawned wherever a predator
  * catches a boid (see Simulation.catchEvents). Each burst is a handful of
  * small round sprites that pop outward, fall slightly under gravity, and
- * fade out over well under a second — a quick, readable "gotcha" beat
+ * fade out over about a second — a quick, readable "gotcha" beat
  * rather than anything gory/realistic.
  */
 export interface BloodEffects {
@@ -15,7 +15,7 @@ export interface BloodEffects {
   dispose(): void;
 }
 
-const BURST_DURATION = 0.55;
+const BURST_DURATION = 1.1;
 const PARTICLES_PER_BURST = 9;
 const GRAVITY = 60;
 const MAX_ACTIVE_BURSTS = 36;
