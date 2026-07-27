@@ -203,16 +203,25 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   if (palette?.dorsalGradient) {
     // Bilinear body gradient:
     //   Y axis: maxY = head, minY = tail  →  tY: 0=head, 1=tail
-    //   Z axis: minZ = belly, maxZ = back  →  tZ: 0=belly, 1=back
+    //   Z axis: normal.z — dorsal (+1 = back), ventral (-1 = belly)  →  tZ: 0=belly, 1=back
     // Blend: lerp( lerp(headBelly, headBack, tZ), lerp(tailBelly, tailBack, tZ), tY )
+    //
+    // We derive tZ from the vertex normal's Z component rather than from
+    // position.z / global-zSpan. The body is a LatheGeometry that tapers to
+    // near-zero radius at the nose and tail tips; at those tips every vertex
+    // has position.z ≈ 0 (the midpoint), so the position-based blend always
+    // returns tZ ≈ 0.5 there — producing the wrong midpoint average colour
+    // instead of the intended tailBack or tailBelly values. The vertex normal
+    // points radially outward from the lathe axis and is independent of the
+    // local radius, so normal.z correctly gives +1 on the back surface and
+    // -1 on the belly even where the body is nearly pointed.
+    body.computeVertexNormals();
     body.computeBoundingBox();
     const minY = body.boundingBox!.min.y;
     const maxY = body.boundingBox!.max.y;
-    const minZ = body.boundingBox!.min.z;
-    const maxZ = body.boundingBox!.max.z;
     const ySpan = Math.max(1e-5, maxY - minY);
-    const zSpan = Math.max(1e-5, maxZ - minZ);
     const posAttr = body.getAttribute('position') as THREE.BufferAttribute;
+    const normalAttr = body.getAttribute('normal') as THREE.BufferAttribute;
     const gradColors = new Float32Array(posAttr.count * 3);
     for (let vi = 0; vi < posAttr.count; vi++) {
       // tY = 0 → head (high +Y), tY = 1 → tail (low -Y)
@@ -221,10 +230,8 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
         0.05, 0.95,
       );
       // tZ = 0 → belly (-Z), tZ = 1 → back (+Z)
-      const tZ = THREE.MathUtils.smoothstep(
-        THREE.MathUtils.clamp((posAttr.getZ(vi) - minZ) / zSpan, 0, 1),
-        0.15, 0.85,
-      );
+      // Map normal.z from [-1..+1] to [0..1] then smoothstep.
+      const tZ = THREE.MathUtils.smoothstep((normalAttr.getZ(vi) + 1) / 2, 0.15, 0.85);
       // Bilinear blend across the four corners
       const r = THREE.MathUtils.lerp(
         THREE.MathUtils.lerp(palette.headBelly.r, palette.headBack.r, tZ),
