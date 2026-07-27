@@ -401,7 +401,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     maxDim: number,
     wasFishtank: boolean,
   ): void {
-    this.deps.controls.maxDistance = maxDim * 5.5;
+    this.deps.controls.maxDistance = maxDim * 3.5;
     this.deps.controls.minPolarAngle = 0;
     this.deps.controls.maxPolarAngle = Math.PI;
     if (!wasFishtank) return;

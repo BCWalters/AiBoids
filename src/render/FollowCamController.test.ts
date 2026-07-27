@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as THREE from 'three';
 import { FollowCamController, isDragMove, DRAG_THRESHOLD_PX } from './FollowCamController';
@@ -104,6 +105,7 @@ describe('FollowCamController drag-aware selection', () => {
       // toRenderedPosition is the identity here — sim-space === render-space.
       toRenderedPosition: (x: number, y: number, z: number) => ({ x, y, z }),
       smoothOrbitTarget,
+      resetOrbitTarget: vi.fn(),
       getCreatureLabels: () => ({ boid: {}, predator: {} }),
     } as unknown as Renderer3D;
   });
@@ -165,5 +167,99 @@ describe('FollowCamController drag-aware selection', () => {
 
     controller.update(0.016, sim, renderer3D);
     expect(smoothOrbitTarget).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FollowCamController — deselect → orbit target reset tests (#119)
+// ---------------------------------------------------------------------------
+
+/** Minimal Simulation stub with two boids. */
+function makeSim(width = 800, height = 600): Simulation {
+  return {
+    width,
+    height,
+    boids: [
+      { id: 1, position: { x: 100, y: 100, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, species: 'normal', panicLevel: 0 },
+      { id: 2, position: { x: 200, y: 200, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, species: 'normal', panicLevel: 0 },
+    ],
+    predators: [],
+  } as unknown as Simulation;
+}
+
+/** Minimal Renderer3D stub whose key methods are vi.fn() spies. */
+function makeRenderer(): Renderer3D {
+  const cam = new THREE.PerspectiveCamera(60, 1, 1, 10000);
+  cam.position.set(0, 0, 500);
+  cam.lookAt(0, 0, 0);
+  cam.updateMatrixWorld();
+  return {
+    getCamera: () => cam,
+    toRenderedPosition: (x: number, y: number, z: number) => new THREE.Vector3(x, y, z),
+    smoothOrbitTarget: vi.fn(),
+    resetOrbitTarget: vi.fn(),
+    getCreatureLabels: () => ({ boid: {}, predator: {} }),
+  } as unknown as Renderer3D;
+}
+
+describe('FollowCamController deselect → orbit target reset', () => {
+  let controller: FollowCamController;
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    resetParams();
+    params.followCamMode = 'orbit';
+    container = document.createElement('div');
+    controller = new FollowCamController(container);
+  });
+
+  it('resets orbit target when handleCanvasClick misses all entities', () => {
+    const sim = makeSim();
+    const renderer = makeRenderer();
+
+    // Build a fake canvas whose bounding rect maps the click to a point far
+    // from any projected entity so pickEntity returns null.
+    const canvas = document.createElement('canvas');
+    canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600 } as DOMRect);
+
+    // Click at top-left corner — entities project near the centre so this misses.
+    const event = new MouseEvent('click', { clientX: 0, clientY: 0 });
+
+    controller.handleCanvasClick(event, canvas, sim, renderer);
+
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledOnce();
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledWith(sim);
+  });
+
+  it('resets orbit target when update() finds the selected entity has been removed', () => {
+    const sim = makeSim();
+    const renderer = makeRenderer();
+
+    // First update with nothing selected: resolveSelected returns null immediately,
+    // but since selectedId is already null the reset must NOT fire.
+    controller.update(0.016, sim, renderer);
+    expect(renderer.resetOrbitTarget).not.toHaveBeenCalled();
+
+    // Force-select boid id=1 by writing private state directly.
+    (controller as unknown as { selectedId: number | null }).selectedId = 1;
+    (controller as unknown as { selectedIsPredator: boolean }).selectedIsPredator = false;
+
+    // Now remove boid 1 from the sim and run update — the graceful-deselect
+    // path should fire resetOrbitTarget exactly once.
+    const simWithoutBoid1 = { ...sim, boids: [sim.boids[1]], predators: [] } as unknown as Simulation;
+    controller.update(0.016, simWithoutBoid1, renderer);
+
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledOnce();
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledWith(simWithoutBoid1);
+  });
+
+  it('resets orbit target when deselect() is called explicitly', () => {
+    const sim = makeSim();
+    const renderer = makeRenderer();
+
+    controller.deselect(renderer, sim);
+
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledOnce();
+    expect(renderer.resetOrbitTarget).toHaveBeenCalledWith(sim);
   });
 });

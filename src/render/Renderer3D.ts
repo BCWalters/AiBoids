@@ -757,6 +757,22 @@ export class Renderer3D {
     this.cameraController.smoothOrbitTarget(x, y, z, alpha);
   }
 
+  /**
+   * Snaps the OrbitControls orbit target back to the rendered scene center
+   * (the same anchor used by the initial camera framing). Call this when the
+   * follow-cam selection is cleared so the orbit pivot doesn't remain anchored
+   * at the last tracked creature's off-centre position — e.g. zooming into a
+   * wall in the nature scene after a creature is deselected near the boundary.
+   *
+   * The center is computed via toRenderedPosition so it is correct for every
+   * scene (arcade, nature, fishtank all have the same sim-space center but
+   * fishtank inflates coordinates by TANK_VISUAL_SCALE).
+   */
+  resetOrbitTarget(sim: Simulation): void {
+    const center = this.toRenderedPosition(sim.width / 2, sim.height / 2, params.worldDepth / 2);
+    this.cameraController.smoothOrbitTarget(center.x, center.y, center.z, 1);
+  }
+
   private groupBoidsBySpecies(boids: Boid[]): Map<BoidSpecies, Boid[]> {
     const boidsBySpecies = new Map<BoidSpecies, Boid[]>();
     for (const boid of boids) {
