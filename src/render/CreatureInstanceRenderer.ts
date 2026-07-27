@@ -89,7 +89,7 @@ const NEAR_POLE_RIGHT_LENGTH_THRESHOLD_SQ = NEAR_POLE_RIGHT_LENGTH_THRESHOLD * N
 const UP_REFERENCE_FALLBACK_AXIS = new THREE.Vector3(0, 0, 1);
 // Roll (bank) when turning: smoothed and clamped well short of inverted — a
 // clear banking lean, not a flip.
-const MAX_BANK_RADIANS = THREE.MathUtils.degToRad(42);
+export const MAX_BANK_RADIANS = THREE.MathUtils.degToRad(42);
 const BANK_GAIN = 2.6;
 const BANK_SMOOTHING_RATE = 5;
 
