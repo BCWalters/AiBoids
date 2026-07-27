@@ -109,6 +109,33 @@ function buildTube(path: THREE.Vector3[], radii: number[], sides = 6): number[] 
 }
 
 /**
+ * A flat, double-sided disc in the XY plane at local Y = `y`, used to
+ * seal the open ring the body lathe leaves at the snout tip so it no
+ * longer reads as a see-through hole. Double-sided (each wedge emitted
+ * with both windings) so it looks solid from both in front and inside.
+ * Same pattern as buildTailCapGeometry in smallBirdGeometry.ts.
+ */
+function buildSnoutCapGeometry(y: number, radius: number, segments: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const x0 = Math.cos(a0) * radius;
+    const z0 = Math.sin(a0) * radius;
+    const x1 = Math.cos(a1) * radius;
+    const z1 = Math.sin(a1) * radius;
+    positions.push(
+      0, y, 0, x0, y, z0, x1, y, z1,
+      0, y, 0, x1, y, z1, x0, y, z0,
+    );
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
  * Rotates a (y, z) pair around a pivot on the Y axis — used to bend the
  * body's lathe profile (see applyNeckBend) and to bend the tail's path
  * into a curve instead of a ruler-straight line.
@@ -267,15 +294,21 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   // banded ones; raise radial segments to 32 for the same reason.
   const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
   const latheGeometry = new THREE.LatheGeometry(smoothProfile, 32);
+  // Seal the open snout-tip lathe ring with a double-sided disc cap so it no
+  // longer reads as a see-through hole when viewed straight on from the front.
+  // The snout tip is the last profile point: radius = width * 0.015, Y = halfLen * SNOUT_TIP_FRACTION.
+  const snoutCap = buildSnoutCapGeometry(halfLen * SNOUT_TIP_FRACTION, width * 0.015, 16);
   const frillGeometry = buildDragonFrillGeometry(length, width, halfLen);
   const faceParts = buildDragonFaceDetailsGeometry(width, halfLen);
   const bodyColor = new THREE.Color(0xffffff);
   const merged = mergeGeometriesWithColor([
     { geometry: latheGeometry, color: bodyColor },
+    { geometry: snoutCap, color: bodyColor },
     { geometry: frillGeometry, color: bodyColor },
     ...faceParts,
   ]);
   latheGeometry.dispose();
+  snoutCap.dispose();
   frillGeometry.dispose();
   for (const part of faceParts) part.geometry.dispose();
 
@@ -297,52 +330,122 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
 }
 
 /**
- * Minimal facial detail — a pair of small glowing amber eyes (jewel-like
- * low-poly icosahedra, tinted via vertex color so they read distinctly
- * against the dark body regardless of per-instance state tinting) plus a
- * pair of small dark nostril bumps near the snout tip. Deliberately kept
- * to just these two features rather than a fully detailed face: at the
- * distances/poly budget this creature is rendered at, a long, perfectly
- * smooth, feature-less snout was the single biggest giveaway that it was
- * a stretched bird head rather than a dragon's, and eyes + nostrils go a
- * long way toward fixing that read without adding real modeling cost.
- * Built at the *unbent* head/neck Y coordinates the body profile uses —
- * applyNeckBend rotates these along with the rest of the merged body
- * afterward, so the face automatically rides along with the head as
- * it's raised and tilted.
+ * Facial detail geometry for the dragon head: a pair of flat disc eyes
+ * (iris + pupil), a pair of nostril bumps near the snout tip, and a pair
+ * of short mouth-line accents below the snout tip to suggest a closed jaw.
+ *
+ * Eyes (#201): flat co-planar CircleGeometry discs facing outward along ±X.
+ * The iris (orangish-yellow) is slightly elongated along the head's
+ * forward axis (Y) to give an almond/cat-eye shape. The pupil (black) sits
+ * on top with a tiny outward X-offset (width * 0.001) to avoid z-fighting
+ * without any visible gap — chosen over the spherical-cap approach because
+ * it is simpler to reason about and introduces zero polygon-offset
+ * state changes into the shared render pipeline.
+ *
+ * Snout (#202): nostrils are positioned close to the snout tip and are kept
+ * small so they read as dark accents without creating holes of their own.
+ * The mouth lines are thin elongated boxes on the sides of the snout,
+ * slightly below the midline, giving a hint of a closed jaw.
+ *
+ * All geometry is built at *unbent* head/neck Y coordinates — applyNeckBend
+ * in buildDragonBodyGeometry rotates everything together afterward.
  */
 function buildDragonFaceDetailsGeometry(
   width: number,
   halfLen: number,
 ): { geometry: THREE.BufferGeometry; color: THREE.Color }[] {
-  const eyeRadius = width * 0.075;
-  const eyeY = halfLen * 0.585; // just forward of the jaw hinge / brow ridge
-  const eyeZ = width * 0.1; // slightly above the head's own center-line
-  const eyeX = width * 0.2; // out near the sides of the skull
+  // ── Eyes ─────────────────────────────────────────────────────────────────
+  // Flat disc eyes: the iris faces outward along ±X (perpendicular to the
+  // skull side). CircleGeometry lies in the XY plane with normal = +Z; after
+  // rotateY(±π/2) the normal maps to ±X (outward) and the disc's local Y maps
+  // to world Y (head-forward) — so scaling local Y by eyeElong before rotation
+  // elongates the eye along the head-forward ("horizontal") direction.
+  const irisRadius = width * 0.085; // slightly larger than the old icosahedra eye
+  const pupilRadius = irisRadius * 0.48;
+  const eyeElong = 1.35; // horizontal stretch: almond/cat-eye shape
+  const eyeX = width * 0.23; // pushed slightly outward from the skull surface
+  const eyeY = halfLen * 0.585; // forward of the jaw hinge / brow ridge
+  const eyeZ = width * 0.07; // slightly above the head's centre-line
+  // Tiny outward offset (along ±X) keeps the pupil disc above the iris without
+  // any visible gap — prevents z-fighting for co-planar discs sharing the same
+  // centre and orientation.
+  const pupilOffset = width * 0.001;
 
-  const leftEye = new THREE.IcosahedronGeometry(eyeRadius, 0);
-  leftEye.translate(-eyeX, eyeY, eyeZ);
-  const rightEye = new THREE.IcosahedronGeometry(eyeRadius, 0);
-  rightEye.translate(eyeX, eyeY, eyeZ);
+  const irisColor = new THREE.Color(0xff9010); // orangish-yellow
+  const pupilColor = new THREE.Color(0x040204); // near-black
 
-  const nostrilRadius = width * 0.045;
-  const nostrilY = halfLen * 0.88; // partway down the snout, past the brow undercut
-  const nostrilZ = width * 0.09; // on top of the snout, not the underside
-  const nostrilX = width * 0.06;
+  const parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
+
+  for (const side of [-1, 1] as const) {
+    const sx = side * eyeX;
+    // rotateY(+π/2) → face +X (right eye outward); rotateY(-π/2) → face -X (left eye outward)
+    const rotAngle = side * Math.PI / 2;
+    const rotMat = new THREE.Matrix4().makeRotationY(rotAngle);
+
+    // Iris
+    const iris = new THREE.CircleGeometry(irisRadius, 16);
+    iris.scale(1, eyeElong, 1); // elongate local Y → world Y (head-forward) after rotation
+    iris.applyMatrix4(rotMat);
+    iris.translate(sx, eyeY, eyeZ);
+
+    // Pupil — slightly smaller, tiny outward (±X) offset to prevent z-fighting
+    const pupil = new THREE.CircleGeometry(pupilRadius, 12);
+    pupil.scale(1, eyeElong * 0.85, 1); // slightly less elongated (more round pupil)
+    pupil.applyMatrix4(rotMat);
+    pupil.translate(sx + side * pupilOffset, eyeY, eyeZ);
+
+    parts.push(
+      { geometry: iris, color: irisColor },
+      { geometry: pupil, color: pupilColor },
+    );
+  }
+
+  // ── Nostrils ─────────────────────────────────────────────────────────────
+  // Small spherical bumps close to the snout tip, on the dorsal (+Z) surface,
+  // kept subtle so they read as dark shadowed slits at viewing distance rather
+  // than deep gouges. Moved forward from the older halfLen * 0.88 position to
+  // sit closer to the front of the snout as a dragon's nostrils typically do.
+  const nostrilRadius = width * 0.032;
+  const nostrilY = halfLen * 0.95; // close to the snout tip (tip is at halfLen * 1.1)
+  const nostrilZ = width * 0.09; // on top of the snout (dorsal side)
+  const nostrilX = width * 0.055;
   const leftNostril = new THREE.SphereGeometry(nostrilRadius, 6, 4);
   leftNostril.translate(-nostrilX, nostrilY, nostrilZ);
   const rightNostril = new THREE.SphereGeometry(nostrilRadius, 6, 4);
   rightNostril.translate(nostrilX, nostrilY, nostrilZ);
 
-  const eyeColor = new THREE.Color(0xffb020); // glowing amber
   const nostrilColor = new THREE.Color(0x0a0508); // near-black shadowed slit
 
-  return [
-    { geometry: leftEye, color: eyeColor },
-    { geometry: rightEye, color: eyeColor },
+  parts.push(
     { geometry: leftNostril, color: nostrilColor },
     { geometry: rightNostril, color: nostrilColor },
-  ];
+  );
+
+  // ── Mouth lines ───────────────────────────────────────────────────────────
+  // Short thin boxes on either side of the snout slightly below the midline
+  // (negative Z = ventral side) — suggest a closed jaw without carving a hole.
+  // Keep them subtle: thin in X (lateral) and Z (height) but long enough in Y
+  // (head-forward) to read as a line at typical viewing distance.
+  const mouthLineLen = width * 0.11; // length along head-forward (Y) axis
+  const mouthLineH = width * 0.012; // height (Z, up-down)
+  const mouthLineD = width * 0.006; // depth (X, lateral — very thin)
+  const mouthY = halfLen * 0.97; // just behind the snout tip
+  const mouthZ = -width * 0.04; // slightly below the midline (ventral)
+  const mouthX = width * 0.05; // slightly to the side
+
+  const leftMouth = new THREE.BoxGeometry(mouthLineD, mouthLineLen, mouthLineH);
+  leftMouth.translate(-mouthX, mouthY, mouthZ);
+  const rightMouth = new THREE.BoxGeometry(mouthLineD, mouthLineLen, mouthLineH);
+  rightMouth.translate(mouthX, mouthY, mouthZ);
+
+  const mouthColor = new THREE.Color(0x050205); // near-black
+
+  parts.push(
+    { geometry: leftMouth, color: mouthColor },
+    { geometry: rightMouth, color: mouthColor },
+  );
+
+  return parts;
 }
 
 /**
