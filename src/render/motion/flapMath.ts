@@ -214,19 +214,32 @@ function warpStrokePhase(phase: number, downstrokeFraction: number): number {
  * Wing rotation angle (radians) about the model's forward axis. Positive is a
  * downstroke: the left wing's tip sits on +X and rotating about the forward
  * axis by a positive angle carries it toward -Z, which is model-down.
+ *
+ * `bottomClipRad` (optional, default 0) clips the bottom of the stroke by `d`
+ * radians while leaving the top exactly unchanged. With amplitude A and clip d,
+ * the effective amplitude becomes A − d/2 and the rest bias shifts by −d/2,
+ * producing range [−A, A−d] instead of [−A, A]. Because the bias is derived
+ * from the current amplitude at call time, the top stays at −A across every
+ * speed — the fix is exact, not approximate. Pass 0 (or omit) to preserve the
+ * original symmetric stroke for all other creatures.
  */
 export function flapAngleFromPhase({
   phase,
   amplitude,
   restBiasRad,
   downstrokeFraction = SYMMETRIC_DOWNSTROKE_FRACTION,
+  bottomClipRad = 0,
 }: {
   phase: number;
   amplitude: number;
   restBiasRad: number;
   downstrokeFraction?: number;
+  /** Radians by which to raise the bottom of the stroke without moving the top. */
+  bottomClipRad?: number;
 }): number {
-  return amplitude * Math.sin(warpStrokePhase(phase, downstrokeFraction)) + restBiasRad;
+  const effectiveAmplitude = amplitude - bottomClipRad / 2;
+  const effectiveBias = restBiasRad - bottomClipRad / 2;
+  return effectiveAmplitude * Math.sin(warpStrokePhase(phase, downstrokeFraction)) + effectiveBias;
 }
 
 /**

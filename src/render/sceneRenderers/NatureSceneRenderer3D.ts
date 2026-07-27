@@ -111,6 +111,18 @@ const UNICORN_LEG_TUCK_RAD = 0.3;
 const DRAGON_FLAP_FREQUENCY = 2.15;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
+/**
+ * Raises the bottom of the dragon's wingbeat by this many radians, leaving the
+ * top of the stroke exactly unchanged at every speed (approach (a) from issue
+ * #199). With the clip, the new max downstroke is 0.95 rad at full speed.
+ *
+ * Geometry rationale: the back leg claws extend to Z = −13.95 model units. The
+ * wing's inner boundary at the back-leg Y (Y ≈ −12.24, wristAnchor X = 16.2)
+ * reaches Z = −16.2 × sin(0.95) ≈ −13.19 units at the new stroke floor —
+ * clearing the claws by ~0.76 units. Without the clip the same point sweeps to
+ * Z ≈ −15.37 units (θ = 1.25 rad), well past the claw depth.
+ */
+const DRAGON_BOTTOM_CLIP_RAD = 0.30;
 const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22;
 // Hawks sway their tail like the other nature birds. This was previously
 // inherited implicitly from Renderer3D's shared tail-sway default; it is now
@@ -595,6 +607,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapIdleAmplitude: DRAGON_FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: DRAGON_FLAP_SPEED_AMPLITUDE,
           flapDownstrokeFraction: DRAGON_DOWNSTROKE_FRACTION,
+          flapBottomClipRad: DRAGON_BOTTOM_CLIP_RAD,
           legSwingAmplitude: DRAGON_LEG_SWING_AMPLITUDE,
           legTuckRad: DRAGON_LEG_TUCK_RAD,
           keepUpright: true,

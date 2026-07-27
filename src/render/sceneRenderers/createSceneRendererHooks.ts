@@ -69,6 +69,13 @@ export interface MotionConfig {
   legSwingAmplitude?: number;
   /** Radians the legs are drawn back at full speed, on top of the swing. */
   legTuckRad?: number;
+  /**
+   * Raises the bottom of the wingbeat stroke by this many radians without
+   * moving the top. At pose time the renderer derives a matching rest bias so
+   * the top stays exactly at −amplitude for every speed. Pass 0 or omit to
+   * preserve the symmetric [−A, +A] stroke (all creatures except the dragon).
+   */
+  flapBottomClipRad?: number;
 
   tailSwayAxis?: THREE.Vector3;
   tailSwayAmplitude?: number;
