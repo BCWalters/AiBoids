@@ -154,7 +154,7 @@ describe('fishScaleShader composition — scale then undulation', () => {
     applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
     applyMockUndulationPatch(mat);
     const { fragmentShader } = captureShader(mat);
-    expect(fragmentShader).toContain('vColor.rgb *= 1.0 - uScaleEdgeDarkness');
+    expect(fragmentShader).toContain('diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness');
   });
 });
 
@@ -180,7 +180,7 @@ describe('fishScaleShader composition — undulation then scale', () => {
     applyMockUndulationPatch(mat);
     applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
     const { fragmentShader } = captureShader(mat);
-    expect(fragmentShader).toContain('vColor.rgb *= 1.0 - uScaleEdgeDarkness');
+    expect(fragmentShader).toContain('diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness');
   });
 });
 
@@ -262,6 +262,39 @@ describe('fishScaleShader frequency gives sane absolute cell counts', () => {
 // ---------------------------------------------------------------------------
 // Shark no-op: edgeDarkness=0 skips patching entirely
 // ---------------------------------------------------------------------------
+
+/**
+ * three.js upgrades these WebGL1-style shaders to GLSL 300 ES, where a
+ * `varying` becomes an `in` in the fragment stage. Inputs are read-only, so
+ * assigning to vColor links with
+ *   ERROR: 'assign' : l-value required (can't modify an input "vColor")
+ * and every fishtank material fails to compile — a black scene, caught only
+ * by the e2e because a shader-string test cannot compile GLSL.
+ *
+ * The pattern must therefore modulate `diffuseColor` (a local vec4) after
+ * color_fragment has folded vColor in, never vColor itself.
+ */
+describe('fishScaleShader writes only to assignable l-values', () => {
+  it('never assigns to the read-only vColor input', () => {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
+    const { fragmentShader } = captureShader(mat);
+
+    const injected = fragmentShader.slice(fragmentShader.indexOf('uFishScaleFreq'));
+    expect(injected).not.toMatch(/\bvColor\b\s*(\.[a-z]+)?\s*(=|\*=|\+=|-=|\/=)/);
+    expect(injected).toContain('diffuseColor.rgb *=');
+  });
+
+  it('applies the pattern after color_fragment so vColor is already folded in', () => {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
+    const { fragmentShader } = captureShader(mat);
+
+    expect(fragmentShader.indexOf('#include <color_fragment>')).toBeLessThan(
+      fragmentShader.indexOf('diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness'),
+    );
+  });
+});
 
 describe('fishScaleShader shark no-op', () => {
   it('does not set onBeforeCompile when edgeDarkness is 0', () => {

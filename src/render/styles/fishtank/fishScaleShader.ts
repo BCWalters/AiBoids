@@ -112,31 +112,32 @@ export function applyFishScaleShader(
     shader.fragmentShader =
       `varying vec3 vFishScalePos;\nuniform float uFishScaleFreq;\nuniform float uScaleEdgeDarkness;\n` +
       shader.fragmentShader;
-    // Modulate vColor before color_fragment multiplies it into diffuseColor.
-    // Guard with USE_COLOR: without vertex colours the vColor variable is
-    // not declared and the block would fail to compile.
+    // Modulate the pattern into diffuseColor *after* color_fragment has
+    // folded vColor in. It must not touch vColor itself: three.js upgrades
+    // these shaders to GLSL 300 ES, where `varying` becomes `in` in the
+    // fragment stage and inputs are read-only — assigning to vColor fails to
+    // link with "l-value required (can't modify an input)" and takes the whole
+    // scene down. diffuseColor is a local vec4, so it is assignable, and
+    // because both are componentwise multiplies the result is identical.
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <color_fragment>',
-      `#ifdef USE_COLOR
+      `#include <color_fragment>
   {
-    // Overlapping-arc hex-grid scale pattern on the YZ body plane.
+    // Overlapping-arc scale pattern on the YZ body plane.
     // Y = spine axis (tail to head); Z = dorsal-ventral axis.
-    // Offset alternating Y-rows by half a cell in Z to produce the
-    // staggered shingle overlap characteristic of real fish scales.
+    // Offset alternating spine columns by half a cell so the shingles
+    // stagger the way real fish scales do.
     vec2 sp = vec2( vFishScalePos.y, vFishScalePos.z ) * uFishScaleFreq;
     sp.y += floor( sp.x ) * 0.5;
     vec2 fp = fract( sp ) - 0.5;
-    // Thin elliptical rim. The 1.6 aspect ratio elongates the shingle along
-    // the spine axis (fp.x / Y) matching real fish scale orientation.
-    // smoothstep rise × fall keeps the rim thin: measured over a unit cell,
-    // 71.7% of the surface is untouched and the mean multiplier is 0.962, so
-    // the pattern reads as scale edges rather than darkening the whole fish.
+    // Thin elliptical rim, elongated along the spine (fp.x) to match the
+    // orientation of real scales. Measured over a unit cell, 71.7% of the
+    // surface is untouched and the mean multiplier is 0.962, so this reads
+    // as scale edges rather than darkening the whole fish.
     float r = length( vec2( fp.x, fp.y * 1.6 ) );
     float rim = smoothstep( 0.34, 0.44, r ) * ( 1.0 - smoothstep( 0.44, 0.52, r ) );
-    vColor.rgb *= 1.0 - uScaleEdgeDarkness * rim;
-  }
-#endif
-#include <color_fragment>`,
+    diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness * rim;
+  }`,
     );
 
     Object.assign(shader.uniforms, {
