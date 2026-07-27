@@ -134,6 +134,12 @@ function arcadeIdHash(id: number, salt: number): number {
 const ARCADE_FLAP_FREQUENCY = 7.6;
 const ARCADE_FLAP_IDLE_AMPLITUDE = 0.25;
 const ARCADE_FLAP_SPEED_AMPLITUDE = 0.9;
+/**
+ * Arcade birds get a gentler version of the nature scene's snap-down beat —
+ * enough to read as a wingbeat rather than a sine wave, without breaking the
+ * deliberately simple, stylised look.
+ */
+const ARCADE_DOWNSTROKE_FRACTION = 0.42;
 const ARCADE_UNICORN_FLAP_FREQUENCY = 3.2;
 const ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE = 0.22;
 const ARCADE_UNICORN_FLAP_SPEED_AMPLITUDE = 0.5;
@@ -288,6 +294,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           flapFrequency: ARCADE_UNICORN_FLAP_FREQUENCY,
           flapIdleAmplitude: ARCADE_UNICORN_FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: ARCADE_UNICORN_FLAP_SPEED_AMPLITUDE,
+          flapDownstrokeFraction: ARCADE_DOWNSTROKE_FRACTION,
           keepUpright: true,
           uprightStyle: 'unicorn',
           bankScale: ARCADE_UNICORN_BANK_SCALE,
@@ -301,6 +308,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
           flapFrequency: ARCADE_FLAP_FREQUENCY,
           flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: ARCADE_FLAP_SPEED_AMPLITUDE,
+          flapDownstrokeFraction: ARCADE_DOWNSTROKE_FRACTION,
           keepUpright: false,
           uprightStyle: undefined,
           worldScale: 1,
@@ -343,6 +351,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       flapFrequency: ARCADE_FLAP_FREQUENCY,
       flapIdleAmplitude: ARCADE_FLAP_IDLE_AMPLITUDE,
       flapSpeedAmplitude: ARCADE_FLAP_SPEED_AMPLITUDE,
+      flapDownstrokeFraction: ARCADE_DOWNSTROKE_FRACTION,
       getScale: (creature) => (creature as Boid).scale,
       tailSwayAxis: new THREE.Vector3(1, 0, 0), // Right axis
       tailSwayAmplitude: 0,

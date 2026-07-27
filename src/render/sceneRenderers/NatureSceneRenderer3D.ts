@@ -80,6 +80,15 @@ const NATURE_HAWK_COLORS: SpeciesColorSet = { body: NATURE_HAWK_HEAD_TINT, wing:
 const FLAP_FREQUENCY = 7.6; // radians/sec-ish; controls flap speed
 const FLAP_IDLE_AMPLITUDE = 0.25;
 const FLAP_SPEED_AMPLITUDE = 0.9;
+/**
+ * Birds spend less of the beat on the power stroke than on the recovery, so
+ * the wing snaps down and eases back up rather than tracing a pure sine.
+ * Feathered birds are the most pronounced; the dragon's heavy membrane wings
+ * and the unicorn's smaller wings are closer to even.
+ */
+const BIRD_DOWNSTROKE_FRACTION = 0.37;
+const DRAGON_DOWNSTROKE_FRACTION = 0.43;
+const UNICORN_DOWNSTROKE_FRACTION = 0.42;
 const DRAGON_FLAP_FREQUENCY = 2.15;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
@@ -551,6 +560,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapFrequency: _UNICORN_FLAP_FREQUENCY,
           flapIdleAmplitude: _UNICORN_FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: _UNICORN_FLAP_SPEED_AMPLITUDE,
+          flapDownstrokeFraction: UNICORN_DOWNSTROKE_FRACTION,
           keepUpright: true,
           uprightStyle: 'unicorn',
           bankScale: _UNICORN_BANK_SCALE,
@@ -563,6 +573,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapFrequency: DRAGON_FLAP_FREQUENCY,
           flapIdleAmplitude: DRAGON_FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: DRAGON_FLAP_SPEED_AMPLITUDE,
+          flapDownstrokeFraction: DRAGON_DOWNSTROKE_FRACTION,
           keepUpright: true,
           uprightStyle: 'dragon',
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
@@ -576,6 +587,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapFrequency: FLAP_FREQUENCY,
           flapIdleAmplitude: FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: FLAP_SPEED_AMPLITUDE,
+          flapDownstrokeFraction: BIRD_DOWNSTROKE_FRACTION,
           keepUpright: false,
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
           tailSwayAmplitude: HAWK_TAIL_SWAY_AMPLITUDE,
@@ -620,6 +632,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       flapFrequency: isParrot && isProfiledParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
       flapIdleAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
       flapSpeedAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+      flapDownstrokeFraction: BIRD_DOWNSTROKE_FRACTION,
       getScale: (creature) => (creature as Boid).scale,
       tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
       tailSwayAmplitude: isParrot && isProfiledParrot

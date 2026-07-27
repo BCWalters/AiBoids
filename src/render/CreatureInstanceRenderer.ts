@@ -29,6 +29,7 @@ import {
   computeSpeedFraction,
   computeTailSwayPhase,
   flapAngleFromPhase,
+  SYMMETRIC_DOWNSTROKE_FRACTION,
   initialFlapPhase,
   tailSwayAngleFromPhase,
 } from './motion/flapMath';
@@ -99,6 +100,7 @@ interface CreatureInstanceMatrixArgs {
   flapIdleAmplitude: number;
   flapSpeedAmplitude: number;
   finRestBiasRad: number;
+  flapDownstrokeFraction: number;
   tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
@@ -119,6 +121,7 @@ interface ResolvedMotionConfig {
   uprightStyle: UprightStyle;
   bankScale: number;
   finRestBiasRad: number;
+  flapDownstrokeFraction: number;
   tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
@@ -170,6 +173,7 @@ interface UpdateCreatureInstanceArgs {
   uprightStyle: UprightStyle;
   bankScale: number;
   finRestBiasRad: number;
+  flapDownstrokeFraction: number;
   tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
@@ -507,6 +511,7 @@ export class CreatureInstanceRenderer {
       flapIdleAmplitude,
       flapSpeedAmplitude,
       finRestBiasRad,
+      flapDownstrokeFraction,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -520,9 +525,9 @@ export class CreatureInstanceRenderer {
     this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle, restOnFloor, containWithinTankWalls);
 
     // Wings: apply an extra local flap rotation around the forward axis.
-    const flapAngle = this.computeWingFlapAngle(
+    const flapAngle = this.computeWingFlapAngle({
       creature,
-      velocity,
+      vel: velocity,
       speed,
       maxSpeed,
       dt,
@@ -536,8 +541,9 @@ export class CreatureInstanceRenderer {
       flapIdleAmplitude,
       flapSpeedAmplitude,
       finRestBiasRad,
+      flapDownstrokeFraction,
       uprightStyle,
-    );
+    });
     this.applyWingFlapMatrices(set, index, flapAngle);
 
     this.applyCreatureTailSwayMatrix(
@@ -699,24 +705,48 @@ export class CreatureInstanceRenderer {
     return box;
   }
 
-  private computeWingFlapAngle(
-    creature: Boid | Predator,
-    vel: { x: number; y: number; z: number },
-    speed: number,
-    maxSpeed: number,
-    dt: number,
-    blendStrength: number,
-    climbWeight: number,
-    diveWeight: number,
-    turnWeight: number,
-    panicWeight: number,
-    cruiseWeight: number,
-    flapFrequency: number,
-    flapIdleAmplitude: number,
-    flapSpeedAmplitude: number,
-    finRestBiasRad: number,
-    uprightStyle: UprightStyle,
-  ): number {
+  /**
+   * Advances this creature's flap clock and returns the current wing angle.
+   * Named fields rather than positional args: this takes 17 inputs, and a
+   * misordered positional list is a silent, type-clean regression.
+   */
+  private computeWingFlapAngle({
+    creature,
+    vel,
+    speed,
+    maxSpeed,
+    dt,
+    blendStrength,
+    climbWeight,
+    diveWeight,
+    turnWeight,
+    panicWeight,
+    cruiseWeight,
+    flapFrequency,
+    flapIdleAmplitude,
+    flapSpeedAmplitude,
+    finRestBiasRad,
+    flapDownstrokeFraction,
+    uprightStyle,
+  }: {
+    creature: Boid | Predator;
+    vel: { x: number; y: number; z: number };
+    speed: number;
+    maxSpeed: number;
+    dt: number;
+    blendStrength: number;
+    climbWeight: number;
+    diveWeight: number;
+    turnWeight: number;
+    panicWeight: number;
+    cruiseWeight: number;
+    flapFrequency: number;
+    flapIdleAmplitude: number;
+    flapSpeedAmplitude: number;
+    finRestBiasRad: number;
+    flapDownstrokeFraction: number;
+    uprightStyle: UprightStyle;
+  }): number {
     const { frequencyMultiplier, amplitudeMultiplier } = computeFlapStateMultipliers({
       blendStrength,
       climbWeight,
@@ -739,7 +769,12 @@ export class CreatureInstanceRenderer {
       dt,
     });
     this.flapPhase.set(creature, phase);
-    return flapAngleFromPhase({ phase, amplitude, restBiasRad: finRestBiasRad });
+    return flapAngleFromPhase({
+      phase,
+      amplitude,
+      restBiasRad: finRestBiasRad,
+      downstrokeFraction: flapDownstrokeFraction,
+    });
   }
 
   /**
@@ -885,6 +920,7 @@ export class CreatureInstanceRenderer {
       uprightStyle = 'dragon' as const,
       bankScale = 1,
       finRestBiasRad = 0,
+      flapDownstrokeFraction = SYMMETRIC_DOWNSTROKE_FRACTION,
       tailSwayAxis = MODEL_RIGHT_AXIS,
       tailSwayAmplitude = 0,
       tailSwayFrequency,
@@ -905,6 +941,7 @@ export class CreatureInstanceRenderer {
       uprightStyle,
       bankScale,
       finRestBiasRad,
+      flapDownstrokeFraction,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -972,6 +1009,7 @@ export class CreatureInstanceRenderer {
       uprightStyle,
       bankScale,
       finRestBiasRad,
+      flapDownstrokeFraction,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -1027,6 +1065,7 @@ export class CreatureInstanceRenderer {
       flapIdleAmplitude,
       flapSpeedAmplitude,
       finRestBiasRad,
+      flapDownstrokeFraction,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -1100,6 +1139,7 @@ export class CreatureInstanceRenderer {
       uprightStyle,
       bankScale,
       finRestBiasRad,
+      flapDownstrokeFraction,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -1144,6 +1184,7 @@ export class CreatureInstanceRenderer {
       uprightStyle,
       bankScale,
       finRestBiasRad,
+      flapDownstrokeFraction,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
