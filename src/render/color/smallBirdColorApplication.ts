@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { jitterHSL } from './colorJitter';
 import type { CreatureInstanceColorArgs } from './creatureColorApplication';
+import { applyLegChainColor } from './legColorApplication';
 
 /**
  * Owns the nature small-songbird color path (sparrow / goldfinch / cardinal /
@@ -65,10 +66,13 @@ export class SmallBirdColorApplicator {
     }
 
     // Legs bake the species foot color; pass pure white so it shows unchanged.
-    if (set.legs) {
-      this.legsColor.setRGB(1, 1, 1);
-      set.legs.setColorAt(index, this.legsColor);
-    }
+    applyLegChainColor({
+      set,
+      index,
+      scratch: this.legsColor,
+      flatColor: this.legsColor,
+      forceWhite: true,
+    });
 
     // Beak is a separate un-baked part: a small per-individual jitter keeps a
     // flock's beaks from all being the exact same pixel color.

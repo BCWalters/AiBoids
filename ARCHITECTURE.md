@@ -72,7 +72,7 @@ AiBoids/
                             # poses + colors one creature render batch per
                             # frame (orientation, flap, tail sway, banking)
       motion/               # pure creature-motion math (no THREE state):
-                            # flapMath.ts, partTransform.ts — unit tested
+                            # flapMath.ts, partTransform.ts, rig.ts — unit tested
       color/                # per-species color applicators
       creatureUprightTuning.ts
                             # per-upright-style tuning tables
@@ -137,6 +137,20 @@ AiBoids/
   about an arbitrary model-space pivot. Rotating about the origin is the
   same code path with a null pivot, so there is one articulation behaviour
   rather than a bespoke matrix sequence per part.
+- **A joint's position is declared by the geometry that builds it, not by the
+  scene**: `src/render/motion/rig.ts` describes parts as plain data (pivot,
+  axis, parent, drive) and each geometry builder emits that declaration
+  alongside its buffers. A pivot is expressed in whatever model units that
+  creature's builder chose, which a per-scene `MotionConfig` has no way to
+  know — a wrong value detaches the limb rather than degrading gracefully.
+  Scenes keep only the tuning they legitimately own: how fast and how hard to
+  drive each oscillator. Parts are ordered root-first and reference their
+  parent by index, so a chain (hip → knee) composes in one forward pass and
+  a child inherits every rotation above it.
+- **Colour keys off a part's group, not its identity**: leg tinting lives in
+  `applyLegChainColor`, so splitting a creature's legs into more parts doesn't
+  ripple back into six colour strategies that don't care how many parts there
+  are.
 
 ## Where to look for common tasks
 
@@ -149,6 +163,7 @@ AiBoids/
 | Change bird/dragon appearance | `src/render/styles/nature/geometry/` |
 | Change fish/shark appearance | `src/render/styles/fishtank/geometry/` |
 | Tune how creatures move (flap, tail sway) | `src/render/motion/flapMath.ts` |
+| Change where a limb bends | that creature's geometry file (its rig declaration) |
 | Add a new animated body part | `src/render/CreatureInstanceRenderer.ts` (`applyArticulatedPartMatrix`) |
 | Add a new control-panel slider | `src/sim/params.ts` + `src/ui/ControlPanel.ts` |
 | Add a new special event (like the alien invasion) | `src/sim/UFO.ts` + `src/render/ufoEffects.ts` as a template |

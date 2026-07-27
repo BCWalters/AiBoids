@@ -3,6 +3,7 @@ import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
+  singleLegPart,
 } from '../../../geometry/sharedGeometry';
 import { buildFingeredWingGeometry } from './birdSharedGeometry';
 
@@ -92,7 +93,7 @@ export function createUnicornGeometries(length: number, width: number): Creature
   const tail = buildUnicornTailGeometry(length, width);
   const legs = buildUnicornLegsGeometry(length, width);
 
-  return { body, wingLeft, wingRight, tail, legs };
+  return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
 }
 
 

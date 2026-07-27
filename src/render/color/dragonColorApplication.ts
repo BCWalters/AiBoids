@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureInstanceColorArgs } from './creatureColorApplication';
+import { applyLegChainColor } from './legColorApplication';
 
 /**
  * Owns the nature dragon (Monster predator) color path. Dragons carry no
@@ -39,13 +40,6 @@ export class DragonColorApplicator {
       set.tail.setColorAt(index, this.tailColor);
     }
 
-    if (set.legs) {
-      if (set.legs.geometry.getAttribute('color')) {
-        this.legsColor.setRGB(1, 1, 1);
-      } else {
-        this.legsColor.copy(this.stateColor);
-      }
-      set.legs.setColorAt(index, this.legsColor);
-    }
+    applyLegChainColor({ set, index, scratch: this.legsColor, flatColor: this.stateColor });
   }
 }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { RigPartDeclaration } from '../motion/rig';
 
 /**
  * Truly generic, cross-domain geometry primitives shared by BOTH the
@@ -16,9 +17,16 @@ export interface CreatureGeometries {
   wingLeft: THREE.BufferGeometry;
   wingRight: THREE.BufferGeometry;
   tail?: THREE.BufferGeometry;
-  /** Dragon-only: a pair of clawed legs tucked under the belly, rendered
-   * with the same static per-instance transform as the body (no flap). */
-  legs?: THREE.BufferGeometry;
+  /**
+   * The creature's legs, as one or more articulated parts ordered root-first.
+   *
+   * Most creatures supply a single part (see singleLegPart) whose whole leg
+   * group swings about one hip line. Creatures with visibly jointed legs split
+   * this into a chain — upper segment, then lower segment pivoting about the
+   * knee — so the joint actually bends instead of being a bend painted onto a
+   * rigid plank.
+   */
+  legs?: CreatureLegPart[];
   /** Small-bird-only: the beak as its own InstancedMesh part (rather than
    * merged/vertex-baked into the body) — see birdGeometry.ts's doc
    * comment on why a shared multi-species geometry needs this instead of
@@ -26,6 +34,41 @@ export interface CreatureGeometries {
    * vertex colors. Rendered with the same static per-instance transform
    * as the body (no flap). */
   beak?: THREE.BufferGeometry;
+}
+
+/**
+ * A rig part paired with the geometry it draws.
+ *
+ * The declaration half stays in motion/rig.ts, which is deliberately free of
+ * any THREE import so rigs can be reasoned about and unit-tested as plain data.
+ * Geometry is attached here, at the point where the two actually meet.
+ */
+export interface CreatureLegPart extends RigPartDeclaration {
+  geometry: THREE.BufferGeometry;
+}
+
+/**
+ * Wraps a single merged legs geometry as a one-part rig, pivoting about the top
+ * of its own bounding box.
+ *
+ * Legs are modelled hanging along -Z, so the top of that box is where they meet
+ * the body — measuring it beats asking each scene for a hip coordinate in model
+ * units it has no way to know. Creatures that want a real jointed leg declare
+ * their pivots explicitly instead of calling this.
+ */
+export function singleLegPart(geometry: THREE.BufferGeometry): CreatureLegPart[] {
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const hipZ = geometry.boundingBox?.max.z ?? 0;
+  return [
+    {
+      role: 'legs',
+      group: 'legs',
+      geometry,
+      pivot: [0, 0, hipZ],
+      axis: [1, 0, 0],
+      drive: { source: 'legSwing' },
+    },
+  ];
 }
 
 /** Disposes every GPU buffer owned by a CreatureGeometries bundle. Each scene
@@ -36,7 +79,7 @@ export function disposeCreatureGeometries(geometries: CreatureGeometries): void 
   geometries.wingLeft.dispose();
   geometries.wingRight.dispose();
   geometries.tail?.dispose();
-  geometries.legs?.dispose();
+  for (const part of geometries.legs ?? []) part.geometry.dispose();
   geometries.beak?.dispose();
 }
 

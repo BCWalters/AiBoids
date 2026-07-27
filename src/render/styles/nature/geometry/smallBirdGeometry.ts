@@ -4,6 +4,7 @@ import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
   buildEyeDotsGeometry,
+  singleLegPart,
 } from '../../../geometry/sharedGeometry';
 import { buildTailGeometry } from './birdSharedGeometry';
 
@@ -117,7 +118,7 @@ export function createRealisticBirdGeometries(
   });
   const legs = buildSmallBirdLegsGeometry(length, width, legsColor);
 
-  return { body, wingLeft, wingRight, tail, beak, legs };
+  return { body, wingLeft, wingRight, tail, beak, legs: singleLegPart(legs) };
 }
 
 

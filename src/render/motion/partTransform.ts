@@ -38,3 +38,29 @@ export function composePartArticulation({
   target.multiply(scratchToOrigin);
   return target;
 }
+
+/**
+ * Composes a chain of articulations in *model space*, so a child joint inherits
+ * every rotation applied to its ancestors — a hoof follows the knee, which
+ * follows the hip.
+ *
+ * `chain` must be ordered root-first. Each entry is the local articulation of
+ * one link, as produced by composePartArticulation. The result is the product
+ * `root · … · leaf`, which the caller then applies once to the body transform.
+ *
+ * Composing in model space rather than accumulating world matrices is what
+ * keeps this cheap: the body's position/orientation/scale is applied a single
+ * time at the end instead of being decomposed per link. That's valid because
+ * body scale is uniform, and uniform scale commutes with rotation.
+ */
+export function composeArticulationChain({
+  target,
+  chain,
+}: {
+  target: THREE.Matrix4;
+  chain: readonly THREE.Matrix4[];
+}): THREE.Matrix4 {
+  target.identity();
+  for (const link of chain) target.multiply(link);
+  return target;
+}

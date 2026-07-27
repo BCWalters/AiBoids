@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { mergeGeometriesWithColor } from '../../../geometry/sharedGeometry';
+import { mergeGeometriesWithColor, singleLegPart } from '../../../geometry/sharedGeometry';
 
 /**
  * "Dragon" predator geometry: a bulkier, longer-necked lathed body with a
@@ -25,7 +25,7 @@ export function createDragonGeometries(length: number, width: number): CreatureG
   const tail = buildDragonTailGeometry(length, width);
   const legs = buildDragonLegsGeometry(length, width);
 
-  return { body, wingLeft, wingRight, tail, legs };
+  return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
 }
 
 // --- Shared volumetric helpers -------------------------------------------

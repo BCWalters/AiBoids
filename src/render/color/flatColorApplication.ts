@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { jitterHSL } from './colorJitter';
 import type { CreatureInstanceColorArgs } from './creatureColorApplication';
+import { applyLegChainColor } from './legColorApplication';
 
 /**
  * Owns the flat-color creature class: solid body tint, wings matched to body,
@@ -39,14 +40,7 @@ export class FlatColorApplicator {
       set.tail.setColorAt(index, this.tailColor);
     }
 
-    if (set.legs) {
-      if (set.legs.geometry.getAttribute('color')) {
-        this.legsColor.setRGB(1, 1, 1);
-      } else {
-        this.legsColor.copy(this.stateColor);
-      }
-      set.legs.setColorAt(index, this.legsColor);
-    }
+    applyLegChainColor({ set, index, scratch: this.legsColor, flatColor: this.stateColor });
 
     if (set.beak && beakColor) {
       jitterHSL(this.beakInstanceColor, beakColor, creature.id, 5, 0.04, 0.1, 0.08);

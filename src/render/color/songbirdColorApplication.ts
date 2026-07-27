@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { idHash, jitterHSL } from './colorJitter';
 import type { CreatureInstanceColorArgs } from './creatureColorApplication';
+import { applyLegChainColor } from './legColorApplication';
 
 /**
  * Owns the "songbird individual-variation" color class — creatures that take
@@ -69,14 +70,7 @@ export class SongbirdColorApplicator {
     set.wingRight.setColorAt(index, this.wingColor);
     if (set.tail) set.tail.setColorAt(index, this.wingColor);
 
-    if (set.legs) {
-      if (set.legs.geometry.getAttribute('color')) {
-        this.legsColor.setRGB(1, 1, 1);
-      } else {
-        this.legsColor.copy(this.stateColor);
-      }
-      set.legs.setColorAt(index, this.legsColor);
-    }
+    applyLegChainColor({ set, index, scratch: this.legsColor, flatColor: this.stateColor });
 
     if (set.beak && beakColor) {
       // Small per-individual jitter, same treatment as the other parts (salt 5)
