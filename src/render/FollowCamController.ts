@@ -107,6 +107,19 @@ export class FollowCamController {
   }
 
   /**
+   * Call from `pointercancel` and `pointerleave` event listeners on the 3D
+   * canvas. Clears the pending pointer-down state so that an aborted or
+   * captured gesture (e.g. OrbitControls calling setPointerCapture) can never
+   * be misclassified as a stationary click when the pointer is eventually
+   * released near its original down position.
+   */
+  handlePointerCancel(): void {
+    this._hasPointerDown = false;
+    this._pointerDownX = 0;
+    this._pointerDownY = 0;
+  }
+
+  /**
    * Call from a `pointerup` event listener on the 3D canvas.
    * Runs the creature-selection path only when the pointer has not moved
    * beyond `DRAG_THRESHOLD_PX` since the matching `handlePointerDown`.
