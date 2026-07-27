@@ -40,13 +40,19 @@ const HALF_LEN = LENGTH * 0.5;
 const PLAIN_FISH_EXPECTED_MAX_X = WIDTH * 0.46 * (0.465 * 0.75);
 
 // Minimum body vertex count that distinguishes the new resolution from the
-// old 16-segment / 8-profile-point config.
-// Old non-indexed lathe vertex count (body alone) ≈ 7 * 16 * 2 * 3 = 672;
-// full merged body (+ dorsal + eyes) ≈ 870.
-// New non-indexed lathe vertex count (body alone) ≈ 32 * 24 * 2 * 3 = 4608;
-// full merged body much higher.  Floor of 1500 fails the old config, passes
-// any sensible new resolution.
-const VERTEX_COUNT_FLOOR = 1500;
+// old 16-segment / 8-profile-point config. Measured merged-body counts:
+//
+//   variant        before   after
+//   plain fish      1188     5124
+//   goldfish        1188     5124
+//   clownfish       3204     5124
+//   blue tang       3204     5124
+//   butterflyfish   1320     5160
+//
+// The floor has to sit above the *highest* pre-fix count (3204), not just
+// above the lowest. A floor of 1500 passes on the old clownfish and blue
+// tang meshes, so it would not have caught either of them regressing.
+const VERTEX_COUNT_FLOOR = 4000;
 
 describe('smallFish body resolution', () => {
   describe('plain fish', () => {

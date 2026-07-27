@@ -26,7 +26,7 @@ const HALF_LEN = LENGTH * 0.5;
 // Expected max X ≈ 0.52 * 0.5 * 0.18 = 0.0468.
 const BUTTERFLY_EXPECTED_MAX_X = WIDTH * 0.52 * 0.18;
 
-const VERTEX_COUNT_FLOOR = 1500;
+const VERTEX_COUNT_FLOOR = 4000;
 
 describe('butterflyfish body resolution', () => {
   let bb: THREE.Box3;
