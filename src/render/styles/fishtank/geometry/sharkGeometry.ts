@@ -5,6 +5,7 @@ import {
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
+  swayingTailRig,
 } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometryAlongX,
@@ -56,7 +57,15 @@ export function createSharkGeometries(rawLength: number, width: number): Creatur
 
   const tail = buildCaudalFinGeometry(length, width);
 
-  return { body, wingLeft, wingRight, tail };
+  return {
+    body,
+    wingLeft,
+    wingRight,
+    tail,
+    // See SHARK_TAIL_PIVOT_FRACTION: hinging at the fin's own root keeps the
+    // root end from sweeping out through the side of the body.
+    tailRig: swayingTailRig({ pivot: [0, sharkTailPivotY(rawLength), 0], axis: [0, 1, 0] }),
+  };
 }
 
 /**
@@ -281,17 +290,25 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
 // Fraction of raw (pre-SHARK_LENGTH_SCALE) creature length at which the
 // caudal fin's root sits along local Y — essentially the body's own
 // peduncle tip once SHARK_LENGTH_SCALE and the 0.97/0.5 halfLen math
-// below are folded in. Exported (via getSharkTailPivotY) so Renderer3D
-// can tell updateInstances() where the tail's true attachment point is,
-// so the tail-sway rotation can pivot around *that* point (matching
-// this geometry's own root vertex) instead of the model's shared local
-// origin — see buildCaudalFinGeometry's docs for why that distinction
-// matters.
+// below are folded in.
+//
+// CAVEAT, because the comment this replaces got it wrong and cost someone a
+// debugging session: this offset currently has NO effect on the sway. The
+// tail sweeps about MODEL_UP (0,1,0) and this pivot differs from the origin
+// only along Y — and a translation *along* the rotation axis commutes with
+// the rotation, so pivoting here is mathematically identical to pivoting at
+// the origin. The earlier claim that this fixed the fin's root sweeping out
+// through the body was therefore never true; whatever fixed that, it wasn't
+// this. It is still declared because it is the honest attachment point, and
+// it would start mattering the moment the sway axis gained an X or Z
+// component. Do not treat the number as a tuning knob: it isn't one, which
+// is exactly the mistake that led to it being fed a fictional "reference
+// length" of 4.0 instead of the shark's real length.
 const SHARK_TAIL_PIVOT_FRACTION = -0.97 * 0.5 * SHARK_LENGTH_SCALE;
 
-/** World-space (local Y) position of the caudal fin's root/attachment
- * point, given the same `rawLength` passed to createSharkGeometries. */
-export function getSharkTailPivotY(rawLength: number): number {
+/** Local-Y position of the caudal fin's root/attachment point, given the
+ * same `rawLength` passed to createSharkGeometries. */
+function sharkTailPivotY(rawLength: number): number {
   return SHARK_TAIL_PIVOT_FRACTION * rawLength;
 }
 

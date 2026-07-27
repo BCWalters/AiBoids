@@ -5,6 +5,7 @@ import {
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
+  swayingTailRig,
 } from '../../../geometry/sharedGeometry';
 import { extrudeRingGeometryAlongX, latheBodyRadiusAt } from './fishSharedGeometry';
 
@@ -48,7 +49,7 @@ const TAIL_TIP_COLOR = new THREE.Color(0x121417);
 // Root of the caudal fin (local Y), as a fraction of raw input length.
 const BARRACUDA_TAIL_PIVOT_FRACTION = -0.88 * 0.5 * BARRACUDA_LENGTH_SCALE;
 
-export function getBarracudaTailPivotY(rawLength: number): number {
+function barracudaTailPivotY(rawLength: number): number {
   return BARRACUDA_TAIL_PIVOT_FRACTION * rawLength;
 }
 
@@ -60,7 +61,15 @@ export function createBarracudaGeometries(rawLength: number, width: number): Cre
   const wingLeft = buildPectoralFinGeometry(length, finSpan, finChord, 1);
   const wingRight = buildPectoralFinGeometry(length, finSpan, finChord, -1);
   const tail = buildCaudalFinGeometry(length, width);
-  return { body, wingLeft, wingRight, tail };
+  return {
+    body,
+    wingLeft,
+    wingRight,
+    tail,
+    // Sweeps side-to-side about MODEL_UP, hinged at the fin's own root rather
+    // than the model origin so the root stays buried in the peduncle.
+    tailRig: swayingTailRig({ pivot: [0, barracudaTailPivotY(rawLength), 0], axis: [0, 1, 0] }),
+  };
 }
 
 /**

@@ -77,10 +77,8 @@ export interface MotionConfig {
    */
   flapBottomClipRad?: number;
 
-  tailSwayAxis?: THREE.Vector3;
   tailSwayAmplitude?: number;
   tailSwayFrequency?: number;
-  tailSwayPivotY?: number;
   worldScale?: number;
   meshScaleBoost?: number;
   preferUpright?: boolean;

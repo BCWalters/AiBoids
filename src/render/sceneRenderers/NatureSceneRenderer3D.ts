@@ -267,7 +267,6 @@ interface NatureSpeciesConfig {
   natureBase: THREE.Color;
   colors?: SpeciesColorSet;
   beakColor?: THREE.Color;
-  tailSwayPivotY?: number;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
 }
@@ -281,7 +280,6 @@ const NATURE_SPECIES_CONFIG: Record<BoidSpecies, NatureSpeciesConfig> = {
   [BoidSpecies.Multicolor]: {
     natureBase: PARROT_NATURE_VARIANTS[0].colors.body,
     useParrotGeometry: true,
-    tailSwayPivotY: -4.186,
     useSmallGeometry: false,
   },
   [BoidSpecies.Gold]: {
@@ -612,7 +610,6 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           legTuckRad: DRAGON_LEG_TUCK_RAD,
           keepUpright: true,
           uprightStyle: 'dragon',
-          tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
           tailSwayAmplitude: DRAGON_TAIL_SWAY_AMPLITUDE,
           worldScale: 1,
           meshScaleBoost: 1,
@@ -627,7 +624,6 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           legSwingAmplitude: BIRD_LEG_SWING_AMPLITUDE,
           legTuckRad: BIRD_LEG_TUCK_RAD,
           keepUpright: false,
-          tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
           tailSwayAmplitude: HAWK_TAIL_SWAY_AMPLITUDE,
           worldScale: 1,
           meshScaleBoost: 1,
@@ -664,7 +660,6 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   getBoidMotionConfig(species: BoidSpecies, _flags: StyleFlags, boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
     const { isProfiledParrot } = boidMotionFlags;
     const isParrot = species === BoidSpecies.Multicolor;
-    const tailSwayPivot = NATURE_SPECIES_CONFIG[species].tailSwayPivotY ?? 0;
 
     return {
       flapFrequency: isParrot && isProfiledParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
@@ -674,12 +669,10 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       legSwingAmplitude: BIRD_LEG_SWING_AMPLITUDE,
       legTuckRad: BIRD_LEG_TUCK_RAD,
       getScale: (creature) => (creature as Boid).scale,
-      tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
       tailSwayAmplitude: isParrot && isProfiledParrot
         ? _PARROT_TAIL_SWAY_AMPLITUDE
         : DRAGON_TAIL_SWAY_AMPLITUDE,
       tailSwayFrequency: undefined,
-      tailSwayPivotY: tailSwayPivot,
       worldScale: 1,
       meshScaleBoost: 1,
       preferUpright: true,

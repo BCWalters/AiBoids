@@ -43,6 +43,9 @@ export interface BoidRenderBatch {
   wingLeft: THREE.InstancedMesh;
   wingRight: THREE.InstancedMesh;
   tail?: THREE.InstancedMesh;
+  /** How the tail hinges, published by the geometry that built it. Absent for
+   * tails that don't sway — they're posed with the plain body transform. */
+  tailRig?: RigPartDeclaration;
   /**
    * The leg chain, ordered root-first so each part is posed after its parent.
    * One entry for most creatures; several for creatures with jointed legs.
@@ -115,10 +118,8 @@ interface CreatureInstanceMatrixArgs {
   flapBottomClipRad: number;
   legSwingAmplitude: number;
   legTuckRad: number;
-  tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
-  tailSwayPivotY: number;
   worldScale: number;
   meshScaleBoost: number;
   uprightStyle: UprightStyle;
@@ -139,10 +140,8 @@ interface ResolvedMotionConfig {
   flapBottomClipRad: number;
   legSwingAmplitude: number;
   legTuckRad: number;
-  tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
-  tailSwayPivotY: number;
   worldScale: number;
   meshScaleBoost: number;
   preferUpright: boolean;
@@ -194,10 +193,8 @@ interface UpdateCreatureInstanceArgs {
   flapBottomClipRad: number;
   legSwingAmplitude: number;
   legTuckRad: number;
-  tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
-  tailSwayPivotY: number;
   worldScale: number;
   meshScaleBoost: number;
   preferUpright: boolean;
@@ -542,10 +539,8 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
-      tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
-      tailSwayPivotY,
       worldScale,
       meshScaleBoost,
       uprightStyle,
@@ -583,10 +578,8 @@ export class CreatureInstanceRenderer {
       creature,
       elapsed,
       flapFrequency,
-      tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
-      tailSwayPivotY,
       uprightStyle,
     );
 
@@ -984,32 +977,43 @@ export class CreatureInstanceRenderer {
     });
   }
 
+  /**
+   * Sways the tail about the hinge its own geometry declared.
+   *
+   * Both the pivot and the axis come from the rig rather than scene config:
+   * they're measured in this model's units and baked into how the tail was
+   * built, so a scene has nothing to base a value on. A tail with no rig isn't
+   * articulated and was already posed with the body matrix.
+   */
   private applyCreatureTailSwayMatrix(
     set: BoidRenderBatch,
     i: number,
     creature: Boid | Predator,
     elapsed: number,
     flapFrequency: number,
-    tailSwayAxis: THREE.Vector3,
     tailSwayAmplitude: number,
     tailSwayFrequency: number | undefined,
-    tailSwayPivotY: number,
     uprightStyle: UprightStyle,
   ): void {
     // Tail sway (dragons/sharks only).
-    if (!set.tail) return;
+    if (!set.tail || !set.tailRig) return;
     if (!usesTailSwayMatrix(uprightStyle)) return;
+    const { pivot, axis, drive } = set.tailRig;
     const tailPhase = computeTailSwayPhase({
       elapsed,
-      frequency: tailSwayFrequency ?? flapFrequency,
+      frequency: (tailSwayFrequency ?? flapFrequency) * (drive.frequencyScale ?? 1),
       creatureId: creature.id,
-    });
-    this.tmpPivot.set(0, tailSwayPivotY, 0);
+    }) + (drive.phaseOffsetRad ?? 0);
+    this.tmpPivot.set(pivot[0], pivot[1], pivot[2]);
+    this.tmpAxis.set(axis[0], axis[1], axis[2]);
     this.applyArticulatedPartMatrix({
       mesh: set.tail,
       index: i,
-      axis: tailSwayAxis,
-      angle: tailSwayAngleFromPhase({ phase: tailPhase, amplitude: tailSwayAmplitude }),
+      axis: this.tmpAxis,
+      angle: resolveDriveAngle({
+        drive,
+        baseAngle: tailSwayAngleFromPhase({ phase: tailPhase, amplitude: tailSwayAmplitude }),
+      }),
       pivot: this.tmpPivot,
     });
   }
@@ -1070,10 +1074,8 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad = 0,
       legSwingAmplitude = 0,
       legTuckRad = 0,
-      tailSwayAxis = MODEL_RIGHT_AXIS,
       tailSwayAmplitude = 0,
       tailSwayFrequency,
-      tailSwayPivotY = 0,
       worldScale = 1,
       meshScaleBoost = 1,
       preferUpright = false,
@@ -1094,10 +1096,8 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
-      tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
-      tailSwayPivotY,
       worldScale,
       meshScaleBoost,
       preferUpright,
@@ -1165,10 +1165,8 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
-      tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
-      tailSwayPivotY,
       worldScale,
       meshScaleBoost,
       preferUpright,
@@ -1224,10 +1222,8 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
-      tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
-      tailSwayPivotY,
       worldScale,
       meshScaleBoost,
       uprightStyle,
@@ -1301,10 +1297,8 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
-      tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
-      tailSwayPivotY,
       worldScale,
       meshScaleBoost,
       preferUpright,
@@ -1349,10 +1343,8 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       legSwingAmplitude,
       legTuckRad,
-      tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
-      tailSwayPivotY,
       worldScale,
       meshScaleBoost,
       preferUpright,
