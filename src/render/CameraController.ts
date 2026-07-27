@@ -125,6 +125,21 @@ export class CameraController {
     t.z += (z - t.z) * alpha;
   }
 
+  /** Enable/disable OrbitControls updates and pointer interaction. */
+  setOrbitControlsEnabled(enabled: boolean): void {
+    this.controls.enabled = enabled;
+  }
+
+  /**
+   * Set camera position + look target directly.
+   * Used by POV follow-cam when OrbitControls is temporarily disabled.
+   */
+  setCameraPose(position: THREE.Vector3, lookTarget: THREE.Vector3): void {
+    this.camera.position.copy(position);
+    this.camera.lookAt(lookTarget);
+    this.camera.updateMatrixWorld();
+  }
+
   /** Returns the perspective camera — used by the screen-space entity picker. */
   getCamera(): THREE.PerspectiveCamera {
     return this.camera;
