@@ -21,8 +21,7 @@ export function createRendererSceneRenderers(args: SceneRendererFactoryArgs): Re
       camera,
       controls,
       driftingClouds: sceneAssets.driftingClouds,
-      fishtankEnv: sceneAssets.fishtankEnv,
-      natureEnv: sceneAssets.natureEnv,
+      getNatureEnv: () => sceneAssets.envProvider.getNatureEnv(),
       fireBreathEffects: sceneAssets.fireBreathEffects,
     }),
     fishtank: new FishtankSceneRenderer3D({
@@ -30,15 +29,12 @@ export function createRendererSceneRenderers(args: SceneRendererFactoryArgs): Re
       controls,
       driftingClouds: sceneAssets.driftingClouds,
       fishtankCenter,
-      fishtankEnv: sceneAssets.fishtankEnv,
-      natureEnv: sceneAssets.natureEnv,
+      getFishtankEnv: () => sceneAssets.envProvider.getFishtankEnv(),
     }),
     arcade: new ArcadeSceneRenderer3D({
       camera,
       controls,
       driftingClouds: sceneAssets.driftingClouds,
-      fishtankEnv: sceneAssets.fishtankEnv,
-      natureEnv: sceneAssets.natureEnv,
     }),
   });
 }

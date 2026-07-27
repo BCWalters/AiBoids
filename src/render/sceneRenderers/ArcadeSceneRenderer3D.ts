@@ -5,8 +5,6 @@ import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
 import { type Boid, BoidSpecies } from '../../sim/Boid';
 import type { DriftingClouds } from '../styles/nature/clouds';
-import type { FishtankEnvironment } from '../styles/fishtank/environment';
-import type { NatureEnvironment } from '../styles/nature/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
 import { createBirdGeometries } from '../styles/nature/geometry/smallBirdGeometry';
@@ -145,8 +143,6 @@ interface ArcadeSceneRendererDependencies {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   driftingClouds: DriftingClouds;
-  fishtankEnv: FishtankEnvironment;
-  natureEnv: NatureEnvironment;
 }
 
 export class ArcadeSceneRenderer3D implements SceneRendererHooks {
@@ -168,8 +164,8 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
   }
 
   setStyleVisibility(): void {
-    this.deps.natureEnv.setVisible(false);
-    this.deps.fishtankEnv.setVisible(false);
+    // Both nature and fishtank envs are disposed (null) when arcade is active
+    // — no setVisible(false) needed; they no longer exist in the scene graph.
     this.deps.driftingClouds.setVisible(false);
   }
 
