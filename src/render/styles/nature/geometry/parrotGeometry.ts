@@ -5,6 +5,7 @@ import {
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
   singleLegPart,
+  swayingTailRig,
 } from '../../../geometry/sharedGeometry';
 
 /**
@@ -150,6 +151,7 @@ const PARROT_BODY_SLIM_SCALE = 0.8;
 const PARROT_HEAD_TILT_RAD = THREE.MathUtils.degToRad(-21);
 const PARROT_HEAD_TILT_BLEND_START_FRAC = 0.3;
 const PARROT_BEAK_DOWN_PITCH_RAD = THREE.MathUtils.degToRad(-8);
+const PARROT_TAIL_ROOT_Y_FACTOR = -0.46;
 
 export function createParrotGeometries(
   length: number,
@@ -179,8 +181,9 @@ export function createParrotGeometries(
 
     const tail = buildParrotTailGeometry(length, width);
     const legs = buildParrotLegsGeometry(length, width);
+    const tailRig = swayingTailRig({ pivot: [0, length * PARROT_TAIL_ROOT_Y_FACTOR, 0], axis: [1, 0, 0] });
 
-    return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
+    return { body, wingLeft, wingRight, tail, tailRig, legs: singleLegPart(legs) };
   } finally {
     ACTIVE_PARROT_PALETTE = previousPalette;
   }
@@ -464,7 +467,7 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
   // — see buildParrotBodyGeometry's profile): a shallower root left a
   // visible gap between where the body's own taper ended and where the
   // tail began, reading as "the tail is separated from the body".
-  const rootY = -length * 0.46;
+  const rootY = length * PARROT_TAIL_ROOT_Y_FACTOR;
 
   const featherCount = 9;
   const maxSpreadDeg = 34; // total angular spread of the fan, center feather at 0deg

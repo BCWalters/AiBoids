@@ -6,8 +6,9 @@ import {
   buildEyeDotsGeometry,
   buildTailCapGeometry,
   singleLegPart,
+  swayingTailRig,
 } from '../../../geometry/sharedGeometry';
-import { buildTailGeometry } from './birdSharedGeometry';
+import { buildTailGeometry, getBirdBodyRearTipY } from './birdSharedGeometry';
 
 /**
  * Per-species palette for baked vertex color gradients on small-bird
@@ -118,8 +119,9 @@ export function createRealisticBirdGeometries(
     gradient: palette?.tailGradient ? { root: palette.tail, tip: palette.tailTip } : undefined,
   });
   const legs = buildSmallBirdLegsGeometry(length, width, legsColor);
+  const tailRig = swayingTailRig({ pivot: [0, getBirdBodyRearTipY(length), 0], axis: [1, 0, 0] });
 
-  return { body, wingLeft, wingRight, tail, beak, legs: singleLegPart(legs) };
+  return { body, wingLeft, wingRight, tail, tailRig, beak, legs: singleLegPart(legs) };
 }
 
 
@@ -164,6 +166,7 @@ const BEAK_LENGTH_SCALE = 0.75; // 25% shorter
 function buildTaperedBodyGeometry(length: number, width: number, palette?: SmallBirdPalette): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const scaledWidth = width * BODY_NARROW_SCALE;
+  const bodyRearY = getBirdBodyRearTipY(length);
   // Head-region radii/positions below are all reduced/stretched relative
   // to the un-narrowed/un-lengthened pass via HEAD_NARROW_SCALE and
   // HEAD_LENGTHEN_SCALE (see their doc comment above) rather than
@@ -171,7 +174,7 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   // easy to re-tune independently later.
   const headFrac = (frac: number) => HEAD_START_FRAC + (frac - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE;
   const controlPoints = [
-    new THREE.Vector2(scaledWidth * 0.03, -halfLen * 1.0), // tail tip
+    new THREE.Vector2(scaledWidth * 0.03, bodyRearY), // tail tip
     new THREE.Vector2(scaledWidth * 0.16, -halfLen * 0.7),
     new THREE.Vector2(scaledWidth * 0.3, -halfLen * 0.25), // belly bulge — slimmer than before
     new THREE.Vector2(scaledWidth * 0.28, halfLen * 0.15), // chest
@@ -436,4 +439,3 @@ function buildSmallBirdWingGeometry(
   geometry.computeVertexNormals();
   return geometry;
 }
-
