@@ -287,12 +287,25 @@ export function createPlainFishGeometries(length: number, width: number): Creatu
   });
 }
 
+/**
+ * Exported so tests can assert against the colours the goldfish actually
+ * ships with rather than a copy. A test that declares its own palette
+ * literal can only prove the baking algorithm honours its input; it cannot
+ * see the shipped configuration rotting.
+ */
+export const GOLDFISH_FISHTANK_PALETTE = {
+  back: 0xff6a00,
+  belly: 0xffb347,
+  fin: 0xff8c1a,
+} as const;
+
+
 /** Goldfish: a deep, rounded, chunky body in rich orange fading to a lighter
  * gold belly, with large flowing orange fins. */
 export function createGoldfishGeometries(length: number, width: number): CreatureGeometries {
-  const back = new THREE.Color(0xff6a00);
-  const belly = new THREE.Color(0xffb347);
-  const finColor = new THREE.Color(0xff8c1a);
+  const back = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.back);
+  const belly = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.belly);
+  const finColor = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.fin);
   return buildFishVariant(length, width, {
     proportions: { sideSquash: 0.54, heightStretch: 0.86 },
     profile: (h, w) => [
@@ -351,12 +364,20 @@ export function createClownfishGeometries(length: number, width: number): Creatu
   });
 }
 
+/** See GOLDFISH_FISHTANK_PALETTE for why these are exported. */
+export const BLUE_TANG_FISHTANK_PALETTE = {
+  body: 0x1560bd,
+  mark: 0x0b1622,
+  tail: 0xffcf00,
+} as const;
+
+
 /** Blue Tang: a tall, disc-shaped, strongly-compressed royal-blue body with a
  * black "palette" marking across the upper flank and a bright yellow tail. */
 export function createBlueTangGeometries(length: number, width: number): CreatureGeometries {
-  const blue = new THREE.Color(0x1560bd);
-  const mark = new THREE.Color(0x0b1622);
-  const yellow = new THREE.Color(0xffcf00);
+  const blue = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.body);
+  const mark = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.mark);
+  const yellow = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.tail);
   return buildFishVariant(length, width, {
     proportions: { sideSquash: 0.375, heightStretch: 1.0 },
     profileSubdivide: 4,
@@ -371,7 +392,15 @@ export function createBlueTangGeometries(length: number, width: number): Creatur
       new THREE.Vector2(0, h * 0.9),
     ],
     bakeBody: (body, halfLen) =>
-      bakeUpperFlankMarkColors(body, blue, mark, halfLen, { zFrom: 0.42, lengthFrom: 0.12, lengthTo: 0.72 }),
+      // zFrom is a surface-normal fraction (0 = belly, 0.5 = the widest
+      // point of the flank, 1 = the dorsal ridge), not a bounding-box
+      // height fraction. 0.5 puts the mark's lower edge exactly on the
+      // widest point at every station along the body. The previous 0.42
+      // was a bounding-box fraction and happened to land on the widest
+      // point at mid-body, but crept to half-way down the belly side at
+      // the narrow peduncle -- 0.5 reproduces the mid-body look and holds
+      // it constant.
+      bakeUpperFlankMarkColors(body, blue, mark, halfLen, { zFrom: 0.5, lengthFrom: 0.12, lengthTo: 0.72 }),
     dorsalColor: mark,
     pectoralColor: yellow,
     tailColor: yellow,
