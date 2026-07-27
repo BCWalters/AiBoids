@@ -46,7 +46,7 @@ const TAIL_ROOT_COLOR = new THREE.Color(0x9aa6b0);
 const TAIL_TIP_COLOR = new THREE.Color(0x121417);
 
 // Root of the caudal fin (local Y), as a fraction of raw input length.
-const BARRACUDA_TAIL_PIVOT_FRACTION = -0.985 * 0.5 * BARRACUDA_LENGTH_SCALE;
+const BARRACUDA_TAIL_PIVOT_FRACTION = -0.92 * 0.5 * BARRACUDA_LENGTH_SCALE;
 
 export function getBarracudaTailPivotY(rawLength: number): number {
   return BARRACUDA_TAIL_PIVOT_FRACTION * rawLength;
@@ -378,13 +378,13 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
  */
 function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const peduncleY = -halfLen * 0.985;
+  const peduncleY = -halfLen * 0.92;
   const root = new THREE.Vector3(0, peduncleY, 0);
-  const upperTip = new THREE.Vector3(0, -halfLen * 1.52, width * 0.72);
-  const notch = new THREE.Vector3(0, -halfLen * 1.14, 0);
-  const lowerTip = new THREE.Vector3(0, -halfLen * 1.52, -width * 0.72);
+  const upperTip = new THREE.Vector3(0, -halfLen * 1.1875, width * 0.72);
+  const notch = new THREE.Vector3(0, -halfLen * 0.9975, 0);
+  const lowerTip = new THREE.Vector3(0, -halfLen * 1.1875, -width * 0.72);
   const fin = extrudeRingGeometryAlongX([root, upperTip, notch, lowerTip], width * 0.05);
-  return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.52);
+  return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.1875);
 }
 
 /**
