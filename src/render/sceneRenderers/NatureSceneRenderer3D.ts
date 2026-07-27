@@ -629,7 +629,6 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           legTuckRad: BIRD_LEG_TUCK_RAD,
           keepUpright: false,
           tailSwayAmplitude: HAWK_TAIL_SWAY_AMPLITUDE,
-          tailFlareStrength: BIRD_TAIL_FLARE_STRENGTH,
           worldScale: 1,
           meshScaleBoost: 1,
         };
