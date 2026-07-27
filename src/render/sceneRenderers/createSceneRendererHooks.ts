@@ -65,6 +65,11 @@ export interface MotionConfig {
   finRestBiasRad?: number;
   /** Fraction of the wingbeat spent on the downstroke; <0.5 snaps down and eases up. */
   flapDownstrokeFraction?: number;
+  /** Fore/aft leg swing half-angle in radians; 0 leaves legs welded to the body. */
+  legSwingAmplitude?: number;
+  /** Radians the legs are drawn back at full speed, on top of the swing. */
+  legTuckRad?: number;
+
   tailSwayAxis?: THREE.Vector3;
   tailSwayAmplitude?: number;
   tailSwayFrequency?: number;

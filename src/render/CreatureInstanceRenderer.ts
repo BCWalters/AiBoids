@@ -31,6 +31,7 @@ import {
   flapAngleFromPhase,
   SYMMETRIC_DOWNSTROKE_FRACTION,
   initialFlapPhase,
+  legSwingAngleFromPhase,
   tailSwayAngleFromPhase,
 } from './motion/flapMath';
 import { composePartArticulation } from './motion/partTransform';
@@ -101,6 +102,8 @@ interface CreatureInstanceMatrixArgs {
   flapSpeedAmplitude: number;
   finRestBiasRad: number;
   flapDownstrokeFraction: number;
+  legSwingAmplitude: number;
+  legTuckRad: number;
   tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
@@ -122,6 +125,8 @@ interface ResolvedMotionConfig {
   bankScale: number;
   finRestBiasRad: number;
   flapDownstrokeFraction: number;
+  legSwingAmplitude: number;
+  legTuckRad: number;
   tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
@@ -174,6 +179,8 @@ interface UpdateCreatureInstanceArgs {
   bankScale: number;
   finRestBiasRad: number;
   flapDownstrokeFraction: number;
+  legSwingAmplitude: number;
+  legTuckRad: number;
   tailSwayAxis: THREE.Vector3;
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
@@ -207,6 +214,9 @@ export class CreatureInstanceRenderer {
   private partPivotToOrigin = new THREE.Matrix4();
   private partOriginToPivot = new THREE.Matrix4();
   private tmpPivot = new THREE.Vector3();
+  /** Hip pivot per legs geometry — see legHipPivotZ. Keyed by geometry so all
+   *  creatures sharing a legs mesh share one measurement. */
+  private legHipPivotByGeometry = new WeakMap<THREE.BufferGeometry, number>();
   private rollQuat = new THREE.Quaternion();
   private tmpForward = new THREE.Vector3();
   private tmpRight = new THREE.Vector3();
@@ -512,6 +522,8 @@ export class CreatureInstanceRenderer {
       flapSpeedAmplitude,
       finRestBiasRad,
       flapDownstrokeFraction,
+      legSwingAmplitude,
+      legTuckRad,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -558,6 +570,17 @@ export class CreatureInstanceRenderer {
       tailSwayPivotY,
       uprightStyle,
     );
+
+    // After the wing flap: reads the phase computeWingFlapAngle just advanced.
+    this.applyCreatureLegSwingMatrix({
+      set,
+      index,
+      creature,
+      speed,
+      maxSpeed,
+      legSwingAmplitude,
+      legTuckRad,
+    });
   }
 
   private applyCreatureBodyMatrices(
@@ -625,7 +648,8 @@ export class CreatureInstanceRenderer {
     this.dummy.scale.setScalar(bodyScale);
     this.dummy.updateMatrix();
     set.body.setMatrixAt(i, this.dummy.matrix);
-    if (set.legs) set.legs.setMatrixAt(i, this.dummy.matrix);
+    // Legs are posed separately (see applyCreatureLegSwingMatrix) when the
+    // scene gives them a swing; otherwise they stay welded to the body.
     if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
     if (set.tail && !usesTailSwayMatrix(uprightStyle)) set.tail.setMatrixAt(i, this.dummy.matrix);
   }
@@ -791,6 +815,73 @@ export class CreatureInstanceRenderer {
    * through here so articulation is one behaviour with one set of scratch
    * objects, not a bespoke matrix sequence per part.
    */
+  /**
+   * Swings the legs fore/aft about the hip instead of leaving them welded to
+   * the body. Scenes that give a creature no leg motion (legSwingAmplitude and
+   * legTuckRad both 0) keep the rigid body matrix, so this is opt-in.
+   *
+   * The whole leg group shares one mesh, so all four legs swing together — a
+   * gait with the fore and hind pairs in opposition needs them split into
+   * separate meshes first (#188/#191). This is the trailing/tucking motion of
+   * a creature in flight, which is what these creatures are actually doing.
+   *
+   * There is deliberately no rigid-legs branch: with both amplitude and tuck at
+   * zero the angle is exactly zero, and articulating by zero reproduces the
+   * body matrix. A branch that re-used `this.dummy.matrix` instead would be
+   * order-dependent, since posing any part overwrites it.
+   */
+  private applyCreatureLegSwingMatrix({
+    set,
+    index,
+    creature,
+    speed,
+    maxSpeed,
+    legSwingAmplitude,
+    legTuckRad,
+  }: {
+    set: BoidRenderBatch;
+    index: number;
+    creature: Boid | Predator;
+    speed: number;
+    maxSpeed: number;
+    legSwingAmplitude: number;
+    legTuckRad: number;
+  }): void {
+    if (!set.legs) return;
+    const angle = legSwingAngleFromPhase({
+      phase: this.flapPhase.get(creature) ?? initialFlapPhase(creature.id),
+      amplitude: legSwingAmplitude,
+      tuckRad: legTuckRad,
+      speedFraction: computeSpeedFraction({ speed, maxSpeed }),
+    });
+    this.tmpPivot.set(0, 0, this.legHipPivotZ(set.legs.geometry));
+    this.applyArticulatedPartMatrix({
+      mesh: set.legs,
+      index,
+      axis: MODEL_RIGHT_AXIS,
+      angle,
+      pivot: this.tmpPivot,
+    });
+  }
+
+  /**
+   * Model-space Z of the hip line the legs pivot about.
+   *
+   * Derived from the geometry rather than configured per scene: legs are built
+   * hanging along -Z, so the top of their bounding box *is* where they meet the
+   * body. A per-scene constant would have to be expressed in each creature's
+   * model units, which the scene renderers don't know — and getting it wrong
+   * detaches the legs from the body instead of swinging them.
+   */
+  private legHipPivotZ(geometry: THREE.BufferGeometry): number {
+    const cached = this.legHipPivotByGeometry.get(geometry);
+    if (cached !== undefined) return cached;
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const pivotZ = geometry.boundingBox?.max.z ?? 0;
+    this.legHipPivotByGeometry.set(geometry, pivotZ);
+    return pivotZ;
+  }
+
   private applyArticulatedPartMatrix({
     mesh,
     index,
@@ -921,6 +1012,8 @@ export class CreatureInstanceRenderer {
       bankScale = 1,
       finRestBiasRad = 0,
       flapDownstrokeFraction = SYMMETRIC_DOWNSTROKE_FRACTION,
+      legSwingAmplitude = 0,
+      legTuckRad = 0,
       tailSwayAxis = MODEL_RIGHT_AXIS,
       tailSwayAmplitude = 0,
       tailSwayFrequency,
@@ -942,6 +1035,8 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      legSwingAmplitude,
+      legTuckRad,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -1010,6 +1105,8 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      legSwingAmplitude,
+      legTuckRad,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -1066,6 +1163,8 @@ export class CreatureInstanceRenderer {
       flapSpeedAmplitude,
       finRestBiasRad,
       flapDownstrokeFraction,
+      legSwingAmplitude,
+      legTuckRad,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -1140,6 +1239,8 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      legSwingAmplitude,
+      legTuckRad,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
@@ -1185,6 +1286,8 @@ export class CreatureInstanceRenderer {
       bankScale,
       finRestBiasRad,
       flapDownstrokeFraction,
+      legSwingAmplitude,
+      legTuckRad,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,

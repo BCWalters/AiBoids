@@ -89,6 +89,19 @@ const FLAP_SPEED_AMPLITUDE = 0.9;
 const BIRD_DOWNSTROKE_FRACTION = 0.37;
 const DRAGON_DOWNSTROKE_FRACTION = 0.43;
 const UNICORN_DOWNSTROKE_FRACTION = 0.42;
+/**
+ * Legs were welded rigidly to the body. These give them a small fore/aft swing
+ * off the flap clock plus a speed-proportional backward tuck, so a creature at
+ * cruise draws its legs up instead of dangling them. Birds tuck hard (it's most
+ * of what real birds do with their legs in flight); the unicorn barely tucks,
+ * since a horse's legs stay down.
+ */
+const BIRD_LEG_SWING_AMPLITUDE = 0.1;
+const BIRD_LEG_TUCK_RAD = 0.34;
+const DRAGON_LEG_SWING_AMPLITUDE = 0.13;
+const DRAGON_LEG_TUCK_RAD = 0.22;
+const UNICORN_LEG_SWING_AMPLITUDE = 0.16;
+const UNICORN_LEG_TUCK_RAD = 0.06;
 const DRAGON_FLAP_FREQUENCY = 2.15;
 const DRAGON_FLAP_IDLE_AMPLITUDE = 0.4;
 const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
@@ -561,6 +574,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapIdleAmplitude: _UNICORN_FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: _UNICORN_FLAP_SPEED_AMPLITUDE,
           flapDownstrokeFraction: UNICORN_DOWNSTROKE_FRACTION,
+          legSwingAmplitude: UNICORN_LEG_SWING_AMPLITUDE,
+          legTuckRad: UNICORN_LEG_TUCK_RAD,
           keepUpright: true,
           uprightStyle: 'unicorn',
           bankScale: _UNICORN_BANK_SCALE,
@@ -574,6 +589,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapIdleAmplitude: DRAGON_FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: DRAGON_FLAP_SPEED_AMPLITUDE,
           flapDownstrokeFraction: DRAGON_DOWNSTROKE_FRACTION,
+          legSwingAmplitude: DRAGON_LEG_SWING_AMPLITUDE,
+          legTuckRad: DRAGON_LEG_TUCK_RAD,
           keepUpright: true,
           uprightStyle: 'dragon',
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
@@ -588,6 +605,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           flapIdleAmplitude: FLAP_IDLE_AMPLITUDE,
           flapSpeedAmplitude: FLAP_SPEED_AMPLITUDE,
           flapDownstrokeFraction: BIRD_DOWNSTROKE_FRACTION,
+          legSwingAmplitude: BIRD_LEG_SWING_AMPLITUDE,
+          legTuckRad: BIRD_LEG_TUCK_RAD,
           keepUpright: false,
           tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
           tailSwayAmplitude: HAWK_TAIL_SWAY_AMPLITUDE,
@@ -633,6 +652,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       flapIdleAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
       flapSpeedAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
       flapDownstrokeFraction: BIRD_DOWNSTROKE_FRACTION,
+      legSwingAmplitude: BIRD_LEG_SWING_AMPLITUDE,
+      legTuckRad: BIRD_LEG_TUCK_RAD,
       getScale: (creature) => (creature as Boid).scale,
       tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
       tailSwayAmplitude: isParrot && isProfiledParrot
