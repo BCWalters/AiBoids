@@ -124,10 +124,7 @@ const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
  */
 const DRAGON_BOTTOM_CLIP_RAD = 0.30;
 const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22;
-// Hawks sway their tail like the other nature birds. This was previously
-// inherited implicitly from Renderer3D's shared tail-sway default; it is now
-// owned here so the hawk's motion is fully self-described.
-const HAWK_TAIL_SWAY_AMPLITUDE = 0.22;
+const HAWK_TAIL_SWAY_AMPLITUDE = 0.08;
 // Hawks are large soaring raptors — they flap noticeably slower than the small
 // passerines (FLAP_FREQUENCY = 7.6) or even parrots (_PARROT_FLAP_FREQUENCY =
 // 5.4). A value of 3.5 rad/s sits between the dragon (2.15) and parrot (5.4)
@@ -141,7 +138,9 @@ const _UNICORN_BANK_SCALE = 0.35;
 const _PARROT_FLAP_FREQUENCY = 5.4;
 const _PARROT_FLAP_IDLE_AMPLITUDE = 0.4;
 const _PARROT_FLAP_SPEED_AMPLITUDE = 0.95;
-const _PARROT_TAIL_SWAY_AMPLITUDE = 0.12;
+const BIRD_TAIL_SWAY_AMPLITUDE = 0.07;
+const PARROT_TAIL_SWAY_AMPLITUDE = 0.06;
+const BIRD_TAIL_FLARE_STRENGTH = 0.3;
 
 type ParrotGeometryProfile = 'neutral' | 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus';
 
@@ -675,9 +674,10 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       legTuckRad: BIRD_LEG_TUCK_RAD,
       getScale: (creature) => (creature as Boid).scale,
       tailSwayAmplitude: isParrot && isProfiledParrot
-        ? _PARROT_TAIL_SWAY_AMPLITUDE
-        : DRAGON_TAIL_SWAY_AMPLITUDE,
+        ? PARROT_TAIL_SWAY_AMPLITUDE
+        : BIRD_TAIL_SWAY_AMPLITUDE,
       tailSwayFrequency: undefined,
+      tailFlareStrength: BIRD_TAIL_FLARE_STRENGTH,
       worldScale: 1,
       meshScaleBoost: 1,
       preferUpright: true,

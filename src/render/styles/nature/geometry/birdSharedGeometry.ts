@@ -21,6 +21,29 @@ export interface TailGradient {
   tip: THREE.Color;
 }
 
+/** Rear-most Y of the shared lathed bird body profile (tail attachment point). */
+export function getBirdBodyRearTipY(length: number): number {
+  return -length * 0.5;
+}
+
+/**
+ * Tail-fan profile Y coordinates derived from the body rear tip.
+ *
+ * Rear extent intentionally preserves the long-distance silhouette the existing
+ * birds already had; only the root moves back to the real body rear.
+ */
+export function getBirdTailFanProfileY(length: number): {
+  rootY: number;
+  sideTipY: number;
+  backCenterY: number;
+} {
+  const rootY = getBirdBodyRearTipY(length);
+  const backCenterY = -length * 0.85;
+  const sideTipT = 0.55 / 0.85;
+  const sideTipY = THREE.MathUtils.lerp(rootY, backCenterY, sideTipT);
+  return { rootY, sideTipY, backCenterY };
+}
+
 /**
  * "finger" feathers at the tip (rooted along the outer trailing edge, each
  * angled slightly differently) — the visual cue that reads as "wingtip
@@ -215,29 +238,34 @@ export function buildHookedBeakGeometry(
 export function buildTailGeometry(
   length: number,
   width: number,
-  opts?: { halfWidth?: number; narrowScale?: number; gradient?: TailGradient },
+  opts?: { halfWidth?: number; narrowScale?: number; gradient?: TailGradient; bodyLength?: number },
 ): THREE.BufferGeometry {
   const scaledWidth = width * (opts?.narrowScale ?? 1);
   const tw = opts?.halfWidth ?? scaledWidth * 0.36; // narrow songbird tail; hawk overrides to width*0.9
-  const root       = new THREE.Vector3(0, 0, 0);
-  const leftTip    = new THREE.Vector3(-tw, -length * 0.55, 0);
-  const rightTip   = new THREE.Vector3(tw, -length * 0.55, 0);
-  const backCenter = new THREE.Vector3(0, -length * 0.85, 0);
+  const rootY = getBirdBodyRearTipY(opts?.bodyLength ?? length);
+  const backCenterY = -length * 0.85;
+  const sideTipT = 0.55 / 0.85;
+  const sideTipY = THREE.MathUtils.lerp(rootY, backCenterY, sideTipT);
+  const root       = new THREE.Vector3(0, rootY, 0);
+  const leftTip    = new THREE.Vector3(-tw, sideTipY, 0);
+  const rightTip   = new THREE.Vector3(tw, sideTipY, 0);
+  const backCenter = new THREE.Vector3(0, backCenterY, 0);
   const thickness  = width * 0.05;
 
   const geo = extrudeRingGeometry([root, leftTip, backCenter, rightTip], thickness);
 
   if (opts?.gradient) {
     const { root: rootColor, tip: tipColor } = opts.gradient;
-    // Y-axis root→tip gradient: root is at Y=0, tip at the lowest Y value.
+    // Y-axis root→tip gradient: maxY at the fan root, minY at the rear tip.
     geo.computeBoundingBox();
+    const maxY = geo.boundingBox!.max.y;
     const minY = geo.boundingBox!.min.y;
-    const ySpan = Math.max(1e-5, Math.abs(minY));
+    const ySpan = Math.max(1e-5, maxY - minY);
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
     for (let vi = 0; vi < pos.count; vi++) {
       const t = THREE.MathUtils.smoothstep(
-        THREE.MathUtils.clamp((-pos.getY(vi)) / ySpan, 0, 1),
+        THREE.MathUtils.clamp((maxY - pos.getY(vi)) / ySpan, 0, 1),
         0.05,
         0.95,
       );
