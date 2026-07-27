@@ -547,7 +547,7 @@ export class CreatureInstanceRenderer {
       restOnFloor,
       containWithinTankWalls,
     } = args;
-    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle, restOnFloor, containWithinTankWalls);
+    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, restOnFloor, containWithinTankWalls);
 
     // Wings: apply an extra local flap rotation around the forward axis.
     const flapAngle = this.computeWingFlapAngle({
@@ -602,7 +602,6 @@ export class CreatureInstanceRenderer {
     entityScale: number,
     worldScale: number,
     meshScaleBoost: number,
-    uprightStyle: UprightStyle,
     restOnFloor: boolean,
     containWithinTankWalls: boolean,
   ): void {
@@ -663,7 +662,12 @@ export class CreatureInstanceRenderer {
     // Legs are posed separately (see applyCreatureLegSwingMatrix) when the
     // scene gives them a swing; otherwise they stay welded to the body.
     if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
-    if (set.tail && !usesTailSwayMatrix(uprightStyle)) set.tail.setMatrixAt(i, this.dummy.matrix);
+    // Weld the tail to the body unconditionally. Creatures that sway their tail
+    // overwrite this a moment later in applyCreatureTailSwayMatrix; those that
+    // don't keep the body pose. Gating this write on the sway conditions instead
+    // is how #200 left every tail without a rig stuck at the identity matrix,
+    // clumped at the world origin (see tailWeld.test.ts).
+    if (set.tail) set.tail.setMatrixAt(i, this.dummy.matrix);
   }
 
   /**
