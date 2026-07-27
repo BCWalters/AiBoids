@@ -166,7 +166,7 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const bury = 0.9;
 
   const firstFrontY = halfLen * 0.12;
-  const firstBackY = -halfLen * 0.02;
+  const firstBackY = -halfLen * 0.16;
   const firstFrontZ = latheBodyRadiusAt(firstFrontY, profile) * BODY_HEIGHT_STRETCH * bury;
   const firstBackZ = latheBodyRadiusAt(firstBackY, profile) * BODY_HEIGHT_STRETCH * bury;
   const firstTip = new THREE.Vector3(0, halfLen * 0.05, firstFrontZ + width * 0.26);
@@ -176,7 +176,7 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   );
 
   const secondFrontY = -halfLen * 0.5;
-  const secondBackY = -halfLen * 0.64;
+  const secondBackY = -halfLen * 0.78;
   const secondFrontZ = latheBodyRadiusAt(secondFrontY, profile) * BODY_HEIGHT_STRETCH * bury;
   const secondBackZ = latheBodyRadiusAt(secondBackY, profile) * BODY_HEIGHT_STRETCH * bury;
   const secondTip = new THREE.Vector3(0, -halfLen * 0.57, secondFrontZ + width * 0.17);
