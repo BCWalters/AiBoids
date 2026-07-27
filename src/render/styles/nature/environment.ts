@@ -139,13 +139,28 @@ const ROCK_COLOR_B = new THREE.Color(0x6b6558);
  * level). flatShading on the shared material (see createRockCluster)
  * takes care of the faceted look; this only needs to break the
  * geometry's perfect symmetry.
+ *
+ * Detail=1 (80 faces vs the former 20) fills in silhouettes enough to
+ * read as a genuine boulder without exploding triangle counts — each
+ * cluster stays well under ~1 000 triangles even with 4 boulders.
+ * A per-boulder y-squash factor (0.6–0.85) gives each stone a flat,
+ * ground-settled profile that reads as weathered rock rather than a
+ * perfect sphere.
  */
 function buildBoulderGeometry(radius: number): THREE.BufferGeometry {
-  const geometry = new THREE.IcosahedronGeometry(radius, 0);
+  const geometry = new THREE.IcosahedronGeometry(radius, 1);
   const position = geometry.attributes.position as THREE.BufferAttribute;
+  // Each boulder gets its own random y-squash so it looks wide and
+  // settled rather than perfectly round.
+  const ySquash = 0.6 + Math.random() * 0.25;
   for (let i = 0; i < position.count; i++) {
     const jitter = 1 + (Math.random() - 0.5) * 0.5;
-    position.setXYZ(i, position.getX(i) * jitter, position.getY(i) * jitter, position.getZ(i) * jitter);
+    position.setXYZ(
+      i,
+      position.getX(i) * jitter,
+      position.getY(i) * jitter * ySquash,
+      position.getZ(i) * jitter,
+    );
   }
   geometry.computeVertexNormals();
   return geometry;
@@ -179,7 +194,32 @@ function mergePositionAndColorGeometries(parts: { geometry: THREE.BufferGeometry
 }
 
 /**
- * A small cluster of 2-3 boulders grouped around a shared origin (rather
+ * Applies a subtle per-face brightness nudge to a vertex-colored, non-indexed
+ * geometry (all three vertices of every face receive the same nudge so
+ * flat-shading renders a uniform tint per face rather than a gradient).
+ * Gives boulder surfaces a "stone grain" variation — different shades of
+ * grey/brown on each facet — without requiring any texture assets.
+ */
+function applyFaceColorVariation(geometry: THREE.BufferGeometry, variance: number): void {
+  const colorAttr = geometry.getAttribute('color') as THREE.BufferAttribute;
+  const faceCount = Math.floor(colorAttr.count / 3);
+  for (let face = 0; face < faceCount; face++) {
+    const nudge = (Math.random() - 0.5) * variance;
+    for (let v = 0; v < 3; v++) {
+      const vi = face * 3 + v;
+      colorAttr.setXYZ(
+        vi,
+        THREE.MathUtils.clamp(colorAttr.getX(vi) + nudge, 0, 1),
+        THREE.MathUtils.clamp(colorAttr.getY(vi) + nudge, 0, 1),
+        THREE.MathUtils.clamp(colorAttr.getZ(vi) + nudge, 0, 1),
+      );
+    }
+  }
+  colorAttr.needsUpdate = true;
+}
+
+/**
+ * A small cluster of 2–4 boulders grouped around a shared origin (rather
  * than a single boulder per cluster def) so each rock formation reads as
  * an irregular outcrop instead of one obviously-lone rock. Built once in
  * "cluster-local" units and later uniformly positioned/scaled per
@@ -187,13 +227,16 @@ function mergePositionAndColorGeometries(parts: { geometry: THREE.BufferGeometry
  * createWaterPatch's lakes.
  */
 function createRockCluster(): THREE.Mesh {
-  const boulderCount = 2 + Math.floor(Math.random() * 2); // 2-3
+  const boulderCount = 2 + Math.floor(Math.random() * 3); // 2–4
   const parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
   for (let i = 0; i < boulderCount; i++) {
     const radius = 0.2 + Math.random() * 0.35;
     const geometry = buildBoulderGeometry(radius);
     const offsetAngle = Math.random() * Math.PI * 2;
-    const offsetDist = i === 0 ? 0 : radius * (0.6 + Math.random() * 0.6);
+    // Tighter offset (was 0.6–1.2×r) so boulders substantially overlap
+    // rather than just touching — interpenetrating geometry ensures no
+    // terrain-coloured gap is visible between adjacent stones.
+    const offsetDist = i === 0 ? 0 : radius * (0.3 + Math.random() * 0.4);
     // Lift each boulder's center only partway above its own radius so
     // the lower portion sits embedded in the terrain rather than
     // perched exactly on top of it — reads as a real half-buried rock
@@ -206,11 +249,16 @@ function createRockCluster(): THREE.Mesh {
   }
   const merged = mergePositionAndColorGeometries(parts);
   parts.forEach((p) => p.geometry.dispose());
+  // Stone-grain per-face tint variation on the merged geometry.
+  applyFaceColorVariation(merged, 0.06);
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
     flatShading: true,
     roughness: 1,
     metalness: 0,
+    // DoubleSide renders back-faces, eliminating any residual see-through
+    // seam at the boundary where adjacent boulders meet.
+    side: THREE.DoubleSide,
   });
   return new THREE.Mesh(merged, material);
 }
