@@ -5,8 +5,8 @@ import type { Simulation } from '../../sim/Simulation';
 import type { Predator } from '../../sim/Predator';
 import { type Boid, BoidSpecies } from '../../sim/Boid';
 import { computeFishtankRoomBounds, placeFishtankEnvironment, TANK_VISUAL_SCALE } from '../styles/fishtank/environment';
-import { getSharkTailPivotY, createSharkGeometries } from '../styles/fishtank/geometry/sharkGeometry';
-import { getBarracudaTailPivotY, createBarracudaGeometries } from '../styles/fishtank/geometry/barracudaGeometry';
+import { createSharkGeometries } from '../styles/fishtank/geometry/sharkGeometry';
+import { createBarracudaGeometries } from '../styles/fishtank/geometry/barracudaGeometry';
 import type { DriftingClouds } from '../styles/nature/clouds';
 import type { FishtankEnvironment } from '../styles/fishtank/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
@@ -108,7 +108,6 @@ const BARRACUDA_PREDATOR_HUNT = new THREE.Color(0xe8eef2);
 interface FishtankSpeciesConfig {
   baseColor: THREE.Color;
   beakColor?: THREE.Color;
-  tailSwayPivotY?: number;
 }
 
 const FISHTANK_SPECIES_CONFIG: Record<BoidSpecies, FishtankSpeciesConfig> = {
@@ -118,7 +117,6 @@ const FISHTANK_SPECIES_CONFIG: Record<BoidSpecies, FishtankSpeciesConfig> = {
   },
   [BoidSpecies.Multicolor]: {
     baseColor: new THREE.Color(0xffffff),
-    tailSwayPivotY: -4.186,
   },
   [BoidSpecies.Gold]: {
     baseColor: new THREE.Color(0xf5d327),
@@ -150,11 +148,6 @@ const BARRACUDA_FLAP_SPEED_AMPLITUDE = 0.08;
 const BARRACUDA_TAIL_SWAY_AMPLITUDE = 0.44;
 const BARRACUDA_TAIL_SWAY_FREQUENCY = 3.9;
 const BARRACUDA_FIN_REST_TILT_RAD = 0.32;
-// Reference length fed to getSharkTailPivotY for the tail-sway pivot. This is
-// an independent motion-tuning value, intentionally NOT the shark's geometry
-// length (see FISHTANK_CREATURE_SIZES.shark) — preserved as-is.
-const SHARK_TAIL_PIVOT_REFERENCE_LENGTH = 4.0;
-
 // Utility function for deterministic per-creature hashing (used for variant selection)
 function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
@@ -423,7 +416,6 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           flapSpeedAmplitude: 0.18,
           keepUpright: true,
           uprightStyle: 'unicorn',
-          tailSwayAxis: new THREE.Vector3(1, 0, 0), // MODEL_RIGHT_AXIS
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
           // The upright seahorse's model origin sits well above its base, so at
@@ -440,10 +432,8 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           keepUpright: true,
           uprightStyle: 'shark',
           finRestBiasRad: BARRACUDA_FIN_REST_TILT_RAD,
-          tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
           tailSwayAmplitude: BARRACUDA_TAIL_SWAY_AMPLITUDE,
           tailSwayFrequency: BARRACUDA_TAIL_SWAY_FREQUENCY,
-          tailSwayPivotY: getBarracudaTailPivotY(FISHTANK_CREATURE_SIZES.barracuda.length),
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_BARRACUDA_MESH_BOOST,
           // Long lean body: keep its nose/tail from poking through the side
@@ -459,10 +449,8 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           keepUpright: true,
           uprightStyle: 'shark',
           finRestBiasRad: SHARK_FIN_REST_TILT_RAD,
-          tailSwayAxis: new THREE.Vector3(0, 1, 0), // MODEL_UP_AXIS
           tailSwayAmplitude: SHARK_TAIL_SWAY_AMPLITUDE,
           tailSwayFrequency: SHARK_TAIL_SWAY_FREQUENCY,
-          tailSwayPivotY: getSharkTailPivotY(SHARK_TAIL_PIVOT_REFERENCE_LENGTH),
           worldScale: TANK_VISUAL_SCALE,
           meshScaleBoost: FISHTANK_FISH_MESH_BOOST * FISHTANK_SHARK_MESH_BOOST,
           // Long body: keep its nose/tail from poking through the side glass
@@ -506,18 +494,15 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getBoidMotionConfig(species: BoidSpecies, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
-    const tailSwayPivot = FISHTANK_SPECIES_CONFIG[species].tailSwayPivotY ?? 0;
+  getBoidMotionConfig(_species: BoidSpecies, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
 
     return {
       flapFrequency: 3.0, // Fishtank fish flap a bit slower
       flapIdleAmplitude: 0.15,
       flapSpeedAmplitude: 0.4,
       getScale: (creature) => (creature as Boid).scale,
-      tailSwayAxis: new THREE.Vector3(0, 1, 0), // Vertical oscillation (tail side-to-side)
       tailSwayAmplitude: 0.06,
       tailSwayFrequency: 2.2,
-      tailSwayPivotY: tailSwayPivot,
       worldScale: TANK_VISUAL_SCALE,
       meshScaleBoost: FISHTANK_FISH_MESH_BOOST,
       // Keep fish dorsal-up: their flattened bodies + distinct dorsal fin make an

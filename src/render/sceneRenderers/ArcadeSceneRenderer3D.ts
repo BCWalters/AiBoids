@@ -67,7 +67,6 @@ interface ArcadeSpeciesConfig {
   arcadeBase: THREE.Color;
   arcadeEmissive: THREE.Color;
   beakColor?: THREE.Color;
-  tailSwayPivotY?: number;
   useSmallGeometry: boolean;
   useParrotGeometry?: boolean;
   /** Per-creature HSL variation of the base color (songbird species only). */
@@ -86,7 +85,6 @@ const ARCADE_SPECIES_CONFIG: Record<BoidSpecies, ArcadeSpeciesConfig> = {
     arcadeBase: ARCADE_PARROT_BASE,
     arcadeEmissive: ARCADE_PARROT_EMISSIVE,
     useParrotGeometry: true,
-    tailSwayPivotY: -4.186,
     useSmallGeometry: false,
     individualVariation: false,
   },
@@ -344,8 +342,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
-  getBoidMotionConfig(species: BoidSpecies, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
-    const tailSwayPivot = ARCADE_SPECIES_CONFIG[species].tailSwayPivotY ?? 0;
+  getBoidMotionConfig(_species: BoidSpecies, _flags: StyleFlags, _boidMotionFlags: BoidMotionStyleFlags): MotionConfig {
 
     return {
       flapFrequency: ARCADE_FLAP_FREQUENCY,
@@ -353,9 +350,7 @@ export class ArcadeSceneRenderer3D implements SceneRendererHooks {
       flapSpeedAmplitude: ARCADE_FLAP_SPEED_AMPLITUDE,
       flapDownstrokeFraction: ARCADE_DOWNSTROKE_FRACTION,
       getScale: (creature) => (creature as Boid).scale,
-      tailSwayAxis: new THREE.Vector3(1, 0, 0), // Right axis
       tailSwayAmplitude: 0,
-      tailSwayPivotY: tailSwayPivot,
       worldScale: 1,
       meshScaleBoost: 1,
       preferUpright: true,

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { RigPartDeclaration } from '../motion/rig';
+import type { RigPartDeclaration, Triple } from '../motion/rig';
 
 /**
  * Truly generic, cross-domain geometry primitives shared by BOTH the
@@ -23,6 +23,24 @@ export interface CreatureGeometries {  body: THREE.BufferGeometry;
   wingLeft: THREE.BufferGeometry;
   wingRight: THREE.BufferGeometry;
   tail?: THREE.BufferGeometry;
+  /**
+   * Where and how the tail hinges, for the creatures whose tails sway.
+   *
+   * Declared here rather than in scene config for the same reason leg pivots
+   * are: the attachment point is measured in this model's units, which a scene
+   * cannot know. The shark learned this the hard way — swaying about the shared
+   * model origin swept the fin's root through an arc wide enough to poke out
+   * the side of the body, and the fix was to pivot about the fin's own root
+   * (see sharkGeometry.ts). That value then had to be exported and threaded
+   * back through scene config to reach the renderer; this field is where it
+   * belonged all along.
+   *
+   * The axis is part of the geometry too: a fish's caudal fin is built to sweep
+   * side-to-side about MODEL_UP, while a dragon's tail sweeps about
+   * MODEL_RIGHT. Omit for tails that don't articulate — they're posed with the
+   * plain body transform, so pivot and axis are meaningless for them.
+   */
+  tailRig?: RigPartDeclaration;
   /**
    * The creature's legs, as one or more articulated parts ordered root-first.
    *
@@ -115,6 +133,17 @@ export function singleLegPart(geometry: THREE.BufferGeometry): CreatureLegPart[]
       drive: { source: 'legSwing' },
     },
   ];
+}
+
+/**
+ * Builds the tail's rig declaration, for tails that sway.
+ *
+ * A helper rather than three hand-written literals so the role/group/drive
+ * fields — which are the same for every tail — can't drift apart between
+ * creatures, leaving only the two values that genuinely differ per model.
+ */
+export function swayingTailRig({ pivot, axis }: { pivot: Triple; axis: Triple }): RigPartDeclaration {
+  return { role: 'tail', group: 'tail', pivot, axis, drive: { source: 'tailSway' } };
 }
 
 /** Disposes every GPU buffer owned by a CreatureGeometries bundle. Each scene

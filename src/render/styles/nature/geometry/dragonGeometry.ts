@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { mergeGeometriesWithColor, singleLegPart } from '../../../geometry/sharedGeometry';
+import { mergeGeometriesWithColor, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
 
 /**
  * "Dragon" predator geometry: a bulkier, longer-necked lathed body with a
@@ -25,7 +25,22 @@ export function createDragonGeometries(length: number, width: number): CreatureG
   const tail = buildDragonTailGeometry(length, width);
   const legs = buildDragonLegsGeometry(length, width);
 
-  return { body, wingLeft, wingRight, tail, legs: singleLegPart(legs) };
+  return {
+    body,
+    wingLeft,
+    wingRight,
+    tail,
+    // Sways about the tail's own root at the rump, not the model origin. The
+    // two are length*0.25 apart, and pivoting at the origin swung the root end
+    // through an arc of that radius — dragging it sideways out through the
+    // haunch. MODEL_RIGHT, so the whip tail sweeps up and down like a
+    // reptile's rather than flicking side to side like a fish's.
+    tailRig: swayingTailRig({
+      pivot: [0, dragonTailRootY(length), dragonTailRootZ(length)],
+      axis: [1, 0, 0],
+    }),
+    legs: singleLegPart(legs),
+  };
 }
 
 // --- Shared volumetric helpers -------------------------------------------
@@ -506,14 +521,30 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
  * a stegosaurus-esque reptile silhouette, sized and spaced to hug the
  * now-slimmer tube rather than sticking out like antennae.
  */
+/**
+ * The tail's attachment point on the body, in model units.
+ *
+ * Exported to the rig (not to scene config) so the sway rotation pivots about
+ * exactly the vertex the tail is built from.
+ */
+function dragonTailRootY(length: number): number {
+  return -length * 0.25;
+}
+
+/** Slight lift above the belly axis; pulled back down from 0.06. */
+function dragonTailRootZ(length: number): number {
+  return length * 0.02;
+}
+
 function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeometry {
   const positions: number[] = [];
 
-  // Tail root sits at the body's rump (Y = -halfLen = -length*0.5) and
-  // slightly below the body's belly axis (Z = -length*0.08), so it
-  // projects rearward from the haunch rather than from the body's center.
-  const yOffset = -length * 0.25;
-  const zOffset = length * 0.02; // slight lift, pulled back down from 0.06
+  // Tail root sits at the body's rump and slightly above the belly axis, so
+  // it projects rearward from the haunch rather than from the body's center.
+  // Shared with the rig so the sway pivot and the vertices it rotates can't
+  // drift apart — the whole point of declaring the pivot next to the geometry.
+  const yOffset = dragonTailRootY(length);
+  const zOffset = dragonTailRootZ(length);
 
   // Walk from the body root (t=0) to the tip (t=1), each entry giving a
   // tapering half-width (used as the tube radius) and a curved (x, y, z)

@@ -323,7 +323,7 @@ export class Renderer3D {
       this.scene.add(beak);
     }
 
-    return { body, wingLeft, wingRight, tail, legs, beak };
+    return { body, wingLeft, wingRight, tail, tailRig: geometries.tailRig, legs, beak };
   }
 
   private disposeRenderBatch(set: BoidRenderBatch | null): void {
