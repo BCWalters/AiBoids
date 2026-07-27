@@ -49,8 +49,8 @@ const STATE_AMPLITUDE_MULTIPLIER_MAX = 1.24;
 const PHASE_ID_STRIDE = 1.7;
 
 /**
- * Tail-sway phase offset: creatures with a swaying tail (dragons, sharks — see
- * usesTailSwayMatrix) drive the tail from the wing flap clock, offset so it
+ * Tail-sway phase offset: creatures with a swaying tail drive the tail from the
+ * wing flap clock, offset so it
  * lags the wingbeat rather than mirroring it exactly. Amplitude/axis are
  * per-scene (MotionConfig); only this shared phase relationship lives here.
  */

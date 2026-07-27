@@ -78,7 +78,3 @@ export function getUprightFlapFrequencyMultiplier(
 export function isClampedUprightStyle(style: UprightStyle): boolean {
   return style !== 'dragon';
 }
-
-export function usesTailSwayMatrix(style: UprightStyle): boolean {
-  return style === 'dragon' || style === 'shark';
-}

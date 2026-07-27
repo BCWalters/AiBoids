@@ -9,7 +9,6 @@ import {
   getUprightPitchLimits,
   getUprightTurnRate,
   isClampedUprightStyle,
-  usesTailSwayMatrix,
   type UprightStyle,
 } from './creatureUprightTuning';
 import {
@@ -118,6 +117,7 @@ interface CreatureInstanceMatrixArgs {
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
   tailSwayPivotY: number;
+  tailFlareStrength: number;
   worldScale: number;
   meshScaleBoost: number;
   uprightStyle: UprightStyle;
@@ -141,6 +141,7 @@ interface ResolvedMotionConfig {
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
   tailSwayPivotY: number;
+  tailFlareStrength: number;
   worldScale: number;
   meshScaleBoost: number;
   preferUpright: boolean;
@@ -195,6 +196,7 @@ interface UpdateCreatureInstanceArgs {
   tailSwayAmplitude: number;
   tailSwayFrequency: number | undefined;
   tailSwayPivotY: number;
+  tailFlareStrength: number;
   worldScale: number;
   meshScaleBoost: number;
   preferUpright: boolean;
@@ -223,6 +225,7 @@ export class CreatureInstanceRenderer {
   private partPivotMatrix = new THREE.Matrix4();
   private partPivotToOrigin = new THREE.Matrix4();
   private partOriginToPivot = new THREE.Matrix4();
+  private partWorldMatrix = new THREE.Matrix4();
   private tmpPivot = new THREE.Vector3();
   private tmpAxis = new THREE.Vector3();
   // Model-space articulation of each link in the leg chain, plus the running
@@ -542,13 +545,14 @@ export class CreatureInstanceRenderer {
       tailSwayAmplitude,
       tailSwayFrequency,
       tailSwayPivotY,
+      tailFlareStrength,
       worldScale,
       meshScaleBoost,
       uprightStyle,
       restOnFloor,
       containWithinTankWalls,
     } = args;
-    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, uprightStyle, restOnFloor, containWithinTankWalls);
+    this.applyCreatureBodyMatrices(set, index, position, entityScale, worldScale, meshScaleBoost, restOnFloor, containWithinTankWalls);
 
     // Wings: apply an extra local flap rotation around the forward axis.
     const flapAngle = this.computeWingFlapAngle({
@@ -578,11 +582,13 @@ export class CreatureInstanceRenderer {
       creature,
       elapsed,
       flapFrequency,
+      flapIdleAmplitude + flapSpeedAmplitude,
+      flapAngle,
       tailSwayAxis,
       tailSwayAmplitude,
       tailSwayFrequency,
       tailSwayPivotY,
-      uprightStyle,
+      tailFlareStrength,
     );
 
     // After the wing flap: reads the phase computeWingFlapAngle just advanced.
@@ -604,7 +610,6 @@ export class CreatureInstanceRenderer {
     entityScale: number,
     worldScale: number,
     meshScaleBoost: number,
-    uprightStyle: UprightStyle,
     restOnFloor: boolean,
     containWithinTankWalls: boolean,
   ): void {
@@ -665,7 +670,7 @@ export class CreatureInstanceRenderer {
     // Legs are posed separately (see applyCreatureLegSwingMatrix) when the
     // scene gives them a swing; otherwise they stay welded to the body.
     if (set.beak) set.beak.setMatrixAt(i, this.dummy.matrix);
-    if (set.tail && !usesTailSwayMatrix(uprightStyle)) set.tail.setMatrixAt(i, this.dummy.matrix);
+    if (set.tail) set.tail.setMatrixAt(i, this.dummy.matrix);
   }
 
   /**
@@ -982,15 +987,15 @@ export class CreatureInstanceRenderer {
     creature: Boid | Predator,
     elapsed: number,
     flapFrequency: number,
+    maxFlapAngle: number,
+    flapAngle: number,
     tailSwayAxis: THREE.Vector3,
     tailSwayAmplitude: number,
     tailSwayFrequency: number | undefined,
     tailSwayPivotY: number,
-    uprightStyle: UprightStyle,
+    tailFlareStrength: number,
   ): void {
-    // Tail sway (dragons/sharks only).
     if (!set.tail) return;
-    if (!usesTailSwayMatrix(uprightStyle)) return;
     const tailPhase = computeTailSwayPhase({
       elapsed,
       frequency: tailSwayFrequency ?? flapFrequency,
@@ -1004,6 +1009,19 @@ export class CreatureInstanceRenderer {
       angle: tailSwayAngleFromPhase({ phase: tailPhase, amplitude: tailSwayAmplitude }),
       pivot: this.tmpPivot,
     });
+
+    if (tailFlareStrength <= 0 || maxFlapAngle <= 1e-5) return;
+    const downstroke = THREE.MathUtils.clamp(flapAngle / maxFlapAngle, 0, 1);
+    if (downstroke <= 0) return;
+    const scaleX = THREE.MathUtils.clamp(1 + tailFlareStrength * downstroke, 1, 1 + tailFlareStrength);
+    this.partPivotMatrix.makeScale(scaleX, 1, 1);
+    this.partPivotToOrigin.makeTranslation(-this.tmpPivot.x, -this.tmpPivot.y, -this.tmpPivot.z);
+    this.partOriginToPivot.makeTranslation(this.tmpPivot.x, this.tmpPivot.y, this.tmpPivot.z);
+    this.partPivotMatrix.premultiply(this.partOriginToPivot);
+    this.partPivotMatrix.multiply(this.partPivotToOrigin);
+    set.tail.getMatrixAt(i, this.partWorldMatrix);
+    this.partWorldMatrix.multiply(this.partPivotMatrix);
+    set.tail.setMatrixAt(i, this.partWorldMatrix);
   }
 
   private applyCreatureOrientationAndMotion(
@@ -1065,6 +1083,7 @@ export class CreatureInstanceRenderer {
       tailSwayAmplitude = 0,
       tailSwayFrequency,
       tailSwayPivotY = 0,
+      tailFlareStrength = 0,
       worldScale = 1,
       meshScaleBoost = 1,
       preferUpright = false,
@@ -1088,6 +1107,7 @@ export class CreatureInstanceRenderer {
       tailSwayAmplitude,
       tailSwayFrequency,
       tailSwayPivotY,
+      tailFlareStrength,
       worldScale,
       meshScaleBoost,
       preferUpright,
@@ -1158,6 +1178,7 @@ export class CreatureInstanceRenderer {
       tailSwayAmplitude,
       tailSwayFrequency,
       tailSwayPivotY,
+      tailFlareStrength,
       worldScale,
       meshScaleBoost,
       preferUpright,
@@ -1216,6 +1237,7 @@ export class CreatureInstanceRenderer {
       tailSwayAmplitude,
       tailSwayFrequency,
       tailSwayPivotY,
+      tailFlareStrength,
       worldScale,
       meshScaleBoost,
       uprightStyle,
@@ -1292,6 +1314,7 @@ export class CreatureInstanceRenderer {
       tailSwayAmplitude,
       tailSwayFrequency,
       tailSwayPivotY,
+      tailFlareStrength,
       worldScale,
       meshScaleBoost,
       preferUpright,
@@ -1339,6 +1362,7 @@ export class CreatureInstanceRenderer {
       tailSwayAmplitude,
       tailSwayFrequency,
       tailSwayPivotY,
+      tailFlareStrength,
       worldScale,
       meshScaleBoost,
       preferUpright,

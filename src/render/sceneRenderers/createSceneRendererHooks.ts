@@ -74,6 +74,8 @@ export interface MotionConfig {
   tailSwayAmplitude?: number;
   tailSwayFrequency?: number;
   tailSwayPivotY?: number;
+  /** Downstroke-only tail fan flare scale (0 disables). Applied as local X-scale about tail pivot. */
+  tailFlareStrength?: number;
   worldScale?: number;
   meshScaleBoost?: number;
   preferUpright?: boolean;
