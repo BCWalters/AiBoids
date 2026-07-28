@@ -6,10 +6,10 @@ import {
   mergePositionOnlyGeometries,
   pushJointBarrel,
   smoothNormalsByPosition,
-  subdivideGeometryWithAttributes,
 } from '../../../geometry/sharedGeometry';
 import type { PartDrive, Triple } from '../../../motion/rig';
-import { buildFingeredWingGeometry } from './birdSharedGeometry';
+import { buildFeatheredWingGeometry } from './birdSharedGeometry';
+import { UNICORN_HORN_MASK_ATTRIBUTE } from '../unicornHornShader';
 
 /**
  * How the cannon bone folds relative to the thigh above it.
@@ -118,14 +118,6 @@ function addRainbowVertexColorsByDistance(
  *   UNICORN_LEG_SOCK_COLOR — so the geometry has to be told the tint outright
  *   instead of relying on the per-instance colour to supply it.
  */
-/**
- * Spanwise subdivision of the unicorn wing. Higher than the dragon's because
- * the source is far coarser — a 6-triangle fan — so 6 is what takes it from 7
- * distinct spanwise stations to a wave-carrying ~40. The wing is 18 vertices,
- * so even at 6 it stays under a thousand.
- */
-const UNICORN_WING_WAVE_DIVISIONS = 6;
-
 export function createUnicornGeometries(
   length: number,
   width: number,
@@ -133,32 +125,53 @@ export function createUnicornGeometries(
 ): CreatureGeometries {
   const body = buildUnicornBodyGeometry(length, width);
 
-  const wingSpan = length * 1.3;
-  const wingChord = length * 0.6;
-  // Subdivided AFTER the rainbow colours are baked, so the colour ramp is
-  // interpolated along with the positions rather than re-derived on a mesh that
-  // has changed underneath it. The unsubdivided wing is a 6-triangle fan with
-  // only 7 distinct spanwise stations, on which the undulation wave cannot be
-  // represented at all — it snapped between poses instead of flexing.
-  const wingLeft = subdivideGeometryWithAttributes(
-    addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, 1), wingSpan),
-    UNICORN_WING_WAVE_DIVISIONS,
+  // Pegasus wings are the hawk's feathered flight wing (issue #301) — a curved
+  // panel carrying shingled secondaries and splayed primaries — rather than the
+  // flat triangle fan this used to build.
+  //
+  // Sizing is NOT the hawk's proportions. The feathered wing's primaries trail
+  // up to 1.24 chords past the panel's trailing edge, so its real front-to-back
+  // depth is roughly 1.7x chord, where the old flat fan's was about 0.86x. Fed
+  // the hawk's chord fraction the wing came out about twice as deep as the one
+  // it replaced and swamped the horse.
+  //
+  // Both numbers were then halved by eye, and brought back up by a quarter. The
+  // feathered wing carries far more visual weight than the flat fan at the same
+  // measurements — it has thickness, a cambered panel and a dozen separated
+  // feathers where the fan was a single silhouette — so matching the fan's
+  // footprint still read as oversized. These are deliberately smaller than
+  // anything a real flier could use; the wings are a decorative cue on a horse,
+  // not a load-bearing airfoil.
+  const wingSpan = length * 0.775;
+  const wingChord = length * 0.181;
+  // No subdivision pass any more: the feathered wing already ships ~440 distinct
+  // spanwise stations, well past what the undulation wave needs, where the old
+  // fan had 7 and needed a 6x subdivide to become usable at all. Subdividing
+  // this one would multiply its vertex count ~36x for nothing.
+  const wingLeft = addRainbowVertexColors(
+    buildFeatheredWingGeometry({ span: wingSpan, chord: wingChord, side: 1 }),
+    wingSpan,
   );
-  const wingRight = subdivideGeometryWithAttributes(
-    addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, -1), wingSpan),
-    UNICORN_WING_WAVE_DIVISIONS,
+  const wingRight = addRainbowVertexColors(
+    buildFeatheredWingGeometry({ span: wingSpan, chord: wingChord, side: -1 }),
+    wingSpan,
   );
-  // Seat the wing root midway between the two hips, per direct feedback that
-  // the wings sat too far back — they now come off the barrel roughly halfway
-  // between the front and rear legs, where a winged horse's shoulder would be,
-  // rather than back over the haunch.
+  // Seat the wing root between the two hips, per direct feedback that the wings
+  // sat too far back — they come off the barrel between the front and rear legs,
+  // where a winged horse's shoulder would be, rather than back over the haunch.
+  //
+  // Not the exact midpoint: biased forward toward the withers, which is where a
+  // shoulder actually is on a horse and where a pegasus is always drawn with its
+  // wings. The bias is a fraction of the hip separation rather than of body
+  // length, so it stays put relative to the two legs it is seated between if
+  // either of them moves.
   //
   // Derived from the hip positions rather than as its own tuned fraction of
   // body length (it was length*0.25), so moving a leg moves the wings with it.
   // The shared wing-geometry builder attaches the root at y = 0 by default —
   // fine for a dragon, but that reads as too dragon-like here.
   const { frontY, backY } = unicornHipYs(length, width);
-  const wingRootY = (frontY + backY) / 2;
+  const wingRootY = THREE.MathUtils.lerp(backY, frontY, 0.5 + UNICORN_WING_FORWARD_BIAS);
   wingLeft.translate(0, wingRootY, 0);
   wingRight.translate(0, wingRootY, 0);
 
@@ -195,6 +208,8 @@ function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGe
   const maneGeometry = buildUnicornManeGeometry(length, width, bodyGeometry, pollY, pollRadius);
   // The mane MUST stay last: the hair mask below identifies its vertices by
   // their position at the tail of the merged buffer.
+  const bodyVertexCount = bodyGeometry.getAttribute('position').count;
+  const hornVertexCount = hornGeometry.getAttribute('position').count;
   const merged = mergeGeometriesWithColor([
     { geometry: bodyGeometry, color: new THREE.Color(0xffffff) },
     { geometry: hornGeometry, color: UNICORN_HORN_COLOR },
@@ -223,14 +238,44 @@ function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGe
   hairMask.fill(1, totalVertexCount - maneVertexCount);
   merged.setAttribute('aHairMask', new THREE.BufferAttribute(hairMask, 1));
 
+  // And which belong to the horn, so it can be shaded as polished metal while
+  // the rest of the body stays matte coat. A vertex colour alone cannot do this:
+  // metalness and roughness are material properties, not colours, and a gold
+  // colour on a rough dielectric surface just reads as mustard paint.
+  //
+  // The horn is merged SECOND, immediately after the body, so its vertices are
+  // the hornVertexCount entries starting at bodyVertexCount. Both counts are
+  // read from the source geometries above rather than assumed, so reordering
+  // the merge list moves the mask with it instead of silently mislabelling
+  // somebody else's vertices — the failure mode the mane mask's
+  // "MUST stay last" comment is guarding against.
+  const hornMask = new Float32Array(totalVertexCount);
+  hornMask.fill(1, bodyVertexCount, bodyVertexCount + hornVertexCount);
+  merged.setAttribute(UNICORN_HORN_MASK_ATTRIBUTE, new THREE.BufferAttribute(hornMask, 1));
+
   maneGeometry.dispose();
   return merged;
 }
 
 
-// Gold, to make the horn stand out clearly against the lavender body
-// rather than blending in as just another body-colored bump.
-const UNICORN_HORN_COLOR = new THREE.Color(0xffd54a);
+// Bright polished gold, to make the horn stand out clearly against the lavender
+// body rather than blending in as just another body-colored bump. Brightened
+// from 0xffd54a per direct feedback and paired with a metallic shading patch —
+// see unicornHornShader.ts. Colour alone was never going to read as gold: what
+// distinguishes metal from paint is a low-roughness, high-metalness response,
+// not a hue.
+const UNICORN_HORN_COLOR = new THREE.Color(0xffe066);
+/**
+ * Forward rake of the horn, per direct feedback that a vertical horn reads as
+ * an antenna. Measured from straight up (+Z) toward the muzzle (+Y).
+ */
+const UNICORN_HORN_TILT_RAD = THREE.MathUtils.degToRad(20);
+/**
+ * How far forward of the hip midpoint the wing roots sit, as a fraction of the
+ * front-to-rear hip separation. 0 is dead centre between the legs; 0.5 would put
+ * them on the front hip itself.
+ */
+const UNICORN_WING_FORWARD_BIAS = 0.16;
 // Horn base radius as a fraction of the poll radius. Narrowed by half per
 // direct feedback: once the horn was moved forward onto the brow, the wider
 // base broke back out through the skull surface instead of staying buried in
@@ -1499,14 +1544,14 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
 
 
 /**
- * A single horn standing straight up (local +Z, the model's dorsal/up
- * direction — see the wings' shared Z=0 plane) from the poll (top of the
- * neck, where the profile's Z is at its peak — see
- * buildHorseBodyProfileGeometry's spine array), rather than jutting
- * forward off the nose — a horn "sticking up" is the single most
- * important unicorn-vs-bird visual read. Kept small and proportionate to
- * the horse-scaled head, rather than the oversized spike of the first
- * pass.
+ * A single horn rising from the poll (top of the neck, where the profile's Z
+ * is at its peak — see buildHorseBodyProfileGeometry's spine array), rather
+ * than jutting forward off the nose — a horn "sticking up" is the single most
+ * important unicorn-vs-bird visual read.
+ *
+ * It is not vertical: it rakes forward over the brow, which is how a unicorn
+ * horn is drawn everywhere it appears. A dead-vertical spike reads as an
+ * antenna.
  */
 function buildUnicornHornGeometry(
   pollY: number,
@@ -1517,7 +1562,8 @@ function buildUnicornHornGeometry(
   // thickened so that edit did not silently rescale it, then a further 25%
   // taller once the narrowed base was approved: a horn framed by hair on both
   // sides reads shorter than it measures, and a narrower one more so still.
-  const hornLength = pollRadius * 2.421; // 1.95 * 1.2 / 1.208 * 1.25
+  // Then a further 20%, again by direct request.
+  const hornLength = pollRadius * 2.9052; // 1.95 * 1.2 / 1.208 * 1.25 * 1.2
   const hornRadius = pollRadius * UNICORN_HORN_RADIUS_FRAC;
   const cone = new THREE.ConeGeometry(hornRadius, hornLength, 8);
   // ConeGeometry is built along +Y by default, apex at +Y/2, base at
@@ -1526,6 +1572,16 @@ function buildUnicornHornGeometry(
   // previous code here) instead sends +Y to -Z, which put the apex
   // pointing down and the (wider) base up: an upside-down cone.
   cone.rotateX(Math.PI / 2);
+  // Tilt happens about the BASE, not about the cone's centre. Rotating the
+  // centred cone would swing the base backwards out of the skull by half the
+  // horn's length, so the base is brought to the origin first and the finished
+  // horn is then translated onto the head. With the horn now nearly three poll
+  // radii long, that difference is most of the head.
+  //
+  // Rotation about +X maps +Z to (0, -sin, cos), so a FORWARD (+Y) rake needs
+  // a negative angle. Getting this sign backwards lays the horn along the neck.
+  cone.translate(0, 0, hornLength / 2);
+  cone.rotateX(-UNICORN_HORN_TILT_RAD);
   // Base sits right at the skull surface (pollRadius above the spine
   // axis at the poll) and extends further upward from there.
   //
@@ -1536,7 +1592,7 @@ function buildUnicornHornGeometry(
   // otherwise moving it forward would lift it clear of the head and leave the
   // horn floating.
   const hornForward = pollRadius * UNICORN_HORN_FORWARD_FRAC;
-  cone.translate(0, pollY + hornForward, pollZ + pollRadius * 0.82 + hornLength / 2);
+  cone.translate(0, pollY + hornForward, pollZ + pollRadius * 0.82);
   return cone;
 }
 

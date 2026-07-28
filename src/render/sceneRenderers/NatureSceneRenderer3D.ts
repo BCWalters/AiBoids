@@ -17,6 +17,7 @@ import { DragonFireBreathController } from '../dragonFireBreathController';
 import type { FireBreathEffects } from '../styles/nature/fireBreath';
 import { applyDragonScaleShader, DRAGON_SCALE_CONFIG } from '../styles/nature/dragonScaleShader';
 import { applyUnicornHairShader, UNICORN_HAIR_CONFIG } from '../styles/nature/unicornHairShader';
+import { applyUnicornHornShader, UNICORN_HORN_CONFIG } from '../styles/nature/unicornHornShader';
 import {
   applyBirdFeatherShader,
   type BirdFeatherConfig,
@@ -958,6 +959,11 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG);
     } else if (geometries === this.unicornPredatorGeometries) {
       applyUnicornHairShader(material, geometries.body, UNICORN_HAIR_CONFIG);
+      // Both patches land on the same material. Each chains the previous
+      // onBeforeCompile and composes the cache key, so order is not load-bearing
+      // — but they must both be applied to the SAME instance and exactly once,
+      // since patching is not idempotent and clone() drops both hooks.
+      applyUnicornHornShader(material, geometries.body, UNICORN_HORN_CONFIG);
     } else if (this.allBirdGeometries?.has(geometries)) {
       // Bird feathers use the body's dorsoventral (Z) axis — 'yz' plane.
       applyBirdFeatherShader(material, geometries.body, this.featherConfigFor(geometries), 'yz');
