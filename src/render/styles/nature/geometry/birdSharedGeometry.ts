@@ -47,14 +47,35 @@ export function getBirdTailFanProfileY(length: number): {
 }
 
 /**
+ * Primary-feather count for the wing-tip fan in normal (unicorn/pegasus)
+ * mode — more feathers give the tip a smoother, more convincing silhouette
+ * than the original 6. Exported so geometry tests can assert the resulting
+ * vertex budget against this constant (see wingTipGeometry.test.ts).
+ */
+export const WING_FINGER_COUNT_NORMAL = 10;
+
+/**
+ * Primary-feather count for the wing-tip fan in broad (hawk/eagle) mode —
+ * raised from 8 to 12 so the open-hand silhouette fills in fully.
+ */
+export const WING_FINGER_COUNT_BROAD = 12;
+
+/**
  * "finger" feathers at the tip (rooted along the outer trailing edge, each
  * angled slightly differently) — the visual cue that reads as "wingtip
  * primary feathers" on a soaring bird of prey.
  *
+ * Each feather uses three triangles (a tapered trapezoid body narrowing to
+ * a pointed tip) rather than a single flat triangle, so the individual
+ * primaries have a visible taper rather than ending as blunt wedges (issue
+ * #256).  The tip point is also computed from the feather-base midpoint so
+ * it is centred over the feather rather than offset to one side.
+ *
  * @param broadTip - When true, fans the primary feathers in a wider arc
- *   (8 feathers, −20° to +55° spread) to produce a broad, blunter wingtip
- *   like a hawk or eagle soaring with spread primaries. Default false keeps
- *   the original 6-feather, narrower spread for the unicorn's swept wing.
+ *   (WING_FINGER_COUNT_BROAD feathers, −20° to +55° spread) to produce a
+ *   broad, rounded "open hand" wingtip like a hawk or eagle soaring with
+ *   spread primaries. Default false keeps the narrower spread for the
+ *   unicorn's swept pegasus wing (WING_FINGER_COUNT_NORMAL feathers).
  *   Overall wingspan and chord are unchanged; only the tip profile differs.
  */
 export function buildFingeredWingGeometry(span: number, chord: number, side: 1 | -1, broadTip: boolean = false): THREE.BufferGeometry {
@@ -73,10 +94,10 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
   const shoulder = [mainSpan * 0.42 * s, chord * 0.42, 0];
   pushTri(root, shoulder, tip);
 
-  // Broad-tip mode (hawk): 8 feathers spread in a wider arc so the wingtip
-  // reads as an open "hand" of primaries rather than a sharp triangle.
-  // Original mode (unicorn): 6 feathers in a tighter arc.
-  const fingerCount = broadTip ? 8 : 6;
+  // Broad-tip mode (hawk): WING_FINGER_COUNT_BROAD feathers spread in a
+  // wider arc so the wingtip reads as an open "hand" of primaries.
+  // Normal mode (unicorn): WING_FINGER_COUNT_NORMAL feathers in a tighter arc.
+  const fingerCount = broadTip ? WING_FINGER_COUNT_BROAD : WING_FINGER_COUNT_NORMAL;
   const innerAnchor = broadTip
     ? [mainSpan * 0.46 * s, -chord * 0.1, 0]
     : [mainSpan * 0.5 * s, -chord * 0.1, 0];
@@ -107,9 +128,28 @@ export function buildFingeredWingGeometry(span: number, chord: number, side: 1 |
     const rot = spreadRad * s;
     const rdx = dx * Math.cos(rot) - dy * Math.sin(rot);
     const rdy = dx * Math.sin(rot) + dy * Math.cos(rot);
-    const tipPt = [rootPt[0] + rdx * fingerLen, rootPt[1] + rdy * fingerLen, 0];
 
-    pushTri(rootPt, rootPt2, tipPt);
+    // Compute tipPt from the MIDPOINT of the feather base so the tip is
+    // centred over the feather rather than offset to one side (the old code
+    // projected from rootPt alone, which skewed each feather asymmetrically).
+    const baseMid = lerp3(rootPt, rootPt2, 0.5);
+    const tipPt = [baseMid[0] + rdx * fingerLen, baseMid[1] + rdy * fingerLen, 0];
+
+    // Tapered feather body: three triangles forming a wide base that narrows
+    // to a "neck" at ~55% of the feather's height, then converges to the
+    // pointed tip — each feather reads as a real primary feather shape rather
+    // than a flat blunt wedge (issue #256).
+    const neckFrac = 0.55;
+    const neckTaper = 0.35; // neck is 35% as wide as the base
+    const neckMid = lerp3(baseMid, tipPt, neckFrac);
+    const halfWx = (rootPt2[0] - rootPt[0]) * 0.5;
+    const halfWy = (rootPt2[1] - rootPt[1]) * 0.5;
+    const neckL = [neckMid[0] - neckTaper * halfWx, neckMid[1] - neckTaper * halfWy, 0];
+    const neckR = [neckMid[0] + neckTaper * halfWx, neckMid[1] + neckTaper * halfWy, 0];
+
+    pushTri(rootPt, rootPt2, neckR); // base-right
+    pushTri(rootPt, neckR, neckL);   // base-left
+    pushTri(neckL, neckR, tipPt);    // pointed tip
   }
 
   const geometry = new THREE.BufferGeometry();
