@@ -141,8 +141,13 @@ export function applyFishScaleShader(
   // (Y span ≈ 3.2, Z span ≈ 1.9) both get the same cell size per world unit
   // for the same scalesPerLength value. Using max.y alone would give the
   // barracuda ≈2 crosswise cells (the Z span is ~5× shorter than Y span).
-  const zSpan = Math.max(1e-6, bb.max.z - bb.min.z);
-  const freq = config.scalesPerLength / zSpan;
+  // Frequency is derived from the span of the SECOND pattern axis, which is
+  // whichever axis `patternPlane` selects. Deriving it from Z while laying the
+  // pattern out on X would make cells far too dense on flatter bodies.
+  const crossSpan = patternPlane === 'yz'
+    ? Math.max(1e-6, bb.max.z - bb.min.z)
+    : Math.max(1e-6, bb.max.x - bb.min.x);
+  const freq = config.scalesPerLength / crossSpan;
   const planeSwizzle = patternPlane === 'yz' ? 'vFishScalePos.z' : 'vFishScalePos.x';
   const cacheKey = `aiboids-fish-scale-v4:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
 
