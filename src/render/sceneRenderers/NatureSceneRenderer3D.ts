@@ -897,3 +897,6 @@ export { NATURE_HAWK_COLORS };
 export { HAWK_FLAP_FREQUENCY, FLAP_FREQUENCY };
 // Exported for unit tests that assert gallery flap amplitude tracks simulation.
 export { FLAP_IDLE_AMPLITUDE, FLAP_SPEED_AMPLITUDE };
+// Exported for unit tests: imported rather than copied so tests stay in sync
+// if the shipped amplitude changes (same pattern as SHARK_TAIL_SWAY_AMPLITUDE).
+export { HAWK_TAIL_SWAY_AMPLITUDE };

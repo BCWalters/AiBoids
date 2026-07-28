@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry, buildDiscCapGeometry, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
-import { buildFingeredWingGeometry, buildTailGeometry, buildHookedBeakGeometry, getBirdBodyRearTipY } from './birdSharedGeometry';
+import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildEyeDotsGeometry, buildDiscCapGeometry, singleLegPart, swayingTailRig, extrudeRingGeometry } from '../../../geometry/sharedGeometry';
+import { buildFingeredWingGeometry, buildHookedBeakGeometry, getBirdBodyRearTipY } from './birdSharedGeometry';
 
 /**
  * Hawk predator geometry — split out from the shared "realistic bird"
@@ -53,7 +53,7 @@ export function createHawkGeometries(length: number, width: number): CreatureGeo
   // per-instance tail tint (see Renderer3D's NATURE_HAWK_COLORS), no
   // vertex-bake needed since the tail is already its own InstancedMesh
   // part.
-  const tail = buildTailGeometry(length * 1.1, width, { halfWidth: width * 0.9, bodyLength: length });
+  const tail = buildHawkFanTailGeometry(length, width);
   const legs = buildHawkLegsGeometry(length, width);
   const tailRig = swayingTailRig({ pivot: [0, getBirdBodyRearTipY(length), 0], axis: [1, 0, 0] });
 
@@ -193,3 +193,60 @@ function buildHawkLegsGeometry(length: number, width: number): THREE.BufferGeome
   const both = mergePositionOnlyGeometries([buildLeg(1), buildLeg(-1)]);
   return mergeGeometriesWithColor([{ geometry: both, color: TALONS_COLOR }]);
 }
+
+/**
+ * A broad, fan-shaped hawk tail — a trapezoidal outline with a wide,
+ * approximately straight trailing edge, matching the real raptor silhouette
+ * (used as an airbrake and steering surface) rather than the narrow kite/diamond
+ * shape produced by the generic shared buildTailGeometry.
+ *
+ * Geometry: a 6-vertex polygon in the XY (horizontal) plane, extruded ±Z for
+ * a small amount of vertical thickness so it does not vanish when viewed edge-on.
+ *
+ * Coordinate frame (MODEL_UP=Z, MODEL_RIGHT=X, spine=Y):
+ *   - Root vertex at the body rear tip (Y = getBirdBodyRearTipY), attachment matches tailRig pivot.
+ *   - Mid-sweep vertices fan out to about half-span at 48% of the tail's length.
+ *   - Left/right trailing corners carry the full half-span at the trailing edge,
+ *     making the trailing edge the widest part of the tail (fan, not kite).
+ *   - A center trailing vertex sits slightly forward of the corner vertices to
+ *     give a very slight convex rounding rather than a sharp rectangular edge.
+ *
+ * Sway axis note: the tailRig still uses axis [1,0,0] (X = MODEL_RIGHT), which
+ * produces a pitch (up/down) motion — the tail tips up as the hawk climbs and
+ * down as it dives. This is correct for a raptor using its tail as an elevator.
+ * Axis [0,1,0] (spine) would roll the tail about its own centerline; [0,0,1]
+ * (world-up) would yaw it left/right. Pitch on X is intentional and unchanged.
+ *
+ * Polygon budget:
+ *   Previous 4-vertex kite: 12 faces / 36 triangle vertices
+ *   New      6-vertex fan:   20 faces / 60 triangle vertices  (+24 vertices)
+ */
+function buildHawkFanTailGeometry(length: number, width: number): THREE.BufferGeometry {
+  const rootY    = getBirdBodyRearTipY(length);   // -0.5 * length — body rear attachment
+  // Total reach keeps the tail roughly the same overall length as before.
+  // Previous: buildTailGeometry(length*1.1) → backCenterY = -length*0.935
+  // root=-0.5L → back=-0.935L → tailReach=0.435L
+  const tailReach = length * 0.435;
+  const backY      = rootY - tailReach;           // rear of trailing edge
+  const midY       = rootY - tailReach * 0.48;   // mid-sweep (48% of the way back)
+  const tw         = width * 0.95;               // half-span; full span = 1.9 * width
+  // Slight center advance: trailing center is fractionally forward of the
+  // corner vertices, giving a gently convex edge rather than a flat line.
+  const centerBulge = length * 0.018;
+  const thickness  = width * 0.055;              // extrusion depth (±Z)
+
+  // 6-point polygon ordered root → left → rear-left → rear-center → rear-right → right.
+  // extrudeRingGeometry fans the top/bottom faces from ring[0] (the root) and
+  // wraps side faces around the perimeter, so the root should be vertex 0.
+  const ring = [
+    new THREE.Vector3(0,       rootY,                     0),  // root (body attachment)
+    new THREE.Vector3(-tw * 0.52, midY,                   0),  // left mid-sweep
+    new THREE.Vector3(-tw,     backY + centerBulge,       0),  // left trailing corner
+    new THREE.Vector3(0,       backY + centerBulge * 1.7, 0),  // center trailing (slight convex)
+    new THREE.Vector3(tw,      backY + centerBulge,       0),  // right trailing corner
+    new THREE.Vector3(tw * 0.52, midY,                    0),  // right mid-sweep
+  ];
+
+  return extrudeRingGeometry(ring, thickness);
+}
+
