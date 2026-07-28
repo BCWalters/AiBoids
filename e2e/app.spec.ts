@@ -244,7 +244,7 @@ test.describe('App smoke tests', () => {
 });
 
 test.describe('Render color regression checks', () => {
-  test('nature dragon keeps flat body/wing tint with white baked tail passthrough', {
+  test('nature dragon keeps flat body/wing/tail tint from shared state color', {
     tag: ['@nature'],
   }, async ({ page }) => {
     failOnConsoleErrors(page);
@@ -256,13 +256,17 @@ test.describe('Render color regression checks', () => {
     const body = colors!.body!;
     const wing = colors!.wingLeft!;
     const tail = colors!.tail!;
+    // Body, wings, and tail all receive the same state color as their instance
+    // color. The tail geometry bakes a root-to-tip darkening MULTIPLIER (not
+    // absolute colors), so the instance color stays the body/wing tint and the
+    // visual darkening is handled per-vertex rather than by the instance color.
     expect(Math.abs(body[0] - wing[0])).toBeLessThan(0.02);
     expect(Math.abs(body[1] - wing[1])).toBeLessThan(0.02);
     expect(Math.abs(body[2] - wing[2])).toBeLessThan(0.02);
+    expect(Math.abs(body[0] - tail[0])).toBeLessThan(0.02);
+    expect(Math.abs(body[1] - tail[1])).toBeLessThan(0.02);
+    expect(Math.abs(body[2] - tail[2])).toBeLessThan(0.02);
     expect(sumRgb(body)).toBeLessThan(2.2);
-    expect(tail[0]).toBeGreaterThan(0.95);
-    expect(tail[1]).toBeGreaterThan(0.95);
-    expect(tail[2]).toBeGreaterThan(0.95);
   });
 
   test('arcade normal boid keeps flat-mode body/wing color match', {

@@ -171,3 +171,71 @@ describe('dragon tail smoothness (issue #262)', () => {
     tail.dispose();
   });
 });
+
+/**
+ * Split-normal regression (the actual cause of the "blocky" look).
+ *
+ * The vertex-count floors above pin polygon density, but density was never
+ * the real problem.  Every one of these parts is a NON-INDEXED triangle soup,
+ * and THREE's computeVertexNormals() averages per index — so on non-indexed
+ * geometry each triangle keeps its own flat face normal and the surface is
+ * hard-faceted no matter how many segments it has.  Raising the segment counts
+ * (#247, #262) only made the facets smaller; the faceting itself survived,
+ * which is why the creatures still read as blocky afterwards.
+ *
+ * This measures shading directly: for each unique position, how many distinct
+ * normals meet there.  A smooth surface shares one averaged normal per
+ * position; a flat-shaded one has a different normal per incident triangle.
+ *
+ *   Part            per-face (before)   smoothed (after)
+ *   ──────────────  ─────────────────   ────────────────
+ *   unicorn body          99 %                26 %
+ *   unicorn tail         100 %                16 %
+ *   dragon body           99 %                 5 %
+ *   dragon tail           96 %                32 %
+ *
+ * The residue is intentional: smoothNormalsByPosition() only averages across
+ * faces meeting below its crease angle, so genuinely sharp features (end caps,
+ * horn base, frill and dorsal-fin roots) correctly keep split normals.
+ *
+ * Threshold 50 % sits between the two measured populations — comfortably above
+ * every "after" value and far below every "before" value.  Falsified by
+ * swapping any smoothNormalsByPosition() call back to computeVertexNormals().
+ */
+describe('creature shading is smooth, not per-face (#247, #262 follow-up)', () => {
+  const SPLIT_NORMAL_CEILING = 0.5;
+
+  const splitNormalFraction = (geometry: THREE.BufferGeometry): number => {
+    const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const nrm = geometry.getAttribute('normal') as THREE.BufferAttribute | undefined;
+    expect(nrm, 'geometry must carry normals').toBeDefined();
+    const byPosition = new Map<string, THREE.Vector3[]>();
+    for (let i = 0; i < pos.count; i++) {
+      const key = `${pos.getX(i).toFixed(4)}|${pos.getY(i).toFixed(4)}|${pos.getZ(i).toFixed(4)}`;
+      const n = new THREE.Vector3(nrm!.getX(i), nrm!.getY(i), nrm!.getZ(i));
+      const seen = byPosition.get(key);
+      if (seen) {
+        if (!seen.some((s) => s.dot(n) > 0.999)) seen.push(n);
+      } else {
+        byPosition.set(key, [n]);
+      }
+    }
+    let split = 0;
+    for (const normals of byPosition.values()) if (normals.length > 1) split++;
+    return split / byPosition.size;
+  };
+
+  it('unicorn body and tail share averaged normals across most positions', () => {
+    const geoms = createUnicornGeometries(2, 0.8);
+    expect(splitNormalFraction(geoms.body)).toBeLessThan(SPLIT_NORMAL_CEILING);
+    expect(geoms.tail).toBeDefined();
+    expect(splitNormalFraction(geoms.tail!)).toBeLessThan(SPLIT_NORMAL_CEILING);
+  });
+
+  it('dragon body and tail share averaged normals across most positions', () => {
+    const geoms = createDragonGeometries(2, 0.8);
+    expect(splitNormalFraction(geoms.body)).toBeLessThan(SPLIT_NORMAL_CEILING);
+    expect(geoms.tail).toBeDefined();
+    expect(splitNormalFraction(geoms.tail!)).toBeLessThan(SPLIT_NORMAL_CEILING);
+  });
+});

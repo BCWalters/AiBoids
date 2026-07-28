@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { buildDiscCapGeometry, mergeGeometriesWithColor, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
+import {
+  buildDiscCapGeometry,
+  mergeGeometriesWithColor,
+  singleLegPart,
+  smoothNormalsByPosition,
+  swayingTailRig,
+} from '../../../geometry/sharedGeometry';
 
 /**
  * "Dragon" predator geometry: a bulkier, longer-necked lathed body with a
@@ -197,7 +203,12 @@ function applyNeckBend(
     pos.setXYZ(i, x, y, z);
   }
   pos.needsUpdate = true;
-  geometry.computeVertexNormals();
+  // Positions moved, so normals must be rebuilt. Smoothed rather than
+  // per-face: this body is a non-indexed merge, so computeVertexNormals()
+  // gave every triangle its own flat normal and the lathe's own analytic
+  // normals were lost. The crease rule keeps the frill, face details and
+  // end caps reading as separate hard-edged features.
+  smoothNormalsByPosition(geometry);
 }
 
 /**
@@ -679,6 +690,61 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+
+  // Bake a root->wingtip lightening gradient, as a MULTIPLIER for the same
+  // reason the tail does (see buildDragonTailGeometry): 1 at the root so the
+  // membrane starts on exactly whatever color the body currently is, rising
+  // toward the tip. Absolute colors would pin the wings to one palette and
+  // reopen a seam at the shoulder the moment the body lerps toward its hunt
+  // tint.
+  //
+  // Lightening means factors ABOVE 1, which is legitimate here: vertex colors
+  // are stored linear and unclamped, and are multiplied into the diffuse term.
+  //
+  // The factor is derived from a reference PAIR rather than typed in directly,
+  // so the membrane keeps a consistent relationship to the body across palette
+  // retunes. Only the RATIO of the two matters, so they are chosen together
+  // and neither is meaningful alone.
+  //
+  // A near-white tip (a pair around 0x3e2064 -> 0xe4d4ff) was tried and is too
+  // strong: the outer third of the membrane washes out to white and stops
+  // reading as a wing. This gentler pair keeps the tip clearly lavender.
+  const wingRefBody = new THREE.Color(0x502a7f);
+  const wingRefTip = new THREE.Color(0xb08fd8); // light lavender at the wingtip
+  const tipFactor = new THREE.Color(
+    wingRefTip.r / wingRefBody.r,
+    wingRefTip.g / wingRefBody.g,
+    wingRefTip.b / wingRefBody.b,
+  );
+
+  const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+  // Distance outward from the body along the span axis, normalized by the
+  // furthest-out vertex. Uses the actual extent rather than the nominal span
+  // so the claw tips land exactly at 1 no matter how the outline is retuned.
+  let maxOut = 0;
+  for (let vi = 0; vi < posAttr.count; vi++) {
+    maxOut = Math.max(maxOut, Math.abs(posAttr.getX(vi)));
+  }
+  // The root stop is deliberately well BELOW 1, i.e. darker than the body
+  // rather than matching it. Matching the body reads as the membrane being
+  // pale right up to the shoulder, which flattens the join; seating it in
+  // shadow there reads as the membrane emerging from under the body, and gives
+  // the outward lightening a longer run to work across.
+  //
+  // Hue-neutral (a single scalar) on purpose: this is a shading term, so
+  // tinting it would fight the palette rather than sit underneath it. Values
+  // much below ~0.3 crush the inner membrane toward black and swallow the
+  // bone-tube silhouette; prefer lifting the tip to widen the range.
+  const rootFactor = 0.45;
+  const colors = new Float32Array(posAttr.count * 3);
+  for (let vi = 0; vi < posAttr.count; vi++) {
+    const t = maxOut > 0 ? THREE.MathUtils.clamp(Math.abs(posAttr.getX(vi)) / maxOut, 0, 1) : 0;
+    colors[vi * 3]     = THREE.MathUtils.lerp(rootFactor, tipFactor.r, t);
+    colors[vi * 3 + 1] = THREE.MathUtils.lerp(rootFactor, tipFactor.g, t);
+    colors[vi * 3 + 2] = THREE.MathUtils.lerp(rootFactor, tipFactor.b, t);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -729,6 +795,22 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   const steps = 11;
   const path: THREE.Vector3[] = [];
   const radii: number[] = [];
+
+  // Start the tail INSIDE the body rather than flush at the rump.
+  //
+  // The tail sways about a pivot at the root, so a tail that merely reaches the
+  // rump plane swings sideways there and opens an annular gap you can see sky
+  // through (#278). The clearance was only ~0.02 wu: the tail is ~0.19 wu wide
+  // where it crosses the rump disc, and that disc is 0.208 wu. Burying the
+  // first segment deep in the body means the junction stays covered through the
+  // full sway range, without widening the visible tail.
+  //
+  // The buried point sits well within the body radius at that height (~0.46 wu
+  // against a 0.22 wu tail), so it never pokes through the flanks.
+  const buriedInset = length * 0.18;
+  path.push(new THREE.Vector3(0, yOffset + buriedInset, zOffset));
+  radii.push(width * 0.275);
+
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const y = yOffset + (-tailLen * t);
@@ -742,10 +824,22 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
     // back upward after the main downward sweep, instead of the curve
     // just bottoming out and staying down — the classic "flick" silhouette
     // real dragon tails are drawn with, rather than a limp noodle.
-    const droop = zOffset + length * 0.2 * Math.sin(t * Math.PI * 2.2) - length * 0.46 * Math.pow(t, 1.35);
+    // Ease the S-bend in from zero at the root (#278). The arc term rises
+    // fast: at its raw value the tail's centreline is already 0.175 wu above
+    // the body axis where it crosses the rump plane, which shoved the tube off
+    // the opening and left sky showing along the bottom and both sides. Fading
+    // it in lets the tail leave the body axially and pick the curve up outside.
+    const arcEase = THREE.MathUtils.smoothstep(t, 0, 0.28);
+    const droop = zOffset + arcEase * length * 0.2 * Math.sin(t * Math.PI * 2.2) - length * 0.46 * Math.pow(t, 1.35);
     const sway = length * 0.16 * Math.sin(t * Math.PI * 0.85);
     path.push(new THREE.Vector3(sway, y, droop));
-    radii.push(width * 0.255 * (1 - t) + width * 0.02 * t * (1 - t)); // base radius 25% slimmer
+    // Base taper, plus a short root flare that decays by t≈0.2. The flare is
+    // what actually seals the joint: the tube has to be wider than the rump
+    // opening (0.208 wu) where it crosses, and the plain taper only reached
+    // 0.193 wu there. It also reads correctly — real tails are thickest where
+    // they meet the body.
+    const rootFlare = width * 0.18 * Math.max(0, 1 - t / 0.2);
+    radii.push(width * 0.255 * (1 - t) + width * 0.02 * t * (1 - t) + rootFlare);
   }
   radii[radii.length - 1] = 0; // sharp spike tip
 
@@ -769,13 +863,34 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
 
-  // Bake a root→tip color gradient: the tail root matches the dragon
-  // body color (DRAGON_PREDATOR_BASE, 0x502a7f) at the rump attachment,
-  // then darkens to almost black at the tip (per issue #73). The renderer
-  // detects the presence of this 'color' attribute and passes white as
-  // the instance color so the gradient shows through unchanged.
-  const rootColor = new THREE.Color(0x502a7f); // matches the dragon body base at the rump
-  const tipColor  = new THREE.Color(0x080314); // near-black at the tip
+  // Bake a root→tip darkening gradient as a MULTIPLIER (neutral white at the
+  // rump, dark at the tip) rather than as absolute colors.
+  //
+  // It used to bake absolute colors, root 0x502a7f to tip 0x080314, and the
+  // color applicator passed white as the tail's instance color so that
+  // gradient showed through untouched. That pinned the tail to one fixed
+  // palette while the body's instance color lerps from DRAGON_PREDATOR_BASE
+  // toward the brighter DRAGON_PREDATOR_HUNT as the dragon chases — so the
+  // two matched only at rest, and the moment the body brightened the tail
+  // stayed put and a visible seam opened at the joint.
+  //
+  // As a multiplier the root is exactly 1 and the tail therefore always starts
+  // at whatever color the body currently is, then darkens along its length. It
+  // tracks the hunt tint for free.
+  //
+  // The tip factor is derived from the two original colors rather than typed in
+  // by hand, so the tip keeps the exact appearance it has today whenever the
+  // body sits at its base color.
+  // These two only set the SHAPE of the falloff (tip / root), never an absolute
+  // color, so the dragon's palette can be retuned in NatureSceneRenderer3D
+  // without touching the geometry.
+  const legacyRootColor = new THREE.Color(0x502a7f); // the old baked root
+  const legacyTipColor = new THREE.Color(0x080314); // the old baked near-black tip
+  const tipFactor = new THREE.Color(
+    legacyTipColor.r / legacyRootColor.r,
+    legacyTipColor.g / legacyRootColor.g,
+    legacyTipColor.b / legacyRootColor.b,
+  );
   const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(posAttr.count * 3);
   const tailRootY = yOffset;
@@ -783,13 +898,19 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   for (let vi = 0; vi < posAttr.count; vi++) {
     const vy = posAttr.getY(vi);
     const t = THREE.MathUtils.clamp((vy - tailRootY) / (tailTipY - tailRootY), 0, 1);
-    colors[vi * 3]     = THREE.MathUtils.lerp(rootColor.r, tipColor.r, t);
-    colors[vi * 3 + 1] = THREE.MathUtils.lerp(rootColor.g, tipColor.g, t);
-    colors[vi * 3 + 2] = THREE.MathUtils.lerp(rootColor.b, tipColor.b, t);
+    colors[vi * 3]     = THREE.MathUtils.lerp(1, tipFactor.r, t);
+    colors[vi * 3 + 1] = THREE.MathUtils.lerp(1, tipFactor.g, t);
+    colors[vi * 3 + 2] = THREE.MathUtils.lerp(1, tipFactor.b, t);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-  geometry.computeVertexNormals();
+  // Averaged rather than per-face normals. computeVertexNormals() on this
+  // non-indexed tube gave every triangle its own flat normal, so the tail
+  // stayed hard-faceted even after PR #267 raised DRAGON_TAIL_TUBE_SIDES from
+  // 6 to 10 — more sides only made the facets narrower, never smooth. The
+  // crease rule keeps the dorsal fins standing proud of the tube crisp
+  // instead of smearing them into it.
+  smoothNormalsByPosition(geometry);
   return geometry;
 }
 
@@ -838,13 +959,22 @@ function buildDragonLegsGeometry(length: number, width: number): THREE.BufferGeo
       [0, 1],
       [1, 0.3],
     ];
+    // Root each claw slightly back UP the shin rather than exactly at the foot
+    // vertex, and start it at the shin's own end radius (#278: claws read as
+    // slightly detached). Both tubes are capped, so this was never a hole — but
+    // the claw's base ring is perpendicular to the claw direction, which
+    // diverges sharply from the shin direction, so a ring pinned exactly at the
+    // shared vertex leaves a visible notch on the outside of the bend. Sinking
+    // the base into the shin buries that seam.
+    const shinDir = new THREE.Vector3().subVectors(foot, knee).normalize();
+    const clawBase = foot.clone().addScaledVector(shinDir, -legR * 0.7);
     for (const [spreadX, spreadForward] of clawSpread) {
       const clawTip = new THREE.Vector3(
         foot.x + spreadX * width * 0.1,
         foot.y + spreadForward * clawLen * 0.4,
         foot.z - clawLen,
       );
-      positions.push(...buildTube([foot, clawTip], [legR * 0.4, 0], 4));
+      positions.push(...buildTube([clawBase, clawTip], [legR * 0.55, 0], 4));
     }
   }
 
