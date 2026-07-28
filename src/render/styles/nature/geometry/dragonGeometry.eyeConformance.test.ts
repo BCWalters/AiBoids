@@ -139,12 +139,18 @@ function isWhite(r: number, g: number, b: number): boolean {
 }
 
 /**
- * Approximately the iris orange (0xff9010) in linear space:
- *   R ~= 1.0, G ~= 0.279, B ~= 0.005.
- * THREE.Color converts sRGB hex to linear, so these are the stored values.
+ * Identifies iris vertices by the one property nothing else on the dragon has:
+ * a colour channel greater than 1.
+ *
+ * The iris is authored as an ABSOLUTE colour and then pre-divided by the body
+ * tint (see tintCompensated in dragonGeometry.ts), because instance colours
+ * MULTIPLY vertex colours and the dragon's tint is very dark. That division
+ * pushes the stored channels well above 1, which no ordinary baked colour can
+ * reach — so this stays correct if the iris hue is ever retuned, unlike the
+ * previous hard-coded match against 0xff9010.
  */
 function isIrisOrange(r: number, g: number, b: number): boolean {
-  return r > 0.9 && g > 0.1 && g < 0.5 && b < 0.01;
+  return Math.max(r, g, b) > 2;
 }
 
 /**

@@ -346,6 +346,183 @@ export function dragonBodyRadiusAtY(y: number, halfLen: number, width: number): 
   return samples[samples.length - 1].x;
 }
 
+/**
+ * The per-instance body tint every dragon vertex is multiplied by.
+ *
+ * Defined here (rather than in NatureSceneRenderer3D, which re-exports it as
+ * DRAGON_PREDATOR_BASE) because the geometry layer needs it to author absolute
+ * colours: three.js InstancedMesh instance colours MULTIPLY the baked vertex
+ * colour, so any detail that is meant to look like a specific colour rather
+ * than "the body colour, shaded" must be pre-divided by this tint.
+ */
+export const DRAGON_BODY_TINT = new THREE.Color(0x3e2064); // deep body purple (per issue #73)
+
+/**
+ * Converts an ABSOLUTE target colour into the vertex colour that, once
+ * multiplied by DRAGON_BODY_TINT at draw time, renders as that target.
+ *
+ * Vertex colours live in a non-normalized Float32 attribute, so channel values
+ * above 1 are legal and simply brighten — which is required here, since the
+ * dragon's tint is very dark (linear ~0.048/0.014/0.127) and multiplication can
+ * only ever darken.
+ *
+ * Note the tint is lerped toward the hunt highlight while a dragon is chasing,
+ * so a compensated detail brightens by up to ~2.5x mid-hunt. For the eyes that
+ * is desirable: they flare as the dragon closes in.
+ */
+function tintCompensated(target: THREE.Color): THREE.Color {
+  // Guard against divide-by-zero on a fully unlit channel, and cap the boost so
+  // a near-zero tint channel can't produce an absurd value.
+  const MAX_BOOST = 24;
+  const ratio = (t: number, tint: number) => Math.min(MAX_BOOST, t / Math.max(tint, 1e-4));
+  return new THREE.Color(
+    ratio(target.r, DRAGON_BODY_TINT.r),
+    ratio(target.g, DRAGON_BODY_TINT.g),
+    ratio(target.b, DRAGON_BODY_TINT.b),
+  );
+}
+
+/**
+ * The whole merged dragon body is squashed along Z after assembly, to turn the
+ * lathe's circular cross-section into a shallow oval. Any face detail that
+ * needs to look ROUND in the final render must pre-divide its Z extent by this,
+ * because it is built before the squash is applied.
+ */
+const DRAGON_BODY_Z_SQUASH = 0.62;
+
+/**
+ * Builds a flat disc that lies FLUSH against the dragon's body surface, facing
+ * outward along ±X.
+ *
+ * CircleGeometry lies in the XY plane with normal +Z; after rotateY(±π/2) the
+ * normal maps to ±X (outward) and the disc's local Y maps to world Y
+ * (head-forward), so scaling local Y by `elong` before rotation elongates the
+ * disc along the head-forward direction.
+ *
+ * Each vertex's X is then derived from the body-profile surface AT THAT VERTEX'S
+ * OWN (Y, Z) plus a small standoff. Conforming in two dimensions is required:
+ *   - Y conforming: dragonBodyRadiusAtY(y) gives the lathe radius r at y.
+ *   - Z conforming: the body cross-section at height z is a circle of radius r,
+ *     so the surface sits at x = sqrt(r² − z²), not just r. Without this second
+ *     step a disc is flush at z = 0 but floats far off the skull higher up
+ *     (#201 follow-up measured 5× standoff at the top edge).
+ *
+ * The translate(0, y, z) happens AFTER the loop, so each vertex's final world Z
+ * must be computed as pos.getZ(i) + z inside it.
+ */
+function buildSurfaceConformedDisc(opts: {
+  radius: number;
+  elong: number;
+  segments: number;
+  y: number;
+  z: number;
+  side: 1 | -1;
+  standoff: number;
+  halfLen: number;
+  width: number;
+  /**
+   * Narrows the disc toward its FORWARD (+Y, snout-ward) end, turning the
+   * symmetric ellipse into an almond/teardrop that reads as slanting forward.
+   * 0 = no taper (a plain ellipse); 0.6 = the forward end is 40 % of the height
+   * of the rear end. Values approaching 1 pinch the front to a point.
+   *
+   * Applied BEFORE the rotation, while the disc is still in the XY plane, and
+   * scales local X — which rotateY(±π/2) maps to the world Z (up/down) axis —
+   * as a function of local Y (which stays world Y, head-forward). Tapering
+   * after the rotation would instead eat into the surface-conforming X values.
+   */
+  forwardTaper?: number;
+  /**
+   * Rotates the disc within its own plane so its forward end drops toward the
+   * jaw, giving the eye a slight downward rake. Radians; 0 = level.
+   *
+   * The sign MUST be flipped per side. rotateY(+π/2) maps local +X to world
+   * −Z, while rotateY(−π/2) maps local +X to world +Z — so applying the same
+   * in-plane rotation to both sides tilts one eye down and the other up.
+   */
+  forwardTiltRad?: number;
+  /**
+   * Optional radial gradient, baked as a per-vertex 'color' attribute:
+   * `rimColor` at the disc's outer edge blending to `centerColor` at the
+   * middle. mergeGeometriesWithColor prefers a part's own 'color' attribute
+   * over its flat fallback colour, so this survives the merge untouched.
+   *
+   * Both colours must already be tint-compensated by the caller if they are
+   * meant to be absolute — this bakes whatever it is handed.
+   */
+  gradient?: { centerColor: THREE.Color; rimColor: THREE.Color };
+}): THREE.BufferGeometry {
+  const {
+    radius, elong, segments, y, z, side, standoff, halfLen, width,
+    forwardTaper = 0, forwardTiltRad = 0, gradient,
+  } = opts;
+  const disc = new THREE.CircleGeometry(radius, segments);
+  // Baked BEFORE any scale/taper/rotation, while the disc is still a clean
+  // circle in the XY plane, so the gradient is measured against true radius
+  // rather than the squashed almond the transforms turn it into.
+  if (gradient) {
+    const pos = disc.getAttribute('position') as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    const scratch = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const t = THREE.MathUtils.clamp(
+        Math.hypot(pos.getX(i), pos.getY(i)) / Math.max(radius, 1e-6), 0, 1,
+      );
+      // CircleGeometry is a triangle fan: one centre vertex plus a rim ring.
+      // Every triangle therefore spans centre→rim, and the rasteriser
+      // interpolates these two endpoints into a smooth radial ramp for free.
+      scratch.copy(gradient.centerColor).lerp(gradient.rimColor, t);
+      colors[i * 3] = scratch.r;
+      colors[i * 3 + 1] = scratch.g;
+      colors[i * 3 + 2] = scratch.b;
+    }
+    disc.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+  disc.scale(1, elong, 1);
+  if (forwardTaper > 0) {
+    const pos = disc.getAttribute('position') as THREE.BufferAttribute;
+    const halfSpan = Math.max(1e-6, radius * elong); // local Y now spans ±halfSpan
+    for (let i = 0; i < pos.count; i++) {
+      // t: -1 at the rear of the disc, +1 at the forward tip.
+      const t = THREE.MathUtils.clamp(pos.getY(i) / halfSpan, -1, 1);
+      // Half the taper is a uniform narrowing and half is the front/rear
+      // gradient, so the overall area shrinks far less than the front does.
+      pos.setX(i, pos.getX(i) * (1 - forwardTaper * 0.5 * (1 + t)));
+    }
+    pos.needsUpdate = true;
+  }
+  // After the taper (which measures along the disc's own long axis) but before
+  // the outward rotation, so the tilt stays a clean in-plane rake.
+  if (forwardTiltRad !== 0) disc.rotateZ(-side * forwardTiltRad);
+  // Pre-invert the body's Z squash, which buildDragonBodyGeometry applies to the
+  // whole merged mesh later. Local X maps to world Z under the rotation below,
+  // so stretching it here cancels that squash exactly.
+  //
+  // This MUST come after the rake: the squash acts in world space, so an
+  // already-rotated ellipse needs its world-Z axis stretched. Compensating
+  // before the rotation would only be correct at zero rake — which is why
+  // raking the almond upward previously flattened it from 2.5:1 to 1.4:1 and
+  // shrank the visible tilt to roughly half of what was asked for.
+  disc.scale(1 / DRAGON_BODY_Z_SQUASH, 1, 1);
+  disc.applyMatrix4(new THREE.Matrix4().makeRotationY(side * Math.PI / 2));
+  const pos = disc.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const r = dragonBodyRadiusAtY(y + pos.getY(i), halfLen, width);
+    const vz = pos.getZ(i) + z;
+    const surfaceX = Math.sqrt(Math.max(0, r * r - vz * vz));
+    pos.setX(i, side * (surfaceX + standoff));
+  }
+  pos.needsUpdate = true;
+  disc.translate(0, y, z);
+  return disc;
+}
+
+/**
+ * A merged-in facial detail. `scales: false` marks vertices that must be
+ * excluded from the procedural scale shader via the `aScaleMask` attribute.
+ */
+type DragonFacePart = { geometry: THREE.BufferGeometry; color: THREE.Color; scales?: boolean };
+
 function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
   const profile = buildDragonBodyProfile(halfLen, width);
@@ -364,13 +541,31 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   const frillGeometry = buildDragonFrillGeometry(length, width, halfLen);
   const faceParts = buildDragonFaceDetailsGeometry(width, halfLen);
   const bodyColor = new THREE.Color(0xffffff);
-  const merged = mergeGeometriesWithColor([
+  const entries: DragonFacePart[] = [
     { geometry: latheGeometry, color: bodyColor },
     { geometry: snoutCap, color: bodyColor },
     { geometry: rumpCap, color: bodyColor },
     { geometry: frillGeometry, color: bodyColor },
     ...faceParts,
-  ]);
+  ];
+  const merged = mergeGeometriesWithColor(entries);
+
+  // Build the scale mask in the SAME order the parts were merged, so each
+  // entry's vertices land on the right run of the attribute.
+  {
+    const mask = new Float32Array(merged.getAttribute('position').count);
+    let offset = 0;
+    for (const entry of entries) {
+      // mergeGeometriesWithColor de-indexes every part, so an indexed part
+      // contributes index.count vertices, not position.count.
+      const count = entry.geometry.index
+        ? entry.geometry.index.count
+        : entry.geometry.getAttribute('position').count;
+      mask.fill(entry.scales === false ? 0 : 1, offset, offset + count);
+      offset += count;
+    }
+    merged.setAttribute('aScaleMask', new THREE.BufferAttribute(mask, 1));
+  }
   latheGeometry.dispose();
   snoutCap.dispose();
   rumpCap.dispose();
@@ -384,7 +579,7 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   // slightly along Z flattens that cross-section into a shallow oval
   // without visibly changing the side silhouette the profile above was
   // tuned against.
-  merged.scale(1, 1, 0.62);
+  merged.scale(1, 1, DRAGON_BODY_Z_SQUASH);
 
   // Raise the neck/head and tilt the head down — see applyNeckBend's doc
   // comment for why this can't just be baked into the (straight-axis)
@@ -417,7 +612,7 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
 function buildDragonFaceDetailsGeometry(
   width: number,
   halfLen: number,
-): { geometry: THREE.BufferGeometry; color: THREE.Color }[] {
+): DragonFacePart[] {
   // ── Eyes ─────────────────────────────────────────────────────────────────
   // Flat disc eyes: the iris faces outward along ±X (perpendicular to the
   // skull side). CircleGeometry lies in the XY plane with normal = +Z; after
@@ -435,11 +630,58 @@ function buildDragonFaceDetailsGeometry(
   //     at the brow ridge (#201 follow-up measured 5× standoff at the top edge).
   // The translate(0, eyeY, eyeZ) happens AFTER the loop, so the vertex's final
   // world Z must be computed as pos.getZ(i) + eyeZ here.
-  const irisRadius = width * 0.085;
-  const pupilRadius = irisRadius * 0.48;
+  const irisRadius = width * 0.0216;
+  // Tuned against the RENDERED size. Kept low because the helper now cancels the
+  // body Z squash: the pupil used to be built oversized and squashed down to
+  // this diameter incidentally, so removing that squash needed a matching cut
+  // here to hold the size steady.
+  const pupilRadius = irisRadius * 0.243;
   const eyeElong = 1.35; // horizontal stretch: almond/cat-eye shape
-  const eyeY = halfLen * 0.585; // forward of the jaw hinge / brow ridge
-  const eyeZ = width * 0.07; // slightly above the head's centre-line
+  // Narrows the front of the eye relative to the back so the almond reads as
+  // raked forward and down toward the snout, rather than as a symmetric oval
+  // pasted flat on the side of the head.
+  const eyeForwardTaper = 0.52;
+  // Rakes the whole almond down-and-forward so its narrow end aims at the snout
+  // midline — the taper then reads as converging on the centre of the face
+  // rather than jutting straight out sideways.
+  //
+  // This is deliberately an IN-PLANE rotation. Yawing the disc out of the plane
+  // to physically aim it inward would break the surface conforming (the helper
+  // derives each vertex's X from its own final Y/Z), so it would float off the
+  // brow on one edge and sink into the skull on the other.
+  // NEGATIVE lifts the narrow forward end toward the dorsal crown; positive
+  // would drop it toward the jaw. ~31° of upward rake, so the taper sweeps up
+  // and back like a raptor's brow rather than drooping toward the snout.
+  const eyeForwardTiltRad = 0.15;
+  // Slides the pupil toward the snout so the dragon reads as looking forward
+  // rather than blankly sideways. Expressed as a fraction of the iris's own
+  // half-length, and applied ALONG the eye's raked long axis (not straight
+  // along +Y), so the pupil tracks the tilted almond and stays inside the
+  // narrow forward end instead of drifting up out of it.
+  // Pulled back toward centre (was 0.34) now that the iris carries a radial
+  // gradient: a strongly off-centre pupil sits over the darker rim and hides
+  // the bright core, whereas a near-centred one lets the ramp read as a ring
+  // around it. Kept slightly forward of dead centre so the dragon still looks
+  // where it's heading.
+  const pupilForwardShift = irisRadius * eyeElong * 0.13;
+  const pupilShiftY = pupilForwardShift * Math.cos(eyeForwardTiltRad);
+  const pupilShiftZ = -pupilForwardShift * Math.sin(eyeForwardTiltRad);
+  // Sampling dragonBodyRadiusAtY across the profile shows the cranium bulge
+  // peaking at halfLen * 0.60 and the snout tapering monotonically from
+  // halfLen * 0.70 out to the tip at halfLen * 1.10. The eyes previously sat at
+  // 0.585 — the widest point of the skull, which reads as the temporal/ear
+  // region rather than the eye socket. Seat them well forward of that, onto the
+  // brow where the snout taper begins.
+  const eyeY = halfLen * 0.76;
+  // Height up the side of the head, expressed as a fraction of the LOCAL snout
+  // radius rather than of the overall body width. The snout tapers steeply, so
+  // a width-relative height that sits mid-cheek at the brow would ride off the
+  // top of the head further forward — tying it to the local radius keeps the
+  // eye at a consistent height up the skull wherever eyeY is moved to.
+  //
+  // 0.70 puts the eye high on the brow, near the dorsal centre-line, while
+  // leaving room for the disc's own vertical extent below the crown.
+  const eyeZ = dragonBodyRadiusAtY(eyeY, halfLen, width) * 0.70;
   // Small standoff beyond the profile surface — enough to ensure no vertex
   // is ever inside even with floating-point rounding, but small enough that
   // the disc isn't visibly hovering at grazing angles.
@@ -447,77 +689,80 @@ function buildDragonFaceDetailsGeometry(
   // Additional tiny offset for the pupil to prevent z-fighting against the iris.
   const pupilOffset = width * 0.003;
 
-  const irisColor = new THREE.Color(0xff9010); // orangish-yellow
+  // The iris is authored as an ABSOLUTE colour, then pre-divided by the body
+  // tint so it survives instance tinting. See tintCompensated() — without this
+  // the "orangish-yellow" iris rendered as #3e0d02, a near-black blob, which is
+  // why the eyes read as black balls even after the #201/#204 geometry fix.
+  // A muted amber rather than a saturated orange: because the compensation
+  // below makes this an ABSOLUTE colour, a fully-saturated hue on an otherwise
+  // very dark purple body reads as a glowing lamp rather than an eye.
+  const irisColor = tintCompensated(new THREE.Color(0xb4761e)); // muted amber
+  // Real irises are darkest at the limbal ring and brighten toward the pupil,
+  // which also stops the disc reading as a flat sticker. Both ends stay
+  // tint-compensated so the ramp holds its hue rather than sliding toward the
+  // body purple at the rim.
+  const irisCenterColor = tintCompensated(new THREE.Color(0xe8b04a)); // bright amber core
+  const irisRimColor = tintCompensated(new THREE.Color(0x6b3d0c)); // deep burnt limbal ring
+  // The pupil is deliberately NOT compensated: it is meant to be black, and
+  // letting the tint darken it further only sharpens the contrast against the
+  // now-bright iris ring.
   const pupilColor = new THREE.Color(0x040204); // near-black
 
-  const parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[] = [];
+  const parts: DragonFacePart[] = [];
 
   for (const side of [-1, 1] as const) {
-    // rotateY(+π/2) → face +X (right eye outward); rotateY(-π/2) → face -X (left eye outward)
-    const rotAngle = side * Math.PI / 2;
-    const rotMat = new THREE.Matrix4().makeRotationY(rotAngle);
-
-    // Iris — after rotateY(±π/2) all vertices have X = 0. We set X to the
-    // true skull-surface distance at each vertex's own (Y, Z), so the disc
-    // conforms to the skull in both head-forward and up-down directions.
-    const iris = new THREE.CircleGeometry(irisRadius, 16);
-    iris.scale(1, eyeElong, 1);
-    iris.applyMatrix4(rotMat);
-    {
-      const pos = iris.getAttribute('position') as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        const r  = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
-        const vz = pos.getZ(i) + eyeZ; // final world Z after translate
-        const surfaceX = Math.sqrt(Math.max(0, r * r - vz * vz));
-        pos.setX(i, side * (surfaceX + eyeStandoff));
-      }
-      pos.needsUpdate = true;
-    }
-    iris.translate(0, eyeY, eyeZ);
-
-    // Pupil — same two-dimensional surface-conforming treatment plus pupilOffset
-    // so it sits just proud of the iris (z-fighting prevention, not a depth cue).
-    const pupil = new THREE.CircleGeometry(pupilRadius, 12);
-    pupil.scale(1, eyeElong * 0.85, 1);
-    pupil.applyMatrix4(rotMat);
-    {
-      const pos = pupil.getAttribute('position') as THREE.BufferAttribute;
-      for (let i = 0; i < pos.count; i++) {
-        const r  = dragonBodyRadiusAtY(eyeY + pos.getY(i), halfLen, width);
-        const vz = pos.getZ(i) + eyeZ; // final world Z after translate
-        const surfaceX = Math.sqrt(Math.max(0, r * r - vz * vz));
-        pos.setX(i, side * (surfaceX + eyeStandoff + pupilOffset));
-      }
-      pos.needsUpdate = true;
-    }
-    pupil.translate(0, eyeY, eyeZ);
+    const iris = buildSurfaceConformedDisc({
+      radius: irisRadius, elong: eyeElong, segments: 16,
+      y: eyeY, z: eyeZ, side, standoff: eyeStandoff, halfLen, width,
+      forwardTaper: eyeForwardTaper,
+      forwardTiltRad: eyeForwardTiltRad,
+      gradient: { centerColor: irisCenterColor, rimColor: irisRimColor },
+    });
+    // The pupil gets the extra pupilOffset so it sits just proud of the iris
+    // (z-fighting prevention, not a depth cue).
+    const pupil = buildSurfaceConformedDisc({
+      // Deliberately ROUND: elong 1 and no taper. The pupil used to inherit the
+      // iris's elongation and forward taper, which made it a miniature copy of
+      // the almond rather than reading as a pupil. The helper now cancels the
+      // body's Z squash itself, so elong 1 really is circular in the render.
+      radius: pupilRadius, elong: 1, segments: 14,
+      y: eyeY + pupilShiftY, z: eyeZ + pupilShiftZ,
+      side, standoff: eyeStandoff + pupilOffset, halfLen, width,
+    });
 
     parts.push(
-      { geometry: iris, color: irisColor },
-      { geometry: pupil, color: pupilColor },
+      // scales: false — the procedural scale pattern must not run across the
+      // eye, or a keel groove bisects the iris and it reads as scaly skin.
+      { geometry: iris, color: irisColor, scales: false },
+      { geometry: pupil, color: pupilColor, scales: false },
     );
   }
 
-  // ── Nostrils ─────────────────────────────────────────────────────────────
-  // Small spherical bumps close to the snout tip, on the dorsal (+Z) surface,
-  // kept subtle so they read as dark shadowed slits at viewing distance rather
-  // than deep gouges. Moved forward from the older halfLen * 0.88 position to
-  // sit closer to the front of the snout as a dragon's nostrils typically do.
-  const nostrilRadius = width * 0.032;
-  const nostrilY = halfLen * 0.95; // close to the snout tip (tip is at halfLen * 1.1)
-  const nostrilZ = width * 0.09; // on top of the snout (dorsal side)
-  const nostrilX = width * 0.055;
-  const leftNostril = new THREE.SphereGeometry(nostrilRadius, 6, 4);
-  leftNostril.translate(-nostrilX, nostrilY, nostrilZ);
-  const rightNostril = new THREE.SphereGeometry(nostrilRadius, 6, 4);
-  rightNostril.translate(nostrilX, nostrilY, nostrilZ);
-
+  // ── Nostrils ────────────────────────────────────────────────────
+  // These were protruding spheres, which read as round bulges — and because the
+  // eyes rendered near-black until the tint compensation above, these bumps were
+  // the most eye-like features on the head and were being mistaken for the eyes.
+  // They are now flush surface-conformed discs, using the same construction as
+  // the iris, so they read as flat dark slits set INTO the snout. Pushed further
+  // forward too (0.95 → 1.02, tip at 1.10) so they sit near the snout's end.
+  const nostrilY = halfLen * 1.02;
+  const nostrilZ = width * 0.028; // just above the snout centre-line
+  // Scaled off the LOCAL snout radius rather than overall body width: the snout
+  // is very slender this far forward, so a width-relative disc would wrap around it.
+  const nostrilRadius = dragonBodyRadiusAtY(nostrilY, halfLen, width) * 0.34;
   const nostrilColor = new THREE.Color(0x0a0508); // near-black shadowed slit
 
-  parts.push(
-    { geometry: leftNostril, color: nostrilColor },
-    { geometry: rightNostril, color: nostrilColor },
-  );
+  for (const side of [-1, 1] as const) {
+    parts.push({
+      geometry: buildSurfaceConformedDisc({
+        radius: nostrilRadius, elong: 1.5, segments: 10,
+        y: nostrilY, z: nostrilZ, side, standoff: eyeStandoff * 0.5, halfLen, width,
+      }),
+      color: nostrilColor,
+      // Flat dark slits must not be crossed by a scale keel either.
+      scales: false,
+    });
+  }
 
   // ── Mouth lines ───────────────────────────────────────────────────────────
   // Short thin boxes on either side of the snout slightly below the midline
