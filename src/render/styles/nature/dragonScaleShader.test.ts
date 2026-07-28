@@ -346,7 +346,7 @@ describe('NatureSceneRenderer3D.patchBodyMaterial dragon scale routing', () => {
     expect(mat.onBeforeCompile).toBe(originalCompile);
   });
 
-  it('does NOT patch non-dragon geometries (unicorn)', () => {
+  it('does NOT apply the dragon scale shader to the unicorn', () => {
     const renderer = makeNatureRenderer();
     const { geometries } = renderer.getPredatorInstanceConfig(
       PredatorSpecies.Horse,
@@ -354,9 +354,11 @@ describe('NatureSceneRenderer3D.patchBodyMaterial dragon scale routing', () => {
       { isMonster: false, isShark: false },
     );
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    const originalCompile = mat.onBeforeCompile;
     renderer.patchBodyMaterial!(mat, geometries);
-    expect(mat.onBeforeCompile).toBe(originalCompile);
+    // The unicorn gets the hair shader (not the dragon scale shader).
+    // Verify the compiled shader does not contain the scale-shader uniform.
+    const { fragmentShader } = captureShader(mat);
+    expect(fragmentShader).not.toContain('uScaleEdgeDarkness');
   });
 });
 

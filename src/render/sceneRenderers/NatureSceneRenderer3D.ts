@@ -16,6 +16,7 @@ import { createUnicornGeometries } from '../styles/nature/geometry/unicornGeomet
 import { DragonFireBreathController } from '../dragonFireBreathController';
 import type { FireBreathEffects } from '../styles/nature/fireBreath';
 import { applyDragonScaleShader, DRAGON_SCALE_CONFIG } from '../styles/nature/dragonScaleShader';
+import { applyUnicornHairShader, UNICORN_HAIR_CONFIG } from '../styles/nature/unicornHairShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -840,6 +841,8 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   patchBodyMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
     if (geometries === this.dragonPredatorGeometries) {
       applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG);
+    } else if (geometries === this.unicornPredatorGeometries) {
+      applyUnicornHairShader(material, geometries.body, UNICORN_HAIR_CONFIG);
     }
   }
 
