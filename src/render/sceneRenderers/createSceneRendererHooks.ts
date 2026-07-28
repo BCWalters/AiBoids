@@ -6,6 +6,8 @@ import type { Predator } from '../../sim/Predator';
 import { PredatorSpecies } from '../../sim/Predator';
 import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
+import type { WingUndulationInstanceState } from '../styles/nature/wingUndulationShader';
+import type { UnicornTailUndulationInstanceState } from '../styles/nature/unicornTailUndulationShader';
 
 export { PredatorSpecies };
 
@@ -318,6 +320,34 @@ export interface SceneRendererHooks {
    * only the left wing.
    */
   patchWingMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
+
+  /**
+  * Called after both wing InstancedMeshes have been created (and after
+  * patchWingMaterial has already been applied to each wing material).
+  * Should clone the wing geometries, attach a shared per-instance phase
+  * attribute, and return the state object for the renderer to update per frame.
+  *
+  * THREE.Material.clone() drops onBeforeCompile — clone first (already done by
+  * buildRenderBatch), THEN call this hook so the patch is applied exactly once
+  * to each material instance that already exists.
+  */
+  setupWingUndulation?: (
+   wingLeft: THREE.InstancedMesh,
+   wingRight: THREE.InstancedMesh,
+   geometries: CreatureGeometries,
+  ) => WingUndulationInstanceState | undefined;
+
+  /**
+  * Called after the tail InstancedMesh has been created and patchTailMaterial
+  * applied. Should clone the tail geometry, attach per-instance phase and
+  * speed-fraction attributes, and return the state object for per-frame updates.
+  * Return undefined (or omit) for non-unicorn batches.
+  */
+  setupTailUndulation?: (
+   tail: THREE.InstancedMesh,
+   geometries: CreatureGeometries,
+  ) => UnicornTailUndulationInstanceState | undefined;
+
   dispose: () => void;
 }
 

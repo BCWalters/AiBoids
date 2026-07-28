@@ -323,6 +323,11 @@ export class Renderer3D {
       ? applyFishUndulationShader({ mesh: body, tailMesh: tail, config: fishUndulation })
       : undefined;
 
+    const wingUndulationState = sceneRenderer.setupWingUndulation?.(wingLeft, wingRight, geometries);
+    const tailUndulationState = tail
+      ? sceneRenderer.setupTailUndulation?.(tail, geometries)
+      : undefined;
+
     let legs: LegPartMesh[] | undefined;
     if (geometries.legs?.length) {
       // Legs are scaly like the body, not membranous like wings/tail, so
@@ -357,7 +362,7 @@ export class Renderer3D {
       this.scene.add(beak);
     }
 
-    return { body, wingLeft, wingRight, tail, tailRig: geometries.tailRig, legs, beak, fishUndulation: fishUndulationState, wingPivotLeft: geometries.wingPivotLeft, wingPivotRight: geometries.wingPivotRight };
+    return { body, wingLeft, wingRight, tail, tailRig: geometries.tailRig, legs, beak, fishUndulation: fishUndulationState, wingUndulation: wingUndulationState, tailUndulation: tailUndulationState, wingPivotLeft: geometries.wingPivotLeft, wingPivotRight: geometries.wingPivotRight };
   }
 
   private disposeRenderBatch(set: BoidRenderBatch | null): void {
@@ -379,6 +384,13 @@ export class Renderer3D {
     if (set.fishUndulation) {
       (set.body.geometry as THREE.BufferGeometry).dispose();
       if (set.tail) (set.tail.geometry as THREE.BufferGeometry).dispose();
+    }
+    if (set.wingUndulation) {
+      (set.wingLeft.geometry as THREE.BufferGeometry).dispose();
+      (set.wingRight.geometry as THREE.BufferGeometry).dispose();
+    }
+    if (set.tailUndulation && set.tail) {
+      (set.tail.geometry as THREE.BufferGeometry).dispose();
     }
   }
 

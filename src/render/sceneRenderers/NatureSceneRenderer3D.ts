@@ -25,6 +25,16 @@ import {
   HAWK_FEATHER_CONFIG,
   PARROT_FEATHER_CONFIG,
 } from '../styles/nature/birdFeatherShader';
+import {
+  applyWingUndulationShader,
+  type WingUndulationConfig,
+  type WingUndulationInstanceState,
+} from '../styles/nature/wingUndulationShader';
+import {
+  applyUnicornTailUndulationShader,
+  type UnicornTailUndulationConfig,
+  type UnicornTailUndulationInstanceState,
+} from '../styles/nature/unicornTailUndulationShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -395,6 +405,23 @@ interface NatureSceneRendererDependencies {
   getNatureEnv: () => NatureEnvironment | null;
   fireBreathEffects: FireBreathEffects;
 }
+
+// Wing-undulation config: 6 % tip amplitude, ~108° phase lag shoulder→tip.
+// Applied to ALL nature flying creatures (birds, hawks, parrots, dragons, unicorns).
+const WING_UNDULATION_CONFIG: WingUndulationConfig = {
+  amplitudeFraction: 0.06,
+  tipPhaseLagRad: Math.PI * 0.6,
+};
+
+// Unicorn tail streaming config. "upBiasFraction" gives the steady upward
+// deflection at full horizontal speed; "amplitudeFraction" is the oscillation
+// on top of that. omega = angular frequency of the tail's own undulation.
+const UNICORN_TAIL_UNDULATION_CONFIG: UnicornTailUndulationConfig = {
+  upBiasFraction: 0.12,
+  amplitudeFraction: 0.08,
+  tipPhaseLagRad: Math.PI * 0.8,
+  omega: 2.56,
+};
 
 export class NatureSceneRenderer3D implements SceneRendererHooks {
   private readonly deps: NatureSceneRendererDependencies;
@@ -939,6 +966,25 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       const plane: BirdFeatherPlane = zSpan < xSpan ? 'yx' : 'yz';
       applyBirdFeatherShader(material, wingGeo, this.featherConfigFor(geometries), plane);
     }
+  }
+
+  setupWingUndulation(
+    wingLeft: THREE.InstancedMesh,
+    wingRight: THREE.InstancedMesh,
+    _geometries: CreatureGeometries,
+  ): WingUndulationInstanceState {
+    // Applied to all nature flying creatures unconditionally.
+    // patchWingMaterial already ran on each material; this chains on top.
+    return applyWingUndulationShader({ wingLeft, wingRight, config: WING_UNDULATION_CONFIG });
+  }
+
+  setupTailUndulation(
+    tail: THREE.InstancedMesh,
+    geometries: CreatureGeometries,
+  ): UnicornTailUndulationInstanceState | undefined {
+    // Only unicorns get the streaming-tail shader.
+    if (geometries !== this.unicornPredatorGeometries) return undefined;
+    return applyUnicornTailUndulationShader({ tailMesh: tail, config: UNICORN_TAIL_UNDULATION_CONFIG });
   }
 
   dispose(): void {
