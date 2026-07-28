@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { extrudeRingGeometry, mergePositionOnlyGeometries } from '../../../geometry/sharedGeometry';
+import {
+  extrudeRingGeometry,
+  mergePositionOnlyGeometries,
+  mirrorGeometryAcrossX,
+  subdivideTriangleSoup,
+} from '../../../geometry/sharedGeometry';
 
 /**
  * Bird-part geometry shared across the nature-scene bird species —
@@ -47,59 +52,256 @@ export function getBirdTailFanProfileY(length: number): {
 }
 
 /**
- * Wing panel with a broad, rounded tip.
+ * Wing planform and feather layout, shared by the hawk and the unicorn's
+ * pegasus wings.
  *
- * Previously this built a narrow main triangle plus a fan of long "finger"
- * primaries radiating past it. Those fingers converged to needle points and
- * read as spindly rather than feathered — issue #256: "they shouldn't have
- * this part at all... it should end before it gets super narrow."
+ * Both creatures previously reused `buildFingeredWingGeometry`, a flat,
+ * zero-thickness triangle fan radiating from the root. That had four separate
+ * problems, all visible in a still render:
  *
- * The wing now ends in a finite, rounded tip chord instead of tapering to a
- * point. Overall span is deliberately unchanged (the outermost vertex still
- * sits at 1.0 x span, exactly where the longest finger used to reach), so the
- * flight silhouette and the flap lever arm are preserved — only the outer
- * profile changes from spikes to a solid rounded edge.
+ *   - it vanished completely when seen edge-on, having no thickness at all;
+ *   - its "fingers" were notches in a solid outline, so at any distance the
+ *     wing read as a plain black slab rather than as separated primaries;
+ *   - the outline was a straight-edged polygon, where a soaring raptor's wing
+ *     has a leading edge that bulges forward and a trailing edge that curves;
+ *   - being a fan from the root, single triangles spanned the whole wing, so
+ *     the undulation vertex shader could only render its travelling wave as one
+ *     straight chord. This is the same defect that made the parrot's feathers
+ *     surface through its wing panel.
  *
- * The outline is a closed polygon in the XY plane triangulated as a fan from
- * the root, which is also the flap pivot, so the root must stay at the origin.
+ * The replacement is a curved panel carrying two separate feather groups, which
+ * is how a raptor wing is actually arranged: secondaries forming a continuous
+ * shingled edge along the inner trailing edge, and a small number of long,
+ * deeply separated primaries at the tip. The gaps between those primaries are
+ * the single most recognisable thing about a soaring hawk.
  *
- * @param broadTip - Hawk/eagle mode: a wider, blunter tip with more chord left
- *   at the outer edge, for a soaring raptor. Default false gives the unicorn's
- *   more swept pegasus wing. Span and chord are identical in both modes.
+ * The shape is entirely proportional to `span` and `chord`, so a caller that
+ * wants a bigger wing only changes those two numbers — which is exactly what
+ * the unicorn does (issue #301). Nothing here is hawk-specific beyond the
+ * planform tables, and those describe a generic feathered flight wing.
  */
-export function buildFingeredWingGeometry(span: number, chord: number, side: 1 | -1, broadTip: boolean = false): THREE.BufferGeometry {
-  const s = side;
-  const positions: number[] = [];
-  const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
+const PRIMARY_COUNT = 6;
+const SECONDARY_COUNT = 10;
+/** Fraction of the span at which the hand (primaries) takes over from the arm. */
+const WRIST_FRAC = 0.58;
+/** How far the primaries splay apart, in radians, from innermost to outermost. */
+const PRIMARY_SPLAY_RAD = 0.62;
+/** Spanwise fraction at which the solid panel ends and only feathers continue. */
+const PANEL_END_FRAC = 0.76;
+const FEATHER_SEAT_FRAC = 0.012;
+const FEATHER_SHINGLE_FRAC = 0.014;
+/**
+ * Panel subdivision, for the same reason as the parrot's. A flat panel needs
+ * interior vertices before a vertex shader can bend it into anything but a
+ * plane; without them the panel swings out from under its own feathers as the
+ * wing flaps.
+ */
+const WING_PANEL_DIVISIONS = 14;
 
-  // Outer profile control. The broad (hawk) wing keeps noticeably more chord
-  // at the tip; the swept (unicorn) wing narrows more but still terminates on
-  // a finite edge rather than a point.
-  const tipChord = broadTip ? 0.30 : 0.20;
-  const tipRounding = broadTip ? 0.055 : 0.035;
+export interface FeatheredWingParams {
+  /** Root-to-tip extent, along +X for the left wing. */
+  span: number;
+  /** Leading-to-trailing depth at the wing root; every feature scales off it. */
+  chord: number;
+  side: 1 | -1;
+}
 
-  // Closed outline, leading edge outward then trailing edge back to the root.
-  // Y is chord-wise (+ leading, - trailing); X is spanwise, mirrored by `s`.
-  const outline: number[][] = [
-    [0, 0, 0],
-    [span * 0.42 * s, chord * 0.42, 0],
-    [span * 0.78 * s, chord * 0.26, 0],
-    // Rounded tip: three closely spaced vertices instead of a single apex, so
-    // the silhouette curves over rather than coming to a spike.
-    [span * (0.96 - tipRounding) * s, chord * 0.12, 0],
-    [span * 1.0 * s, chord * (0.12 - tipChord * 0.5), 0],
-    [span * (0.96 - tipRounding) * s, chord * (0.12 - tipChord), 0],
-    [span * 0.74 * s, -chord * 0.34, 0],
-    [span * 0.40 * s, -chord * 0.44, 0],
-  ];
+export function buildFeatheredWingGeometry({ span, chord, side }: FeatheredWingParams): THREE.BufferGeometry {
+  // The right wing is the reflection of the left, never a second build with the
+  // sign pushed through every coordinate. See mirrorGeometryAcrossX.
+  if (side === -1) return mirrorGeometryAcrossX(buildFeatheredWingGeometry({ span, chord, side: 1 }));
 
-  // Fan from the root vertex. Winding is mirrored with `s` so both wings face
-  // the same way; the wing material is DoubleSide regardless.
-  for (let i = 1; i < outline.length - 1; i++) {
-    if (s > 0) pushTri(outline[0], outline[i], outline[i + 1]);
-    else pushTri(outline[0], outline[i + 1], outline[i]);
+  const halfThickness = chord * 0.009;
+  const panel: number[] = [];
+  const pushTri = (a: number[], b: number[], c: number[]) => panel.push(...a, ...b, ...c);
+
+  // Leading and trailing edges, given as explicit stations along the span and
+  // interpolated between. Written as tables rather than as trigonometric
+  // expressions because the outline has to be read and adjusted by eye, and a
+  // closed-form version of it proved impossible to reason about: an earlier
+  // attempt produced a wing whose outer half pointed forwards.
+  //
+  // Both edges are in chord units. The leading edge bulges forward over the
+  // arm and sweeps back past the wrist; the trailing edge is deepest inboard,
+  // which is what gives a soaring raptor its broad, plank-like inner wing.
+  // The panel only carries the front two-thirds of the chord; the secondaries
+  // supply the rest. Giving the panel the full depth made the inner wing read
+  // as a solid slab with a row of small scallops stuck on the back of it.
+  const leadingStations = [0.44, 0.5, 0.51, 0.49, 0.45, 0.36, 0.12];
+  const trailingStations = [-0.3, -0.36, -0.37, -0.34, -0.27, -0.18, -0.05];
+  const sampleEdge = (table: number[], t: number) => {
+    const u = THREE.MathUtils.clamp(t / PANEL_END_FRAC, 0, 1) * (table.length - 1);
+    const i = Math.min(Math.floor(u), table.length - 2);
+    return chord * THREE.MathUtils.lerp(table[i], table[i + 1], u - i);
+  };
+  const leadingAt = (t: number) => sampleEdge(leadingStations, t);
+  const trailingAt = (t: number) => sampleEdge(trailingStations, t);
+
+  const panelSteps = 18;
+  for (let i = 0; i < panelSteps; i++) {
+    const t0 = (i / panelSteps) * PANEL_END_FRAC;
+    const t1 = ((i + 1) / panelSteps) * PANEL_END_FRAC;
+    const x0 = span * t0;
+    const x1 = span * t1;
+    const l0 = leadingAt(t0);
+    const l1 = leadingAt(t1);
+    const tr0 = trailingAt(t0);
+    const tr1 = trailingAt(t1);
+    for (const z of [halfThickness, -halfThickness]) {
+      pushTri([x0, l0, z], [x1, l1, z], [x1, tr1, z]);
+      pushTri([x0, l0, z], [x1, tr1, z], [x0, tr0, z]);
+    }
+    // Closed rim, so the wing still shows a solid edge when seen edge-on.
+    pushTri([x0, l0, halfThickness], [x0, l0, -halfThickness], [x1, l1, -halfThickness]);
+    pushTri([x0, l0, halfThickness], [x1, l1, -halfThickness], [x1, l1, halfThickness]);
+    pushTri([x0, tr0, -halfThickness], [x0, tr0, halfThickness], [x1, tr1, halfThickness]);
+    pushTri([x0, tr0, -halfThickness], [x1, tr1, halfThickness], [x1, tr1, -halfThickness]);
   }
 
+  /**
+   * Camber and dihedral, applied to the finished wing rather than baked into
+   * each piece, so the panel and every feather stay on one continuous surface.
+   *
+   * Without this the wing is a dead-flat plate: it shades as a single uniform
+   * tone from every angle, which is what made the previous version read as a
+   * cut-out rather than a wing.
+   *
+   * `u` runs 0 at the leading edge to 1 at the panel's trailing edge and on
+   * past 1 over the feathers, so the bulge rises over the panel and settles
+   * back down along the flight feathers.
+   */
+  const curveWing = (geometry: THREE.BufferGeometry) => {
+    const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < position.count; i++) {
+      const x = position.getX(i);
+      const t = THREE.MathUtils.clamp(x / span, 0, 1);
+      const lead = leadingAt(t);
+      const depth = Math.max(lead - trailingAt(t), 1e-4);
+      const u = THREE.MathUtils.clamp((lead - position.getY(i)) / depth, 0, 2.6);
+      // Rises over the panel and droops away along the flight feathers, which
+      // is the real profile. Peaking the bulge at the panel's trailing edge
+      // instead reflexed it, and the secondaries read as upturned flaps.
+      const camber =
+        u <= 1
+          ? chord * 0.075 * Math.sin(Math.PI * u)
+          : -chord * 0.055 * ((u - 1) / 1.6);
+      const dihedral = span * 0.045 * t * t;
+      position.setZ(i, position.getZ(i) + camber + dihedral);
+    }
+    position.needsUpdate = true;
+    geometry.computeVertexNormals();
+    return geometry;
+  };
+
+  const parts: THREE.BufferGeometry[] = [];
+  const panelGeometry = new THREE.BufferGeometry();
+  panelGeometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array(subdivideTriangleSoup(panel, WING_PANEL_DIVISIONS)), 3),
+  );
+  panelGeometry.computeVertexNormals();
+  parts.push(panelGeometry);
+
+  const seatZ = -chord * FEATHER_SEAT_FRAC;
+
+  // Secondaries: a continuous shingled row along the inner trailing edge.
+  for (let i = 0; i < SECONDARY_COUNT; i++) {
+    const t = (i + 0.5) / SECONDARY_COUNT;
+    const at = t * WRIST_FRAC;
+    const x = span * at;
+    const rootY = trailingAt(at);
+    const width = (span * WRIST_FRAC) / SECONDARY_COUNT;
+    const len = chord * (0.46 + 0.14 * Math.sin(Math.PI * t));
+    const z = seatZ + (i % 2 === 0 ? 0 : -1) * chord * FEATHER_SHINGLE_FRAC;
+    // Secondaries trail straight back, leaning slightly outward down the span.
+    const theta = THREE.MathUtils.degToRad(THREE.MathUtils.lerp(6, 22, t));
+    parts.push(
+      buildFlightFeatherGeometry({
+        root: [x, rootY, z],
+        dir: new THREE.Vector2(Math.sin(theta), -Math.cos(theta)),
+        length: len,
+        halfWidth: width * 1.15,
+        tipFrac: 0.88,
+      }),
+    );
+  }
+
+  // Primaries: long, separated, and splayed progressively further back and
+  // outward toward the tip. The gaps between them are the point.
+  for (let i = 0; i < PRIMARY_COUNT; i++) {
+    const t = i / (PRIMARY_COUNT - 1);
+    // Rooted along the outer panel, from just inboard of the wrist to its end.
+    const at = WRIST_FRAC * 0.88 + (PANEL_END_FRAC - WRIST_FRAC * 0.88) * t;
+    const x = span * at;
+    // Seated on the panel's trailing half so the quills are covered by it.
+    const rootY = THREE.MathUtils.lerp(trailingAt(at) * 1.35, leadingAt(at) * 0.3, t * 0.55);
+    // Angle measured from straight back toward straight outboard. The innermost
+    // primary trails mostly backward and each one after it swings further out,
+    // which is what opens the gaps between the fingers.
+    const theta = THREE.MathUtils.degToRad(28) + PRIMARY_SPLAY_RAD * t;
+    const dir = new THREE.Vector2(Math.sin(theta), -Math.cos(theta));
+    const len = chord * (1.24 - 0.28 * t);
+    const z = seatZ + (i % 2 === 0 ? 0 : -1) * chord * FEATHER_SHINGLE_FRAC;
+    parts.push(
+      buildFlightFeatherGeometry({ root: [x, rootY, z], dir, length: len, halfWidth: chord * 0.16, tipFrac: 0.6 }),
+    );
+  }
+
+  return curveWing(mergePositionOnlyGeometries(parts));
+}
+
+/**
+ * One flight feather: a flat tapered vane with a blunt, squared-off tip.
+ *
+ * Real flight feathers do not come to a needle point, and modelling them that
+ * way makes a wing read as a row of spikes — a mistake already corrected once
+ * on the small bird's tail. `tipFrac` is the tip's width as a fraction of the
+ * base, so the primaries can finish narrower than the secondaries without
+ * either of them becoming a spike.
+ */
+export interface FlightFeatherParams {
+  root: [number, number, number];
+  /** Unit direction the vane runs in, in the XY plane, for a LEFT wing. */
+  dir: THREE.Vector2;
+  length: number;
+  halfWidth: number;
+  /** Tip width as a fraction of the base width. */
+  tipFrac: number;
+}
+
+export function buildFlightFeatherGeometry({
+  root,
+  dir,
+  length,
+  halfWidth,
+  tipFrac,
+}: FlightFeatherParams): THREE.BufferGeometry {
+  // `perp` must not be derived in a way that ignores handedness — on the parrot
+  // and small bird, a perpendicular whose x did not track the wing's side made
+  // the outline cross itself and notched a wedge out of every feather. Here the
+  // whole wing is mirrored as a finished mesh, so `dir` is always left-wing.
+  const perp = new THREE.Vector2(-dir.y, dir.x);
+  const steps = 5;
+  const positions: number[] = [];
+  const ring: number[][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    // Widest a third of the way out, tapering to `tipFrac` at the tip.
+    const w = halfWidth * (0.72 + 0.28 * Math.sin(Math.PI * Math.min(t * 1.5, 1))) * THREE.MathUtils.lerp(1, tipFrac, t * t);
+    const cx = root[0] + dir.x * length * t;
+    const cy = root[1] + dir.y * length * t;
+    ring.push([cx + perp.x * w, cy + perp.y * w, root[2]]);
+  }
+  for (let i = steps; i >= 0; i--) {
+    const t = i / steps;
+    const w = halfWidth * (0.72 + 0.28 * Math.sin(Math.PI * Math.min(t * 1.5, 1))) * THREE.MathUtils.lerp(1, tipFrac, t * t);
+    const cx = root[0] + dir.x * length * t;
+    const cy = root[1] + dir.y * length * t;
+    ring.push([cx - perp.x * w, cy - perp.y * w, root[2]]);
+  }
+  for (let i = 1; i < ring.length - 1; i++) {
+    positions.push(...ring[0], ...ring[i], ...ring[i + 1]);
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.computeVertexNormals();
