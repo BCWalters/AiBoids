@@ -637,6 +637,15 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
           legSwingAmplitude: BIRD_LEG_SWING_AMPLITUDE,
           legTuckRad: BIRD_LEG_TUCK_RAD,
           keepUpright: false,
+          // preferUpright anchors the hawk's dorsal to world-up each frame via
+          // setPersistedUprightBasis (cross-product basis from world-up). Without
+          // this, setFromUnitVectors((0,1,0), heading) is used instead — that
+          // produces the minimal rotation between those two vectors, which does
+          // NOT preserve world-up alignment for arbitrary headings, resulting in
+          // the hawk spending ~43% of frames inverted. With preferUpright the
+          // hawk still banks up to ±42° in turns and pitches ±18° during climbs/
+          // dives, giving plenty of dynamic lean without ever flipping upside down.
+          preferUpright: true,
           tailSwayAmplitude: HAWK_TAIL_SWAY_AMPLITUDE,
           worldScale: 1,
           meshScaleBoost: 1,
