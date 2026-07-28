@@ -294,6 +294,7 @@ const CREATURE_TABLE: CreatureCase[] = [
     makeGeometries: () => createUnicornGeometries(
       36 / 9.1 * NATURE_BASE.length,
       14.85 / 6.24 * NATURE_BASE.width,
+      new THREE.Color(0xc9a8f0),
     ),
     motion: NATURE_UNICORN_MOTION,
   },
