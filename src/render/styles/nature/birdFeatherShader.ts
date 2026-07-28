@@ -21,6 +21,24 @@ export interface BirdFeatherConfig {
    * without turning birds into chrome).
    */
   barbGloss: number;
+  /**
+   * How many times longer each feather cell is along the spine axis than it is
+   * across.  1 gives the round cells this shader originally used, which tile
+   * into an unmistakable honeycomb — the "scale or tile floor" look.  Feathers
+   * are long, narrow, overlapping blades, so values around 3–4 are what make
+   * the pattern read as plumage at all.
+   *
+   * Implemented as a genuinely lower tiling frequency along the spine axis
+   * rather than as a stretch inside the cell, so the cells are longer in world
+   * space instead of merely being drawn as ellipses at the same pitch.
+   */
+  featherElongation: number;
+  /**
+   * Strength of the pale central shaft (rachis) drawn down each feather's long
+   * axis.  0 disables it.  The shaft is the single strongest cue that a shape
+   * is a feather rather than a scale, because scales have no midline.
+   */
+  barbRachis: number;
 }
 
 /**
@@ -56,6 +74,8 @@ export const BIRD_FEATHER_CONFIG: BirdFeatherConfig = {
   barbsPerLength: 20,
   barbDarkness: 0.22,
   barbGloss: 0.18,
+  featherElongation: 3.2,
+  barbRachis: 0.16,
 };
 
 /**
@@ -76,18 +96,28 @@ export const SMALL_BIRD_FEATHER_CONFIG: BirdFeatherConfig = {
   barbsPerLength: 24,
   barbDarkness: 0.18,
   barbGloss: 0.14,
+  // Softest, least defined plumage of the three: short downy body feathers.
+  featherElongation: 2.6,
+  barbRachis: 0.10,
 };
 
 export const HAWK_FEATHER_CONFIG: BirdFeatherConfig = {
   barbsPerLength: 14,
   barbDarkness: 0.30,
   barbGloss: 0.10,
+  // Big, strongly separated flight feathers with hard edges: longest blades
+  // and the most pronounced shaft of the three families.
+  featherElongation: 4.0,
+  barbRachis: 0.22,
 };
 
 export const PARROT_FEATHER_CONFIG: BirdFeatherConfig = {
   barbsPerLength: 22,
   barbDarkness: 0.20,
   barbGloss: 0.34,
+  // Tight, glossy, strongly directional macaw plumage.
+  featherElongation: 3.6,
+  barbRachis: 0.18,
 };
 
 /**
@@ -141,15 +171,27 @@ export function applyBirdFeatherShader(
   const zSpan = Math.max(1e-6, bb.max.z - bb.min.z);
   const span = patternPlane === 'yz' ? zSpan : xSpan;
   const freq = config.barbsPerLength / span;
+  // Feathers are long blades, not round scales. Tile the spine axis at a
+  // proportionally LOWER frequency so each cell is `featherElongation` times
+  // longer in world space than it is wide. Doing it with the frequency rather
+  // than by stretching inside the cell is what actually changes the shape of
+  // the tiling; stretching alone would keep the same pitch and still read as a
+  // honeycomb, just a squashed one.
+  const elongation = Math.max(1, config.featherElongation);
+  const freqLong = freq / elongation;
 
   // patternPlane MUST be part of the cache key.  three.js reuses a compiled
   // program whenever the cache key matches, so omitting it would let the wing
-  // silently reuse the body's program and collapse to stripes.
+  // silently reuse the body's program and collapse to stripes.  Every value
+  // baked into the emitted GLSL or its uniforms belongs here for the same
+  // reason — including the elongation and rachis added for the long-feather
+  // pattern, or two families would share one compiled variant.
   const planeSwizzle =
     patternPlane === 'yz' ? 'vBirdFeatherPos.z' : 'vBirdFeatherPos.x';
   const cacheKey =
-    `aiboids-bird-feather-v1:${patternPlane}:${freq.toFixed(5)}:` +
-    `${config.barbDarkness.toFixed(4)}:${config.barbGloss.toFixed(4)}`;
+    `aiboids-bird-feather-v2:${patternPlane}:${freq.toFixed(5)}:${freqLong.toFixed(5)}:` +
+    `${config.barbDarkness.toFixed(4)}:${config.barbGloss.toFixed(4)}:` +
+    `${config.barbRachis.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -177,7 +219,7 @@ export function applyBirdFeatherShader(
     // --- Fragment shader ---
     // Declare the varying (in) and uniforms at the top.
     shader.fragmentShader =
-      `varying vec3 vBirdFeatherPos;\nuniform float uBarbFreq;\nuniform float uBarbDarkness;\nuniform float uBarbGloss;\n` +
+      `varying vec3 vBirdFeatherPos;\nuniform float uBarbFreq;\nuniform float uBarbFreqLong;\nuniform float uBarbDarkness;\nuniform float uBarbGloss;\nuniform float uBarbRachis;\n` +
       shader.fragmentShader;
 
     // Inject the feather pattern AFTER roughnessmap_fragment.  That chunk
@@ -192,37 +234,49 @@ export function applyBirdFeatherShader(
       '#include <roughnessmap_fragment>',
       `#include <roughnessmap_fragment>
   {
-    // Overlapping feather-barb pattern, staggered rows (brick layout).
-    // Y = spine axis (tail→head).  Second axis = dorsoventral (yz) or
-    // wing span (yx), chosen per mesh to avoid stripe collapse on
-    // near-flat wing panels.  Pattern uses rest-space vBirdFeatherPos.
-    vec2 sp = vec2( vBirdFeatherPos.y, ${planeSwizzle} ) * uBarbFreq;
+    // Overlapping flight-feather pattern, staggered rows (brick layout).
+    // Y = spine axis (tail->head) and is the feather's LONG axis; it is
+    // tiled at uBarbFreqLong, a fraction of the cross-axis frequency, so
+    // each cell is several times longer than it is wide.  Second axis =
+    // dorsoventral (yz) or wing span (yx), chosen per mesh to avoid stripe
+    // collapse on near-flat wing panels.  Uses rest-space vBirdFeatherPos.
+    vec2 sp = vec2( vBirdFeatherPos.y * uBarbFreqLong, ${planeSwizzle} * uBarbFreq );
     sp.y += floor( sp.x ) * 0.5;
     vec2 fp = fract( sp ) - 0.5;  // cell-local coords in [-0.5, 0.5]
 
-    // Slightly flattened ellipse: barbs are wider than tall, evoking
-    // the broadened vanes of a contour feather.
-    float r      = length( vec2( fp.x, fp.y * 0.85 ) );
-    float rAbove = length( vec2( fp.x + 1.0, fp.y * 0.85 ) );
+    // Vane outline.  Slightly wider than tall in cell space on top of the
+    // world-space elongation above, giving a blade that comes to a rounded
+    // point rather than an even oval.
+    float r      = length( vec2( fp.x * 0.86, fp.y ) );
+    float rAhead = length( vec2( ( fp.x + 1.0 ) * 0.86, fp.y ) );
 
-    // Barb radius > 0.5 so rows overlap, exposing only the tail-facing
-    // crescent (the visible vane edge).
+    // Vane radius > 0.5 so successive feathers overlap along their length,
+    // exposing only the trailing part of each (the visible blade edge).
     const float kBarbR = 0.58;
 
-    // Smooth visibility mask: 1 = exposed crescent, 0 = hidden by row above.
-    float visible = smoothstep( kBarbR - 0.04, kBarbR + 0.04, rAbove );
+    // Smooth visibility mask: 1 = exposed blade, 0 = hidden by the one ahead.
+    float visible = smoothstep( kBarbR - 0.04, kBarbR + 0.04, rAhead );
 
     // Soft free-edge arc: wider than dragon scales (0.20 vs 0.14) so
-    // barbs read as fluffy plumage rather than hard reptilian plates.
+    // feathers read as plumage rather than hard reptilian plates.
     float edge = smoothstep( kBarbR - 0.20, kBarbR, r )
                * ( 1.0 - smoothstep( kBarbR, kBarbR + 0.10, r ) );
 
-    // --- Colour: darken the trailing arc of each exposed barb crescent ---
+    // Rachis: the pale shaft running down the blade's midline.  Scales have
+    // no midline, so this is the cue that most strongly separates "feather"
+    // from "scale".  Confined to the exposed part of the vane and faded out
+    // towards the tip so it does not run past the end of the blade.
+    float rachis = ( 1.0 - smoothstep( 0.0, 0.10, abs( fp.y ) ) )
+                 * ( 1.0 - smoothstep( kBarbR * 0.55, kBarbR, r ) )
+                 * visible;
+
+    // --- Colour: darken the trailing arc, lift the shaft ---
     // Writes only to diffuseColor (mutable local).  vColor is read-only in
     // GLSL 300 ES; assigning to it causes a link error that blacks the scene.
     diffuseColor.rgb *= 1.0 - uBarbDarkness * edge * visible;
+    diffuseColor.rgb *= 1.0 + uBarbRachis * rachis;
 
-    // --- Reflectivity: barb centres catch a gentle soft sheen ---
+    // --- Reflectivity: blade centres catch a gentle soft sheen ---
     float gloss = uBarbGloss * max( 0.0, 1.0 - r / kBarbR ) * visible;
     roughnessFactor = clamp( roughnessFactor - gloss, 0.0, 1.0 );
   }`,
@@ -230,8 +284,10 @@ export function applyBirdFeatherShader(
 
     Object.assign(shader.uniforms, {
       uBarbFreq: { value: freq },
+      uBarbFreqLong: { value: freqLong },
       uBarbDarkness: { value: config.barbDarkness },
       uBarbGloss: { value: config.barbGloss },
+      uBarbRachis: { value: config.barbRachis },
     });
   };
 

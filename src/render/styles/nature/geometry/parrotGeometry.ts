@@ -26,7 +26,6 @@ const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
 interface ParrotPalette {
   beak: THREE.Color;
   feet: THREE.Color;
-  facePatch: THREE.Color;
   eyeOuter: THREE.Color;
   back: THREE.Color;
   backLight: THREE.Color;
@@ -41,17 +40,34 @@ interface ParrotPalette {
    * (back color at crown/dorsal surface, belly color at ventral surface)
    * instead of the default dominant-weight back/belly region split. */
   dorsalGradient: boolean;
-  /** When true, the face dome (the filled opening the beak grows from) is
-   * baked with a smooth dorsal→ventral Z-axis gradient from `back` (top) to
-   * `belly` (bottom) instead of the flat `facePatch` color, so the face fades
-   * between the bird's back and belly colors. */
-  faceDomeGradient: boolean;
+  /**
+   * Bare facial skin. Macaws have a large unfeathered patch wrapping the eye
+   * and running forward across the lores to the beak; on the classic scarlet
+   * it is near-white, and every species has some pale version of it.
+   *
+   * This replaced a dorsal→ventral gradient across the face dome. That
+   * gradient lerped `belly`→`back` in RGB, and on these palettes those are
+   * near-complementary (blue-gold is literally gold→blue), so the middle of
+   * the ramp passed through a desaturated near-white. The face dome is a
+   * rounded cap that sweeps the whole Z range, so it displayed that muddy
+   * midpoint as a pale blob sitting on the front of the head — the "awkward
+   * beak attach dome". Painting the region deliberately, in a colour chosen
+   * per palette, both removes the artifact and matches the real bird.
+   */
+  faceSkin: THREE.Color;
+  /** Upper mandible. Scarlet macaws have a pale horn-coloured upper against a
+   * black lower; most others are black throughout. */
+  beakUpper: THREE.Color;
+  /** Lower mandible; black on every macaw. */
+  beakLower: THREE.Color;
 }
 
 const GREEN_FOCUS_PARROT_PALETTE: ParrotPalette = {
+  faceSkin: new THREE.Color(0xe8e4d8),
+  beakUpper: new THREE.Color(0xe0dccb),
+  beakLower: new THREE.Color(0x2a2a2a),
   beak: new THREE.Color(0xe35d2b),
   feet: new THREE.Color(0x707070),
-  facePatch: new THREE.Color(0x44b749),
   eyeOuter: new THREE.Color(0x44b749),
   back: new THREE.Color(0x44b749),
   backLight: new THREE.Color(0x4fbf52),
@@ -63,13 +79,14 @@ const GREEN_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0x44b749),
   tailTip: new THREE.Color(0xc8e455),
   dorsalGradient: true,
-  faceDomeGradient: true,
 };
 
 const BLUE_GOLD_FOCUS_PARROT_PALETTE: ParrotPalette = {
+  faceSkin: new THREE.Color(0xf2efe6),
+  beakUpper: new THREE.Color(0x1b1b1b),
+  beakLower: new THREE.Color(0x141414),
   beak: new THREE.Color(0x161616),
   feet: new THREE.Color(0x5a5a5a),
-  facePatch: new THREE.Color(0x2f75ff),
   eyeOuter: new THREE.Color(0xffffff),
   back: new THREE.Color(0x2f75ff),
   backLight: new THREE.Color(0x5d98ff),
@@ -81,13 +98,14 @@ const BLUE_GOLD_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0x2f75ff),
   tailTip: new THREE.Color(0xffe033),
   dorsalGradient: false,
-  faceDomeGradient: true,
 };
 
 const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
+  faceSkin: new THREE.Color(0xf6f3ec),
+  beakUpper: new THREE.Color(0xe8dcc0),
+  beakLower: new THREE.Color(0x161616),
   beak: new THREE.Color(0x161616),
   feet: new THREE.Color(0x6a6a6a),
-  facePatch: new THREE.Color(0xe12832),
   eyeOuter: new THREE.Color(0xffffff),
   back: new THREE.Color(0xe12832),
   backLight: new THREE.Color(0xf13a45),
@@ -99,13 +117,14 @@ const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0xe0c45d),
   tailTip: new THREE.Color(0x2b57b0),
   dorsalGradient: false,
-  faceDomeGradient: true,
 };
 
 const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
+  faceSkin: new THREE.Color(0xeae4f5),
+  beakUpper: new THREE.Color(0x2a2436),
+  beakLower: new THREE.Color(0x1a1622),
   beak: new THREE.Color(0x161616),
   feet: new THREE.Color(0x9a9a9a),
-  facePatch: new THREE.Color(0x6b4bb3),
   eyeOuter: new THREE.Color(0x39ff14),
   back: new THREE.Color(0x6b4bb3),
   backLight: new THREE.Color(0x9a7fe0),
@@ -117,13 +136,14 @@ const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0x7b60c8),
   tailTip: new THREE.Color(0xd1c2ff),
   dorsalGradient: false,
-  faceDomeGradient: true,
 };
 
 const NEUTRAL_PARROT_PALETTE: ParrotPalette = {
+  faceSkin: new THREE.Color(0xffffff),
+  beakUpper: new THREE.Color(0xffffff),
+  beakLower: new THREE.Color(0xffffff),
   beak: new THREE.Color(0x161616),
   feet: new THREE.Color(0x707070),
-  facePatch: new THREE.Color(0xffffff),
   eyeOuter: new THREE.Color(0xffffff),
   back: new THREE.Color(0xffffff),
   backLight: new THREE.Color(0xffffff),
@@ -135,7 +155,6 @@ const NEUTRAL_PARROT_PALETTE: ParrotPalette = {
   tailRoot: new THREE.Color(0xffffff),
   tailTip: new THREE.Color(0xffffff),
   dorsalGradient: false,
-  faceDomeGradient: true,
 };
 
 let ACTIVE_PARROT_PALETTE: ParrotPalette = GREEN_FOCUS_PARROT_PALETTE;
@@ -152,6 +171,66 @@ const PARROT_HEAD_TILT_RAD = THREE.MathUtils.degToRad(-21);
 const PARROT_HEAD_TILT_BLEND_START_FRAC = 0.3;
 const PARROT_BEAK_DOWN_PITCH_RAD = THREE.MathUtils.degToRad(-8);
 const PARROT_TAIL_ROOT_Y_FACTOR = -0.46;
+
+/**
+ * Spanwise extent of the bare facial patch, on the same `headFrac` scale the
+ * eye and face-point use (so it moves with the head, not with absolute Y).
+ * `START` is where the patch begins to fade in, behind the eye; `FULL` is where
+ * it is fully bare, at the beak. The eye sits at 0.79, so the patch surrounds
+ * it rather than stopping short of it — that wrap is what makes it read as a
+ * macaw's bare face rather than as a pale muzzle.
+ */
+const PARROT_FACE_PATCH_START_FRAC = 0.50;
+const PARROT_FACE_PATCH_FULL_FRAC = 0.86;
+
+/**
+ * How far up the head the bare patch is allowed to climb, expressed as the
+ * vertex normal's Z component (+1 = straight up at the crown). Macaws keep a
+ * fully feathered coloured crown above the bare skin, so the patch has to be
+ * cut off before the top of the head or the bird loses its cap.
+ */
+const PARROT_FACE_PATCH_CROWN_LIMIT = 0.42;
+
+/**
+ * Number of trailing-edge flight feathers per wing.
+ *
+ * Raised from 12 so the fan reads as real plumage rather than a row of spikes
+ * (#245 follow-up). See PARROT_FEATHER_BASE_HALF_GAP for the packing maths that
+ * has to move with this number.
+ */
+const PARROT_FEATHER_COUNT = 20;
+
+/**
+ * Half-width of each feather's base, as a fraction of the trailing edge.
+ *
+ * The feathers are seated at `featherT = smoothstep(i / (n - 1))`, so their
+ * spacing is not uniform: smoothstep's derivative peaks at 1.5 in the middle of
+ * the fan, making the widest neighbour gap about `1.5 / (n - 1)` — roughly
+ * 0.079 at n = 20. Bases therefore have to be at least half that (≈0.040) wide
+ * merely to touch. This value is set deliberately above that threshold so they
+ * genuinely overlap by ~20% at the loosest point in the fan and by more towards
+ * the ends, which is what removes the notches that used to show between them.
+ *
+ * Keep this comfortably above `0.75 / (PARROT_FEATHER_COUNT - 1)` if the count
+ * changes, or the notches come back.
+ */
+const PARROT_FEATHER_BASE_HALF_GAP = 0.048;
+
+/**
+ * Alternating out-of-plane offset applied to successive flight feathers, as a
+ * fraction of chord. Because the bases now overlap, coplanar vanes would fuse
+ * into a single slab; separating each neighbouring pair by twice this keeps the
+ * overlap reading as distinct layered feathers.
+ */
+const PARROT_FEATHER_SHINGLE_FRAC = 0.006;
+
+/**
+ * Radius of the tail-root connector as a fraction of body width. Real birds
+ * have no bump here; this exists only to stop the fan's roots reading as a
+ * hard collar against the rump, so it is sized to be as inconspicuous as it
+ * can be while still covering the joint.
+ */
+const PARROT_TAIL_CONNECTOR_RADIUS_FRAC = 0.098;
 
 export function createParrotGeometries(
   length: number,
@@ -248,7 +327,13 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   // banded ones; PARROT_BODY_LATHE_SEGMENTS is already raised to 32.
   const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
   const torso = new THREE.LatheGeometry(smoothProfile, PARROT_BODY_LATHE_SEGMENTS);
-  tintParrotTorsoRegions(torso, halfLen);
+  // The bare facial patch spans from just behind the eye forward to the beak.
+  // Measured off the same headFrac scale the eye and face use so it tracks any
+  // future change to head proportions instead of being a fixed magic Y.
+  tintParrotTorsoRegions(torso, halfLen, {
+    startY: halfLen * headFrac(PARROT_FACE_PATCH_START_FRAC),
+    fullY: halfLen * headFrac(PARROT_FACE_PATCH_FULL_FRAC),
+  });
   pitchHeadRegionDown(torso, headTiltBlendStartY, headTiltPivotY, PARROT_HEAD_TILT_RAD);
 
   // Two-part macaw beak: a large, strongly hooked upper mandible that
@@ -266,10 +351,13 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
 
   // Keep one internal filler at the face opening so the beak/body
   // junction never reveals the lathe cavity from front angles.
-  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.2, 12, 10);
+  // Radius must stay above faceRadius after the scale below, or the lathe's
+  // face opening reappears as a hole. x: 1.12*0.96 = 1.075, z: 1.12*0.902 =
+  // 1.010 — both still cover it, with the bulge trimmed back so the dome no
+  // longer reads as a ball stuck on the front of the head.
+  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.12, 12, 10);
   beakSocketFill.scale(0.96, 0.9, 0.902);
   beakSocketFill.translate(0, faceY - length * 0.004, -length * 0.02 + faceRadius * 0.26);
-  if (ACTIVE_PARROT_PALETTE.faceDomeGradient) tintParrotFaceDomeGradient(beakSocketFill);
   rotateGeometryAroundXPivot(beakSocketFill, headTiltPivotY, PARROT_HEAD_TILT_RAD);
 
   const eyeY = halfLen * headFrac(0.79);
@@ -283,10 +371,11 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   return mergeGeometriesWithColor([
     { geometry: torso, color: WHITE_VERTEX_COLOR },
     { geometry: rearCap, color: WHITE_VERTEX_COLOR },
-    { geometry: beakSocketFill, color: ACTIVE_PARROT_PALETTE.facePatch },
+    // Flat bare-skin colour, NOT a dorsal→ventral gradient: see ParrotPalette.faceSkin.
+    { geometry: beakSocketFill, color: ACTIVE_PARROT_PALETTE.faceSkin },
     { geometry: eyeRing, color: ACTIVE_PARROT_PALETTE.eyeOuter },
-    { geometry: beak.upper, color: ACTIVE_PARROT_PALETTE.beak },
-    { geometry: beak.lower, color: ACTIVE_PARROT_PALETTE.beak },
+    { geometry: beak.upper, color: ACTIVE_PARROT_PALETTE.beakUpper },
+    { geometry: beak.lower, color: ACTIVE_PARROT_PALETTE.beakLower },
     { geometry: pupils, color: EYE_COLOR },
   ]);
 }
@@ -480,10 +569,18 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
 
   const featherGeometries: THREE.BufferGeometry[] = [];
   // Blend tail fan into the body so the root doesn't read as a hard collar.
-  const rootBlend = new THREE.SphereGeometry(width * 0.14, 10, 8);
+  // Kept deliberately small: it is a cosmetic filler, and real birds have no
+  // bump here at all, so the less of it that shows the better.
+  const rootBlend = new THREE.SphereGeometry(width * PARROT_TAIL_CONNECTOR_RADIUS_FRAC, 10, 8);
   rootBlend.scale(1.1, 0.56, 0.76);
-  rootBlend.translate(0, rootY + length * 0.026, -length * 0.015);
+  rootBlend.translate(0, rootY + length * 0.019, -length * 0.012);
   featherGeometries.push(rootBlend);
+  // Vertex count of the connector, captured AFTER the same non-indexed
+  // conversion the merge performs, so tintParrotTailGradient can address
+  // exactly this prefix of the merged buffer. mergePositionOnlyGeometries
+  // appends in order and the connector is pushed first, so its vertices are
+  // the merged geometry's leading `connectorVertexCount` entries.
+  const connectorVertexCount = rootBlend.toNonIndexed().getAttribute('position').count;
   for (let i = 0; i < featherCount; i++) {
     // -1 (leftmost) .. 0 (center) .. +1 (rightmost)
     const t = (i / (featherCount - 1)) * 2 - 1;
@@ -549,7 +646,7 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
   }
 
   const geometry = mergePositionOnlyGeometries(featherGeometries);
-  tintParrotTailGradient(geometry, rootY, maxLen);
+  tintParrotTailGradient(geometry, rootY, maxLen, connectorVertexCount);
   return geometry;
 }
 
@@ -599,11 +696,11 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     pushTri(rootBottom, bBottom, aBottom);
   }
 
-  // A handful of short finger feathers growing from the panel's own
-  // trailing-edge boundary (between the tip and the trailing-inner
-  // point) rather than floating separately — kept short (relative to
-  // span) and closely spaced so they read as soft feather tips, not
-  // long spiky needles.
+  // A dense fan of flight feathers growing from the panel's own trailing-edge
+  // boundary (between the tip and the trailing-inner point) rather than
+  // floating separately. Packed tightly enough that adjacent bases OVERLAP —
+  // see PARROT_FEATHER_BASE_HALF_GAP — so the trailing edge reads as a
+  // continuous shingled fan rather than a row of separated spikes.
   const trailOuter = boundary[4];
   const trailInner = boundary[8];
   const lerp = (a: number[], b: number[], t: number) => [
@@ -611,11 +708,8 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     a[1] + (b[1] - a[1]) * t,
     a[2] + (b[2] - a[2]) * t,
   ];
-  const fingerCount = 12;
+  const fingerCount = PARROT_FEATHER_COUNT;
   const fingerGeometries: THREE.BufferGeometry[] = [];
-  const shoulderCovert = new THREE.SphereGeometry(chord * 0.17, 12, 10);
-  shoulderCovert.scale(0.92, 0.58, 0.5);
-  shoulderCovert.translate(0.13 * span * s, chord * 0.01, -chord * 0.01);
   const trailingCovertStrip = extrudeRingGeometry(
     [
       new THREE.Vector3(trailInner[0], trailInner[1] + chord * 0.04, 0),
@@ -625,16 +719,16 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     ],
     chord * 0.016,
   );
-  const halfGap = 0.034;
-  const outerFeatherTaperStartIndex = fingerCount - 4;
+  const halfGap = PARROT_FEATHER_BASE_HALF_GAP;
+  const outerFeatherTaperStartIndex = fingerCount - 5;
   for (let i = 0; i < fingerCount; i++) {
     const t = i / (fingerCount - 1);
     const featherT = THREE.MathUtils.smoothstep(t, 0, 1);
     const baseA = lerp(trailInner, trailOuter, Math.max(0, featherT - halfGap));
     const baseB = lerp(trailInner, trailOuter, Math.min(1, featherT + halfGap));
     const tipTaperT = THREE.MathUtils.smoothstep(i, outerFeatherTaperStartIndex, fingerCount - 1);
-    const tipTaperScale = THREE.MathUtils.lerp(1, 0.62, tipTaperT);
-    const fingerLen = span * (0.13 + 0.14 * featherT) * tipTaperScale;
+    const tipTaperScale = THREE.MathUtils.lerp(1, 0.66, tipTaperT);
+    const fingerLen = span * (0.16 + 0.17 * featherT) * tipTaperScale;
     const midBase = lerp(baseA, baseB, 0.5);
     // Inner feathers trail almost straight back; outer feathers cant outward
     // progressively toward the wingtip.
@@ -652,11 +746,20 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     const capHalfWidth = rootHalfWidth * 0.4;
     const capMidHalfWidth = capHalfWidth * 0.6;
     const zDroop = -chord * (0.008 + 0.04 * t);
+    // Shingling: adjacent vanes now OVERLAP in plan (halfGap exceeds their
+    // spacing), so without a z separation they would intersect as one fused
+    // slab. Alternating successive feathers above/below the mean plane keeps
+    // every neighbouring pair a full vane-thickness apart, which is what makes
+    // the overlap read as layered feathers. An alternation is used rather than
+    // a monotonic ramp because a ramp across ~20 feathers either accumulates
+    // into a visibly warped trailing edge or leaves neighbours too close to
+    // separate; the alternation is bounded and depends only on the pair.
+    const shingleZ = (i % 2 === 0 ? 1 : -1) * chord * PARROT_FEATHER_SHINGLE_FRAC;
     const toPoint = (dist: number, halfWidth: number, sideSign: 1 | -1, z: number): THREE.Vector3 =>
       new THREE.Vector3(
         midBase[0] + forward.x * dist + sideward.x * halfWidth * sideSign,
         midBase[1] + forward.y * dist + sideward.y * halfWidth * sideSign,
-        z,
+        z + shingleZ,
       );
     const ring = [
       new THREE.Vector3(baseA[0], baseA[1], 0),
@@ -678,9 +781,8 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
 
   const baseWing = new THREE.BufferGeometry();
   baseWing.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  const geometry = mergePositionOnlyGeometries([baseWing, shoulderCovert, trailingCovertStrip, ...fingerGeometries]);
+  const geometry = mergePositionOnlyGeometries([baseWing, trailingCovertStrip, ...fingerGeometries]);
   baseWing.dispose();
-  shoulderCovert.dispose();
   trailingCovertStrip.dispose();
   fingerGeometries.forEach((f) => f.dispose());
   tintParrotWingRegions(geometry, chord);
@@ -723,32 +825,54 @@ function buildParrotLegsGeometry(length: number, width: number): THREE.BufferGeo
   ]);
 }
 
-function tintParrotFaceDomeGradient(geometry: THREE.BufferGeometry): void {
-  // Smooth dorsal→ventral gradient purely in Z across the face dome: back
-  // color at the top (max Z, dorsal side) fading to belly color at the bottom
-  // (min Z, ventral side), so the face reads as a fade between the bird's back
-  // and belly colors instead of a flat patch. Uses the dome's own Z extent so
-  // the gradient spans exactly surface-to-surface. Baked before the head-tilt
-  // rotation; the colors ride along with their vertices afterward.
-  const pos = geometry.getAttribute('position');
-  geometry.computeBoundingBox();
-  const minZ = geometry.boundingBox?.min.z ?? -1;
-  const maxZ = geometry.boundingBox?.max.z ?? 1;
-  const zSpan = Math.max(1e-5, maxZ - minZ);
-  const colors = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) {
-    const z = pos.getZ(i);
-    const t = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp((z - minZ) / zSpan, 0, 1), 0, 1);
-    colors[i * 3]     = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.r, ACTIVE_PARROT_PALETTE.back.r, t);
-    colors[i * 3 + 1] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.g, ACTIVE_PARROT_PALETTE.back.g, t);
-    colors[i * 3 + 2] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.b, ACTIVE_PARROT_PALETTE.back.b, t);
-  }
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+/**
+ * Region of the head covered by bare facial skin, in model Y.
+ * See PARROT_FACE_PATCH_START_FRAC for how these are derived.
+ */
+interface ParrotFacePatchRegion {
+  startY: number;
+  fullY: number;
 }
 
-function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number): void {
+/**
+ * Blends the bare facial patch over an already-computed body colour.
+ *
+ * Two masks multiply together:
+ *  - a fore/aft ramp, so the patch fades in behind the eye and is fully bare by
+ *    the beak rather than ending at a hard line; and
+ *  - a crown cutoff keyed on the vertex normal, so the patch wraps the side of
+ *    the head and the lores but leaves the coloured cap on top.
+ *
+ * The normal is used rather than position.z because the lathe tapers to
+ * near-zero radius at the face: there, every vertex has position.z ≈ 0 whatever
+ * direction it actually faces, so a positional test cannot tell the crown from
+ * the chin. This is the same reason tintParrotTorsoRegions' dorsal gradient
+ * reads the normal, documented below.
+ */
+function parrotFacePatchWeight(
+  y: number,
+  normalZ: number,
+  region: ParrotFacePatchRegion | undefined,
+): number {
+  if (!region) return 0;
+  const forward = THREE.MathUtils.smoothstep(y, region.startY, region.fullY);
+  const belowCrown =
+    1 - THREE.MathUtils.smoothstep(normalZ, PARROT_FACE_PATCH_CROWN_LIMIT, PARROT_FACE_PATCH_CROWN_LIMIT + 0.45);
+  return forward * belowCrown;
+}
+
+function tintParrotTorsoRegions(
+  geometry: THREE.BufferGeometry,
+  halfLen: number,
+  facePatch?: ParrotFacePatchRegion,
+): void {
   const pos = geometry.getAttribute('position');
   const colors = new Float32Array(pos.count * 3);
+  // Needed by BOTH branches below: the dorsal gradient uses it for the
+  // back/belly split, and the bare-face patch uses it for its crown cutoff.
+  geometry.computeVertexNormals();
+  const normals = geometry.getAttribute('normal');
+  const skin = ACTIVE_PARROT_PALETTE.faceSkin;
 
   if (ACTIVE_PARROT_PALETTE.dorsalGradient) {
     // Smooth dorsal→ventral gradient in Z: back color at the crown (dorsal
@@ -761,13 +885,12 @@ function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number)
     // there — blending back and belly instead of showing the correct colour.
     // The vertex normal is independent of the local radius and correctly
     // gives +1 (back) / -1 (belly) even at the tips.
-    geometry.computeVertexNormals();
-    const normalAttr = geometry.getAttribute('normal');
     for (let i = 0; i < pos.count; i++) {
-      const t = THREE.MathUtils.smoothstep((normalAttr.getZ(i) + 1) / 2, 0, 1);
-      colors[i * 3]     = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.r, ACTIVE_PARROT_PALETTE.back.r, t);
-      colors[i * 3 + 1] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.g, ACTIVE_PARROT_PALETTE.back.g, t);
-      colors[i * 3 + 2] = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.b, ACTIVE_PARROT_PALETTE.back.b, t);
+      const t = THREE.MathUtils.smoothstep((normals.getZ(i) + 1) / 2, 0, 1);
+      const face = parrotFacePatchWeight(pos.getY(i), normals.getZ(i), facePatch);
+      colors[i * 3]     = THREE.MathUtils.lerp(THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.r, ACTIVE_PARROT_PALETTE.back.r, t), skin.r, face);
+      colors[i * 3 + 1] = THREE.MathUtils.lerp(THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.g, ACTIVE_PARROT_PALETTE.back.g, t), skin.g, face);
+      colors[i * 3 + 2] = THREE.MathUtils.lerp(THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.b, ACTIVE_PARROT_PALETTE.back.b, t), skin.b, face);
     }
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     return;
@@ -806,14 +929,38 @@ function tintParrotTorsoRegions(geometry: THREE.BufferGeometry, halfLen: number)
         b = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.back.b, ACTIVE_PARROT_PALETTE.belly.b, strength);
       }
     }
-    colors[i * 3] = r;
-    colors[i * 3 + 1] = g;
-    colors[i * 3 + 2] = b;
+    const face = parrotFacePatchWeight(y, normals.getZ(i), facePatch);
+    colors[i * 3] = THREE.MathUtils.lerp(r, skin.r, face);
+    colors[i * 3 + 1] = THREE.MathUtils.lerp(g, skin.g, face);
+    colors[i * 3 + 2] = THREE.MathUtils.lerp(b, skin.b, face);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
 
-function tintParrotTailGradient(geometry: THREE.BufferGeometry, rootY: number, maxLen: number): void {
+/**
+ * Bakes the tail fan's colours.
+ *
+ * `connectorVertexCount` leading vertices are the root-blend connector, which
+ * is tinted on a *sharpened* dorsal/ventral split rather than the feathers'
+ * smooth crossfade. That distinction matters and is not cosmetic:
+ *
+ * The crossfade lerps `tailRoot` to `belly` in RGB, and on several palettes
+ * those are near-complementary (blue-gold is literally blue → gold), so the
+ * middle of the interpolation passes through a desaturated grey. A feather is a
+ * thin flat vane spanning almost no Z, so it samples one end of the crossfade
+ * and the grey never appears. The connector is a rounded blob whose surface
+ * sweeps the entire Z range, so it renders the whole ramp — including a broad
+ * band of that grey right where it meets the rump, which read as the connector
+ * being unpainted or see-through. Snapping the connector's blend to one endpoint
+ * or the other collapses the grey to a single ring of triangles while leaving the
+ * feathers' intentionally soft gradient untouched.
+ */
+function tintParrotTailGradient(
+  geometry: THREE.BufferGeometry,
+  rootY: number,
+  maxLen: number,
+  connectorVertexCount = 0,
+): void {
   const pos = geometry.getAttribute('position');
   geometry.computeBoundingBox();
   const minZ = geometry.boundingBox?.min.z ?? -maxLen * 0.08;
@@ -824,11 +971,16 @@ function tintParrotTailGradient(geometry: THREE.BufferGeometry, rootY: number, m
     const y = pos.getY(i);
     const z = pos.getZ(i);
     const t = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp((rootY - y) / span, 0, 1), 0, 1);
-    const undersideWeight = THREE.MathUtils.smoothstep(
+    let undersideWeight = THREE.MathUtils.smoothstep(
       THREE.MathUtils.clamp(((-z) - minZ * 0.12) / Math.max(1e-5, -minZ * 0.88), 0, 1),
       0,
       1,
     );
+    if (i < connectorVertexCount) {
+      // Push the blend towards 0 or 1 so the connector is almost entirely one
+      // colour or the other, and only a narrow seam sits in the muddy middle.
+      undersideWeight = THREE.MathUtils.smoothstep(undersideWeight, 0.4, 0.6);
+    }
     const topR = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.tailRoot.r, ACTIVE_PARROT_PALETTE.tailTip.r, t);
     const topG = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.tailRoot.g, ACTIVE_PARROT_PALETTE.tailTip.g, t);
     const topB = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.tailRoot.b, ACTIVE_PARROT_PALETTE.tailTip.b, t);
