@@ -333,7 +333,7 @@ describe('NatureSceneRenderer3D.patchBodyMaterial dragon scale routing', () => {
     expect(fragmentShader).toContain('uScaleKeelDarkness');
   });
 
-  it('does NOT patch non-dragon geometries (hawk)', () => {
+  it('does NOT patch hawk geometry with dragon scales (hawk gets feather shader instead)', () => {
     const renderer = makeNatureRenderer();
     const { geometries } = renderer.getPredatorInstanceConfig(
       PredatorSpecies.Normal,
@@ -341,9 +341,13 @@ describe('NatureSceneRenderer3D.patchBodyMaterial dragon scale routing', () => {
       { isMonster: false, isShark: false },
     );
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    const originalCompile = mat.onBeforeCompile;
     renderer.patchBodyMaterial!(mat, geometries);
-    expect(mat.onBeforeCompile).toBe(originalCompile);
+    const { fragmentShader } = captureShader(mat);
+    // Hawk must NOT receive dragon scale uniforms — those are reptilian.
+    expect(fragmentShader).not.toContain('uScaleEdgeDarkness');
+    expect(fragmentShader).not.toContain('uScaleKeelDarkness');
+    // Hawk receives the bird feather shader instead.
+    expect(fragmentShader).toContain('uBarbDarkness');
   });
 
   it('does NOT apply the dragon scale shader to the unicorn', () => {
