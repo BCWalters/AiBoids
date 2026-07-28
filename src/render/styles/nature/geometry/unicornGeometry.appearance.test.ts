@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { createUnicornGeometries } from './unicornGeometry';
+import {
+  createUnicornGeometries,
+  UNICORN_TAIL_SEGMENTS,
+  UNICORN_TAIL_SIDES,
+} from './unicornGeometry';
 
 const LENGTH = 2;
 const WIDTH = 0.8;
@@ -43,6 +47,28 @@ describe('unicorn tail is one continuous surface', () => {
     }
     const boundary = [...edges.values()].filter((c) => c === 1).length;
     expect(boundary, `${boundary} boundary edges — the tail surface is torn open`).toBe(0);
+  });
+
+  /**
+   * Zero boundary edges alone is not enough. Capping every segment at both ends
+   * also yields a closed surface — but as a row of separate sealed sausages,
+   * which is exactly the appearance being fixed. Verified: a variant that caps
+   * each segment individually passes the boundary-edge check above.
+   *
+   * So assert the rings are genuinely SHARED, by counting distinct positions:
+   *
+   *   one ring per point (after)     80  = 8 points x 10 sides
+   *   two rings per segment (before) 128
+   *
+   * Triangle count is identical either way, so only vertex identity
+   * distinguishes them.
+   */
+  it('adjacent segments share their joint ring, rather than each having its own', () => {
+    const tail = geoms().tail!;
+    const pos = tail.getAttribute('position') as THREE.BufferAttribute;
+    const unique = new Set<string>();
+    for (let i = 0; i < pos.count; i++) unique.add(posKey(pos, i));
+    expect(unique.size).toBe((UNICORN_TAIL_SEGMENTS + 1) * UNICORN_TAIL_SIDES);
   });
 });
 
@@ -226,9 +252,12 @@ describe('unicorn neck is symmetric (no one-sided mane)', () => {
       (v) => !present.has(`${(-v.x).toFixed(3)}|${v.y.toFixed(3)}|${v.z.toFixed(3)}`),
     );
     const fraction = unmirrored.length / neck.length;
+    // A symmetric neck is exactly 0. The removed one-sided mane measured 0.0386
+    // (59 of 1529 neck vertices), so 0.005 sits well between the two while
+    // leaving room for float noise.
     expect(
       fraction,
       `${unmirrored.length}/${neck.length} neck vertices have no mirror — the neck is one-sided`,
-    ).toBeLessThan(0.02);
+    ).toBeLessThan(0.005);
   });
 });

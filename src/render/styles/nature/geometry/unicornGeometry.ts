@@ -187,6 +187,12 @@ const UNICORN_HOOF_COLOR = new THREE.Color(0x3a3a3a);
 // local so the front-leg placement below can be expressed in terms of the
 // leg's own front-to-back depth instead of a magic number that would drift
 // out of step if the legs were ever made thicker or thinner.
+// Tail tube resolution. Exported so the watertightness test can derive the
+// expected shared-ring vertex count from the shipped values rather than
+// hard-coding a number that would silently stop meaning anything if either
+// changed.
+export const UNICORN_TAIL_SIDES = 10;
+export const UNICORN_TAIL_SEGMENTS = 7; // 6 internal joints between root and tip
 const UNICORN_LEG_HALF_WIDTH_FRAC = 0.09;
 const UNICORN_LEG_HALF_DEPTH_FRAC = 0.07;
 // Near-black "dark dot" eyes.
@@ -800,7 +806,7 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
   // cross-section keeps the previous slight flattening (the minor radius is
   // 0.8 of the major) so the silhouette still reads as horse hair rather than
   // a hosepipe.
-  const TAIL_SIDES = 10;
+  const TAIL_SIDES = UNICORN_TAIL_SIDES;
   let transportedNormal = new THREE.Vector3(1, 0, 0);
   const ringAt = (center: THREE.Vector3, direction: THREE.Vector3, halfMajor: number, halfMinor: number) => {
     const tangent = direction.clone();
@@ -867,7 +873,7 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
   // Longer than the previous stubby tail — a real flowing horse tail
   // rather than a short bunch.
   const tailLength = length * 0.68;
-  const numSegments = 7; // 6 internal joints between root and tip
+  const numSegments = UNICORN_TAIL_SEGMENTS;
   // Trails mostly backward with a gentle downward sag, rather than
   // curling almost straight down (-95deg tip, from an earlier pass tuned
   // for a different flight-pose model) — now that unicorns fly upright
