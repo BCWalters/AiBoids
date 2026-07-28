@@ -328,7 +328,7 @@ const NATURE_SPECIES_CONFIG: Record<BoidSpecies, NatureSpeciesConfig> = {
   [BoidSpecies.Gold]: {
     natureBase: GOLDFINCH_BODY_BASE,
     colors: { body: GOLDFINCH_BODY_BASE, wing: GOLDFINCH_WING_BASE, tail: GOLDFINCH_TAIL_BASE },
-    beakColor: new THREE.Color(0x9a6030),
+    beakColor: new THREE.Color(0x8a6446),
     useSmallGeometry: false,
   },
   [BoidSpecies.Red]: {
