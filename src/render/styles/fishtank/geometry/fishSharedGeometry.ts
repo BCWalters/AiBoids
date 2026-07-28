@@ -10,6 +10,29 @@ import * as THREE from 'three';
  */
 
 /**
+ * Fin membranes in the fishtank scene should be as thin as possible without
+ * collapsing into a zero-thickness card that flickers, loses normals, or
+ * vanishes edge-on. Every fin extrusion in this folder takes its depth from
+ * this shared helper so the scene cannot drift back to a mix of species-local
+ * magic fractions.
+ */
+export const FISHTANK_FIN_THICKNESS_RATIO = 0.012;
+export const FISHTANK_MIN_FIN_THICKNESS = 0.004;
+
+export function fishtankFinThickness(referenceSize: number): number {
+  return Math.max(referenceSize * FISHTANK_FIN_THICKNESS_RATIO, FISHTANK_MIN_FIN_THICKNESS);
+}
+
+export type FinThinAxis = 'x' | 'z';
+
+export interface FinThicknessSample {
+  label: string;
+  geometry: THREE.BufferGeometry;
+  referenceSize: number;
+  thinAxis: FinThinAxis;
+}
+
+/**
  * Like extrudeRingGeometry, but thickens the ring along local X instead
  * of Z. extrudeRingGeometry assumes its ring lies roughly in the X/Y
  * (horizontal) plane and adds dorsoventral (Z) depth — right for shapes
