@@ -784,6 +784,22 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   const steps = 11;
   const path: THREE.Vector3[] = [];
   const radii: number[] = [];
+
+  // Start the tail INSIDE the body rather than flush at the rump.
+  //
+  // The tail sways about a pivot at the root, so a tail that merely reaches the
+  // rump plane swings sideways there and opens an annular gap you can see sky
+  // through (#278). The clearance was only ~0.02 wu: the tail is ~0.19 wu wide
+  // where it crosses the rump disc, and that disc is 0.208 wu. Burying the
+  // first segment deep in the body means the junction stays covered through the
+  // full sway range, without widening the visible tail.
+  //
+  // The buried point sits well within the body radius at that height (~0.46 wu
+  // against a 0.22 wu tail), so it never pokes through the flanks.
+  const buriedInset = length * 0.18;
+  path.push(new THREE.Vector3(0, yOffset + buriedInset, zOffset));
+  radii.push(width * 0.275);
+
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
     const y = yOffset + (-tailLen * t);
@@ -914,13 +930,22 @@ function buildDragonLegsGeometry(length: number, width: number): THREE.BufferGeo
       [0, 1],
       [1, 0.3],
     ];
+    // Root each claw slightly back UP the shin rather than exactly at the foot
+    // vertex, and start it at the shin's own end radius (#278: claws read as
+    // slightly detached). Both tubes are capped, so this was never a hole — but
+    // the claw's base ring is perpendicular to the claw direction, which
+    // diverges sharply from the shin direction, so a ring pinned exactly at the
+    // shared vertex leaves a visible notch on the outside of the bend. Sinking
+    // the base into the shin buries that seam.
+    const shinDir = new THREE.Vector3().subVectors(foot, knee).normalize();
+    const clawBase = foot.clone().addScaledVector(shinDir, -legR * 0.7);
     for (const [spreadX, spreadForward] of clawSpread) {
       const clawTip = new THREE.Vector3(
         foot.x + spreadX * width * 0.1,
         foot.y + spreadForward * clawLen * 0.4,
         foot.z - clawLen,
       );
-      positions.push(...buildTube([foot, clawTip], [legR * 0.4, 0], 4));
+      positions.push(...buildTube([clawBase, clawTip], [legR * 0.55, 0], 4));
     }
   }
 
