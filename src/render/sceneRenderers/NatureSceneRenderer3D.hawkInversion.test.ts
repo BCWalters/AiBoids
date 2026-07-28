@@ -12,8 +12,19 @@
  * `setPersistedUprightBasis`, which anchors the dorsal to world-up via an explicit
  * cross-product basis. Post-fix rate: 0%.
  *
- * Threshold chosen to sit squarely between both measured populations:
- *   broken ~42%  |  THRESHOLD = 5%  |  fixed 0%
+ * Comparison with other species: small-bird boids already had `preferUpright: true`
+ * and showed ~0% inversion before this fix, confirming the bug was hawk-specific
+ * (absent `preferUpright` in their MotionConfig), not a shared orientation-math issue.
+ *
+ * Banking check: `preferUpright` only changes the base orientation path; the
+ * renderBank roll is applied on top of it in every case. The test therefore also
+ * asserts that hawks bank visibly into turns — max |renderBank| must exceed 5° —
+ * so a fix that silently zeroed out banking would fail here even if inversion
+ * dropped to 0%.
+ *
+ * Thresholds chosen to sit squarely between the two measured populations:
+ *   inversion: broken ~42%  |  MAX_INVERTED_FRACTION = 5%  |  fixed 0%
+ *   banking:   working ≥5°  |  MIN_MAX_BANK_DEG = 5°       |  broken 0°
  *
  * Falsification: removing `preferUpright: true` from NatureSceneRenderer3D's hawk
  * MotionConfig restores the 42% rate and fails this test immediately.
@@ -83,10 +94,17 @@ function isDorsalInverted(bodyMesh: THREE.InstancedMesh, index: number): boolean
 
 /**
  * Runs the simulation for `seconds` at 60 fps, calling updateInstances each
- * frame, and returns the fraction of creature-frames where the dorsal is
- * pointing downward. `creatures` must be live references from `sim.predators`.
+ * frame, and returns:
+ *   - `inversionFraction`: fraction of creature-frames where the dorsal is downward
+ *   - `maxBankRad`: the largest |renderBank| observed across all hawks and frames
+ *
+ * `hawks` must be live references from `sim.predators`.
  */
-function measureInversionFraction(sim: Simulation, hawks: Predator[], seconds: number): number {
+function measureHawkStats(
+  sim: Simulation,
+  hawks: Predator[],
+  seconds: number,
+): { inversionFraction: number; maxBankRad: number } {
   const hawkMotion = NatureSceneRenderer3D.prototype.getPredatorMotionConfig.call(
     {} as NatureSceneRenderer3D,
     PredatorSpecies.Normal,
@@ -99,6 +117,7 @@ function measureInversionFraction(sim: Simulation, hawks: Predator[], seconds: n
   const steps = Math.round(seconds * 60);
   let inverted = 0;
   let total = 0;
+  let maxBankRad = 0;
 
   for (let i = 0; i < steps; i++) {
     sim.update(1 / 60);
@@ -106,14 +125,18 @@ function measureInversionFraction(sim: Simulation, hawks: Predator[], seconds: n
     for (let j = 0; j < hawks.length; j++) {
       if (isDorsalInverted(set.body, j)) inverted++;
       total++;
+      maxBankRad = Math.max(maxBankRad, Math.abs(hawks[j].renderBank));
     }
   }
 
-  return total > 0 ? inverted / total : 0;
+  return {
+    inversionFraction: total > 0 ? inverted / total : 0,
+    maxBankRad,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// Threshold
+// Thresholds
 // ---------------------------------------------------------------------------
 
 /**
@@ -123,6 +146,17 @@ function measureInversionFraction(sim: Simulation, hawks: Predator[], seconds: n
  * any rounding noise in the 0% fixed rate.
  */
 const MAX_INVERTED_FRACTION = 0.05;
+
+/**
+ * Banking is applied on top of the preferUpright base orientation.
+ * During 30 s of hawk-chasing-boids the max |renderBank| observed is well
+ * above 5° (typically 10°–35° depending on the seed). A result of 0° would
+ * mean banking has been silently disabled; this floor catches that regression.
+ * Measured with the fix applied: max bank comfortably exceeds this bound on
+ * every seed. If banking were zeroed out the bound would not be met.
+ */
+const MIN_MAX_BANK_DEG = 5;
+const MIN_MAX_BANK_RAD = MIN_MAX_BANK_DEG * (Math.PI / 180);
 
 // ---------------------------------------------------------------------------
 // Test
@@ -139,6 +173,7 @@ describe('hawk inverted-frame fraction stays well below 5%', () => {
     () => {
       let totalFraction = 0;
       let runs = 0;
+      let overallMaxBankRad = 0;
 
       for (const seed of [1, 2, 3, 4, 5, 6]) {
         seedRandom(seed);
@@ -159,13 +194,18 @@ describe('hawk inverted-frame fraction stays well below 5%', () => {
 
         const hawks = sim.predators.filter(p => p.species === PredatorSpecies.Normal);
         if (hawks.length > 0) {
-          totalFraction += measureInversionFraction(sim, hawks, 30);
+          const { inversionFraction, maxBankRad } = measureHawkStats(sim, hawks, 30);
+          totalFraction += inversionFraction;
+          overallMaxBankRad = Math.max(overallMaxBankRad, maxBankRad);
           runs++;
         }
       }
 
       const avgFraction = runs > 0 ? totalFraction / runs : 0;
+      // Inversion guard: broken ~42%, fixed 0%, threshold 5%
       expect(avgFraction).toBeLessThan(MAX_INVERTED_FRACTION);
+      // Banking guard: hawks must visibly lean into turns (not zeroed out by the fix)
+      expect(overallMaxBankRad).toBeGreaterThan(MIN_MAX_BANK_RAD);
     },
     60_000,
   );
