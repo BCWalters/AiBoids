@@ -24,6 +24,7 @@ import {
   BONY_FISH_SCALE_CONFIG,
   BARRACUDA_SCALE_CONFIG,
   SHARK_SCALE_CONFIG,
+  type FishScalePlane,
 } from '../styles/fishtank/fishScaleShader';
 import { applySeaHorsePlateShader, SEAHORSE_PLATE_CONFIG } from '../styles/fishtank/seaHorsePlateShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
@@ -668,7 +669,18 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       // Butterflyfish share the same bony-plate scale config.
       config = BONY_FISH_SCALE_CONFIG;
     }
-    applyFishScaleShader(material, geometries.body, config);
+    // Scale patterns are 2D. To avoid stripe-collapse on flatter bodies, pick
+    // the second pattern axis from the body's stronger lateral span.
+    const plane = this.pickFishScalePlane(geometries.body);
+    applyFishScaleShader(material, geometries.body, config, plane);
+  }
+
+  private pickFishScalePlane(geometry: THREE.BufferGeometry): FishScalePlane {
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const bb = geometry.boundingBox!;
+    const xSpan = Math.max(1e-6, bb.max.x - bb.min.x);
+    const zSpan = Math.max(1e-6, bb.max.z - bb.min.z);
+    return zSpan >= xSpan ? 'yz' : 'yx';
   }
 
   dispose(): void {
