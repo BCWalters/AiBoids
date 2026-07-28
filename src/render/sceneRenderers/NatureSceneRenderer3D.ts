@@ -813,6 +813,22 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
+  patchTailMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    if (geometries === this.dragonPredatorGeometries) {
+      // Deliberately passes the BODY geometry, not the tail's own. The shader
+      // derives its cell size from the geometry's Z span, and the tail's span
+      // (1.490 wu) is 2.2x the body's (0.672) because the tail sweeps far in Z
+      // while the body is a slim tube. Passing the tail here would render its
+      // scales 2.2x oversized and the mismatch would land right at the joint.
+      //
+      // The pattern is keyed on rest-space model position and both geometries
+      // are authored in the same model space, so one shared frequency also
+      // makes the scale rows run continuously from body onto tail rather than
+      // restarting at the seam.
+      applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG);
+    }
+  }
+
   dispose(): void {
     // The nature env is owned by LazyEnvProvider and disposed there — do not
     // call dispose() on it here to avoid a double-dispose.

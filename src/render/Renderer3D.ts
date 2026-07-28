@@ -296,6 +296,10 @@ export class Renderer3D {
       // vertexColors on a color-less tail would render solid black.
       tailMaterial.vertexColors = !!geometries.tail.getAttribute('color');
       tailMaterial.needsUpdate = true;
+      // Scene-specific tail patch, mirroring patchBodyMaterial above. Applied
+      // after vertexColors is settled and before the InstancedMesh exists, so
+      // onBeforeCompile is in place before first use.
+      sceneRenderer.patchTailMaterial?.(tailMaterial, geometries);
       tail = new THREE.InstancedMesh(geometries.tail, tailMaterial, Math.max(count, 1));
       tail.count = count;
       tail.frustumCulled = false;

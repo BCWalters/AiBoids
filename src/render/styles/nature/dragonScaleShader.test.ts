@@ -416,3 +416,74 @@ describe('dragonScaleShader composition — mock prior then scale', () => {
     expect(vertexShader).toContain('__MOCK_PRIOR_SENTINEL__');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Uniforms must actually drive the output, not merely be declared
+// ---------------------------------------------------------------------------
+
+/**
+ * The `toContain('uScaleKeelDarkness')` checks above are satisfied by the
+ * uniform's own DECLARATION line at the top of the fragment shader, so they
+ * pass even when nothing reads it. Verified: deleting the statement that
+ * applies the keel to diffuseColor left all 22 other tests green — while the
+ * keel is the single feature distinguishing these reptilian scales from the
+ * existing fish-scale shader, i.e. the entire point of the change.
+ *
+ * These assertions strip the declarations first, then require each uniform to
+ * appear in a statement that writes one of the shader's two mutable outputs
+ * (diffuseColor or roughnessFactor). A uniform that is declared, computed into
+ * a local, and then dropped on the floor fails here.
+ */
+describe('dragonScaleShader uniforms drive the shipped output', () => {
+  const outputStatements = (fragmentShader: string): string[] => {
+    // Drop declaration lines so a bare `uniform float uX;` cannot satisfy the
+    // usage check below.
+    const body = fragmentShader
+      .split('\n')
+      .filter((line) => !/^\s*uniform\s/.test(line))
+      .join('\n');
+    return body
+      .split(';')
+      .filter((stmt) => /\b(diffuseColor|roughnessFactor)\b\s*(\.[a-z]+)?\s*[-*+]?=/.test(stmt));
+  };
+
+  const assertDrivesOutput = (uniform: string) => {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyDragonScaleShader(mat, makeBodyGeo(), DRAGON_SCALE_CONFIG);
+    const { fragmentShader } = captureShader(mat);
+
+    const statements = outputStatements(fragmentShader);
+    expect(statements.length, 'expected statements writing diffuseColor/roughnessFactor').toBeGreaterThan(0);
+
+    // The uniform may feed the output through an intermediate local (e.g.
+    // `keel`), so follow one level of indirection: collect locals assigned
+    // from the uniform, then check the uniform or any of those locals reaches
+    // an output statement.
+    const body = fragmentShader.split('\n').filter((l) => !/^\s*uniform\s/.test(l)).join('\n');
+    const derived = new Set<string>([uniform]);
+    for (const stmt of body.split(';')) {
+      if (!stmt.includes(uniform)) continue;
+      const m = stmt.match(/(?:float|vec[234])\s+([A-Za-z_]\w*)\s*=/);
+      if (m) derived.add(m[1]);
+    }
+
+    const reaches = statements.some((stmt) => [...derived].some((name) => stmt.includes(name)));
+    expect(
+      reaches,
+      `${uniform} is declared but never reaches diffuseColor or roughnessFactor — ` +
+        `it has no effect on the rendered image`,
+    ).toBe(true);
+  };
+
+  it('uScaleEdgeDarkness affects the rendered output', () => {
+    assertDrivesOutput('uScaleEdgeDarkness');
+  });
+
+  it('uScaleKeelDarkness affects the rendered output', () => {
+    assertDrivesOutput('uScaleKeelDarkness');
+  });
+
+  it('uScaleGloss affects the rendered output', () => {
+    assertDrivesOutput('uScaleGloss');
+  });
+});
