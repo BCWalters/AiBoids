@@ -101,14 +101,14 @@ function buildLatheBody(profile: THREE.Vector2[], proportions: BodyProportions):
 }
 
 /**
- * A low trapezoidal dorsal fin standing up (+Z) from the fish's back over the
- * widest part of the body — the single strongest silhouette cue that separates
- * "a fish" from "a flattened egg". A flat-topped trapezoid (two upper corners,
- * inset from the base corners) rather than a single tall peak, so it reads as a
- * generic fish ridge instead of a shark's dorsal. Built via
- * extrudeRingGeometryAlongX (thickened flank-to-flank along X) because its ring
- * lies in the Y-Z plane, so a Z-axis extrusion would leave it vanishingly thin
- * edge-on.
+ * A natural-profile dorsal fin standing up (+Z) from the fish's back — the
+ * single strongest silhouette cue that separates "a fish" from "a flattened
+ * egg". The profile mimics a real small-fish dorsal: a steep leading edge rises
+ * to a peak near the front, then a long gentle slope tapers back toward the
+ * peduncle, so the fin reads as an organic ridge rather than a uniform spike
+ * ("mohawk"). Five ring points define the outline; the fin is extruded
+ * flank-to-flank along X via extrudeRingGeometryAlongX (a Z-axis extrusion
+ * would leave it near-invisible edge-on).
  */
 function buildDorsalFinGeometry(length: number, width: number, heightFactor: number, heightStretch: number): THREE.BufferGeometry {
   const halfLen = length * 0.5;
@@ -125,14 +125,19 @@ function buildDorsalFinGeometry(length: number, width: number, heightFactor: num
   const frontBaseY = baseMidY + (frontBaseY0 - baseMidY) * 1.5;
   const rearBaseY = baseMidY + (rearBaseY0 - baseMidY) * 1.5;
   const baseLen = frontBaseY - rearBaseY;
-  // Top edge shorter than the base (corners inset along Y) → trapezoid.
-  const topInset = baseLen * 0.28;
+  // Natural profile: peak close to the leading edge, then a curved sweep back.
+  //   frontBase → rearBase  : bottom edge (along body surface)
+  //   rearBase  → rearTaper : short rear riser (≈18 % of finHeight)
+  //   rearTaper → midCurve  : long gentle slope up (≈62 % of finHeight)
+  //   midCurve  → peak      : final rise to the peak
+  //   peak      → frontBase : steep leading edge
   const frontBase = new THREE.Vector3(0, frontBaseY, baseZ);
-  const rearBase = new THREE.Vector3(0, rearBaseY, baseZ);
-  const rearTop = new THREE.Vector3(0, rearBaseY + topInset, baseZ + finHeight);
-  const frontTop = new THREE.Vector3(0, frontBaseY - topInset, baseZ + finHeight);
+  const rearBase  = new THREE.Vector3(0, rearBaseY,                      baseZ);
+  const rearTaper = new THREE.Vector3(0, rearBaseY  + baseLen * 0.20, baseZ + finHeight * 0.18);
+  const midCurve  = new THREE.Vector3(0, baseMidY   + baseLen * 0.08, baseZ + finHeight * 0.62);
+  const peak      = new THREE.Vector3(0, frontBaseY - baseLen * 0.12, baseZ + finHeight);
   const thickness = fishtankFinThickness(width);
-  return extrudeRingGeometryAlongX([frontBase, rearBase, rearTop, frontTop], thickness);
+  return extrudeRingGeometryAlongX([frontBase, rearBase, rearTaper, midCurve, peak], thickness);
 }
 
 /**
