@@ -229,6 +229,25 @@ export class Predator {
     let centerSum = V.create();
     let centerCount = 0;
 
+    // In 3D mode, if the predator is itself inside the boundary margin, also
+    // track the nearest boid that is NOT near any wall. When available, this
+    // open-water boid is preferred as the pursuit target over the nearest
+    // (possibly wall-pressed) boid. Without this, pursuit force (~250) easily
+    // overwhelms boundary push (~87.5), creating a stable co-pinning
+    // equilibrium: predator drives boid to a wall, then chases it there
+    // indefinitely, spending ~42% of frames in the boundary layer. Preferring
+    // an open-water target pulls the predator away from the wall naturally,
+    // reducing wall occupancy without changing any force magnitudes.
+    //
+    // Using this.cornerStuckTime > 0 (rather than a point-in-time nearWall
+    // check) gives hysteresis: the preference activates after the first frame
+    // of wall contact and stays active while cornerStuckTime decays (up to ~0.5s
+    // in the open-water decay regime), preventing the predator from immediately
+    // re-pursuing a wall-pressed boid after briefly exiting the margin.
+    const predatorNearWall = p.mode === '3d' && this.cornerStuckTime > 0;
+    let nearestOpenWater: Boid | null = null;
+    let nearestOpenWaterDistSq = p.predatorPerceptionRadius * p.predatorPerceptionRadius;
+
     for (const boid of boids) {
       const distSq = V.distanceSq(this.position, boid.position);
       if (distSq > p.predatorPerceptionRadius * p.predatorPerceptionRadius) continue;
@@ -240,14 +259,34 @@ export class Predator {
         nearestDistSq = distSq;
         nearest = boid;
       }
+
+      if (predatorNearWall && nearWallAxisCount(boid.position, bounds, p.boundaryMargin) === 0) {
+        if (distSq < nearestOpenWaterDistSq) {
+          nearestOpenWaterDistSq = distSq;
+          nearestOpenWater = boid;
+        }
+      }
     }
 
+    // Prefer an open-water boid as the pursuit target when the predator is
+    // itself near a wall; fall back to nearest boid when none is visible.
+    const targetBoid = predatorNearWall && nearestOpenWater !== null ? nearestOpenWater : nearest;
+
     let acceleration = V.create();
-    const target = nearest
-      ? nearest.position
-      : centerCount > 0
-        ? V.scale(centerSum, 1 / centerCount)
-        : null;
+    // When near a wall and no open-water boid is visible (all perceived boids
+    // are also wall-pressed), steer toward the world centre so the predator
+    // actively moves into open water rather than chasing deeper into the
+    // boundary layer.  In all other cases keep the usual nearest-boid or
+    // flock-centre fallback.  Strike logic at line 286 still uses `nearest`
+    // directly, so catch mechanics are unchanged.
+    const target =
+      predatorNearWall && nearestOpenWater === null && nearest !== null
+        ? V.create(bounds.width / 2, bounds.height / 2, bounds.depth / 2)
+        : targetBoid
+          ? targetBoid.position
+          : centerCount > 0
+            ? V.scale(centerSum, 1 / centerCount)
+            : null;
 
     // Strike commitment (#237): commit once the nearest prey is inside
     // strike range, then ramp down when it isn't. Gated on `nearest` rather
