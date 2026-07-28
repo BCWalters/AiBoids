@@ -146,7 +146,12 @@ describe('dragon tail smoothness (issue #262)', () => {
 
   const setup = () => {
     const geoms = createDragonGeometries(LENGTH, WIDTH);
-    tail = geoms.tail;
+    // `tail` is optional on CreatureGeometries (not every creature has one),
+    // so assert it before use rather than casting the undefined away — if the
+    // dragon ever stops producing a tail these tests should fail loudly here
+    // instead of silently skipping the smoothness check.
+    expect(geoms.tail, 'dragon must produce a tail geometry').toBeDefined();
+    tail = geoms.tail!;
     posAttr = tail.getAttribute('position') as THREE.BufferAttribute;
   };
 
