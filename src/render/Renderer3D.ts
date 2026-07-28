@@ -268,6 +268,10 @@ export class Renderer3D {
       // color-less geometry renders black.
       vertexColors: rainbowWings || !!geometries.wingLeft.getAttribute('color'),
     });
+    // Scene-specific shader patch for fin geometry (e.g. fishtank fin-ray
+    // pattern). Called before any InstancedMesh so that clones for wingRight
+    // and tailMaterial inherit the patch via onBeforeCompile copy.
+    sceneRenderer.patchWingMaterial?.(wingMaterial, geometries);
 
     // Clone first, then patch BOTH instances: Material.clone() drops
     // onBeforeCompile and customProgramCacheKey, so patching before the clone
