@@ -226,6 +226,8 @@ export class Predator {
     const p = params;
     let nearest: Boid | null = null;
     let nearestDistSq = p.predatorPerceptionRadius * p.predatorPerceptionRadius;
+    let nearestOpenWater: Boid | null = null;
+    let nearestOpenWaterDistSq = p.predatorPerceptionRadius * p.predatorPerceptionRadius;
     let centerSum = V.create();
     let centerCount = 0;
 
@@ -240,21 +242,47 @@ export class Predator {
         nearestDistSq = distSq;
         nearest = boid;
       }
+      if (
+        distSq < nearestOpenWaterDistSq &&
+        nearWallAxisCount(boid.position, bounds, p.boundaryMargin) === 0
+      ) {
+        nearestOpenWaterDistSq = distSq;
+        nearestOpenWater = boid;
+      }
     }
 
+    // Wall-pinning (#253): pursuit force comfortably outweighs the
+    // position-based wall push, so a predator that chases a boid into the
+    // boundary layer settles into a stable co-pinned equilibrium and stays
+    // there — measured at 42% of frames against a 16% prey control. Raising
+    // the centering force does not fix it (41% -> 59% -> 60%, via overshoot).
+    //
+    // The lever that does work is target *selection*: while the predator is
+    // itself in the boundary layer, ignore wall-pressed prey and hunt the
+    // nearest boid in open water instead; if there is none in view, break off
+    // toward the world centre rather than pressing further into the wall.
+    // Prey become huntable again the moment they leave the boundary layer, so
+    // this reads as "break off and reposition", not as losing interest.
+    const predatorNearWall =
+      p.mode === '3d' && nearWallAxisCount(this.position, bounds, p.boundaryMargin) > 0;
+    const pursued = predatorNearWall ? nearestOpenWater : nearest;
+    const pursuedDistSq = predatorNearWall ? nearestOpenWaterDistSq : nearestDistSq;
+
     let acceleration = V.create();
-    const target = nearest
-      ? nearest.position
-      : centerCount > 0
-        ? V.scale(centerSum, 1 / centerCount)
-        : null;
+    const target = pursued
+      ? pursued.position
+      : predatorNearWall
+        ? V.create(bounds.width / 2, bounds.height / 2, bounds.depth / 2)
+        : centerCount > 0
+          ? V.scale(centerSum, 1 / centerCount)
+          : null;
 
     // Strike commitment (#237): commit once the nearest prey is inside
     // strike range, then ramp down when it isn't. Gated on `nearest` rather
     // than `target` so a predator never sprints at a centre-of-mass point.
     this.strikeCooldown = Math.max(0, this.strikeCooldown - dt);
-    if (p.predatorStrikeEnabled && nearest && !this.digesting) {
-      const inRange = nearestDistSq <= p.predatorStrikeRange * p.predatorStrikeRange;
+    if (p.predatorStrikeEnabled && pursued && !this.digesting) {
+      const inRange = pursuedDistSq <= p.predatorStrikeRange * p.predatorStrikeRange;
       if (inRange && (this.strikeCommit > 0 || this.strikeCooldown <= 0)) {
         this.strikeCommit = Math.min(1, this.strikeCommit + dt / STRIKE_RAMP_SECONDS);
       } else {
