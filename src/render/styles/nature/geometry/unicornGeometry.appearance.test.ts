@@ -9,7 +9,7 @@ import {
 const LENGTH = 2;
 const WIDTH = 0.8;
 
-const geoms = () => createUnicornGeometries(LENGTH, WIDTH);
+const geoms = () => createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
 
 const posKey = (a: THREE.BufferAttribute, i: number) =>
   `${a.getX(i).toFixed(5)}|${a.getY(i).toFixed(5)}|${a.getZ(i).toFixed(5)}`;
@@ -152,29 +152,81 @@ describe('unicorn front legs attach inside the body', () => {
  *
  * Hooves are excluded: they are deliberately dark (0x3a3a3a).
  */
-describe('unicorn legs render in the body color', () => {
-  it('leg vertices use a neutral color multiplier', () => {
-    const legs = geoms().legs!;
-    let neutral = 0;
+/**
+ * Legs fade from the body color at the hip to white by the hoof.
+ *
+ * Vertex colors MULTIPLY the per-instance lavender, so "body color" means a
+ * neutral 1.0 multiplier and "white" means components above 1 — specifically
+ * the reciprocal of the species body color, which lifts green hardest (the
+ * lavender is weakest in green) and blue barely at all. Checking that green
+ * rises faster than red is what distinguishes walking toward WHITE from merely
+ * brightening the lavender.
+ */
+/**
+ * Leg colours are ABSOLUTE, not multipliers.
+ *
+ * applyLegChainColor() in src/render/color/legColorApplication.ts forces the
+ * per-instance colour of every leg part to white whenever the part geometry
+ * carries a `color` attribute. So unlike the body mesh — where vertex colours
+ * multiply the per-instance species tint and neutral is 1.0 — a leg vertex
+ * colour is exactly what gets drawn. That is why createUnicornGeometries has
+ * to be TOLD the body colour: it cannot inherit it at draw time.
+ *
+ * This test uses a deliberately lurid body colour rather than the shipped
+ * lavender, so that "the top of the leg is the body colour" is checked against
+ * a value that could not arise by accident from a neutral or a stray tint.
+ */
+describe('unicorn legs fade from body color at the hip to white at the hoof', () => {
+  const BODY = new THREE.Color(0.2, 0.4, 0.8);
+
+  it('starts at the body color at the hip and ramps to white at the hoof', () => {
+    const legs = createUnicornGeometries(LENGTH, WIDTH, BODY).legs!;
     let hoof = 0;
+    let top: { r: number; g: number; b: number; z: number } | null = null;
+    let bottom: { r: number; g: number; b: number; z: number } | null = null;
+
     for (const part of legs) {
-      const c = part.geometry.getAttribute('color') as THREE.BufferAttribute;
-      for (let i = 0; i < c.count; i++) {
-        const r = c.getX(i);
-        const g = c.getY(i);
-        const b = c.getZ(i);
-        if (r < 0.5 && g < 0.5 && b < 0.5) {
+      const pos = part.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const col = part.geometry.getAttribute('color') as THREE.BufferAttribute;
+      for (let i = 0; i < col.count; i++) {
+        const r = col.getX(i);
+        const g = col.getY(i);
+        const b = col.getZ(i);
+        // The hoof is a flat dark tint by design and sits outside the ramp.
+        if (r < 0.15 && g < 0.15 && b < 0.15) {
           hoof++;
           continue;
         }
-        expect(r).toBeCloseTo(1, 5);
-        expect(g).toBeCloseTo(1, 5);
-        expect(b).toBeCloseTo(1, 5);
-        neutral++;
+        const z = pos.getZ(i);
+        // Legs are built downward along -Z, so max Z is the hip end.
+        if (!top || z > top.z) top = { r, g, b, z };
+        if (!bottom || z < bottom.z) bottom = { r, g, b, z };
+        // Absolute colours: nothing on the leg may exceed white. An
+        // above-1 value here would mean the multiplier model had crept back.
+        expect(r).toBeLessThanOrEqual(1 + 1e-5);
+        expect(g).toBeLessThanOrEqual(1 + 1e-5);
+        expect(b).toBeLessThanOrEqual(1 + 1e-5);
       }
     }
-    expect(neutral, 'expected leg vertices').toBeGreaterThan(0);
+
     expect(hoof, 'expected dark hoof vertices to still exist').toBeGreaterThan(0);
+    expect(top, 'expected leg vertices').not.toBeNull();
+    expect(bottom, 'expected leg vertices').not.toBeNull();
+
+    // Top of the leg: the body colour itself, so the leg reads as continuous
+    // with the haunch it hangs from.
+    expect(top!.r).toBeCloseTo(BODY.r, 2);
+    expect(top!.g).toBeCloseTo(BODY.g, 2);
+    expect(top!.b).toBeCloseTo(BODY.b, 2);
+
+    // Bottom of the leg: a white sock. Every channel has risen toward 1, and
+    // the channel that started lowest has climbed the furthest.
+    expect(bottom!.r).toBeGreaterThan(top!.r);
+    expect(bottom!.g).toBeGreaterThan(top!.g);
+    expect(bottom!.b).toBeGreaterThan(top!.b);
+    expect(bottom!.r).toBeGreaterThan(0.9);
+    expect(bottom!.g).toBeGreaterThan(0.9);
+    expect(bottom!.b).toBeGreaterThan(0.9);
   });
 });
 

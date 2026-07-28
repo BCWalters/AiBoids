@@ -24,7 +24,7 @@ const MOVING_HALF_WIDTH = LEG_HALF_WIDTH * 0.85;
 const MOVING_HALF_DEPTH = LEG_HALF_DEPTH * 0.85;
 
 function movingCapVertices() {
-  const geometries = createUnicornGeometries(LENGTH, WIDTH);
+  const geometries = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
   const lower = geometries.legs?.find((part) => part.role === 'legLowerFront');
   if (!lower?.pivot) throw new Error('expected a legLowerFront part with a declared pivot');
   const pivot = new THREE.Vector3(...lower.pivot);
@@ -79,7 +79,7 @@ describe('joint cover sizing', () => {
   });
 
   it('sits on the hinge axis, so the joint it covers cannot make it wobble', () => {
-    const geometries = createUnicornGeometries(LENGTH, WIDTH);
+    const geometries = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const upper = geometries.legs?.find((part) => part.role === 'legUpperFront');
     const lower = geometries.legs?.find((part) => part.role === 'legLowerFront');
     if (!lower?.pivot) throw new Error('expected a legLowerFront pivot');

@@ -111,24 +111,39 @@ function addRainbowVertexColorsByDistance(
  * rainbow vertex-color gradient — see addRainbowVertexColors) and a
  * flowing fanned tail.
  */
-export function createUnicornGeometries(length: number, width: number): CreatureGeometries {
+/**
+ * @param bodyColor The species body colour, used for the top of the legs.
+ *   Leg vertex colours are absolute rather than multipliers — see
+ *   UNICORN_LEG_SOCK_COLOR — so the geometry has to be told the tint outright
+ *   instead of relying on the per-instance colour to supply it.
+ */
+export function createUnicornGeometries(
+  length: number,
+  width: number,
+  bodyColor: THREE.Color,
+): CreatureGeometries {
   const body = buildUnicornBodyGeometry(length, width);
 
   const wingSpan = length * 1.3;
   const wingChord = length * 0.6;
   const wingLeft = addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, 1), wingSpan);
   const wingRight = addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, -1), wingSpan);
-  // Shift the wing root back off the shoulder/chest (where the shared
-  // wing-geometry builder attaches it by default, y=0 — fine for a
-  // dragon, but reads as too dragon-like here) by a quarter of the
-  // torso's length, so the wings sit further back over the barrel
-  // instead of right at the very front.
-  const wingBackOffset = length * 0.25;
-  wingLeft.translate(0, -wingBackOffset, 0);
-  wingRight.translate(0, -wingBackOffset, 0);
+  // Seat the wing root midway between the two hips, per direct feedback that
+  // the wings sat too far back — they now come off the barrel roughly halfway
+  // between the front and rear legs, where a winged horse's shoulder would be,
+  // rather than back over the haunch.
+  //
+  // Derived from the hip positions rather than as its own tuned fraction of
+  // body length (it was length*0.25), so moving a leg moves the wings with it.
+  // The shared wing-geometry builder attaches the root at y = 0 by default —
+  // fine for a dragon, but that reads as too dragon-like here.
+  const { frontY, backY } = unicornHipYs(length, width);
+  const wingRootY = (frontY + backY) / 2;
+  wingLeft.translate(0, wingRootY, 0);
+  wingRight.translate(0, wingRootY, 0);
 
   const tail = buildUnicornTailGeometry(length, width);
-  const legs = buildUnicornLegParts(length, width);
+  const legs = buildUnicornLegParts(length, width, bodyColor);
 
   return { body, wingLeft, wingRight, tail, legs };
 }
@@ -150,22 +165,33 @@ export function createUnicornGeometries(length: number, width: number): Creature
  * unicornHairShader.ts.
  */
 function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGeometry {
-  const { geometry: bodyGeometry, pollY, pollZ, pollRadius, headTop } = buildHorseBodyProfileGeometry(length, width);
+  const { geometry: bodyGeometry, pollY, pollZ, pollRadius, headTop, flankXAt, spineZAt } =
+    buildHorseBodyProfileGeometry(length, width);
   const hornGeometry = buildUnicornHornGeometry(pollY, pollZ, pollRadius);
   const earsGeometry = buildUnicornEarsGeometry(pollY, pollZ, pollRadius);
-  const eyesGeometry = buildUnicornEyesGeometry(headTop.y, headTop.z, headTop.radius);
-  const maneGeometry = buildUnicornManeGeometry(length, width, bodyGeometry);
+  const { whites: eyeWhitesGeometry, pupils: eyePupilsGeometry, lids: eyeLidsGeometry } =
+    buildUnicornEyeGeometries(headTop.y, headTop.radius, flankXAt, spineZAt);
+  const nostrilsGeometry = buildUnicornNostrilsGeometry(length * 0.5, width, flankXAt, spineZAt);
+  const maneGeometry = buildUnicornManeGeometry(length, width, bodyGeometry, pollY, pollRadius);
+  // The mane MUST stay last: the hair mask below identifies its vertices by
+  // their position at the tail of the merged buffer.
   const merged = mergeGeometriesWithColor([
     { geometry: bodyGeometry, color: new THREE.Color(0xffffff) },
     { geometry: hornGeometry, color: UNICORN_HORN_COLOR },
     { geometry: earsGeometry, color: new THREE.Color(0xffffff) },
-    { geometry: eyesGeometry, color: UNICORN_EYE_COLOR },
+    { geometry: eyeWhitesGeometry, color: UNICORN_WHITEN_TINT },
+    { geometry: eyePupilsGeometry, color: UNICORN_EYE_COLOR },
+    { geometry: eyeLidsGeometry, color: UNICORN_EYELID_COLOR },
+    { geometry: nostrilsGeometry, color: UNICORN_NOSTRIL_COLOR },
     { geometry: maneGeometry, color: UNICORN_MANE_COLOR },
   ]);
   bodyGeometry.dispose();
   hornGeometry.dispose();
   earsGeometry.dispose();
-  eyesGeometry.dispose();
+  eyeWhitesGeometry.dispose();
+  eyePupilsGeometry.dispose();
+  eyeLidsGeometry.dispose();
+  nostrilsGeometry.dispose();
   // Tag which vertices belong to the mane so the hair shader can apply the
   // strand pattern to the mane ONLY. Without this the pattern covers the whole
   // creature and the body reads as corduroy rather than as a horse with a mane.
@@ -185,13 +211,46 @@ function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGe
 // Gold, to make the horn stand out clearly against the lavender body
 // rather than blending in as just another body-colored bump.
 const UNICORN_HORN_COLOR = new THREE.Color(0xffd54a);
-// Legs carry a neutral multiplier so they render in exactly the per-instance
-// body color. They used to be tinted a lighter lavender (0xd8cef0) to
-// "harmonise" with the body, but a near-match reads as a mismatch: the legs
-// looked like separate paler parts stuck onto the horse. Hooves stay dark
-// gray so they still read as a distinct hoof.
-const UNICORN_LEG_COLOR = new THREE.Color(0xffffff);
+// Horn base radius as a fraction of the poll radius. Narrowed by half per
+// direct feedback: once the horn was moved forward onto the brow, the wider
+// base broke back out through the skull surface instead of staying buried in
+// it. Shared with the mane, which has to know the horn's footprint in order
+// to part around it rather than swallow it.
+//
+// Everything at the poll is sized relative to pollRadius, so thickening the
+// neck would have silently scaled the horn up by another ~21% on top of the
+// bump the user had just asked for. This fraction and the length below are
+// divided by the same factor the poll radius grew by, which keeps the horn's
+// ABSOLUTE size exactly where it was tuned.
+const UNICORN_HORN_RADIUS_FRAC = 0.2235;
+// How far forward of the poll the horn's base sits, as a fraction of the poll
+// radius. Pulled back slightly from 0.62 for the same reason as the narrowing:
+// further forward the skull has sloped away and the base emerges. Shared with
+// the mane, since if the horn moves and the parting does not, the crest closes
+// over it again.
+const UNICORN_HORN_FORWARD_FRAC = 0.45;
+// Legs are the one part whose vertex colours are ABSOLUTE rather than
+// multipliers. applyLegChainColor (see legColorApplication.ts) forces the
+// per-instance colour of every leg part to white whenever the geometry carries
+// a colour attribute, so that a creature's baked leg palette shows through
+// unchanged. Everything else merged into the BODY mesh keeps the multiply
+// behaviour, because the body's instance colour is the species tint.
+//
+// This was previously misread as a multiply: the legs carried 0xffffff and a
+// comment claiming they would "render in exactly the per-instance body color",
+// when in fact white x white renders a plain white leg.
+//
+// So the top of the leg has to name the body colour outright. It must track
+// NATURE_UNICORN_BODY in NatureSceneRenderer3D; the renderer passes it in
+// rather than this file guessing, so the two cannot drift apart.
 const UNICORN_HOOF_COLOR = new THREE.Color(0x3a3a3a);
+// The bottom of the leg, and genuinely white — see above, no reciprocal trick
+// is needed here because nothing multiplies it.
+const UNICORN_LEG_SOCK_COLOR = new THREE.Color(0xffffff);
+// Number of sides on a leg segment's cross-section. A horse's leg is a round
+// column; the previous 4-sided box section kept hard 90-degree corners down
+// its whole length no matter how it was shaded.
+const UNICORN_LEG_SIDES = 12;
 // Leg cross-section, as fractions of body width. Module-level rather than
 // local so the front-leg placement below can be expressed in terms of the
 // leg's own front-to-back depth instead of a magic number that would drift
@@ -202,10 +261,54 @@ const UNICORN_HOOF_COLOR = new THREE.Color(0x3a3a3a);
 // changed.
 export const UNICORN_TAIL_SIDES = 10;
 export const UNICORN_TAIL_SEGMENTS = 7; // 6 internal joints between root and tip
-const UNICORN_LEG_HALF_WIDTH_FRAC = 0.09;
-const UNICORN_LEG_HALF_DEPTH_FRAC = 0.07;
+// Leg cross-section, as fractions of body width — thinned by 25% per direct
+// feedback. The knee barrel is derived from these rather than tuned on its
+// own, so it follows the legs down automatically and cannot end up looking
+// like a swollen joint on a slimmer limb.
+const UNICORN_LEG_HALF_WIDTH_FRAC = 0.0675;
+const UNICORN_LEG_HALF_DEPTH_FRAC = 0.0525;
+
+/**
+ * Where the two hip sockets sit along the body's forward axis.
+ *
+ * Shared by the leg rig and the wing placement so the wings can be seated
+ * relative to the legs rather than at an independently-tuned offset that would
+ * silently drift out of step the next time a hip moves.
+ */
+function unicornHipYs(length: number, width: number): { frontY: number; backY: number } {
+  // Front hips pulled back by one full leg depth. At length*0.02 the shoulder
+  // sat forward of the chest's own front surface, so the top of each front leg
+  // stood outside the body and only the thin joint barrel bridged the gap —
+  // the legs read as hanging off the chest by a thread. Backing off by the
+  // leg's own front-to-back depth (2 x half-depth) seats the hip socket inside
+  // the chest bulge, the same reasoning that fixed the rear legs below.
+  const frontLegDepth = width * UNICORN_LEG_HALF_DEPTH_FRAC * 2;
+  // Rear hip Y was -length*0.42 — *behind* the body's own rear-most spine
+  // point (the tail root sits at -halfLen*0.8 = -length*0.4, see
+  // buildHorseBodyProfileGeometry), so the back legs floated in empty space
+  // past the rump instead of actually attaching to the haunch — read as
+  // "detached" legs. Moved forward into the hindquarter bulge (spine's
+  // hindquarter ring sits at -halfLen*0.62 = -length*0.31, radius width*0.32 —
+  // the widest part of the rear body) so the hip socket sits inside/at the
+  // body surface.
+  return { frontY: length * 0.02 - frontLegDepth, backY: -length * 0.3 };
+}
 // Near-black "dark dot" eyes.
 const UNICORN_EYE_COLOR = new THREE.Color(0x101014);
+// Vertex colours MULTIPLY the per-instance body tint, so a neutral 0xffffff
+// reproduces the body colour exactly and there is no constant that means
+// "white" on its own. Reaching white takes the reciprocal of the species
+// body colour (NATURE_UNICORN_BODY, 0xc9a8f0 = 0.788/0.659/0.941), which is
+// what this is — the same above-1 trick UNICORN_TOP_TINT uses to lighten the
+// topline. Used for the whites of the eyes and for the bottom of the legs.
+const UNICORN_WHITEN_TINT = new THREE.Color(1.269, 1.518, 1.063);
+// Dark, slightly purple — reads as an opening in the muzzle rather than a
+// black sticker, once multiplied against the lavender body tint.
+const UNICORN_NOSTRIL_COLOR = new THREE.Color(0.22, 0.14, 0.26);
+// Eyelids: a gentle darkening of whatever colour the unicorn is, so the lid
+// reads as skin in shadow rather than as a drawn-on line. Subtle on purpose —
+// its job is to hide the eye plates' rims, not to be noticed itself.
+const UNICORN_EYELID_COLOR = new THREE.Color(0.78, 0.74, 0.84);
 // Vertex colours here MULTIPLY the per-instance species tint, so a neutral
 // value below 1 darkens the mane to a deeper shade of whatever colour that
 // unicorn is, rather than forcing one fixed hue. Merged into the body
@@ -307,6 +410,10 @@ function buildHorseBodyProfileGeometry(
   pollRadius: number;
   headTop: { y: number; z: number; radius: number };
   muzzleTip: { y: number; z: number; radius: number };
+  /** Half-width of the body surface at a point on its flank — see below. */
+  flankXAt: (y: number, z: number) => number;
+  /** Centreline height of the swept cross-section at a given y. */
+  spineZAt: (y: number) => number;
 } {
   const halfLen = length * 0.5;
   const spine: SpinePoint[] = [
@@ -318,13 +425,19 @@ function buildHorseBodyProfileGeometry(
     { y: -halfLen * 0.62, z: length * 0.01, radius: width * 0.32 }, // hindquarter
     { y: -halfLen * 0.29, z: length * 0.02, radius: width * 0.4 }, // barrel (widest point)
     { y: -halfLen * 0.01, z: length * 0.02, radius: width * 0.34 }, // chest/shoulder
-    { y: halfLen * 0.08, z: length * 0.1, radius: width * 0.22 }, // withers — neck starts rising
+    { y: halfLen * 0.08, z: length * 0.1, radius: width * 0.275 }, // withers — neck starts rising
     // Neck (withers -> poll) shortened to ~2/3 of its previous length —
     // per direct feedback the neck read as too long. Scaled toward the
     // withers point rather than re-deriving from scratch.
-    { y: halfLen * 0.147, z: length * 0.193, radius: width * 0.17 }, // neck, lower-mid
-    { y: halfLen * 0.207, z: length * 0.287, radius: width * 0.13 }, // neck, upper-mid
-    { y: halfLen * 0.247, z: length * 0.353, radius: width * 0.12 }, // poll — peak of the neck, horn sits here
+    //
+    // Radii through the neck were then thickened ~30% per direct feedback
+    // ("the neck should be thicker somehow"): against the widened barrel the
+    // neck had come to read as a stalk. The taper from withers to poll is
+    // preserved, so it still narrows toward the head rather than becoming a
+    // uniform tube.
+    { y: halfLen * 0.147, z: length * 0.193, radius: width * 0.225 }, // neck, lower-mid
+    { y: halfLen * 0.207, z: length * 0.287, radius: width * 0.175 }, // neck, upper-mid
+    { y: halfLen * 0.247, z: length * 0.353, radius: width * 0.145 }, // poll — peak of the neck, horn sits here
     // Head (poll -> muzzle) keeps its original shape/proportions,
     // just re-anchored to the new, closer-in poll position above.
     // Head shortened (poll -> muzzle distance scaled toward the poll)
@@ -475,6 +588,32 @@ function buildHorseBodyProfileGeometry(
     );
   }
 
+  // Cap the rump end too. The sweep above emits side walls only, and until
+  // now the muzzle tip was the sole capped ring — which left spine[0] as an
+  // open circular hole at the back of the horse. It went unnoticed because
+  // the tail's old, much thicker base was planted directly over it; slimming
+  // the tail and seating it forward inside the haunch exposed the gap.
+  //
+  // Wound against a reference point ahead of it (spine[1]) so pushOutwardTri
+  // resolves the cap's outward direction as backward (−Y), the mirror of the
+  // muzzle cap's forward-facing fan.
+  const rumpRing = rings[0];
+  const rumpRingColor = ringVertexColors[0];
+  const rumpCapAhead = new THREE.Vector3(0, spine[1].y, spine[1].z);
+  const rumpCenter = new THREE.Vector3(0, spine[0].y, spine[0].z);
+  for (let j = 0; j < segments; j++) {
+    const k = (j + 1) % segments;
+    pushOutwardTri(
+      rumpCenter,
+      gradedColorAt(ringColors[0], rumpCenter, spine[0]),
+      rumpRing[j],
+      rumpRingColor[j],
+      rumpRing[k],
+      rumpRingColor[k],
+      rumpCapAhead,
+    );
+  }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
@@ -488,6 +627,53 @@ function buildHorseBodyProfileGeometry(
   const poll = spine[7];
   const headTopPoint = spine[8];
   const muzzleTipPoint = spine[spine.length - 1];
+
+  /**
+   * Locates the pair of spine rings bracketing `y` and returns the blended
+   * cross-section there. Spine y is strictly increasing from rump to muzzle,
+   * so a simple forward scan is enough.
+   */
+  const sectionAt = (y: number) => {
+    let i = 0;
+    while (i < spine.length - 2 && spine[i + 1].y < y) i++;
+    const a = spine[i];
+    const b = spine[i + 1];
+    const t = THREE.MathUtils.clamp((y - a.y) / (b.y - a.y), 0, 1);
+    return {
+      centerZ: THREE.MathUtils.lerp(a.z, b.z, t),
+      radius: THREE.MathUtils.lerp(a.radius, b.radius, t),
+      zScale: THREE.MathUtils.lerp(a.zScale ?? 1, b.zScale ?? 1, t),
+    };
+  };
+
+  const spineZAt = (y: number) => sectionAt(y).centerZ;
+
+  /**
+   * Half-width of the body surface at flank point (y, z) — the analytic
+   * inverse of crossSectionOffset.
+   *
+   * Needed to seat features that must lie ON the skin (eyes, nostrils). A
+   * flat plate placed at a single measured offset is clipped by the very
+   * surface it sits on: the centre stands proud while the rim sinks inside,
+   * so what shows is a lens or crescent rather than the intended shape. This
+   * is the same failure the fishtank hit; see buildFlankEyeDiscsGeometry.
+   *
+   * crossSectionOffset maps an angle to (x, z) as
+   *   x = radiusX * sign(c) * |c|^(1/2),  z = radiusZ * sign(s) * |s|^(1/2)
+   * with squareness 4. Inverting the z branch gives |s| = (|dz|/radiusZ)^2,
+   * and c follows from c^2 + s^2 = 1 — so the surface half-width at that
+   * height is radiusX * sqrt(|c|), with no iteration required.
+   */
+  const flankXAt = (y: number, z: number): number => {
+    const { centerZ, radius, zScale } = sectionAt(y);
+    const radiusX = radius * 0.85;
+    const radiusZ = radius * 1.05 * zScale;
+    if (radiusZ < 1e-6) return 0;
+    const sAbs = Math.min(1, Math.abs(z - centerZ) / radiusZ) ** 2;
+    const cAbs = Math.sqrt(Math.max(0, 1 - sAbs * sAbs));
+    return radiusX * Math.sqrt(cAbs);
+  };
+
   return {
     geometry,
     pollY: poll.y,
@@ -495,28 +681,282 @@ function buildHorseBodyProfileGeometry(
     pollRadius: poll.radius,
     headTop: { y: headTopPoint.y, z: headTopPoint.z, radius: headTopPoint.radius },
     muzzleTip: { y: muzzleTipPoint.y, z: muzzleTipPoint.z, radius: muzzleTipPoint.radius },
+    flankXAt,
+    spineZAt,
   };
 }
 
 
 /**
- * Two small dark "dot" eyes, placed on either side of the head near the
- * poll/head-top junction (roughly where a real horse's eyes sit — at
- * the base of the head, not out on the muzzle) and merged into the body
- * geometry via mergeGeometriesWithColor. Uses the same outward-normal-
- * safe approach as the rest of the body (a sphere's normals are already
- * correct outward from its own center, so no extra winding fix-up is
- * needed here).
+ * A mirrored pair of thin discs that FOLLOW the body's flank instead of
+ * cutting through it, used for both the eyes and the nostrils.
+ *
+ * Every point of the disc is placed at that point's OWN surface position
+ * (via `flankXAt`) plus a constant `offset`, so the disc is a shell parallel
+ * to the skin. It cannot be clipped anywhere, at any curvature, because it is
+ * nowhere inside the body — which is the whole reason the previous sphere
+ * eyes read badly. A sunk sphere only ever shows a cap of height
+ * sqrt(R² − d²), so its apparent size is much smaller than its radius; a
+ * conforming disc shows all of R. Radii here are therefore tuned smaller than
+ * the sphere radii they replace, not carried across unchanged.
+ *
+ * Built as a closed thin plate (outer fan, inner fan, rim band) so it is
+ * watertight and reads correctly regardless of material side. Elliptical
+ * (separate radiusY/radiusZ) so nostrils can be taller than they are long.
+ *
+ * Position-only — callers merge it with the colour they want.
  */
-function buildUnicornEyesGeometry(headTopY: number, headTopZ: number, headTopRadius: number): THREE.BufferGeometry {
-  const eyeRadius = headTopRadius * 0.22;
-  const sideOffset = headTopRadius * 0.8;
-  const upOffset = headTopRadius * 0.15;
-  const leftEye = new THREE.SphereGeometry(eyeRadius, 8, 6);
-  leftEye.translate(-sideOffset, headTopY, headTopZ + upOffset);
-  const rightEye = new THREE.SphereGeometry(eyeRadius, 8, 6);
-  rightEye.translate(sideOffset, headTopY, headTopZ + upOffset);
-  return mergePositionOnlyGeometries([leftEye, rightEye]);
+function buildConformingDiscPair({
+  y,
+  z,
+  radiusY,
+  radiusZ,
+  flankXAt,
+  offset,
+  thickness,
+  segments = 16,
+}: {
+  y: number;
+  z: number;
+  radiusY: number;
+  radiusZ: number;
+  flankXAt: (y: number, z: number) => number;
+  offset: number;
+  thickness: number;
+  segments?: number;
+}): THREE.BufferGeometry {
+  const build = (side: 1 | -1): THREE.BufferGeometry => {
+    const positions: number[] = [];
+    const outer = (px: number) => side * px;
+
+    const centreOut = flankXAt(y, z) + offset;
+    const centreIn = centreOut - thickness;
+
+    const rim: { y: number; z: number; out: number; in: number }[] = [];
+    for (let i = 0; i < segments; i++) {
+      const a = (i / segments) * Math.PI * 2;
+      const py = y + radiusY * Math.cos(a);
+      const pz = z + radiusZ * Math.sin(a);
+      const f = flankXAt(py, pz) + offset;
+      rim.push({ y: py, z: pz, out: f, in: f - thickness });
+    }
+
+    const tri = (
+      ax: number, ay: number, az: number,
+      bx: number, by: number, bz: number,
+      cx: number, cy: number, cz: number,
+    ) => {
+      // Winding is authored for the +X side; mirroring across X reverses
+      // handedness, so the −X copy swaps two corners to keep faces outward.
+      if (side === 1) positions.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+      else positions.push(ax, ay, az, cx, cy, cz, bx, by, bz);
+    };
+
+    for (let i = 0; i < segments; i++) {
+      const p = rim[i];
+      const q = rim[(i + 1) % segments];
+      tri(outer(centreOut), y, z, outer(p.out), p.y, p.z, outer(q.out), q.y, q.z);
+      tri(outer(centreIn), y, z, outer(q.in), q.y, q.z, outer(p.in), p.y, p.z);
+      tri(outer(p.out), p.y, p.z, outer(p.in), p.y, p.z, outer(q.out), q.y, q.z);
+      tri(outer(q.out), q.y, q.z, outer(p.in), p.y, p.z, outer(q.in), q.y, q.z);
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    // Crease-aware averaging, not computeVertexNormals(). The disc follows the
+    // head's curvature, so its face is a genuinely curved shell and wants to
+    // shade as one; a flat normal per triangle makes a 20-segment disc read as
+    // a faceted washer. The rim meets the faces at 90 degrees, well past the
+    // crease angle, so the disc still has a crisp edge.
+    smoothNormalsByPosition(g);
+    return g;
+  };
+
+  return mergePositionOnlyGeometries([build(1), build(-1)]);
+}
+
+
+/**
+ * A pair of conforming eyelid sheets — a top and a bottom arc of an annulus
+ * laid over the outer edge of the eye, following the head's curvature like
+ * everything else here.
+ *
+ * These exist to kill the "sticker" read. Stacked plates each show their own
+ * rim, and those two concentric ledges standing off the skin are what made the
+ * eye look applied to the head rather than set into it. A lid laid across the
+ * eye's outer edge hides the rim under something that is itself part of the
+ * face, so what's left visible is an eye shape in a socket.
+ *
+ * Left and right arcs are deliberately NOT covered: leaving the corners open
+ * is what reads as a pair of lids rather than as a ring or a pair of goggles.
+ *
+ * Single-sided sheets rather than closed plates — they sit flat on an opaque
+ * head, so a back face and a rim would add nothing to look at while adding two
+ * more creased edges of exactly the kind being hidden.
+ */
+function buildConformingLidPair({
+  y,
+  z,
+  innerRadius,
+  outerRadius,
+  flankXAt,
+  offset,
+  segments = 12,
+}: {
+  y: number;
+  z: number;
+  innerRadius: number;
+  outerRadius: number;
+  flankXAt: (y: number, z: number) => number;
+  offset: number;
+  segments?: number;
+}): THREE.BufferGeometry {
+  // Measured from +Y, so these cover the top and the bottom of the eye and
+  // leave a gap at each corner.
+  const arcs: [number, number][] = [
+    [Math.PI * 0.11, Math.PI * 0.89],
+    [Math.PI * 1.11, Math.PI * 1.89],
+  ];
+
+  const build = (side: 1 | -1): THREE.BufferGeometry => {
+    const positions: number[] = [];
+    const at = (radius: number, angle: number) => {
+      const py = y + radius * Math.cos(angle);
+      const pz = z + radius * Math.sin(angle);
+      return { x: side * (flankXAt(py, pz) + offset), y: py, z: pz };
+    };
+    type P = { x: number; y: number; z: number };
+    const tri = (a: P, b: P, c: P) => {
+      // Authored for the +X side; mirroring across X reverses handedness, so
+      // the −X copy swaps two corners to keep faces outward.
+      if (side === 1) positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+      else positions.push(a.x, a.y, a.z, c.x, c.y, c.z, b.x, b.y, b.z);
+    };
+
+    for (const [from, to] of arcs) {
+      for (let i = 0; i < segments; i++) {
+        const a0 = from + ((to - from) * i) / segments;
+        const a1 = from + ((to - from) * (i + 1)) / segments;
+        const i0 = at(innerRadius, a0);
+        const i1 = at(innerRadius, a1);
+        const o0 = at(outerRadius, a0);
+        const o1 = at(outerRadius, a1);
+        tri(i0, o0, o1);
+        tri(i0, o1, i1);
+      }
+    }
+
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+    smoothNormalsByPosition(g);
+    return g;
+  };
+
+  return mergePositionOnlyGeometries([build(1), build(-1)]);
+}
+
+
+/**
+ * Eyes as an iris disc with a pupil on it and a lid over the edge of both,
+ * all conforming to the head's surface — replacing the pair of dark spheres
+ * that used to be half-buried in the skull.
+ *
+ * Returned as separate geometries rather than one because they carry
+ * different colours and mergeGeometriesWithColor tints per geometry.
+ */
+function buildUnicornEyeGeometries(
+  headTopY: number,
+  headTopRadius: number,
+  flankXAt: (y: number, z: number) => number,
+  spineZAt: (y: number) => number,
+): { whites: THREE.BufferGeometry; pupils: THREE.BufferGeometry; lids: THREE.BufferGeometry } {
+  // Nudged forward of the head-top ring, onto the cheek, and sitting just
+  // above the cross-section's centreline — where a horse's eye actually sits.
+  // Forward also means better oriented: the head is narrowing by here, so the
+  // conforming shell tilts with the surface and the eye catches a forward
+  // component instead of staring straight out to the side.
+  const eyeY = headTopY + headTopRadius * 0.34;
+  const eyeZ = spineZAt(eyeY) + headTopRadius * 0.15;
+  // Iris trimmed 25% and pupil 50% from the first pass, per direct feedback.
+  // The pupil is now a third of the iris rather than a half, which is what
+  // taking 50% off the pupil while taking only 25% off the iris works out to.
+  const whiteRadius = headTopRadius * 0.15;
+  const pupilRadius = whiteRadius / 3;
+
+  // The whole stack is kept as flat against the skull as it can be while
+  // still resolving depth. The pupil used to sit a full plate-thickness proud
+  // of the iris, which put its face 0.06 of the head radius off the skin —
+  // about 40% of the iris's own radius — and that ledge is what made the eye
+  // bulge. It now clears the iris by a quarter of a thickness: enough to stay
+  // in front, far too little to cast a visible step.
+  const thickness = headTopRadius * 0.03;
+  const whiteOffset = headTopRadius * 0.012;
+  const pupilOffset = whiteOffset + thickness * 0.25;
+
+  const whites = buildConformingDiscPair({
+    y: eyeY,
+    z: eyeZ,
+    radiusY: whiteRadius,
+    radiusZ: whiteRadius,
+    flankXAt,
+    offset: whiteOffset,
+    thickness,
+  });
+  const pupils = buildConformingDiscPair({
+    y: eyeY,
+    z: eyeZ,
+    radiusY: pupilRadius,
+    radiusZ: pupilRadius,
+    flankXAt,
+    offset: pupilOffset,
+    thickness,
+  });
+  const lids = buildConformingLidPair({
+    y: eyeY,
+    z: eyeZ,
+    // Overlaps the iris rim from just inside it to just outside it, so the
+    // plate edge is buried under the lid rather than standing on the cheek.
+    innerRadius: whiteRadius * 0.84,
+    outerRadius: whiteRadius * 1.22,
+    flankXAt,
+    offset: pupilOffset + thickness * 0.15,
+  });
+  return { whites, pupils, lids };
+}
+
+
+/**
+ * A pair of dark nostrils on the muzzle, conforming to its surface the same
+ * way the eyes do. Taller than they are long, matching the vertical slit of a
+ * real horse's nostril, and placed on the lower flank of the muzzle just
+ * behind the nose front.
+ */
+function buildUnicornNostrilsGeometry(
+  halfLen: number,
+  width: number,
+  flankXAt: (y: number, z: number) => number,
+  spineZAt: (y: number) => number,
+): THREE.BufferGeometry {
+  // Well forward, near the nose front rather than back on the side of the
+  // muzzle, per direct feedback that they sat too far out to the sides.
+  //
+  // Position does double duty here. The disc is a shell offset along ±X, so
+  // its facing is set by how the surface runs beneath it: back along the
+  // straight part of the muzzle the flank is near-parallel to the body axis
+  // and the nostril can only face sideways, whereas up here the muzzle is
+  // narrowing sharply toward its tip, so the shell tilts with it and the
+  // nostril reads as facing forward-and-out.
+  const nostrilY = halfLen * 0.474;
+  const nostrilZ = spineZAt(nostrilY) + width * 0.03;
+  return buildConformingDiscPair({
+    y: nostrilY,
+    z: nostrilZ,
+    radiusY: width * 0.017,
+    radiusZ: width * 0.038,
+    flankXAt,
+    offset: width * 0.002,
+    thickness: width * 0.005,
+  });
 }
 
 
@@ -547,7 +987,7 @@ function buildUnicornEyesGeometry(headTopY: number, headTopZ: number, headTopRad
  * Four parts rather than eight because left and right legs of a pair differ
  * only in X, and the swing axis *is* X — so a single pivot line serves both.
  */
-function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] {
+function buildUnicornLegParts(length: number, width: number, bodyColor: THREE.Color): CreatureLegPart[] {
   // One buffer per rig part rather than one merged buffer for all four legs.
   // A part can only rotate as a unit, so a segment that needs to bend
   // independently needs its own vertices.
@@ -558,33 +998,69 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
   const rearUpper = newBuffer();
   const rearLower = newBuffer();
   let sink: Buffer = frontUpper;
-  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, color: THREE.Color) => {
-    sink.positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-    sink.colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
+  const pushVertex = (p: THREE.Vector3, color: THREE.Color) => {
+    sink.positions.push(p.x, p.y, p.z);
+    sink.colors.push(color.r, color.g, color.b);
   };
+  // Colour is resolved per vertex rather than per segment so a segment can
+  // carry a gradient along its length (see legColorAt). `flatColor` keeps the
+  // uniform case — the hoof — a one-word change at the call site.
+  type ColorAt = (p: THREE.Vector3) => THREE.Color;
+  const flatColor = (color: THREE.Color): ColorAt => () => color;
+  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, colorAt: ColorAt) => {
+    pushVertex(a, colorAt(a));
+    pushVertex(b, colorAt(b));
+    pushVertex(c, colorAt(c));
+  };
+  const smoothstep01 = (t: number) => t * t * (3 - 2 * t);
 
   // Outward-normal-safe box segment between two points, with a
   // rectangular (legWidth x legDepth) cross-section — a real 3D volume
   // with thickness along both the left-right (X) and front-back (Y)
   // axes, unlike a flat single-axis-offset ribbon.
-  function pushBoxSegment(
+  // Round-section limb segment between two points.
+  //
+  // This replaced a 4-sided box section, which kept hard 90-degree corners
+  // running the full length of every leg — no amount of normal smoothing can
+  // round a shape that genuinely has four flat sides, and it read as a table
+  // leg rather than a horse's. The cross-section stays elliptical rather than
+  // circular (halfX across, halfY fore-aft) because a real cannon bone is
+  // deeper than it is wide.
+  //
+  // The ring basis is exact rather than arbitrary: every leg segment lies in
+  // the Y-Z plane, so model X is always perpendicular to the segment axis and
+  // can seed the frame directly with no chance of degenerating.
+  function pushTubeSegment(
     a: THREE.Vector3,
     b: THREE.Vector3,
     halfX: number,
     halfY: number,
     capStart: boolean,
     capEnd: boolean,
-    color: THREE.Color,
+    colorAt: ColorAt,
   ) {
-    const corner = (p: THREE.Vector3, sx: number, sy: number) => new THREE.Vector3(p.x + sx * halfX, p.y + sy * halfY, p.z);
-    const signs: [number, number][] = [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ];
-    const ca = signs.map(([sx, sy]) => corner(a, sx, sy));
-    const cb = signs.map(([sx, sy]) => corner(b, sx, sy));
+    const axis = new THREE.Vector3().subVectors(b, a);
+    if (axis.lengthSq() < 1e-12) return;
+    axis.normalize();
+    const across = new THREE.Vector3(1, 0, 0);
+    const along = new THREE.Vector3().crossVectors(axis, across).normalize();
+
+    const ringAt = (p: THREE.Vector3) => {
+      const ring: THREE.Vector3[] = [];
+      for (let s = 0; s < UNICORN_LEG_SIDES; s++) {
+        const theta = (s / UNICORN_LEG_SIDES) * Math.PI * 2;
+        ring.push(
+          p
+            .clone()
+            .add(across.clone().multiplyScalar(Math.cos(theta) * halfX))
+            .add(along.clone().multiplyScalar(Math.sin(theta) * halfY)),
+        );
+      }
+      return ring;
+    };
+
+    const ra = ringAt(a);
+    const rb = ringAt(b);
     const axisCenter = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
     const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, center: THREE.Vector3) => {
       const e1 = new THREE.Vector3().subVectors(p1, p0);
@@ -593,23 +1069,26 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
       const centroid = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3);
       const outward = new THREE.Vector3().subVectors(centroid, center);
       if (normal.dot(outward) < 0) {
-        pushTri(p0, p2, p1, color);
+        pushTri(p0, p2, p1, colorAt);
       } else {
-        pushTri(p0, p1, p2, color);
+        pushTri(p0, p1, p2, colorAt);
       }
     };
-    for (let i = 0; i < 4; i++) {
-      const j = (i + 1) % 4;
-      pushOutward(ca[i], cb[i], cb[j], axisCenter);
-      pushOutward(ca[i], cb[j], ca[j], axisCenter);
+
+    for (let i = 0; i < UNICORN_LEG_SIDES; i++) {
+      const j = (i + 1) % UNICORN_LEG_SIDES;
+      pushOutward(ra[i], rb[i], rb[j], axisCenter);
+      pushOutward(ra[i], rb[j], ra[j], axisCenter);
     }
     if (capStart) {
-      pushOutward(ca[0], ca[1], ca[2], axisCenter);
-      pushOutward(ca[0], ca[2], ca[3], axisCenter);
+      for (let i = 1; i < UNICORN_LEG_SIDES - 1; i++) {
+        pushOutward(ra[0], ra[i], ra[i + 1], axisCenter);
+      }
     }
     if (capEnd) {
-      pushOutward(cb[0], cb[1], cb[2], axisCenter);
-      pushOutward(cb[0], cb[2], cb[3], axisCenter);
+      for (let i = 1; i < UNICORN_LEG_SIDES - 1; i++) {
+        pushOutward(rb[0], rb[i], rb[i + 1], axisCenter);
+      }
     }
   }
 
@@ -640,12 +1119,28 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
     const knee = new THREE.Vector3(flareX, hipY + upper.dy, hipZ + upper.dz);
     const lower = jointOffset(lowerAngleDeg, legLength * 0.42);
     const hoofTop = new THREE.Vector3(flareX, knee.y + lower.dy, knee.z + lower.dz);
-    const hoof = jointOffset(hoofAngleDeg, legLength * 0.16);
+    const hoof = jointOffset(hoofAngleDeg, legLength * 0.09);
     const hoofTip = new THREE.Vector3(flareX, hoofTop.y + hoof.dy, hoofTop.z + hoof.dz);
+
+    // Leg gradient: the top of the leg is the body colour, so it reads as
+    // continuous with the barrel it hangs from, ramping to white by the hoof —
+    // the "socks" of a classic storybook unicorn. Graded by height (Z) rather
+    // than by segment so it runs smoothly across the knee instead of stepping
+    // at each joint.
+    //
+    // These are absolute colours, not multipliers; see UNICORN_LEG_SOCK_COLOR.
+    //
+    // The ramp is measured hip-to-hoof-top, not hip-to-hoof-tip, so the last
+    // stretch of cannon bone is fully white before the dark hoof begins.
+    const gradientSpan = hipZ - hoofTop.z;
+    const legColorAt = (p: THREE.Vector3): THREE.Color => {
+      const t = gradientSpan > 1e-6 ? THREE.MathUtils.clamp((hipZ - p.z) / gradientSpan, 0, 1) : 0;
+      return bodyColor.clone().lerp(UNICORN_LEG_SOCK_COLOR, smoothstep01(t));
+    };
 
     // Thigh: rotates about the hip.
     sink = upperBuffer;
-    pushBoxSegment(hip, knee, legHalfWidth, legHalfDepth, true, false, UNICORN_LEG_COLOR);
+    pushTubeSegment(hip, knee, legHalfWidth, legHalfDepth, true, false, legColorAt);
 
     // Knee barrel, covering the wedge that opens between the thigh's flat
     // end face and the cannon bone's flat top face once the knee bends.
@@ -662,48 +1157,48 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
     // rotation axis, so the knee's own bend cannot move it — but it must
     // still follow the thigh when the hip swings, which is what living in
     // the thigh's part gives us.
+    // Radius and length have both been pulled in repeatedly per direct
+    // feedback — the goal is a knee you notice only when it bends, not a
+    // visible hinge. Both dimensions stay tied to the leg's own cross-section,
+    // so the barrel tracked the 25% leg thinning without needing re-tuning.
     const kneeBarrel = jointBarrelForBoxSection({
-      movingHalfDepth: legHalfDepth * 0.85,
-      widestHalfWidth: legHalfWidth,
+      movingHalfDepth: legHalfDepth * 0.882,
+      widestHalfWidth: legHalfWidth * 0.846,
     });
     pushJointBarrel(sink, {
       center: knee,
       axis: new THREE.Vector3(1, 0, 0),
       radius: kneeBarrel.radius,
       halfLength: kneeBarrel.halfLength,
-      color: UNICORN_LEG_COLOR,
+      color: legColorAt(knee),
+      // 20 rather than the default 10, so the barrel's facets are 18 degrees
+      // apart instead of 36 and it reads as a turned cylinder.
+      segments: 20,
     });
 
     // Cannon bone and hoof: rotate about the knee, on top of whatever the
     // thigh above them is doing. Capping the top of the lower segment keeps
     // the joint from showing a hollow end once it bends away from the thigh.
     sink = lowerBuffer;
-    pushBoxSegment(knee, hoofTop, legHalfWidth * 0.85, legHalfDepth * 0.85, true, false, UNICORN_LEG_COLOR);
-    // Small squared-off hoof block, tinted dark gray to read as a hoof
-    // distinct from the rest of the leg, instead of the dragon's fanned
-    // claws.
-    pushBoxSegment(hoofTop, hoofTip, legHalfWidth * 0.7, legHalfDepth * 0.7, false, true, UNICORN_HOOF_COLOR);
+    pushTubeSegment(knee, hoofTop, legHalfWidth * 0.85, legHalfDepth * 0.85, true, true, legColorAt);
+    // Small hoof, tinted dark gray to read as a hoof distinct from the rest of
+    // the leg, instead of the dragon's fanned claws. Slightly wider than the
+    // cannon bone above it, the way a real hoof flares out below the pastern.
+    //
+    // The two tubes BUTT at the pastern rather than overlapping. Both are
+    // capped, and because each cap is a disc centred on the shared point, the
+    // discs intersect and the union is solid — the earlier open end on the
+    // cannon bone is what made the hoof look detached. Sleeving the hoof up
+    // over the cannon was tried and is worse: the cannon axis diverges from
+    // the hoof axis through the bend, so it pokes out through the hoof wall
+    // almost immediately, and it made the hoof read far too tall.
+    pushTubeSegment(hoofTop, hoofTip, legHalfWidth * 0.92, legHalfDepth * 0.92, true, true, flatColor(UNICORN_HOOF_COLOR));
 
     return knee;
   }
 
-  // Front hips pulled back by one full leg depth. At length*0.02 the shoulder
-  // sat forward of the chest's own front surface, so the top of each front leg
-  // stood outside the body and only the thin joint barrel bridged the gap —
-  // the legs read as hanging off the chest by a thread. Backing off by the
-  // leg's own front-to-back depth (2 x half-depth) seats the hip socket inside
-  // the chest bulge, the same reasoning that fixed the rear legs below.
-  const frontLegDepth = width * UNICORN_LEG_HALF_DEPTH_FRAC * 2;
-  const frontY = length * 0.02 - frontLegDepth; // seated inside the chest
-  // Rear hip Y was -length*0.42 — *behind* the body's own rear-most spine
-  // point (the tail root sits at -halfLen*0.8 = -length*0.4, see
-  // buildHorseBodyProfileGeometry), so the back legs floated in empty
-  // space past the rump instead of actually attaching to the haunch —
-  // read as "detached" legs. Moved forward into the hindquarter bulge
-  // (spine's hindquarter ring sits at -halfLen*0.62 = -length*0.31,
-  // radius width*0.32 — the widest part of the rear body) so the hip
-  // socket sits inside/at the body surface.
-  const backY = -length * 0.3; // inside the hindquarter bulge
+  // Front and rear hip sockets, shared with the wing placement.
+  const { frontY, backY } = unicornHipYs(length, width);
   const stanceX = width * 0.19; // pulled in from 0.26 so legs stick out less laterally
   // Legs now emerge a bit lower on the belly (more negative Z, "down")
   // rather than right at the body's central spine axis (z=0) — per
@@ -728,7 +1223,14 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buffer.positions), 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(buffer.colors), 3));
-    geometry.computeVertexNormals();
+    // Crease-aware averaging rather than computeVertexNormals(). On this
+    // non-indexed buffer computeVertexNormals gives every triangle its own
+    // flat normal, which left the knee barrel shading as a ring of flat
+    // strips — it read as a blocky rectangular hub rather than a cylinder,
+    // however many segments it had. The 60-degree crease threshold smooths
+    // the barrel's 18-degree facets while leaving the leg boxes' 90-degree
+    // edges crisp, so the limbs keep their squared-off silhouette.
+    smoothNormalsByPosition(geometry);
     return geometry;
   };
 
@@ -887,7 +1389,10 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
 
   // Longer than the previous stubby tail — a real flowing horse tail
   // rather than a short bunch.
-  const tailLength = length * 0.68;
+  // Slightly longer than the old 0.68 so the *visible* tail stays the length
+  // it was: the root now starts buried inside the haunch (see below), and
+  // without this the tail would read shorter than the version already tuned.
+  const tailLength = length * 0.74;
   const numSegments = UNICORN_TAIL_SEGMENTS;
   // Trails mostly backward with a gentle downward sag, rather than
   // curling almost straight down (-95deg tip, from an earlier pass tuned
@@ -900,11 +1405,20 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
   const endAngleDeg = -30; // trailing back with a gentle downward droop at the tip
   const smoothstep = (t: number) => t * t * (3 - 2 * t);
 
-  // Root anchor matches the body's now-slightly-shorter rump (tail root
-  // spine point, see buildHorseBodyProfileGeometry) so the tail still
-  // starts flush against the body rather than floating off the back of a
-  // now-shorter torso.
-  const root = new THREE.Vector3(0, -halfLen * 0.78, width * 0.05);
+  // Root anchor pushed FORWARD into the hindquarter bulge rather than sitting
+  // at the body's rear-most spine point.
+  //
+  // The rump ring at -halfLen*0.8 has a radius of only width*0.04, so butting
+  // the tail against it left a tail base several times wider than the body it
+  // met — the join showed as a visible seam/collar all the way round. Starting
+  // at -halfLen*0.68 instead puts the root inside a body radius of ~width*0.23,
+  // comfortably wider than the (now much slimmer) base below, so the first
+  // segment is buried in the haunch and the tail simply emerges from it.
+  //
+  // Nothing else needs updating to match: the undulation shader derives its
+  // root from the geometry's own bounding box (see applyUnicornTailUndulation-
+  // Shader), so the weld point follows this automatically.
+  const root = new THREE.Vector3(0, -halfLen * 0.68, width * 0.05);
   const points: THREE.Vector3[] = [root];
   let prev = root;
   const segLength = tailLength / numSegments;
@@ -922,8 +1436,11 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
     prev = next;
   }
 
-  const rootHalfWidth = width * 0.15;
-  const tipHalfWidth = width * 0.03;
+  // Base halved and tip taken down by a quarter, per direct feedback — the
+  // old root was thick enough to read as a beaver's tail rather than a
+  // horse's dock.
+  const rootHalfWidth = width * 0.075;
+  const tipHalfWidth = width * 0.0225;
   // Taper continuously across each segment (start radius -> end radius) rather
   // than holding one radius per segment. The old per-segment constant width
   // left a visible step at every joint, which read as extra blockiness on top
@@ -976,8 +1493,12 @@ function buildUnicornHornGeometry(
   pollZ: number,
   pollRadius: number,
 ): THREE.BufferGeometry {
-  const hornLength = pollRadius * 1.95; // 1.3 * 1.5 — 50% larger, per feedback
-  const hornRadius = pollRadius * 0.45; // 0.3 * 1.5
+  // Bumped 20% per direct feedback, divided by 1.208 when the neck was
+  // thickened so that edit did not silently rescale it, then a further 25%
+  // taller once the narrowed base was approved: a horn framed by hair on both
+  // sides reads shorter than it measures, and a narrower one more so still.
+  const hornLength = pollRadius * 2.421; // 1.95 * 1.2 / 1.208 * 1.25
+  const hornRadius = pollRadius * UNICORN_HORN_RADIUS_FRAC;
   const cone = new THREE.ConeGeometry(hornRadius, hornLength, 8);
   // ConeGeometry is built along +Y by default, apex at +Y/2, base at
   // -Y/2. Rotating +90 degrees about X maps +Y onto +Z, sending the
@@ -987,7 +1508,15 @@ function buildUnicornHornGeometry(
   cone.rotateX(Math.PI / 2);
   // Base sits right at the skull surface (pollRadius above the spine
   // axis at the poll) and extends further upward from there.
-  cone.translate(0, pollY, pollZ + pollRadius + hornLength / 2);
+  //
+  // Shifted forward (+Y) onto the brow per direct feedback: sitting exactly
+  // at the poll it read as growing out of the top of the neck rather than out
+  // of the head. The skull surface drops away as it slopes down toward the
+  // muzzle, so the base is sunk a little deeper in Z at the same time —
+  // otherwise moving it forward would lift it clear of the head and leave the
+  // horn floating.
+  const hornForward = pollRadius * UNICORN_HORN_FORWARD_FRAC;
+  cone.translate(0, pollY + hornForward, pollZ + pollRadius * 0.82 + hornLength / 2);
   return cone;
 }
 
@@ -1061,56 +1590,124 @@ function buildUnicornManeGeometry(
   length: number,
   width: number,
   bodyGeometry: THREE.BufferGeometry,
+  pollY: number,
+  pollRadius: number,
 ): THREE.BufferGeometry {
   const halfLen = length * 0.5;
 
   // Neck spine points (exact copies of the body's neck section from
-  // buildHorseBodyProfileGeometry) plus a forelock point past the poll.
+  // buildHorseBodyProfileGeometry) plus two forelock points past the poll.
+  //
+  // The mane used to stop at a single point just past the poll, which sits
+  // INSIDE the horn's own base footprint — so what should have been a
+  // forelock was really just more hair piled against the horn. Carrying the
+  // crest further forward onto the forehead gives it somewhere to start that
+  // is genuinely on the head rather than on the horn.
   interface ManeSpinePoint { y: number; z: number; radius: number; }
   const spine: ManeSpinePoint[] = [
     { y: halfLen * 0.08,  z: length * 0.1,   radius: width * 0.22 }, // withers
     { y: halfLen * 0.147, z: length * 0.193,  radius: width * 0.17 }, // lower-mid
     { y: halfLen * 0.207, z: length * 0.287,  radius: width * 0.13 }, // upper-mid
-    { y: halfLen * 0.247, z: length * 0.353,  radius: width * 0.12 }, // poll
-    { y: halfLen * 0.285, z: length * 0.340,  radius: width * 0.09 }, // forelock
+    { y: halfLen * 0.247, z: length * 0.353,  radius: width * 0.12 }, // poll — horn stands here
+    { y: halfLen * 0.285, z: length * 0.340,  radius: width * 0.11 }, // behind the forelock
+    { y: halfLen * 0.315, z: length * 0.325,  radius: width * 0.09 }, // forelock, on the forehead
   ];
 
-  // Cross-section profile at each spine point.  Width and height taper via
-  // a sin envelope so the crest peaks at the upper-mid neck and tapers to
-  // near-zero at each end rather than starting/stopping with a blunt edge.
-  // Highest Z on the body surface in a thin Y slab around `y`, within the
-  // crest's own X footprint. Returns -Infinity if the slab is empty, in which
-  // case the caller falls back to the spine estimate.
+  // Resample to a finer set of rings. The horn clearance below carves a notch
+  // narrower than the gap between two authored points, so at the authored
+  // resolution it would land as a hard V rather than as hair parting.
+  const RINGS = 19;
+  const resampled: ManeSpinePoint[] = [];
+  for (let i = 0; i < RINGS; i++) {
+    const u = (i / (RINGS - 1)) * (spine.length - 1);
+    const lo = Math.min(Math.floor(u), spine.length - 2);
+    const f = u - lo;
+    const a = spine[lo];
+    const b = spine[lo + 1];
+    resampled.push({
+      y: THREE.MathUtils.lerp(a.y, b.y, f),
+      z: THREE.MathUtils.lerp(a.z, b.z, f),
+      radius: THREE.MathUtils.lerp(a.radius, b.radius, f),
+    });
+  }
+
   const bodyPos = bodyGeometry.getAttribute('position');
-  const surfaceTopZAt = (y: number, halfWidth: number): number => {
-    const slab = length * 0.03;
+  const slab = length * 0.03;
+  const xBand = width * 0.035;
+
+  // Highest body-surface Z in a thin Y slab, restricted to vertices whose
+  // |x| is near `absX`. Sampling at absX = 0 gives the topline; sampling at
+  // the crest's own half-width gives the point on the flank where that side
+  // of the crest has to sit.
+  //
+  // Anchoring to the REAL surface rather than to the spine radius matters:
+  // the rendered neck is fatter than `pt.radius` (the head/nose bulbs and
+  // profile smoothing widen it), so a crest placed at pt.z + pt.radius sits
+  // BURIED for most of its length — measured up to 1.6 wu below the surface,
+  // which is why the first version of this mane was invisible.
+  const surfaceTopZAt = (y: number, absX: number): number => {
     let top = -Infinity;
     for (let i = 0; i < bodyPos.count; i++) {
       if (Math.abs(bodyPos.getY(i) - y) > slab) continue;
-      if (Math.abs(bodyPos.getX(i)) > halfWidth * 1.3) continue;
+      if (Math.abs(Math.abs(bodyPos.getX(i)) - absX) > xBand) continue;
       top = Math.max(top, bodyPos.getZ(i));
     }
     return top;
   };
 
-  const N = spine.length;
-  const rings = spine.map((pt, i): [THREE.Vector3, THREE.Vector3, THREE.Vector3] => {
+  // Widest |x| on the body in a thin Y slab — the neck's own half-width.
+  const surfaceHalfWidthAt = (y: number): number => {
+    let widest = 0;
+    for (let i = 0; i < bodyPos.count; i++) {
+      if (Math.abs(bodyPos.getY(i) - y) > slab) continue;
+      widest = Math.max(widest, Math.abs(bodyPos.getX(i)));
+    }
+    return widest;
+  };
+
+  // Keep the crest clear of the horn.
+  //
+  // The crest is a blade standing on the midline — exactly where the horn
+  // stands — so at the poll it simply swallowed the horn's lower half, and no
+  // amount of lengthening the horn would fix that. Within the horn's own
+  // footprint the ridge is flattened almost to the skin, so the hair parts
+  // around the base of the horn and the horn reads at full height. Outside
+  // that footprint the crest is untouched.
+  const hornRadius = pollRadius * UNICORN_HORN_RADIUS_FRAC;
+  const hornClearSpan = hornRadius * 2.1;
+  // Centred on the horn's actual base, which sits forward of the poll.
+  const hornCenterY = pollY + pollRadius * UNICORN_HORN_FORWARD_FRAC;
+  const smoothstep01 = (t: number) => t * t * (3 - 2 * t);
+  const hornClearanceAt = (y: number): number => {
+    const d = Math.abs(y - hornCenterY) / hornClearSpan;
+    if (d >= 1) return 1;
+    return 0.1 + 0.9 * smoothstep01(d);
+  };
+
+  const N = resampled.length;
+  const rings = resampled.map((pt, i): [THREE.Vector3, THREE.Vector3, THREE.Vector3] => {
     const t = i / (N - 1);
     const env = Math.sin(t * Math.PI) * 0.7 + 0.3; // 0.3 at ends, 1.0 in the middle
-    const halfWidth = pt.radius * 0.75 * env;
-    const crewHeight = pt.radius * 1.9 * env;
-    // Anchor the crest to the REAL neck surface, not to the spine radius.
-    // The rendered neck is fatter than `pt.radius` (the head/nose bulbs and
-    // profile smoothing widen it), so a crest placed at pt.z + pt.radius sits
-    // BURIED inside the body for most of its length — measured up to 1.6 wu
-    // below the surface, which is why the first version of this mane was
-    // invisible. Sampling the merged body silhouette makes the crest
-    // self-correcting if the neck profile is ever retuned.
-    const toplineZ = Math.max(pt.z + pt.radius, surfaceTopZAt(pt.y, halfWidth));
+    // Wider than the old 0.75 per direct feedback — but never wider than the
+    // neck it sits on. A base corner past the body's own silhouette would
+    // hang in mid-air rather than resting against the neck, so the desired
+    // width is clamped against the measured surface.
+    const neckHalfWidth = surfaceHalfWidthAt(pt.y);
+    const desiredHalfWidth = pt.radius * 1.25 * env;
+    const halfWidth =
+      neckHalfWidth > 0 ? Math.min(desiredHalfWidth, neckHalfWidth * 0.82) : desiredHalfWidth;
+    const crestHeight = pt.radius * 1.9 * env * hornClearanceAt(pt.y);
+
+    const ridgeFoot = Math.max(pt.z + pt.radius, surfaceTopZAt(pt.y, 0));
+    // Each base corner sits on the flank at its own x, not up at the topline.
+    // Draping the base over the neck's curvature is what lets the crest widen
+    // without lifting away from the body at its edges.
+    const sideTop = surfaceTopZAt(pt.y, halfWidth);
+    const baseZ = Number.isFinite(sideTop) ? sideTop : ridgeFoot;
     return [
-      new THREE.Vector3(-halfWidth, pt.y, toplineZ),          // [0] left base
-      new THREE.Vector3(0,          pt.y, toplineZ + crewHeight), // [1] ridge tip
-      new THREE.Vector3(+halfWidth, pt.y, toplineZ),          // [2] right base
+      new THREE.Vector3(-halfWidth, pt.y, baseZ),             // [0] left base
+      new THREE.Vector3(0,          pt.y, ridgeFoot + crestHeight), // [1] ridge tip
+      new THREE.Vector3(+halfWidth, pt.y, baseZ),             // [2] right base
     ];
   });
 

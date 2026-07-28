@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 
 import { createDragonGeometries } from './dragonGeometry';
 import { createHawkGeometries } from './hawkGeometry';
@@ -20,7 +21,7 @@ import { findRigOrderingViolation } from '../../../motion/rig';
  */
 describe('leg attachment convention', () => {
   const creatures: [string, CreatureLegPart[] | undefined][] = [
-    ['unicorn', createUnicornGeometries(1, 0.4).legs],
+    ['unicorn', createUnicornGeometries(1, 0.4, new THREE.Color(0xc9a8f0)).legs],
     ['dragon', createDragonGeometries(1, 0.4).legs],
     ['hawk', createHawkGeometries(1, 0.4).legs],
     ['parrot', createParrotGeometries(1, 0.4).legs],
@@ -49,7 +50,19 @@ describe('leg attachment convention', () => {
         // The declared pivot sits at or above the top of the part it rotates,
         // with a small tolerance because some creatures (the dragon) attach
         // their legs a little above the central spine axis.
-        expect(part.pivot[2], `${name} ${part.role}`).toBeGreaterThanOrEqual(box.max.z - drop * 0.1);
+        //
+        // The tolerance is also at least the part's own radial half-thickness.
+        // A round limb segment's end cap is a disc perpendicular to the
+        // segment axis, so on a leg that is tilted at all — every leg here —
+        // the cap unavoidably projects above the joint by up to one radius.
+        // That geometry is buried inside the body and is what stops a seam
+        // showing at the hip. Without this term the check scales with limb
+        // LENGTH, so it silently tightened when the unicorn's hoof was
+        // shortened and failed on a change that made the model strictly
+        // better looking.
+        const halfThickness = (box.max.x - box.min.x) / 2;
+        const tolerance = Math.max(drop * 0.1, halfThickness);
+        expect(part.pivot[2], `${name} ${part.role}`).toBeGreaterThanOrEqual(box.max.z - tolerance);
       }
     });
 
@@ -60,7 +73,7 @@ describe('leg attachment convention', () => {
   }
 
   it('gives the unicorn a jointed leg whose lower segment hangs off a knee', () => {
-    const legs = createUnicornGeometries(1, 0.4).legs;
+    const legs = createUnicornGeometries(1, 0.4, new THREE.Color(0xc9a8f0)).legs;
     expect(legs).toBeTruthy();
     if (!legs) return;
 
