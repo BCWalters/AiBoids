@@ -59,6 +59,38 @@ export const BIRD_FEATHER_CONFIG: BirdFeatherConfig = {
 };
 
 /**
+ * Per-family feather configs. Issue #245 asks for *separate* textures for
+ * small birds, hawks and parrots rather than one shared pattern, because the
+ * three families read very differently in life:
+ *
+ *  - Small birds have fine, soft, low-contrast plumage.
+ *  - Raptors have large, distinctly separated flight feathers with strong
+ *    edge definition and a matte finish.
+ *  - Parrots have tight, glossy, highly iridescent plumage.
+ *
+ * Note `barbsPerLength` is normalised against each creature's own span inside
+ * applyBirdFeatherShader, so these numbers are directly comparable as
+ * "barbs across the body" rather than as absolute cell sizes.
+ */
+export const SMALL_BIRD_FEATHER_CONFIG: BirdFeatherConfig = {
+  barbsPerLength: 24,
+  barbDarkness: 0.18,
+  barbGloss: 0.14,
+};
+
+export const HAWK_FEATHER_CONFIG: BirdFeatherConfig = {
+  barbsPerLength: 14,
+  barbDarkness: 0.30,
+  barbGloss: 0.10,
+};
+
+export const PARROT_FEATHER_CONFIG: BirdFeatherConfig = {
+  barbsPerLength: 22,
+  barbDarkness: 0.20,
+  barbGloss: 0.34,
+};
+
+/**
  * Patches a MeshStandardMaterial with a procedural feather-barb pattern
  * injected via onBeforeCompile.
  *

@@ -349,10 +349,14 @@ describe('NatureSceneRenderer3D.patchBodyMaterial bird feather routing', () => {
       NORMAL_PRED_FLAGS,
     );
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    const originalCompile = mat.onBeforeCompile;
     renderer.patchBodyMaterial(mat, geometries);
-    // Unicorn has neither feather nor scale shader — no patch at all.
-    expect(mat.onBeforeCompile).toBe(originalCompile);
+    const { fragmentShader } = captureShader(mat);
+    // The unicorn IS patched — with the mane hair shader (#248) — so asserting
+    // "no patch at all" here would be wrong. What matters is that it does not
+    // get the BIRD feather pattern.
+    expect(fragmentShader).not.toContain('uBarbDarkness');
+    expect(fragmentShader).not.toContain('uBarbFreq');
+    expect(fragmentShader).toContain('uHairGapDarkness');
   });
 });
 

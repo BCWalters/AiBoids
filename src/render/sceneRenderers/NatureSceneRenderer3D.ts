@@ -17,7 +17,14 @@ import { DragonFireBreathController } from '../dragonFireBreathController';
 import type { FireBreathEffects } from '../styles/nature/fireBreath';
 import { applyDragonScaleShader, DRAGON_SCALE_CONFIG } from '../styles/nature/dragonScaleShader';
 import { applyUnicornHairShader, UNICORN_HAIR_CONFIG } from '../styles/nature/unicornHairShader';
-import { applyBirdFeatherShader, BIRD_FEATHER_CONFIG, type BirdFeatherPlane } from '../styles/nature/birdFeatherShader';
+import {
+  applyBirdFeatherShader,
+  type BirdFeatherConfig,
+  type BirdFeatherPlane,
+  SMALL_BIRD_FEATHER_CONFIG,
+  HAWK_FEATHER_CONFIG,
+  PARROT_FEATHER_CONFIG,
+} from '../styles/nature/birdFeatherShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -859,6 +866,25 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     };
   }
 
+  /**
+   * Feather config for a bird family (#245 asks for separate textures per
+   * family rather than one shared pattern). Falls back to the small-bird
+   * config, which is the most common case and the most conservative.
+   */
+  private featherConfigFor(geometries: CreatureGeometries): BirdFeatherConfig {
+    if (geometries === this.predatorGeometries) return HAWK_FEATHER_CONFIG;
+    if (
+      geometries === this.parrotGeometries ||
+      geometries === this.parrotBlueGoldGeometries ||
+      geometries === this.parrotScarletGeometries ||
+      geometries === this.parrotPurpleLavenderGeometries ||
+      geometries === this.parrotNeutralGeometries
+    ) {
+      return PARROT_FEATHER_CONFIG;
+    }
+    return SMALL_BIRD_FEATHER_CONFIG;
+  }
+
   patchBodyMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
     if (geometries === this.dragonPredatorGeometries) {
       applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG);
@@ -866,7 +892,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       applyUnicornHairShader(material, geometries.body, UNICORN_HAIR_CONFIG);
     } else if (this.allBirdGeometries?.has(geometries)) {
       // Bird feathers use the body's dorsoventral (Z) axis — 'yz' plane.
-      applyBirdFeatherShader(material, geometries.body, BIRD_FEATHER_CONFIG, 'yz');
+      applyBirdFeatherShader(material, geometries.body, this.featherConfigFor(geometries), 'yz');
     }
   }
 
@@ -888,7 +914,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       // so feather cell size is derived from its actual Z span and the tail
       // doesn't inherit an outsized frequency from the (different-proportion)
       // body.
-      applyBirdFeatherShader(material, geometries.tail!, BIRD_FEATHER_CONFIG, 'yz');
+      applyBirdFeatherShader(material, geometries.tail!, this.featherConfigFor(geometries), 'yz');
     }
   }
 
@@ -911,7 +937,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       const xSpan = wbb.max.x - wbb.min.x;
       const zSpan = wbb.max.z - wbb.min.z;
       const plane: BirdFeatherPlane = zSpan < xSpan ? 'yx' : 'yz';
-      applyBirdFeatherShader(material, wingGeo, BIRD_FEATHER_CONFIG, plane);
+      applyBirdFeatherShader(material, wingGeo, this.featherConfigFor(geometries), plane);
     }
   }
 
