@@ -124,6 +124,22 @@ const DRAGON_FLAP_SPEED_AMPLITUDE = 0.85;
  * Z ≈ −15.37 units (θ = 1.25 rad), well past the claw depth.
  */
 const DRAGON_BOTTOM_CLIP_RAD = 0.30;
+/**
+ * Raises the bottom of the small-bird (and non-profiled boid) wingbeat by this
+ * many radians without moving the top of the stroke (same mechanism as
+ * DRAGON_BOTTOM_CLIP_RAD, issue #199). Before: worst-case bottom (max speed ×
+ * STATE_AMPLITUDE_MULTIPLIER_MAX 1.24) = 1.426 rad (81.7°). After: 1.226 rad
+ * (70.2°). Nominal max at speedFraction = 1, stateMultiplier = 1: 0.95 rad
+ * (54.4°), matching the already-clipped dragon stroke floor.
+ */
+const BIRD_BOTTOM_CLIP_RAD = 0.20;
+/**
+ * Same treatment for the profiled macaw/parrot — their higher idle/speed
+ * amplitudes make the downstroke worse than small birds without a clip.
+ * Before: worst-case = 1.674 rad (95.9°). After: 1.324 rad (75.8°).
+ * Nominal max: 1.00 rad (57.3°).
+ */
+const _PARROT_BOTTOM_CLIP_RAD = 0.35;
 const DRAGON_TAIL_SWAY_AMPLITUDE = 0.22;
 const HAWK_TAIL_SWAY_AMPLITUDE = 0.08;
 // Hawks are large soaring raptors — they flap noticeably slower than the small
@@ -701,6 +717,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       flapFrequency: isParrot && isProfiledParrot ? _PARROT_FLAP_FREQUENCY : FLAP_FREQUENCY,
       flapIdleAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_IDLE_AMPLITUDE : FLAP_IDLE_AMPLITUDE,
       flapSpeedAmplitude: isParrot && isProfiledParrot ? _PARROT_FLAP_SPEED_AMPLITUDE : FLAP_SPEED_AMPLITUDE,
+      flapBottomClipRad: isParrot && isProfiledParrot ? _PARROT_BOTTOM_CLIP_RAD : BIRD_BOTTOM_CLIP_RAD,
       flapDownstrokeFraction: BIRD_DOWNSTROKE_FRACTION,
       legSwingAmplitude: BIRD_LEG_SWING_AMPLITUDE,
       legTuckRad: BIRD_LEG_TUCK_RAD,
