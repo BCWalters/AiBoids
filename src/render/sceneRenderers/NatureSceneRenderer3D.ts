@@ -8,7 +8,7 @@ import type { DriftingClouds } from '../styles/nature/clouds';
 import { placeNatureEnvironment, type NatureEnvironment } from '../styles/nature/environment';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import { disposeCreatureGeometries } from '../geometry/sharedGeometry';
-import { computeDragonMouthTransform, createDragonGeometries } from '../styles/nature/geometry/dragonGeometry';
+import { computeDragonMouthTransform, createDragonGeometries, DRAGON_BODY_TINT } from '../styles/nature/geometry/dragonGeometry';
 import { createHawkGeometries } from '../styles/nature/geometry/hawkGeometry';
 import { createParrotGeometries } from '../styles/nature/geometry/parrotGeometry';
 import { createRealisticBirdGeometries } from '../styles/nature/geometry/smallBirdGeometry';
@@ -299,7 +299,9 @@ const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
 // (1 at the rump) rather than absolute colors, so its root follows whatever
 // these resolve to and it darkens from there — no separate tail palette to
 // keep in sync.
-export const DRAGON_PREDATOR_BASE = new THREE.Color(0x3e2064); // deep body purple (per issue #73)
+// Re-exported from the geometry module, which needs the same value to author
+// tint-compensated absolute colours (the eyes) — see tintCompensated().
+export const DRAGON_PREDATOR_BASE = DRAGON_BODY_TINT; // deep body purple (per issue #73)
 const DRAGON_PREDATOR_HUNT = new THREE.Color(0x5f3c99); // brighter chase tint in the same palette
 
 // Unicorn predator (all styles): light lavender body, always upright
@@ -409,8 +411,11 @@ interface NatureSceneRendererDependencies {
 // Wing-undulation config: 6 % tip amplitude, ~108° phase lag shoulder→tip.
 // Applied to ALL nature flying creatures (birds, hawks, parrots, dragons, unicorns).
 const WING_UNDULATION_CONFIG: WingUndulationConfig = {
-  amplitudeFraction: 0.06,
-  tipPhaseLagRad: Math.PI * 0.6,
+  // Real birds' primaries trail the shoulder far more than the first pass
+  // suggested — the tip visibly whips through the stroke rather than gently
+  // bowing. Raised from 0.06 / 0.6π after review of the shipped motion.
+  amplitudeFraction: 0.15,
+  tipPhaseLagRad: Math.PI * 0.95,
 };
 
 // Unicorn tail streaming config. "upBiasFraction" gives the steady upward
