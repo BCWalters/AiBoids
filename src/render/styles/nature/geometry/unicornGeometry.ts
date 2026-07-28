@@ -5,6 +5,7 @@ import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
   pushJointBarrel,
+  smoothNormalsByPosition,
 } from '../../../geometry/sharedGeometry';
 import type { PartDrive, Triple } from '../../../motion/rig';
 import { buildFingeredWingGeometry } from './birdSharedGeometry';
@@ -400,7 +401,12 @@ function buildHorseBodyProfileGeometry(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-  geometry.computeVertexNormals();
+  // Averaged rather than per-face normals. computeVertexNormals() on this
+  // non-indexed sweep gave every triangle its own flat normal, so the body
+  // stayed visibly faceted even after PR #267 raised the ring count from 10
+  // to 16 — more segments only made the facets smaller, never smooth. The
+  // crease rule keeps genuinely sharp joins (muzzle tip, tip cap) crisp.
+  smoothNormalsByPosition(geometry);
 
   const poll = spine[7];
   const headTopPoint = spine[8];
@@ -711,53 +717,78 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
     colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
   };
 
-  // Same outward-normal-safe box-segment helper used by the legs (see
-  // buildUnicornLegsGeometry's pushBoxSegment) — a real 3D volume with
-  // thickness along both the left-right (X) and front-back (Y) axes,
-  // rather than a flat single-axis-offset ribbon.
-  function pushBoxSegment(
+  // A round tube segment, replacing the 4-sided box section this tail used to
+  // share with the legs.
+  //
+  // Two separate things made the old version read as blocky, and raising the
+  // body's segment count in PR #267 fixed neither:
+  //
+  //  1. FOUR SIDES. A square cross-section has 90-degree corners, so it stays
+  //     visibly angular from every angle no matter how the normals are built.
+  //  2. THE RING WAS NOT PERPENDICULAR TO THE TAIL. Corners were offset along
+  //     world X and Y while the tail itself sweeps through -Y and Z, so the
+  //     "thickness" along Y ran roughly *lengthwise* down the tail rather than
+  //     radially around it. The section was closer to a padded ribbon than a
+  //     tube.
+  //
+  // Rings are now built in the plane perpendicular to each segment's own
+  // direction, using a parallel-transported frame so consecutive rings stay
+  // rotationally aligned and the tube doesn't twist as the tail droops. The
+  // cross-section keeps the previous slight flattening (the minor radius is
+  // 0.8 of the major) so the silhouette still reads as horse hair rather than
+  // a hosepipe.
+  const TAIL_SIDES = 10;
+  let transportedNormal = new THREE.Vector3(1, 0, 0);
+  const ringAt = (center: THREE.Vector3, direction: THREE.Vector3, halfMajor: number, halfMinor: number) => {
+    const tangent = direction.clone();
+    if (tangent.lengthSq() < 1e-10) tangent.set(0, -1, 0);
+    tangent.normalize();
+    // Re-orthogonalise the carried normal against the new tangent rather than
+    // picking a fresh basis per ring, which would let the frame flip.
+    transportedNormal.sub(tangent.clone().multiplyScalar(transportedNormal.dot(tangent)));
+    if (transportedNormal.lengthSq() < 1e-8) {
+      transportedNormal.set(1, 0, 0).sub(tangent.clone().multiplyScalar(tangent.x));
+      if (transportedNormal.lengthSq() < 1e-8) transportedNormal.set(0, 0, 1);
+    }
+    transportedNormal.normalize();
+    const binormal = new THREE.Vector3().crossVectors(tangent, transportedNormal).normalize();
+    const ring: THREE.Vector3[] = [];
+    for (let s = 0; s < TAIL_SIDES; s++) {
+      const theta = (s / TAIL_SIDES) * Math.PI * 2;
+      ring.push(
+        center
+          .clone()
+          .add(transportedNormal.clone().multiplyScalar(Math.cos(theta) * halfMajor))
+          .add(binormal.clone().multiplyScalar(Math.sin(theta) * halfMinor)),
+      );
+    }
+    return ring;
+  };
+
+  function pushTubeSegment(
     a: THREE.Vector3,
     b: THREE.Vector3,
-    halfX: number,
-    halfY: number,
+    halfXa: number,
+    halfYa: number,
+    halfXb: number,
+    halfYb: number,
     capStart: boolean,
     capEnd: boolean,
     color: THREE.Color,
   ) {
-    const corner = (p: THREE.Vector3, sx: number, sy: number) => new THREE.Vector3(p.x + sx * halfX, p.y + sy * halfY, p.z);
-    const signs: [number, number][] = [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ];
-    const ca = signs.map(([sx, sy]) => corner(a, sx, sy));
-    const cb = signs.map(([sx, sy]) => corner(b, sx, sy));
-    const axisCenter = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
-    const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, center: THREE.Vector3) => {
-      const e1 = new THREE.Vector3().subVectors(p1, p0);
-      const e2 = new THREE.Vector3().subVectors(p2, p0);
-      const normal = new THREE.Vector3().crossVectors(e1, e2);
-      const centroid = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3);
-      const outward = new THREE.Vector3().subVectors(centroid, center);
-      if (normal.dot(outward) < 0) {
-        pushTri(p0, p2, p1, color);
-      } else {
-        pushTri(p0, p1, p2, color);
-      }
-    };
-    for (let i = 0; i < 4; i++) {
-      const j = (i + 1) % 4;
-      pushOutward(ca[i], cb[i], cb[j], axisCenter);
-      pushOutward(ca[i], cb[j], ca[j], axisCenter);
+    const direction = new THREE.Vector3().subVectors(b, a);
+    const ringA = ringAt(a, direction, halfXa, halfYa);
+    const ringB = ringAt(b, direction, halfXb, halfYb);
+    for (let s = 0; s < TAIL_SIDES; s++) {
+      const t = (s + 1) % TAIL_SIDES;
+      pushTri(ringA[s], ringB[s], ringB[t], color);
+      pushTri(ringA[s], ringB[t], ringA[t], color);
     }
     if (capStart) {
-      pushOutward(ca[0], ca[1], ca[2], axisCenter);
-      pushOutward(ca[0], ca[2], ca[3], axisCenter);
+      for (let s = 1; s < TAIL_SIDES - 1; s++) pushTri(ringA[0], ringA[s + 1], ringA[s], color);
     }
     if (capEnd) {
-      pushOutward(cb[0], cb[1], cb[2], axisCenter);
-      pushOutward(cb[0], cb[2], cb[3], axisCenter);
+      for (let s = 1; s < TAIL_SIDES - 1; s++) pushTri(ringB[0], ringB[s], ringB[s + 1], color);
     }
   }
 
@@ -800,17 +831,35 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
 
   const rootHalfWidth = width * 0.15;
   const tipHalfWidth = width * 0.03;
+  // Taper continuously across each segment (start radius -> end radius) rather
+  // than holding one radius per segment. The old per-segment constant width
+  // left a visible step at every joint, which read as extra blockiness on top
+  // of the square cross-section.
+  const halfWidthAt = (i: number) =>
+    THREE.MathUtils.lerp(rootHalfWidth, tipHalfWidth, i / (points.length - 1));
   for (let i = 0; i < points.length - 1; i++) {
-    const t = i / (points.length - 2);
-    const halfX = THREE.MathUtils.lerp(rootHalfWidth, tipHalfWidth, t);
-    const halfY = halfX * 0.8;
-    pushBoxSegment(points[i], points[i + 1], halfX, halfY, i === 0, i === points.length - 2, WHITE_VERTEX_COLOR);
+    const halfXa = halfWidthAt(i);
+    const halfXb = halfWidthAt(i + 1);
+    pushTubeSegment(
+      points[i],
+      points[i + 1],
+      halfXa,
+      halfXa * 0.8,
+      halfXb,
+      halfXb * 0.8,
+      i === 0,
+      i === points.length - 2,
+      WHITE_VERTEX_COLOR,
+    );
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-  geometry.computeVertexNormals();
+  // Averaged rather than per-face normals, so the 10-sided tube shades as a
+  // round surface instead of ten flat strips. The end caps meet the tube wall
+  // at 90 degrees, well past the crease angle, so they stay crisp.
+  smoothNormalsByPosition(geometry);
 
   const tip = points[points.length - 1];
   addRainbowVertexColorsByDistance(geometry, root, root.distanceTo(tip));

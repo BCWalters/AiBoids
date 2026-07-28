@@ -167,19 +167,55 @@ export function disposeCreatureGeometries(geometries: CreatureGeometries): void 
  * which line up between a LatheGeometry and a hand-authored triangle
  * soup. Recomputes normals fresh on the combined result.
  */
+/**
+ * Copies a part's vertex normals into the merged buffer, computing flat
+ * per-face normals only for parts that don't carry their own.
+ *
+ * Both merge helpers below used to call computeVertexNormals() on the finished
+ * merge, which silently threw away two kinds of good normals:
+ *
+ *  - analytic normals from THREE.LatheGeometry (used by the dragon body and
+ *    every fish body), which are smoother and more correct than anything a
+ *    recompute can recover; and
+ *  - smoothed normals from smoothNormalsByPosition().
+ *
+ * Because the merged buffer is non-indexed, recomputing produced one flat
+ * normal per triangle. For parts that supply no normals this helper reproduces
+ * exactly that same per-face result, so their shading is unchanged.
+ */
+function appendPartNormals(target: number[], part: THREE.BufferGeometry): void {
+  const existing = part.getAttribute('normal');
+  if (existing) {
+    for (let i = 0; i < existing.count; i++) {
+      target.push(existing.getX(i), existing.getY(i), existing.getZ(i));
+    }
+    return;
+  }
+  const flat = new THREE.BufferGeometry();
+  flat.setAttribute('position', part.getAttribute('position'));
+  flat.computeVertexNormals();
+  const computed = flat.getAttribute('normal');
+  for (let i = 0; i < computed.count; i++) {
+    target.push(computed.getX(i), computed.getY(i), computed.getZ(i));
+  }
+  flat.dispose();
+}
+
 export function mergePositionOnlyGeometries(geometries: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const positions: number[] = [];
+  const normals: number[] = [];
   for (const geometry of geometries) {
     const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
     const attr = nonIndexed.getAttribute('position');
     for (let i = 0; i < attr.count; i++) {
       positions.push(attr.getX(i), attr.getY(i), attr.getZ(i));
     }
+    appendPartNormals(normals, nonIndexed);
     if (nonIndexed !== geometry) nonIndexed.dispose();
   }
   const merged = new THREE.BufferGeometry();
   merged.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  merged.computeVertexNormals();
+  merged.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
   return merged;
 }
 
@@ -200,6 +236,7 @@ export function mergePositionOnlyGeometries(geometries: THREE.BufferGeometry[]):
 export function mergeGeometriesWithColor(parts: { geometry: THREE.BufferGeometry; color: THREE.Color }[]): THREE.BufferGeometry {
   const positions: number[] = [];
   const colors: number[] = [];
+  const normals: number[] = [];
   for (const { geometry, color } of parts) {
     const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
     const posAttr = nonIndexed.getAttribute('position');
@@ -212,12 +249,13 @@ export function mergeGeometriesWithColor(parts: { geometry: THREE.BufferGeometry
         colors.push(color.r, color.g, color.b);
       }
     }
+    appendPartNormals(normals, nonIndexed);
     if (nonIndexed !== geometry) nonIndexed.dispose();
   }
   const merged = new THREE.BufferGeometry();
   merged.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   merged.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-  merged.computeVertexNormals();
+  merged.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
   return merged;
 }
 
@@ -440,4 +478,101 @@ export function pushJointBarrel(
       pushOutward(capCenter, rim(end, seg), rim(end, seg + 1), center);
     }
   }
+}
+
+/**
+ * Averages vertex normals across triangles that share a position, so a
+ * faceted triangle soup shades as a smooth surface.
+ *
+ * WHY THIS EXISTS: every hand-authored creature part in this repo is built as
+ * a non-indexed triangle soup (positions pushed three at a time, no index
+ * buffer). `THREE.BufferGeometry.computeVertexNormals()` averages normals per
+ * *index*, so on non-indexed geometry every vertex is unique and each triangle
+ * ends up with its own flat face normal. The result is hard faceting that no
+ * amount of extra segments can remove — it only makes the facets smaller.
+ *
+ * Measured on main before this helper existed: 99–100% of unique positions on
+ * the unicorn body/tail and dragon body/tail carried split normals, with up to
+ * 180 degrees of spread. Raising the unicorn body from 10 to 16 segments and
+ * the dragon tail tube from 6 to 10 sides (PR #267) shrank the facets but left
+ * the shading just as hard, which is why both still read as blocky.
+ *
+ * Normals are only averaged across faces meeting at less than `creaseAngleDeg`,
+ * which is the standard smoothing-group rule. Genuinely sharp features — a
+ * horn's base, a hoof, the flat end cap of a tapered tube — meet at a wide
+ * angle and keep their hard edge instead of melting into the surrounding
+ * surface.
+ *
+ * Operates in place on non-indexed geometry and returns it for chaining.
+ */
+export function smoothNormalsByPosition(
+  geometry: THREE.BufferGeometry,
+  creaseAngleDeg = 60,
+): THREE.BufferGeometry {
+  if (geometry.index) {
+    throw new Error('smoothNormalsByPosition expects non-indexed geometry');
+  }
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const vertexCount = position.count;
+  const faceCount = Math.floor(vertexCount / 3);
+  const cosCrease = Math.cos((creaseAngleDeg * Math.PI) / 180);
+
+  const faceNormals: THREE.Vector3[] = new Array(faceCount);
+  const edge1 = new THREE.Vector3();
+  const edge2 = new THREE.Vector3();
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  for (let f = 0; f < faceCount; f++) {
+    a.fromBufferAttribute(position, f * 3);
+    b.fromBufferAttribute(position, f * 3 + 1);
+    c.fromBufferAttribute(position, f * 3 + 2);
+    edge1.subVectors(b, a);
+    edge2.subVectors(c, a);
+    const normal = new THREE.Vector3().crossVectors(edge1, edge2);
+    // Degenerate triangles (zero area) have no meaningful normal; leaving
+    // them as a zero vector keeps them from dragging an averaged normal
+    // toward an arbitrary direction.
+    if (normal.lengthSq() > 0) normal.normalize();
+    faceNormals[f] = normal;
+  }
+
+  // Bucket faces by the positions they touch. Quantised so vertices that are
+  // coincident but not bit-identical still weld.
+  const QUANTUM = 1e4;
+  const buckets = new Map<string, number[]>();
+  const keyAt = (vertexIndex: number): string => {
+    const x = Math.round(position.getX(vertexIndex) * QUANTUM);
+    const y = Math.round(position.getY(vertexIndex) * QUANTUM);
+    const z = Math.round(position.getZ(vertexIndex) * QUANTUM);
+    return `${x},${y},${z}`;
+  };
+  for (let v = 0; v < vertexCount; v++) {
+    const key = keyAt(v);
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+    }
+    bucket.push(Math.floor(v / 3));
+  }
+
+  const normals = new Float32Array(vertexCount * 3);
+  const accumulated = new THREE.Vector3();
+  for (let v = 0; v < vertexCount; v++) {
+    const own = faceNormals[Math.floor(v / 3)];
+    accumulated.set(0, 0, 0);
+    for (const face of buckets.get(keyAt(v))!) {
+      const other = faceNormals[face];
+      if (own.dot(other) >= cosCrease) accumulated.add(other);
+    }
+    if (accumulated.lengthSq() === 0) accumulated.copy(own);
+    else accumulated.normalize();
+    normals[v * 3] = accumulated.x;
+    normals[v * 3 + 1] = accumulated.y;
+    normals[v * 3 + 2] = accumulated.z;
+  }
+
+  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  return geometry;
 }
