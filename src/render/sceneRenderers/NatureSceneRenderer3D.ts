@@ -298,7 +298,7 @@ const NATURE_SPECIES_CONFIG: Record<BoidSpecies, NatureSpeciesConfig> = {
   [BoidSpecies.Gold]: {
     natureBase: GOLDFINCH_BODY_BASE,
     colors: { body: GOLDFINCH_BODY_BASE, wing: GOLDFINCH_WING_BASE, tail: GOLDFINCH_TAIL_BASE },
-    beakColor: new THREE.Color(0xf07820),
+    beakColor: new THREE.Color(0x9a6030),
     useSmallGeometry: false,
   },
   [BoidSpecies.Red]: {
@@ -821,3 +821,5 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
 export { NATURE_HAWK_COLORS };
 // Exported for unit tests that assert hawk flap frequency intent is preserved.
 export { HAWK_FLAP_FREQUENCY, FLAP_FREQUENCY };
+// Exported for unit tests that assert gallery flap amplitude tracks simulation.
+export { FLAP_IDLE_AMPLITUDE, FLAP_SPEED_AMPLITUDE };
