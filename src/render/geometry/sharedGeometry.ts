@@ -58,6 +58,22 @@ export interface CreatureGeometries {  body: THREE.BufferGeometry;
    * vertex colors. Rendered with the same static per-instance transform
    * as the body (no flap). */
   beak?: THREE.BufferGeometry;
+  /**
+   * Wing (pectoral fin) pivot declarations for articulated parts whose root
+   * sits off the model's forward axis.
+   *
+   * When absent, wings articulate about the model origin (pivot = null), which
+   * works correctly only when the wing root lies on the Y axis (x=0, z=0). For
+   * any root offset from the axis — e.g. the seahorse's pectoral fins whose
+   * root sits on the body's side surface at x = ±surfaceX — the shared engine
+   * must articulate about that root instead; otherwise the rotation sweeps the
+   * root through an arc that detaches it from the body surface mid-flap.
+   *
+   * Left and right pivots are declared separately to support asymmetric rigs.
+   * Symmetric rigs will have equal-and-opposite X and equal Y/Z.
+   */
+  wingPivotLeft?: Triple;
+  wingPivotRight?: Triple;
 }
 
 /**

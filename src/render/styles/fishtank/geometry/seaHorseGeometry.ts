@@ -26,7 +26,19 @@ export function createSeaHorseGeometries(length: number, width: number): Creatur
   const wingLeft = buildPectoralFinGeometry(length, width, 1);
   const wingRight = buildPectoralFinGeometry(length, width, -1);
   const tail = buildCurledTailGeometry(length, width);
-  return { body, wingLeft, wingRight, tail };
+  const beak = buildSnoutFinGeometry(length, width);
+  // Pectoral fin root — must match the root vector in buildPectoralFinGeometry.
+  // The fins flap about the Y axis (FORWARD_AXIS in the renderer); pivoting at
+  // the model origin (null) sweeps the root through an arc, detaching it from
+  // the body surface. Declaring the root as the pivot keeps it welded.
+  const finRootY = length * FIN_ROOT_Y_FRAC;
+  const finRootZ = length * FIN_ROOT_Z_FRAC;
+  const finSurfaceX = width * FIN_SURFACE_X_FRAC;
+  return {
+    body, wingLeft, wingRight, tail, beak,
+    wingPivotLeft:  [finSurfaceX, finRootY, finRootZ],
+    wingPivotRight: [-finSurfaceX, finRootY, finRootZ],
+  };
 }
 
 // Seahorse palette — single source of truth shared between the baked tail
@@ -98,6 +110,16 @@ const SEAHORSE_FIN_RATIO = new THREE.Color().setRGB(
   SEAHORSE_FIN_LINEAR.g / SEAHORSE_BODY_LINEAR.g,
   SEAHORSE_FIN_LINEAR.b / SEAHORSE_BODY_LINEAR.b,
 );
+
+// Pectoral fin root coordinates (fraction of length/width).
+// These are the single source of truth shared between buildPectoralFinGeometry
+// and createSeaHorseGeometries' wing-pivot declarations, so that any future
+// geometry change to the fin root automatically updates the pivot too.
+// Exported so tests can anchor assertions on these concrete values instead of
+// copying them (a copied constant cannot detect a change to the original).
+export const FIN_ROOT_Y_FRAC = 0.03;
+export const FIN_ROOT_Z_FRAC = 0.05;
+export const FIN_SURFACE_X_FRAC = 0.15;
 
 interface SpinePoint {
   y: number;
@@ -211,10 +233,111 @@ function buildSeaHorseHornGeometry(crestY: number, crestZ: number, crestRadius: 
   // so growing hornLength extends the tip forward without moving the base.
   const hornLength = crestRadius * 1.4375;
   const hornRadius = crestRadius * 0.28;
-  const horn = new THREE.ConeGeometry(hornRadius, hornLength, 8);
+  // Build a spiraled cone: same dimensions as the old ConeGeometry but with a
+  // single helical ridge to give it a coral/shell spiral-y texture. The ridge
+  // traces one-and-a-half turns from base to tip and fades toward the tip.
+  const horn = buildSpiralCone(hornRadius, hornLength);
+  // ConeGeometry's axis runs along +Y; rotateX(PI/2) points it along +Z (the
+  // model's up/forward direction when the seahorse is posed upright).
   horn.rotateX(Math.PI / 2);
   horn.translate(0, crestY - crestRadius * 0.05, crestZ + crestRadius * 0.3 + hornLength * 0.5);
   return horn;
+}
+
+/**
+ * A tapered cone with a single helical ridge spiralling from base to tip.
+ * The cone's axis runs along +Y (apex at +hornLength/2, base at -hornLength/2)
+ * matching THREE.ConeGeometry's convention, so callers can apply the same
+ * rotateX + translate placement as before.
+ *
+ * The ridge is a raised sinusoidal bump in the radial direction whose peak
+ * angle advances linearly with height, tracing a helix. It fades toward the
+ * tip so the apex stays sharp.
+ */
+function buildSpiralCone(hornRadius: number, hornLength: number): THREE.BufferGeometry {
+  const segments = 12;
+  const stacks = 22;
+  const ridgeTurns = 1.5;
+  const ridgeAmp = hornRadius * 0.22; // height of the raised ridge
+
+  // Return a vertex on the spiral cone surface.
+  // stack: 0 = base, stacks = apex.
+  // seg: circumferential index in [0, segments).
+  const getPoint = (stack: number, seg: number): THREE.Vector3 => {
+    const t = stack / stacks;                         // 0 = base, 1 = apex
+    const angle = (seg / segments) * Math.PI * 2;
+    const baseRadius = hornRadius * (1 - t);          // linear taper to zero
+    // Helical ridge: peak phase advances with height to form a helix.
+    const phase = angle - t * ridgeTurns * Math.PI * 2;
+    // cos(phase): +1 at ridge crest, -1 at valley; clamp negatives to zero
+    const ridgeFactor = Math.max(0, Math.cos(phase));
+    // Sharpen the ridge and fade it toward the tip (×(1-t)) so the apex is clean
+    const bump = ridgeAmp * Math.pow(ridgeFactor, 3) * (1 - t);
+    const r = baseRadius + bump;
+    const y = t * hornLength - hornLength * 0.5; // center at origin
+    return new THREE.Vector3(r * Math.cos(angle), y, r * Math.sin(angle));
+  };
+
+  const positions: number[] = [];
+  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) =>
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+
+  // Side quads
+  for (let stack = 0; stack < stacks; stack++) {
+    for (let seg = 0; seg < segments; seg++) {
+      const next = (seg + 1) % segments;
+      const a = getPoint(stack, seg);
+      const b = getPoint(stack, next);
+      const c = getPoint(stack + 1, seg);
+      const d = getPoint(stack + 1, next);
+      pushTri(a, b, c);
+      pushTri(b, d, c);
+    }
+  }
+
+  // Base cap
+  const basePt = new THREE.Vector3(0, -hornLength * 0.5, 0);
+  for (let seg = 0; seg < segments; seg++) {
+    const next = (seg + 1) % segments;
+    pushTri(basePt, getPoint(0, next), getPoint(0, seg));
+  }
+
+  // Apex cap (degenerate — just one point)
+  const apexPt = new THREE.Vector3(0, hornLength * 0.5, 0);
+  for (let seg = 0; seg < segments; seg++) {
+    const next = (seg + 1) % segments;
+    pushTri(apexPt, getPoint(stacks - 1, seg), getPoint(stacks - 1, next));
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * A small snout fin (beak) near the seahorse's snout tip — the tiny nasal
+ * crown fin that many seahorse species display just forward of the face.
+ *
+ * Returned as the `beak` field of CreatureGeometries so it gets its own
+ * InstancedMesh and is unconditionally welded to the body transform by
+ * applyCreatureBodyMatrices (the same weld that fixed the rigless-tail bug
+ * in #200). Colored via the seahorse's body instanceColor.
+ */
+function buildSnoutFinGeometry(length: number, width: number): THREE.BufferGeometry {
+  // Anchor just forward of the snout tip (spine[7] area).
+  const snoutY = length * 0.068;
+  const snoutZ = length * 0.179;
+  // A small kite-shaped fin pointing forward (+Z). It's thin enough to read
+  // as a delicate membrane and tiny enough not to clash with the horn above.
+  const span = width * 0.055;     // half-width of the fin
+  const chord = length * 0.038;   // depth of the fin (fore-aft)
+  const root = new THREE.Vector3(0, snoutY, snoutZ);
+  const leftEdge = new THREE.Vector3(-span, snoutY + chord * 0.25, snoutZ + chord * 0.45);
+  const tipFwd = new THREE.Vector3(0, snoutY + chord * 0.55, snoutZ + chord);
+  const rightEdge = new THREE.Vector3(span, snoutY + chord * 0.25, snoutZ + chord * 0.45);
+  const thickness = fishtankFinThickness(span * 2);
+  return extrudeRingGeometry([root, leftEdge, tipFwd, rightEdge], thickness);
 }
 
 function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeometry {
@@ -282,20 +405,16 @@ function buildRidgePlate(anchor: THREE.Vector3, height: number, thickness: numbe
 }
 
 function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): THREE.BufferGeometry {
-  // The animated "wing" slot. The shared engine flaps these around the body's
-  // long (vertical +Y) axis, pivoting at the body centerline (x=0, z=0), with a
-  // gentle amplitude (see the seahorse motion config). Per feedback, the fin now
-  // attaches at the OUTSIDE of the body — its root sits on the body's side
-  // surface (x = surfaceX) rather than buried on the centerline — so it visibly
-  // hinges off the flank like the small fish's pectorals. Because the flap
-  // amplitude is small, an off-axis root only sweeps a short arc near the
-  // surface instead of shearing through the torso. The kite ring lies flat in an
-  // X/Y plane (constant z), so extrudeRingGeometry gives it depth along Z into a
-  // very thin, wispy 3D paddle.
-  const rootY = length * 0.03;
-  const rootZ = length * 0.05;
+  // The animated "wing" slot. The shared engine flaps these about the body's
+  // long (vertical +Y) axis. The fin's root sits on the body's side surface at
+  // x = surfaceX (see FIN_SURFACE_X_FRAC), so it visibly hinges off the flank.
+  // The pivot is declared in createSeaHorseGeometries via wingPivotLeft/Right —
+  // the renderer articulates around that root instead of the model origin,
+  // keeping the root welded to the body through the full flap arc.
+  const rootY = length * FIN_ROOT_Y_FRAC;
+  const rootZ = length * FIN_ROOT_Z_FRAC;
   // Body side surface at the shoulder section (~spine[4/5]): x = radius * xScale.
-  const surfaceX = width * 0.15;
+  const surfaceX = width * FIN_SURFACE_X_FRAC;
   const span = width * 0.28; // blade reach outward from the flank
   const chord = length * 0.13;
   const root = new THREE.Vector3(side * surfaceX, rootY, rootZ);

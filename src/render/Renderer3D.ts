@@ -352,7 +352,7 @@ export class Renderer3D {
       this.scene.add(beak);
     }
 
-    return { body, wingLeft, wingRight, tail, tailRig: geometries.tailRig, legs, beak, fishUndulation: fishUndulationState };
+    return { body, wingLeft, wingRight, tail, tailRig: geometries.tailRig, legs, beak, fishUndulation: fishUndulationState, wingPivotLeft: geometries.wingPivotLeft, wingPivotRight: geometries.wingPivotRight };
   }
 
   private disposeRenderBatch(set: BoidRenderBatch | null): void {
