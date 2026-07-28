@@ -34,6 +34,15 @@ const UNICORN_KNEE_DRIVE: PartDrive = {
   phaseOffsetRad: -0.45,
 };
 
+/**
+ * Radial cross-section segments for the unicorn body sweep.  Raising this
+ * from the old value of 10 gives the body a smoothly rounded silhouette
+ * rather than a visibly faceted one (issues #247).  Exported so the
+ * creatureSmoothness regression test can assert the exact resulting
+ * triangle count against this constant.
+ */
+export const UNICORN_BODY_RADIAL_SEGMENTS = 16;
+
 // Rainbow vertex-color gradients used only by the unicorn's pegasus
 // wings and rainbow tail (violet at the root, red at the tip), read by a
 // vertexColors-enabled material — see Renderer3D's buildRenderBatch
@@ -308,7 +317,7 @@ function buildHorseBodyProfileGeometry(
     { y: halfLen * 0.487, z: length * 0.2, radius: width * 0.07, zScale: 1.1, color: UNICORN_MUZZLE_TINT }, // rounded nose tip, curling up so the chin recedes
   ];
 
-  const segments = 10;
+  const segments = UNICORN_BODY_RADIAL_SEGMENTS;
   const rings: THREE.Vector3[][] = spine.map((point) => {
     const ring: THREE.Vector3[] = [];
     for (let j = 0; j < segments; j++) {
