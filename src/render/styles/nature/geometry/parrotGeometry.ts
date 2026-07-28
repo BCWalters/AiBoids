@@ -5,6 +5,9 @@ import {
   mergeGeometriesWithColor,
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
+  mirrorGeometryAcrossX,
+  subdivideGeometryTriangles,
+  subdivideTriangleSoup,
   singleLegPart,
   swayingTailRig,
 } from '../../../geometry/sharedGeometry';
@@ -341,12 +344,37 @@ const PARROT_FEATHER_SHINGLE_FRAC = 0.012;
  * is seated, as a fraction of chord.
  *
  * Every feather vertex ends up at or below `-chord * this`, and the panel's
- * upper surface is at `+chord * 0.006`, so no feather can ever surface through
- * the top of the wing no matter how the undulation shader bends it. Real
- * primaries emerge from under the covert layer too, so seating rather than
- * centring them is also the more correct arrangement.
+ * upper surface is at `+chord * 0.006`, so no feather can surface through the
+ * top of the wing. Real primaries emerge from under the covert layer too, so
+ * seating rather than centring them is also the more correct arrangement.
+ *
+ * This clearance is only meaningful if the panel actually holds the shape the
+ * undulation shader gives it, which is why the panel is subdivided — see
+ * PARROT_WING_PANEL_DIVISIONS. Undivided, the panel missed its own displaced
+ * surface by several times this depth and the fan surfaced right through it.
  */
 const PARROT_FEATHER_SEAT_FRAC = 0.011;
+
+/**
+ * How many times each wing-panel triangle is split along each edge before the
+ * undulation shader gets hold of it.
+ *
+ * The panel is a triangle fan radiating from the shoulder, so its triangles
+ * reach from the root all the way to the wingtip — spanning 98 % of the wing.
+ * The undulation is a travelling wave along that same axis, and a triangle can
+ * only represent it as a straight chord between its corners, so an undivided
+ * panel missed its own displaced surface by about 0.95 model units. The flight
+ * feathers are small enough to follow the wave closely, and they are seated
+ * only 0.058 below the panel, so the panel swung out from under them and they
+ * surfaced through it by up to 0.55 — nearly ten times the seat depth — by an
+ * amount that changed with the flap phase.
+ *
+ * At 16 divisions the longest edge is about a sixteenth of the span, bringing
+ * the residual error (which falls with the square of edge length) to 0.010, a
+ * sixth of the seat depth, and no feather breaches at any phase. The cost is
+ * paid once at build time on a geometry every parrot instance shares.
+ */
+const PARROT_WING_PANEL_DIVISIONS = 16;
 
 
 export type ParrotPaletteProfile =
@@ -973,7 +1001,10 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
  * rather than long spikes.
  */
 function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
-  const s = side;
+  // The right wing is the reflection of the left, never a second build with
+  // the sign flipped through every coordinate. See mirrorGeometryAcrossX.
+  if (side === -1) return mirrorGeometryAcrossX(buildParrotWingGeometry(span, chord, 1));
+  const s: 1 = 1;
   const positions: number[] = [];
   const pushTri = (a: number[], b: number[], c: number[]) => positions.push(...a, ...b, ...c);
   const sheetHalfThickness = chord * 0.006;
@@ -1063,7 +1094,15 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     const outerTwoBoost = i >= fingerCount - 2 ? 0.12 : 0;
     const lateral = 0.01 + 0.34 * outwardBias + outerTwoBoost;
     const forward = new THREE.Vector2(s * lateral, -(1.1 + 0.22 * t)).normalize();
-    const sideward = new THREE.Vector2(-forward.y, forward.x);
+    // `* s` because the vane's two base corners are taken from the trailing
+    // edge, which mirrors with the wing, while (-forward.y, forward.x) does
+    // not: its X component is -forward.y, and forward.y is negative on both
+    // wings, so it points the same way on each. Without this the ring runs out
+    // along one side and returns to a base corner on that same side, crossing
+    // itself: it notched a wedge out of every feather on one wing, flipped the
+    // normals that the colour pass reads, and left the two wings genuinely
+    // different geometry rather than mirror images.
+    const sideward = new THREE.Vector2(-forward.y, forward.x).multiplyScalar(s);
     const rootHalfWidth = Math.max(0.0001, Math.hypot(baseB[0] - baseA[0], baseB[1] - baseA[1]) * 0.5) * 1.16;
     const shoulderDist = fingerLen * 0.56;
     const tipDist = fingerLen * 0.88;
@@ -1112,9 +1151,23 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   }
 
   const baseWing = new THREE.BufferGeometry();
-  baseWing.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  const geometry = mergePositionOnlyGeometries([baseWing, trailingCovertStrip, ...fingerGeometries]);
+  baseWing.setAttribute(
+    'position',
+    new THREE.BufferAttribute(
+      new Float32Array(subdivideTriangleSoup(positions, PARROT_WING_PANEL_DIVISIONS)),
+      3,
+    ),
+  );
+  // The covert strip runs almost the full trailing edge, so it needs the same
+  // treatment as the panel; the feathers are already short enough in span to
+  // track the wave on their own tessellation.
+  const dividedCoverts = subdivideGeometryTriangles(
+    trailingCovertStrip,
+    PARROT_WING_PANEL_DIVISIONS,
+  );
+  const geometry = mergePositionOnlyGeometries([baseWing, dividedCoverts, ...fingerGeometries]);
   baseWing.dispose();
+  dividedCoverts.dispose();
   trailingCovertStrip.dispose();
   fingerGeometries.forEach((f) => f.dispose());
   tintParrotWingRegions(geometry, chord, side);

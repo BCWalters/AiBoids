@@ -245,7 +245,23 @@ export function buildTailGeometry(
   const geo = extrudeRingGeometry([root, leftTip, backCenter, rightTip], thickness);
 
   if (opts?.gradient) {
-    const { root: rootColor, tip: tipColor, interpolation = 'rgb', rootHold = 0 } = opts.gradient;
+    applyTailGradient(geo, opts.gradient);
+  }
+
+  return geo;
+}
+
+/**
+ * Bakes a root-to-tip vertex-colour ramp down a tail, keyed on Y.
+ *
+ * Split out of buildTailGeometry so the fanned small-bird tail, which is built
+ * from many separate feather solids rather than one kite, can share exactly the
+ * same ramp — the per-species palettes and their tests are written against this
+ * behaviour.
+ */
+export function applyTailGradient(geo: THREE.BufferGeometry, gradient: TailGradient): void {
+  {
+    const { root: rootColor, tip: tipColor, interpolation = 'rgb', rootHold = 0 } = gradient;
     // Y-axis root->tip gradient: max Y at the fan root, min Y at the rear tip.
     geo.computeBoundingBox();
     const gradientRootY = geo.boundingBox!.max.y;
@@ -281,6 +297,4 @@ export function buildTailGeometry(
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   }
-
-  return geo;
 }

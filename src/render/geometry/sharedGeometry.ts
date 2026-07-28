@@ -291,6 +291,152 @@ export function mergeGeometriesWithColor(parts: { geometry: THREE.BufferGeometry
  * unicornGeometry.ts's pushBoxSegment, so it works regardless of the
  * input ring's own winding order.
  */
+/**
+ * Splits every triangle in a position-only soup into `divisions²` smaller ones
+ * on a regular barycentric lattice, preserving winding.
+ *
+ * ### Why a flat panel ever needs interior vertices
+ * A wing panel is geometrically flat, so as static geometry a handful of large
+ * triangles describes it exactly. But the wing-undulation vertex shader bends
+ * it, and a vertex shader can only move the vertices that exist: between them
+ * the rasteriser interpolates linearly. A triangle that spans the whole wing
+ * therefore renders the travelling wave as a single straight chord across it,
+ * missing the true surface by up to the wave's own amplitude.
+ *
+ * That error is invisible on the panel alone — a slightly wrong curve still
+ * looks like a wing. It becomes visible where coarse geometry meets fine:
+ * flight feathers are small enough to track the wave closely, so the panel
+ * swings out from under them and they surface through it, by an amount that
+ * changes with the flap phase.
+ *
+ * Pick `divisions` so the longest resulting edge stays short relative to the
+ * wavelength; the residual error falls with the square of the edge length.
+ *
+ * ### Uniform, not adaptive
+ * Every triangle is divided the same number of times, including ones already
+ * small enough. Subdividing only the large triangles would leave a T-junction
+ * wherever a divided triangle abuts an undivided neighbour: the shared edge
+ * gains a midpoint vertex on one side only, that vertex gets displaced, and the
+ * surfaces tear apart along the seam. Since the displacement is what we are
+ * subdividing for, those seams would split precisely when they are most
+ * visible. Uniform division keeps every shared edge split identically on both
+ * sides, so the mesh stays watertight at any amplitude.
+ */
+/**
+ * Reflect a non-indexed geometry through the x = 0 plane, producing the exact
+ * mirror image of the input.
+ *
+ * Use this instead of rebuilding a mirrored part with a `side: 1 | -1` factor
+ * baked into every coordinate. Building both sides from the same parameterised
+ * code looks equivalent but is not, because negating x reverses triangle
+ * winding: helpers that re-derive winding from a centroid test (extrudeRing-
+ * Geometry) or from a signed area silently correct themselves, while plain
+ * triangle lists do not. A part then ends up with its normals flipped on some
+ * regions and not others, and any later pass that reads the sign of a normal
+ * to decide dorsal from ventral colours the two sides differently. That is
+ * exactly what happened to the parrot wing: 2700 of its vertices kept their
+ * normal sign while 15276 flipped, so one wing rendered its topside palette
+ * and the other its underside palette from the same viewpoint.
+ *
+ * Reflecting the finished geometry cannot drift in that way. Positions and
+ * normals both have x negated, which is the true mirror of the normal field,
+ * and the winding of every triangle is reversed so faces still enclose the
+ * same solid. Vertex colours are carried across untouched, so the mirrored
+ * part is guaranteed to shade identically to its source.
+ */
+export function mirrorGeometryAcrossX(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  const mirrored = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+  const position = mirrored.getAttribute('position') as THREE.BufferAttribute;
+  const normal = mirrored.getAttribute('normal') as THREE.BufferAttribute | undefined;
+  for (let i = 0; i < position.count; i++) {
+    position.setX(i, -position.getX(i));
+    if (normal) normal.setX(i, -normal.getX(i));
+  }
+  // Reverse each triangle so the reflected faces wind outward again. Swapping
+  // the second and third corners is enough and keeps corner 0 in place.
+  const swap = (attr: THREE.BufferAttribute | undefined) => {
+    if (!attr) return;
+    const size = attr.itemSize;
+    const data = attr.array as unknown as { [k: number]: number };
+    for (let tri = 0; tri < attr.count; tri += 3) {
+      for (let c = 0; c < size; c++) {
+        const b = (tri + 1) * size + c;
+        const cc = (tri + 2) * size + c;
+        const tmp = data[b];
+        data[b] = data[cc];
+        data[cc] = tmp;
+      }
+    }
+  };
+  for (const name of Object.keys(mirrored.attributes)) {
+    swap(mirrored.getAttribute(name) as THREE.BufferAttribute);
+  }
+  for (const name of Object.keys(mirrored.attributes)) {
+    (mirrored.getAttribute(name) as THREE.BufferAttribute).needsUpdate = true;
+  }
+  mirrored.computeBoundingSphere();
+  return mirrored;
+}
+
+export function subdivideTriangleSoup(positions: number[], divisions: number): number[] {
+  if (divisions <= 1) return positions;
+  const out: number[] = [];
+  const at = (base: number, corner: number, axis: number) => positions[base + corner * 3 + axis];
+  for (let base = 0; base + 8 < positions.length; base += 9) {
+    // Lattice point (i, j) of the triangle (a, b, c), where i runs toward b and
+    // j toward c. Held as a flat [x, y, z] triple to keep the inner loops free
+    // of allocation — this runs over every panel triangle at geometry build.
+    const lattice = (i: number, j: number): number[] => {
+      const u = i / divisions;
+      const v = j / divisions;
+      const w = 1 - u - v;
+      return [
+        at(base, 0, 0) * w + at(base, 1, 0) * u + at(base, 2, 0) * v,
+        at(base, 0, 1) * w + at(base, 1, 1) * u + at(base, 2, 1) * v,
+        at(base, 0, 2) * w + at(base, 1, 2) * u + at(base, 2, 2) * v,
+      ];
+    };
+    for (let i = 0; i < divisions; i++) {
+      for (let j = 0; i + j < divisions; j++) {
+        // Both sub-triangles list their corners in the same rotational order as
+        // the parent, so the whole soup keeps its original facing. Callers rely
+        // on that: the wing's colour pass reads the vertex normal to decide
+        // which face it is painting.
+        out.push(...lattice(i, j), ...lattice(i + 1, j), ...lattice(i, j + 1));
+        if (i + j < divisions - 1) {
+          out.push(...lattice(i + 1, j), ...lattice(i + 1, j + 1), ...lattice(i, j + 1));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * {@link subdivideTriangleSoup} for a whole geometry, for parts that arrive as
+ * a built {@link THREE.BufferGeometry} rather than a raw position array. The
+ * result is always non-indexed, since the lattice duplicates shared corners.
+ */
+export function subdivideGeometryTriangles(
+  geometry: THREE.BufferGeometry,
+  divisions: number,
+): THREE.BufferGeometry {
+  if (divisions <= 1) return geometry;
+  const source = geometry.index ? geometry.toNonIndexed() : geometry;
+  const position = source.getAttribute('position');
+  const flat: number[] = [];
+  for (let i = 0; i < position.count; i++) {
+    flat.push(position.getX(i), position.getY(i), position.getZ(i));
+  }
+  if (source !== geometry) source.dispose();
+  const result = new THREE.BufferGeometry();
+  result.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array(subdivideTriangleSoup(flat, divisions)), 3),
+  );
+  return result;
+}
+
 export function extrudeRingGeometry(ring: THREE.Vector3[], thickness: number): THREE.BufferGeometry {
   const n = ring.length;
   const half = thickness / 2;
