@@ -26,6 +26,13 @@ import {
   SHARK_SCALE_CONFIG,
 } from '../styles/fishtank/fishScaleShader';
 import { applySeaHorsePlateShader, SEAHORSE_PLATE_CONFIG } from '../styles/fishtank/seaHorsePlateShader';
+import {
+  applyFishFinRayShader,
+  BONY_FISH_FIN_RAY_CONFIG,
+  BARRACUDA_FIN_RAY_CONFIG,
+  PECTORAL_FIN_FRAME,
+  CAUDAL_FIN_FRAME,
+} from '../styles/fishtank/fishFinRayShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -669,6 +676,45 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       config = BONY_FISH_SCALE_CONFIG;
     }
     applyFishScaleShader(material, geometries.body, config);
+  }
+
+  patchWingMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    // Sea horse: not a bony fish — no fin rays (it has a membranous pectoral
+    // fin without the stiff bony spines that real fin rays form).
+    if (geometries === this.unicornPredatorGeometries) return;
+    // Shark: cartilaginous fins have no visible bony ray structure. Real
+    // shark fins are supported by ceratotrichia (flexible protein fibres),
+    // not the distinct hard spines that read as rays on bony fish. Leaving
+    // the shark fins smooth is both accurate and consistent with the
+    // SHARK_SCALE_CONFIG decision to skip the scale pattern.
+    if (geometries === this.sharkPredatorGeometries) return;
+
+    const config = geometries === this.barracudaPredatorGeometries
+      ? BARRACUDA_FIN_RAY_CONFIG
+      : BONY_FISH_FIN_RAY_CONFIG;
+    applyFishFinRayShader(material, geometries.wingLeft, config, PECTORAL_FIN_FRAME);
+  }
+
+  /**
+   * The caudal fin does NOT share the pectoral material — Renderer3D clones the
+   * wing material for it, and Material.clone() copies neither onBeforeCompile
+   * nor customProgramCacheKey. Without this hook the tail fin would be the one
+   * fin with no rays at all.
+   *
+   * It also needs its own frame: the caudal panel lies in YZ and runs aft along
+   * -Y, whereas the pectorals lie in XY and run outward along +X. Reusing the
+   * pectoral frame here would strike the fan from a point off the geometry
+   * entirely.
+   */
+  patchTailMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    if (!geometries.tail) return;
+    if (geometries === this.unicornPredatorGeometries) return;
+    if (geometries === this.sharkPredatorGeometries) return;
+
+    const config = geometries === this.barracudaPredatorGeometries
+      ? BARRACUDA_FIN_RAY_CONFIG
+      : BONY_FISH_FIN_RAY_CONFIG;
+    applyFishFinRayShader(material, geometries.tail, config, CAUDAL_FIN_FRAME);
   }
 
   dispose(): void {

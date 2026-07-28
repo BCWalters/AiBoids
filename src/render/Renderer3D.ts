@@ -268,10 +268,15 @@ export class Renderer3D {
       // color-less geometry renders black.
       vertexColors: rainbowWings || !!geometries.wingLeft.getAttribute('color'),
     });
-
-    // Clone first, then patch BOTH instances: Material.clone() drops
-    // onBeforeCompile and customProgramCacheKey, so patching before the clone
-    // would leave the right wing unpatched.
+    // Scene-specific shader patch for wing/fin geometry (dragon scales,
+    // fishtank fin rays).
+    //
+    // Clone FIRST, then patch every instance. Material.clone() copies neither
+    // onBeforeCompile nor customProgramCacheKey, so patching before the clone
+    // leaves the right wing unpatched — that is the "effect only shows on one
+    // fin" bug. The tail clone below is patched by patchTailMaterial for the
+    // same reason. Patching is not idempotent (each call chains onto the
+    // previous onBeforeCompile), so each material must be patched exactly once.
     const wingRightMaterial = wingMaterial.clone();
     sceneRenderer.patchWingMaterial?.(wingMaterial, geometries);
     sceneRenderer.patchWingMaterial?.(wingRightMaterial, geometries);
