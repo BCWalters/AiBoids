@@ -197,6 +197,8 @@ describe('birdFeatherShader no-op when barbDarkness is 0', () => {
       barbsPerLength: 20,
       barbDarkness: 0,
       barbGloss: 0.18,
+      featherElongation: 3.2,
+      barbRachis: 0.16,
     });
     expect(mat.onBeforeCompile).toBe(originalCompile);
   });

@@ -42,6 +42,35 @@ export interface WingUndulationInstanceState {
 
 // ---- GLSL helpers injected into the vertex shader ----
 
+/**
+ * The undulation displacement, in TypeScript.
+ *
+ * This mirrors {@link vertexDisplacementSnippet} exactly, and exists so that
+ * geometry tests can ask "where does this vertex actually end up mid-flap?"
+ * without a GPU. Anything changed in one must be changed in the other; the
+ * pairing follows the same arrangement as `sampleFishUndulationDisplacement`.
+ */
+export function sampleWingUndulationDisplacement({
+  x,
+  root,
+  span,
+  amplitude,
+  waveNumber,
+  phase,
+}: {
+  x: number;
+  root: number;
+  span: number;
+  amplitude: number;
+  waveNumber: number;
+  phase: number;
+}): number {
+  if (span <= 1e-6) return 0;
+  const t = Math.min(1, Math.max(0, (Math.abs(x) - root) / span));
+  const envelope = t * t * (3 - 2 * t);
+  return amplitude * envelope * Math.sin(phase - waveNumber * t);
+}
+
 function vertexDeclarations(): string {
   return `
 attribute float wingUndulationPhase;

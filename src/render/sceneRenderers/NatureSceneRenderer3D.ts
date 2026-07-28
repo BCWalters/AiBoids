@@ -410,7 +410,7 @@ interface NatureSceneRendererDependencies {
 
 // Wing-undulation config: 6 % tip amplitude, ~108° phase lag shoulder→tip.
 // Applied to ALL nature flying creatures (birds, hawks, parrots, dragons, unicorns).
-const WING_UNDULATION_CONFIG: WingUndulationConfig = {
+export const WING_UNDULATION_CONFIG: WingUndulationConfig = {
   // Real birds' primaries trail the shoulder far more than the first pass
   // suggested — the tip visibly whips through the stroke rather than gently
   // bowing. Raised from 0.06 / 0.6π after review of the shipped motion.
