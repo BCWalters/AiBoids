@@ -164,6 +164,23 @@ export interface SimParams {
   // false, predators can chase boids forever but never actually catch them.
   predatorCatchEnabled: boolean;
 
+  // Predator burst strike (#237). When true, a predator that closes to
+  // within predatorStrikeRange of its target commits to a short sprint:
+  // it aims at an intercept point rather than the prey's current position,
+  // and its speed cap ramps up to predatorMaxSpeed * predatorStrikeSpeedBoost.
+  //
+  // Exists because the base pursuit cannot actually catch anything. The
+  // predator/prey speed ratio is only 150/120 = 1.25 against prey that flee
+  // at fleeWeight 3.5 from panicRadius 90, which converges to a stable
+  // trailing standoff: measured over ~70,000 predator-frames per scene, the
+  // mouth point came within 3.5 units of a live boid in 0.00% of frames.
+  // maxForce is NOT the binding constraint — strike force x3 vs x5 produced
+  // byte-identical catch counts across all 10 seeds, because once up to speed
+  // (desired - velocity) is already shorter than the clamp.
+  predatorStrikeEnabled: boolean;
+  predatorStrikeRange: number;
+  predatorStrikeSpeedBoost: number;
+
   // Simulation control
   running: boolean;
   showDebugOverlay: boolean;
@@ -243,6 +260,11 @@ export const defaultParams: SimParams = {
   depthMurkEnabled: true,
   enableDiagnosticsCapture: false,
   predatorCatchEnabled: true,
+  // Off by default: this is a feel change (predators sprint at 270 against
+  // prey capped at 120), so it ships behind a toggle pending review.
+  predatorStrikeEnabled: false,
+  predatorStrikeRange: 60,
+  predatorStrikeSpeedBoost: 1.8,
 
   running: true,
   showDebugOverlay: false,
