@@ -35,10 +35,10 @@
  *      → barracuda cell-size test fails:
  *        AssertionError: expected 3.04 to be <= 2.5
  *
- *   e) Remove the seahorse early-return guard from patchBodyMaterial
+ *   e) Remove the seahorse plate-shader call from patchBodyMaterial (revert to early-return)
  *      → seahorse routing test fails:
- *        AssertionError: expected [Function: bound onBeforeCompile]
- *        to be [Function: originalCompile]
+ *        AssertionError: expected [Function: originalCompile]
+ *        not to be [Function: originalCompile]
  *
  *   f) Remove the shark SHARK_SCALE_CONFIG branch (fall through to bony-fish config)
  *      → shark routing test fails:
@@ -353,7 +353,7 @@ describe('FishtankSceneRenderer3D.patchBodyMaterial species routing', () => {
     expect(mat.onBeforeCompile).toBe(originalCompile);
   });
 
-  it('does NOT patch onBeforeCompile for the sea horse (not a fish)', () => {
+  it('patches onBeforeCompile for the sea horse (bony plates, not fish scales)', () => {
     const renderer = makeFishtankRenderer();
     const { geometries } = renderer.getPredatorInstanceConfig(
       PredatorSpecies.Horse,
@@ -363,7 +363,7 @@ describe('FishtankSceneRenderer3D.patchBodyMaterial species routing', () => {
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     const originalCompile = mat.onBeforeCompile;
     renderer.patchBodyMaterial(mat, geometries);
-    expect(mat.onBeforeCompile).toBe(originalCompile);
+    expect(mat.onBeforeCompile).not.toBe(originalCompile);
   });
 
   it('patches onBeforeCompile for the barracuda', () => {
