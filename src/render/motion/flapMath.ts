@@ -199,8 +199,15 @@ const HALF_PI = Math.PI / 2;
  *
  * Phase is offset by a quarter cycle so that u = 0 is the top of the stroke;
  * this makes downstrokeFraction = 0.5 reproduce sin(phase) exactly.
+ *
+ * Exported because the wing-undulation vertex shader has to ride this same
+ * warped clock. The shader used to be fed the raw linear phase while the rigid
+ * rotation was warped, so on every creature with an asymmetric beat (all of
+ * them — birds are at 0.37) the travelling wave drifted against the stroke it
+ * is supposed to be part of, and read as an unrelated ripple rather than as the
+ * tip trailing the wing.
  */
-function warpStrokePhase(phase: number, downstrokeFraction: number): number {
+export function warpStrokePhase(phase: number, downstrokeFraction: number): number {
   const down = clamp(downstrokeFraction, DOWNSTROKE_FRACTION_MIN, DOWNSTROKE_FRACTION_MAX);
   let u = (phase / TWO_PI + 0.25) % 1;
   if (u < 0) u += 1;

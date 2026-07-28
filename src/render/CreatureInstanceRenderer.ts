@@ -33,6 +33,7 @@ import {
   initialFlapPhase,
   legSwingAngleFromPhase,
   tailSwayAngleFromPhase,
+  warpStrokePhase,
 } from './motion/flapMath';
 import {
   advanceFishUndulationPhase,
@@ -645,7 +646,20 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       uprightStyle,
     });
-    this.applyWingFlapMatrices(set, index, flapAngle, this.flapPhase.get(creature) ?? initialFlapPhase(creature.id), creature);
+    this.applyWingFlapMatrices(
+      set,
+      index,
+      flapAngle,
+      // The undulation shader must ride the WARPED stroke clock, not the raw
+      // linear one: the rigid rotation is warped by flapDownstrokeFraction, and
+      // feeding the wave a different clock lets it drift against the stroke.
+      // warpStrokePhase is the identity at 0.5, so fish fins are unaffected.
+      warpStrokePhase(
+        this.flapPhase.get(creature) ?? initialFlapPhase(creature.id),
+        flapDownstrokeFraction,
+      ),
+      creature,
+    );
 
     this.applyCreatureTailSwayMatrix({
       set,
