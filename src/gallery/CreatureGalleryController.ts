@@ -46,6 +46,28 @@ interface DeepLinkState {
 const GALLERY_PREDATOR_CREATURES = new Set<GalleryCreature>(['horse', 'monster', 'predator']);
 const GALLERY_BOID_SPECIES = new Set<GalleryCreature>(['normal', 'multicolor', 'gold', 'red', 'blue']);
 
+/**
+ * Fraction of max speed the gallery creature cruises at when posed. Kept well
+ * below 1 so the rendered flap amplitude matches typical in-flight motion
+ * rather than showing the exaggerated full-speed stroke. At 1 the wings sweep
+ * nearly the full arc; at 0.6 the amplitude matches a bird cruising at ~60 %
+ * of its top speed, which reads as realistic sustained flight.
+ *
+ * Exported so tests can verify the gallery's amplitude tracks the simulation's
+ * formula rather than drifting independently.
+ */
+export const GALLERY_SPEED_FRACTION = 0.6;
+
+// Unit-direction of the gallery creature's velocity: mostly +X (right), with
+// a slight pitch-up (Y) and lateral (Z) component so the 3/4-front pose reads
+// as active cruising flight rather than a dead-straight charge at the camera.
+// Derived from the original (0.9, 0.12, 0.35) direction vector; normalised so
+// the speed fraction above controls the actual magnitude.
+const _GALLERY_DIR_X = 0.9;
+const _GALLERY_DIR_Y = 0.12;
+const _GALLERY_DIR_Z = 0.35;
+const _GALLERY_DIR_LEN = Math.sqrt(_GALLERY_DIR_X ** 2 + _GALLERY_DIR_Y ** 2 + _GALLERY_DIR_Z ** 2);
+
 function readGalleryCreatureFromURL(): { creatureSpecies: GalleryCreature; distance: number | null } | null {
   const searchParams = new URLSearchParams(window.location.search);
   const creatureSpecies = searchParams.get('galleryCreature')?.toLowerCase() ?? null;
@@ -368,10 +390,11 @@ export class CreatureGalleryController {
     creature.position.y = center.y;
     creature.position.z = center.z;
 
-    const speed = GALLERY_PREDATOR_CREATURES.has(creatureSpecies) ? params.predatorMaxSpeed : params.boidMaxSpeed;
-    creature.velocity.x = speed * 0.9;
-    creature.velocity.y = speed * 0.12;
-    creature.velocity.z = speed * 0.35;
+    const maxSpeed = GALLERY_PREDATOR_CREATURES.has(creatureSpecies) ? params.predatorMaxSpeed : params.boidMaxSpeed;
+    const cruiseSpeed = maxSpeed * GALLERY_SPEED_FRACTION;
+    creature.velocity.x = (_GALLERY_DIR_X / _GALLERY_DIR_LEN) * cruiseSpeed;
+    creature.velocity.y = (_GALLERY_DIR_Y / _GALLERY_DIR_LEN) * cruiseSpeed;
+    creature.velocity.z = (_GALLERY_DIR_Z / _GALLERY_DIR_LEN) * cruiseSpeed;
 
     params.running = false;
     this.galleryPosed = true;

@@ -821,3 +821,5 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
 export { NATURE_HAWK_COLORS };
 // Exported for unit tests that assert hawk flap frequency intent is preserved.
 export { HAWK_FLAP_FREQUENCY, FLAP_FREQUENCY };
+// Exported for unit tests that assert gallery flap amplitude tracks simulation.
+export { FLAP_IDLE_AMPLITUDE, FLAP_SPEED_AMPLITUDE };
