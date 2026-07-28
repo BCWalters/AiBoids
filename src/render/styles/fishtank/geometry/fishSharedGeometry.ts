@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { smoothNormalsByPosition } from '../../../geometry/sharedGeometry';
 
 /**
  * Fish-part geometry shared across the fishtank-scene creatures — the
@@ -89,7 +90,11 @@ export function extrudeRingGeometryAlongX(ring: THREE.Vector3[], thickness: numb
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.computeVertexNormals();
+  // smoothNormalsByPosition averages face normals across coincident vertices so
+  // fins read as smoothly curved rather than flat-faceted. computeVertexNormals()
+  // on non-indexed geometry produces per-face normals (flat shading at any
+  // tessellation) — trap #4 from the geometry authoring guide.
+  smoothNormalsByPosition(geometry);
   return geometry;
 }
 
