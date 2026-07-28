@@ -15,6 +15,7 @@ import { createRealisticBirdGeometries } from '../styles/nature/geometry/smallBi
 import { createUnicornGeometries } from '../styles/nature/geometry/unicornGeometry';
 import { DragonFireBreathController } from '../dragonFireBreathController';
 import type { FireBreathEffects } from '../styles/nature/fireBreath';
+import { applyDragonScaleShader, DRAGON_SCALE_CONFIG } from '../styles/nature/dragonScaleShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -804,6 +805,12 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
         horse: 'Unicorn',
       },
     };
+  }
+
+  patchBodyMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    if (geometries === this.dragonPredatorGeometries) {
+      applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG);
+    }
   }
 
   dispose(): void {
