@@ -15,6 +15,7 @@ export const en = {
   panicRadius: 'Predator panic radius',
   fleeWeight: 'Flee weight',
   predatorCatchLabel: 'Predators can catch prey',
+  predatorStrikeLabel: 'Predator burst strike',
 };
 
 export const es: typeof en = {
@@ -32,6 +33,7 @@ export const es: typeof en = {
   panicRadius: 'Radio de pánico ante depredadores',
   fleeWeight: 'Peso de huida',
   predatorCatchLabel: 'Los depredadores pueden atrapar presas',
+  predatorStrikeLabel: 'Ataque rápido del depredador',
 };
 
 export const fr: typeof en = {
@@ -49,4 +51,5 @@ export const fr: typeof en = {
   panicRadius: 'Rayon de panique face aux prédateurs',
   fleeWeight: 'Poids de fuite',
   predatorCatchLabel: 'Les prédateurs peuvent attraper des proies',
+  predatorStrikeLabel: 'Attaque éclair du prédateur',
 };

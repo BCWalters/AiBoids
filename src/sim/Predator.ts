@@ -49,6 +49,16 @@ export const DIGEST_WAIT_DURATION = 3.5;
 // as an anti-stacking floor, not a tunable behavior.
 const PREDATOR_MUTUAL_SEPARATION_RADIUS = 60;
 const PREDATOR_MUTUAL_SEPARATION_WEIGHT = 2.2;
+
+/** Seconds the strike sprint ramps in over, so it reads as an acceleration
+ *  rather than an instantaneous speed jump. */
+const STRIKE_RAMP_SECONDS = 0.35;
+/** Mutual separation is damped this much while committed, so two predators
+ *  converging on the same boid don't shove each other off the strike line. */
+const STRIKE_SEPARATION_DAMPING = 0.25;
+/** Seconds a predator must wait after a strike decays before committing
+ *  again, so the burst stays a burst instead of becoming cruise speed. */
+const STRIKE_COOLDOWN_SECONDS = 1.5;
 const SINGLE_WALL_STALL_SPEED_FRACTION = 0.15;
 export const CORNER_STUCK_ESCAPE_THRESHOLD = 1.2;
 
@@ -164,6 +174,10 @@ export class Predator {
    */
   private cornerStuckTime = 0;
   private boundaryEscapeOverrideActive = false;
+  /** 0..1 ramp of the current strike commitment. Drives both the speed cap
+   *  and the intercept aiming so they fade in and out together. */
+  private strikeCommit = 0;
+  private strikeCooldown = 0;
 
   constructor(position: Vec3, velocity: Vec3, species: PredatorSpecies = PredatorSpecies.Normal) {
     this.id = nextId++;
@@ -235,8 +249,26 @@ export class Predator {
         ? V.scale(centerSum, 1 / centerCount)
         : null;
 
+    // Strike commitment (#237): commit once the nearest prey is inside
+    // strike range, then ramp down when it isn't. Gated on `nearest` rather
+    // than `target` so a predator never sprints at a centre-of-mass point.
+    this.strikeCooldown = Math.max(0, this.strikeCooldown - dt);
+    if (p.predatorStrikeEnabled && nearest && !this.digesting) {
+      const inRange = nearestDistSq <= p.predatorStrikeRange * p.predatorStrikeRange;
+      if (inRange && (this.strikeCommit > 0 || this.strikeCooldown <= 0)) {
+        this.strikeCommit = Math.min(1, this.strikeCommit + dt / STRIKE_RAMP_SECONDS);
+      } else {
+        this.strikeCommit = Math.max(0, this.strikeCommit - dt / STRIKE_RAMP_SECONDS);
+        if (this.strikeCommit === 0 && inRange) this.strikeCooldown = STRIKE_COOLDOWN_SECONDS;
+      }
+    } else if (this.strikeCommit > 0) {
+      this.strikeCommit = Math.max(0, this.strikeCommit - dt / STRIKE_RAMP_SECONDS);
+    }
+    const strikeSpeed =
+      p.predatorMaxSpeed * (1 + (p.predatorStrikeSpeedBoost - 1) * this.strikeCommit);
+
     if (target) {
-      const desired = V.setMagnitude(V.sub(target, this.position), p.predatorMaxSpeed);
+      const desired = V.setMagnitude(V.sub(target, this.position), strikeSpeed);
       acceleration = V.limit(V.sub(desired, this.velocity), p.maxForce);
       // A boid came into view — no need to keep spooling up along the
       // old pre-digest heading, normal pursuit takes over.
@@ -270,7 +302,10 @@ export class Predator {
     if (sepCount > 0) {
       const desired = V.setMagnitude(V.scale(sepSum, 1 / sepCount), p.predatorMaxSpeed);
       const steer = V.limit(V.sub(desired, this.velocity), p.maxForce);
-      acceleration = V.add(acceleration, V.scale(steer, PREDATOR_MUTUAL_SEPARATION_WEIGHT));
+      const separationWeight =
+        PREDATOR_MUTUAL_SEPARATION_WEIGHT *
+        (1 - (1 - STRIKE_SEPARATION_DAMPING) * this.strikeCommit);
+      acceleration = V.add(acceleration, V.scale(steer, separationWeight));
     }
 
     // Smooth hunt intensity toward how close the nearest prey is (0 if
@@ -331,7 +366,7 @@ export class Predator {
 
     this.velocity = V.limit(
       V.add(this.velocity, V.scale(acceleration, dt)),
-      p.predatorMaxSpeed,
+      strikeSpeed,
     );
     this.position = V.add(this.position, V.scale(this.velocity, dt));
   }

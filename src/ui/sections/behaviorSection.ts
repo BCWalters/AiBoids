@@ -55,6 +55,33 @@ function buildPredatorCatchToggle(): HTMLElement {
   return wrapper;
 }
 
+/**
+ * Toggle for the #237 burst strike. Exposed in the UI because it is a feel
+ * change, not a bug fix: with it on, a predator that closes to within strike
+ * range commits to a short sprint and aims at an intercept point rather than
+ * the prey's current position. Off by default; flip it live to A/B the hunt.
+ */
+function buildPredatorStrikeToggle(): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'control-row control-checkbox-row';
+
+  const label = document.createElement('label');
+  label.textContent = t('predatorStrikeLabel');
+  label.htmlFor = 'param-predator-strike';
+
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.id = 'param-predator-strike';
+  input.checked = params.predatorStrikeEnabled;
+  input.addEventListener('change', () => {
+    params.predatorStrikeEnabled = input.checked;
+  });
+
+  wrapper.appendChild(input);
+  wrapper.appendChild(label);
+  return wrapper;
+}
+
 // ------------------------------------------------------------------
 // Section builder
 // ------------------------------------------------------------------
@@ -63,7 +90,11 @@ export function buildBehaviorSection(ctx: SectionContext): HTMLElement {
   return ctx.buildSection(
     'behavior',
     t('sectionBehavior'),
-    [buildPredatorCatchToggle(), ...behaviorSpecs.map((spec) => ctx.buildSlider(spec))],
+    [
+      buildPredatorCatchToggle(),
+      buildPredatorStrikeToggle(),
+      ...behaviorSpecs.map((spec) => ctx.buildSlider(spec)),
+    ],
     false,
   );
 }
