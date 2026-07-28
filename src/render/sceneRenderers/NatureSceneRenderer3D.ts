@@ -504,7 +504,7 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
 
     this.predatorGeometries = createHawkGeometries(NATURE_CREATURE_SIZES.hawk.length, NATURE_CREATURE_SIZES.hawk.width);
     this.dragonPredatorGeometries = createDragonGeometries(NATURE_CREATURE_SIZES.dragon.length, NATURE_CREATURE_SIZES.dragon.width);
-    this.unicornPredatorGeometries = createUnicornGeometries(NATURE_CREATURE_SIZES.unicorn.length, NATURE_CREATURE_SIZES.unicorn.width);
+    this.unicornPredatorGeometries = createUnicornGeometries(NATURE_CREATURE_SIZES.unicorn.length, NATURE_CREATURE_SIZES.unicorn.width, NATURE_UNICORN_BODY);
 
     // All bird-type geometry sets — every nature creature except the dragon
     // and unicorn receives the feather shader.  Built after all geometry

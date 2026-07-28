@@ -71,7 +71,7 @@ describe('unicorn body smoothness (issue #247)', () => {
   let posAttr: THREE.BufferAttribute;
 
   const setup = () => {
-    const geoms = createUnicornGeometries(LENGTH, WIDTH);
+    const geoms = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     body = geoms.body;
     posAttr = body.getAttribute('position') as THREE.BufferAttribute;
   };
@@ -189,7 +189,7 @@ describe('dragon tail smoothness (issue #262)', () => {
  *
  *   Part            per-face (before)   smoothed (after)
  *   ──────────────  ─────────────────   ────────────────
- *   unicorn body          99 %                26 %
+ *   unicorn body          99 %                60 %
  *   unicorn tail         100 %                16 %
  *   dragon body           99 %                 5 %
  *   dragon tail           96 %                32 %
@@ -198,12 +198,26 @@ describe('dragon tail smoothness (issue #262)', () => {
  * faces meeting below its crease angle, so genuinely sharp features (end caps,
  * horn base, frill and dorsal-fin roots) correctly keep split normals.
  *
- * Threshold 50 % sits between the two measured populations — comfortably above
- * every "after" value and far below every "before" value.  Falsified by
- * swapping any smoothNormalsByPosition() call back to computeVertexNormals().
+ * Threshold 50 % sits between the two measured populations for most parts.
+ *
+ * The unicorn BODY is the one exception and gets its own, higher ceiling. It
+ * carries three pairs of thin closed plates merged into it — the eye whites,
+ * the pupils and the nostrils — and a thin plate's rim meets its faces at 90
+ * degrees, so every rim position splits by design. Those plates are ~40 % of
+ * the body's unique positions (the unicorn's swept torso is coarse, so they
+ * are not diluted the way the dragon's high-vertex lathe dilutes its own disc
+ * eyes), which puts the floor for a correctly-smoothed unicorn body at ~60 %.
+ * Measured: 59.5 % smoothed against 98.5 % fully flat-shaded, so the guard
+ * still separates the two populations by a wide margin — it is the threshold
+ * that moved, not the property being checked.
+ *
+ * Falsified by swapping any smoothNormalsByPosition() call back to
+ * computeVertexNormals().
  */
 describe('creature shading is smooth, not per-face (#247, #262 follow-up)', () => {
   const SPLIT_NORMAL_CEILING = 0.5;
+  // See the note above: thin merged plates put a hard floor under this one.
+  const UNICORN_BODY_SPLIT_NORMAL_CEILING = 0.75;
 
   const splitNormalFraction = (geometry: THREE.BufferGeometry): number => {
     const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -226,8 +240,8 @@ describe('creature shading is smooth, not per-face (#247, #262 follow-up)', () =
   };
 
   it('unicorn body and tail share averaged normals across most positions', () => {
-    const geoms = createUnicornGeometries(2, 0.8);
-    expect(splitNormalFraction(geoms.body)).toBeLessThan(SPLIT_NORMAL_CEILING);
+    const geoms = createUnicornGeometries(2, 0.8, new THREE.Color(0xc9a8f0));
+    expect(splitNormalFraction(geoms.body)).toBeLessThan(UNICORN_BODY_SPLIT_NORMAL_CEILING);
     expect(geoms.tail).toBeDefined();
     expect(splitNormalFraction(geoms.tail!)).toBeLessThan(SPLIT_NORMAL_CEILING);
   });

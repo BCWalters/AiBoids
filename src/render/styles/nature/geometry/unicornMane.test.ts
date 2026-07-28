@@ -77,7 +77,7 @@ function captureShader(material: THREE.MeshStandardMaterial): {
  */
 describe('unicorn mane geometry — pattern-plane variation', () => {
   it('mane crest has non-degenerate X extent (XY hair shader cannot collapse to stripes)', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const pos = body.getAttribute('position') as THREE.BufferAttribute;
 
     // The mane sits in the neck region: Y > LENGTH * 0.03 (past the withers
@@ -96,7 +96,7 @@ describe('unicorn mane geometry — pattern-plane variation', () => {
   });
 
   it('mane crest has non-degenerate Y extent (along-strand variation is visible)', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const pos = body.getAttribute('position') as THREE.BufferAttribute;
 
     // Collect Y range of vertices in the neck/mane region.
@@ -134,7 +134,7 @@ describe('unicorn mane geometry — pattern-plane variation', () => {
  */
 describe('unicorn hair shader — clone-drops-shader requirement', () => {
   it('patched material carries our cache key; cloned material silently loses it', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
 
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
@@ -156,7 +156,7 @@ describe('unicorn hair shader — clone-drops-shader requirement', () => {
 
 describe('unicorn hair shader — vertex injection', () => {
   it('declares vUnicornHairPos varying in the vertex shader', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     const { vertexShader } = captureShader(mat);
@@ -165,7 +165,7 @@ describe('unicorn hair shader — vertex injection', () => {
   });
 
   it('captures rest-space position in the vertex shader', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     const { vertexShader } = captureShader(mat);
@@ -176,7 +176,7 @@ describe('unicorn hair shader — vertex injection', () => {
 
 describe('unicorn hair shader — fragment injection', () => {
   it('contains the gap-darkness uniform in the fragment shader', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     const { fragmentShader } = captureShader(mat);
@@ -185,7 +185,7 @@ describe('unicorn hair shader — fragment injection', () => {
   });
 
   it('contains the hair frequency X uniform in the fragment shader', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     const { fragmentShader } = captureShader(mat);
@@ -194,7 +194,7 @@ describe('unicorn hair shader — fragment injection', () => {
   });
 
   it('never assigns to the read-only vColor input (GLSL 300 ES safety)', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     const { fragmentShader } = captureShader(mat);
@@ -206,7 +206,7 @@ describe('unicorn hair shader — fragment injection', () => {
   });
 
   it('applies the pattern after color_fragment (vColor already folded into diffuseColor)', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     const { fragmentShader } = captureShader(mat);
@@ -225,7 +225,7 @@ describe('unicorn hair shader — fragment injection', () => {
 
 describe('unicorn hair shader — no-op when gapDarkness is 0', () => {
   it('does not set onBeforeCompile when gapDarkness is 0', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     const originalCompile = mat.onBeforeCompile;
     applyUnicornHairShader(mat, body, { ...UNICORN_HAIR_CONFIG, gapDarkness: 0 });
@@ -257,7 +257,7 @@ function applyMockPriorPatch(material: THREE.MeshStandardMaterial): void {
 
 describe('unicorn hair shader composition — hair then mock prior', () => {
   it('vertex shader contains the hair position injection', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     applyMockPriorPatch(mat);
@@ -267,7 +267,7 @@ describe('unicorn hair shader composition — hair then mock prior', () => {
   });
 
   it('vertex shader still contains the mock prior sentinel', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
     applyMockPriorPatch(mat);
@@ -279,7 +279,7 @@ describe('unicorn hair shader composition — hair then mock prior', () => {
 
 describe('unicorn hair shader composition — mock prior then hair', () => {
   it('vertex shader contains the hair position injection', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyMockPriorPatch(mat);
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
@@ -289,7 +289,7 @@ describe('unicorn hair shader composition — mock prior then hair', () => {
   });
 
   it('vertex shader still contains the mock prior sentinel', () => {
-    const { body } = createUnicornGeometries(LENGTH, WIDTH);
+    const { body } = createUnicornGeometries(LENGTH, WIDTH, new THREE.Color(0xc9a8f0));
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
     applyMockPriorPatch(mat);
     applyUnicornHairShader(mat, body, UNICORN_HAIR_CONFIG);
