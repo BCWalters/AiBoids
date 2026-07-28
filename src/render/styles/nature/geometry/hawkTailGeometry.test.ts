@@ -243,4 +243,48 @@ describe('hawk tail attachment — hinge stays near body', () => {
       `(bodyRadius=${bodyRadius.toFixed(4)} × 0.25)`,
     ).toBeLessThan(tolerance);
   });
+
+  /**
+   * The check above transforms the rig pivot — a constant read from
+   * geom.tailRig.pivot — by both matrices, so it verifies the transform
+   * plumbing (already guaranteed by the unconditional weld in
+   * CreatureInstanceRenderer) but never looks at a single tail vertex.
+   * Authoring the tail mesh away from its own pivot leaves it fully green
+   * while the tail visibly floats behind the bird, which is the #215 bug.
+   * Verified: moving rootY back by 0.3 × length keeps all four other tests
+   * passing.
+   *
+   * So assert the geometry itself reaches its hinge. Measured minimum
+   * pivot-to-vertex distance as a fraction of the tail's own reach:
+   *
+   *   fan tail (this PR)      0.020
+   *   kite tail (previous)    0.022
+   *   detached by 0.3 × L     0.370
+   *
+   * 0.10 sits between the attached and detached populations.
+   */
+  it('tail geometry actually reaches its hinge (not just the rig transform)', () => {
+    const geom = createHawkGeometries(LENGTH, WIDTH);
+    const pivot = geom.tailRig!.pivot;
+    const hinge = new THREE.Vector3(pivot[0], pivot[1], pivot[2]);
+    const pos = geom.tail!.getAttribute('position');
+
+    let minGap = Infinity;
+    let maxReach = 0;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+      const d = v.distanceTo(hinge);
+      if (d < minGap) minGap = d;
+      if (d > maxReach) maxReach = d;
+    }
+
+    const ratio = minGap / maxReach;
+    expect(
+      ratio,
+      `nearest tail vertex sits ${minGap.toFixed(4)} from the hinge, ` +
+      `${(ratio * 100).toFixed(1)}% of the tail's own reach ${maxReach.toFixed(4)} — ` +
+      `the tail is authored away from its pivot and will visibly float`,
+    ).toBeLessThan(0.10);
+  });
 });
