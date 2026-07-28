@@ -230,7 +230,7 @@ describe('fishScaleShader frequency gives sane absolute cell counts', () => {
     expect(crosswiseCells).toBeGreaterThanOrEqual(3);
   });
 
-  it('barracuda cell size in world units is in a plausible range [0.3, 2.5]', () => {
+  it('barracuda cell size in world units is in a plausible range [0.05, 0.5]', () => {
     const { body } = createBarracudaGeometries(
       FISHTANK_CREATURE_SIZES.barracuda.length,
       FISHTANK_CREATURE_SIZES.barracuda.width,
@@ -239,10 +239,16 @@ describe('fishScaleShader frequency gives sane absolute cell counts', () => {
     applyFishScaleShader(mat, body, BARRACUDA_SCALE_CONFIG);
     const freq = captureShader(mat).uniforms.uFishScaleFreq.value;
 
-    // With the old max.y formula: freq ≈ 0.329 → cell size ≈ 3.04 (> 2.5 → FAIL).
+    // With the old max.y formula: freq ≈ 0.329 → cell size ≈ 3.04 (→ FAIL).
+    //
+    // The window matches the goldfish's, deliberately. Barracuda density was
+    // raised 6 → 60 after visual review, which puts its cell at 0.113 world
+    // units -- slightly LARGER than the already-shipped goldfish at 0.094, so
+    // this is the same visual regime rather than a new sub-pixel risk. The
+    // previous [0.3, 2.5] window was calibrated to the old density only.
     const cellSizeWorld = 1.0 / freq;
-    expect(cellSizeWorld).toBeGreaterThan(0.3);
-    expect(cellSizeWorld).toBeLessThan(2.5);
+    expect(cellSizeWorld).toBeGreaterThan(0.05);
+    expect(cellSizeWorld).toBeLessThan(0.5);
   });
 
   it('goldfish cell size in world units is in a plausible range [0.05, 0.5]', () => {

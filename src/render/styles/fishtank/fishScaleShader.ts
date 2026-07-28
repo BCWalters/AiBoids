@@ -33,18 +33,29 @@ export const FISH_SCALE_RADIUS = 0.62 as const;
 
 /**
  * Bony plate scales for small fish (Tetra, Goldfish, Clownfish, Blue Tang)
- * and Butterflyfish. Ten visible scale cells across the dorsoventral (Z) body
- * span, with a quarter-darkened arc rim and subtle per-scale highlights.
+ * and Butterflyfish. Twenty visible scale cells across the dorsoventral (Z)
+ * body span, with a quarter-darkened arc rim and subtle per-scale highlights.
+ *
+ * Density is a look call, not a physical measurement: at the first-pass value
+ * of 10 the scales read as large plates rather than fish scales, so this was
+ * doubled after visual review.
  */
 export const BONY_FISH_SCALE_CONFIG: FishScaleConfig = {
-  scalesPerLength: 10,
+  scalesPerLength: 20,
   edgeDarkness: 0.25,
   scaleGloss: 0.25,
 };
 
-/** Six crosswise scale cells for the barracuda's elongated body. */
+/**
+ * Crosswise scale cells for the barracuda's elongated body.
+ *
+ * Much denser than the small fish (60 vs 20) because this count is cells per
+ * unit of *dorsoventral* span, and the barracuda is a long, narrow fish whose
+ * body is far deeper than it is wide -- at the first-pass value of 6 the
+ * scales were enormous slabs. Raised 10x after visual review.
+ */
 export const BARRACUDA_SCALE_CONFIG: FishScaleConfig = {
-  scalesPerLength: 6,
+  scalesPerLength: 60,
   edgeDarkness: 0.15,
   scaleGloss: 0.2,
 };
