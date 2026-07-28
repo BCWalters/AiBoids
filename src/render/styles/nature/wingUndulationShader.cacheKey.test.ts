@@ -32,8 +32,8 @@ describe('applyWingUndulationShader — cache-key integrity', () => {
     expect(rightKey).toBeTruthy();
     // Both keys must contain the undulation sentinel so a different amplitude
     // produces a different cache key, preventing stale-shader reuse.
-    expect(leftKey).toContain('aiboids-wing-undulation-v1');
-    expect(rightKey).toContain('aiboids-wing-undulation-v1');
+    expect(leftKey).toContain('aiboids-wing-undulation-v2');
+    expect(rightKey).toContain('aiboids-wing-undulation-v2');
   });
 
   it('customProgramCacheKey is distinct when config amplitude differs, guarding against program cache collisions', () => {

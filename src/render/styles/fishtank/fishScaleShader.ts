@@ -131,6 +131,7 @@ export function applyFishScaleShader(
   bodyGeometry: THREE.BufferGeometry,
   config: FishScaleConfig,
   patternPlane: FishScalePlane = 'yz',
+  crossSpanOverride?: number,
 ): void {
   if (config.edgeDarkness === 0) return;
 
@@ -144,9 +145,18 @@ export function applyFishScaleShader(
   // Frequency is derived from the span of the SECOND pattern axis, which is
   // whichever axis `patternPlane` selects. Deriving it from Z while laying the
   // pattern out on X would make cells far too dense on flatter bodies.
-  const crossSpan = patternPlane === 'yz'
+  // `crossSpanOverride` exists for parts that carry the body's scale pattern
+  // but are far smaller than the body — the pectoral fins. Sizing their cells
+  // from their own span would give a fin the same NUMBER of scales as the
+  // whole flank, so each one would be a few times too small and the fin would
+  // read as a different material. Passing the body's cross-span keeps cell
+  // size isotropic in world space across body and fin.
+  const measuredCrossSpan = patternPlane === 'yz'
     ? Math.max(1e-6, bb.max.z - bb.min.z)
     : Math.max(1e-6, bb.max.x - bb.min.x);
+  const crossSpan = crossSpanOverride !== undefined
+    ? Math.max(1e-6, crossSpanOverride)
+    : measuredCrossSpan;
   const freq = config.scalesPerLength / crossSpan;
   const planeSwizzle = patternPlane === 'yz' ? 'vFishScalePos.z' : 'vFishScalePos.x';
   const cacheKey = `aiboids-fish-scale-v4:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;

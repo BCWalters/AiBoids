@@ -76,6 +76,11 @@ const DEFAULT_FIN_SIZING: FinSizing = {
 const SMALL_FISH_BODY_DEPTH_SCALE = 0.75;
 const SMALL_FISH_SIDE_SQUASH_SCALE = 0.75;
 const SMALL_FISH_DORSAL_HEIGHT_SCALE = 0.75;
+//  - PECTORAL: the side fins are 15% smaller than their per-variant span/chord
+//    factors would give. Applied here rather than by editing each factor so the
+//    per-variant proportions (one variant deliberately runs larger fins) stay
+//    in their existing relative sizes.
+const SMALL_FISH_PECTORAL_SCALE = 0.85;
 
 /** Builds the shared lathe body (nose at +Y, peduncle at -Y) with the given
  * profile and lateral-compression proportions. The caller bakes the body's
@@ -223,8 +228,17 @@ function buildDorsalFinGeometry(
  * These use the wingLeft/wingRight slots so they get the existing per-instance
  * flap animation (reads as paddling/steering).
  */
-function buildPectoralFinGeometry(length: number, span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
-  const rootY = length * 0.12;
+function buildPectoralFinGeometry(length: number, rawSpan: number, rawChord: number, side: 1 | -1): THREE.BufferGeometry {
+  // Seated further aft (was 0.12) so the blade sits behind the gill line rather
+  // than crowding the eye — the forward rake below carries the outer blade
+  // toward the head, which pushed the whole fin visually forward.
+  const rootY = length * 0.02;
+  // The blade outline shrinks, but the extrusion thickness below is taken from
+  // the UNSCALED chord: thickness is how solid the fin is, not a dimension of
+  // its silhouette, and scaling it too would push these fins under the
+  // "genuinely 3D" floor that finThickness.test.ts guards.
+  const span = rawSpan * SMALL_FISH_PECTORAL_SCALE;
+  const chord = rawChord * SMALL_FISH_PECTORAL_SCALE;
   // Forward rake: the blade's outboard end is carried toward the head, so the
   // fin reads as held out from the gills rather than swept back along the body
   // toward the tail. Applied as a function of span fraction so the root stays
@@ -249,7 +263,7 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
     pt(0.22, -0.50),
     pt(0.06, -0.26),
   ];
-  const thickness = fishtankFinThickness(chord);
+  const thickness = fishtankFinThickness(rawChord);
   return extrudeRingGeometry(ring, thickness);
 }
 
