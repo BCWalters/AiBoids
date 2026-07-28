@@ -112,6 +112,8 @@ function makeBatch(geom: CreatureGeometries): BoidRenderBatch {
     }));
   }
   if (geom.beak) batch.beak = makeMesh(geom.beak);
+  if (geom.wingPivotLeft) batch.wingPivotLeft = geom.wingPivotLeft;
+  if (geom.wingPivotRight) batch.wingPivotRight = geom.wingPivotRight;
   return batch;
 }
 
@@ -131,8 +133,8 @@ function collectParts(
   geometries: CreatureGeometries,
 ): Array<{ label: string; mesh: THREE.InstancedMesh; pivot?: Triple }> {
   const parts: Array<{ label: string; mesh: THREE.InstancedMesh; pivot?: Triple }> = [
-    { label: 'wingLeft', mesh: batch.wingLeft },
-    { label: 'wingRight', mesh: batch.wingRight },
+    { label: 'wingLeft', mesh: batch.wingLeft, pivot: geometries.wingPivotLeft },
+    { label: 'wingRight', mesh: batch.wingRight, pivot: geometries.wingPivotRight },
   ];
   if (batch.tail) parts.push({ label: 'tail', mesh: batch.tail, pivot: geometries.tailRig?.pivot });
   if (batch.legs) {

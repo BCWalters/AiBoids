@@ -39,7 +39,7 @@ import {
   computeFishUndulationOmega,
 } from './motion/fishUndulationMath';
 import { composeArticulationChain, composePartArticulation } from './motion/partTransform';
-import { resolveDriveAngle, type RigPartDeclaration } from './motion/rig';
+import { resolveDriveAngle, type RigPartDeclaration, type Triple } from './motion/rig';
 import type { FishUndulationInstanceState } from './styles/fishtank/fishUndulationShader';
 
 /** One creature's instanced meshes: a body plus optional wing/tail/legs/beak parts. */
@@ -59,6 +59,11 @@ export interface BoidRenderBatch {
   /** Small-bird-only: see CreatureGeometries.beak's doc comment. */
   beak?: THREE.InstancedMesh;
   fishUndulation?: FishUndulationInstanceState;
+  /** Wing pivot declarations — mirrors CreatureGeometries.wingPivotLeft/Right.
+   * When set, each wing articulates about its own root rather than the model
+   * origin, keeping the fin root welded to the body through the flap cycle. */
+  wingPivotLeft?: Triple;
+  wingPivotRight?: Triple;
 }
 
 /** A rig part declaration bound to the InstancedMesh that draws it. */
@@ -1012,19 +1017,29 @@ export class CreatureInstanceRenderer {
 
   private applyWingFlapMatrices(set: BoidRenderBatch, i: number, flapAngle: number): void {
     // Wings mirror each other around the model's forward axis.
+    // When the batch carries an explicit root pivot (e.g. seahorse pectoral fins
+    // whose root sits on the body's side surface), articulate about that pivot so
+    // the root stays welded to the body through the whole flap arc. Without a pivot
+    // the wing root is at the model origin and null is correct.
+    if (set.wingPivotLeft) {
+      this.tmpPivot.set(set.wingPivotLeft[0], set.wingPivotLeft[1], set.wingPivotLeft[2]);
+    }
     this.applyArticulatedPartMatrix({
       mesh: set.wingLeft,
       index: i,
       axis: FORWARD_AXIS,
       angle: flapAngle,
-      pivot: null,
+      pivot: set.wingPivotLeft ? this.tmpPivot : null,
     });
+    if (set.wingPivotRight) {
+      this.tmpPivot.set(set.wingPivotRight[0], set.wingPivotRight[1], set.wingPivotRight[2]);
+    }
     this.applyArticulatedPartMatrix({
       mesh: set.wingRight,
       index: i,
       axis: FORWARD_AXIS,
       angle: -flapAngle,
-      pivot: null,
+      pivot: set.wingPivotRight ? this.tmpPivot : null,
     });
   }
 
