@@ -40,13 +40,10 @@ import {
   applyFishFinRayShader,
   BONY_FISH_FIN_RAY_CONFIG,
   BARRACUDA_FIN_RAY_CONFIG,
+  PECTORAL_FIN_FRAME,
+  CAUDAL_FIN_FRAME,
 } from './fishFinRayShader';
-import {
-  FishtankSceneRenderer3D,
-  FISHTANK_CREATURE_SIZES,
-} from '../../sceneRenderers/FishtankSceneRenderer3D';
-import { createPlainFishGeometries } from './geometry/smallFishGeometry';
-import { createBarracudaGeometries } from './geometry/barracudaGeometry';
+import { FishtankSceneRenderer3D } from '../../sceneRenderers/FishtankSceneRenderer3D';
 import { BoidSpecies } from '../../../sim/Boid';
 import { PredatorSpecies } from '../../sceneRenderers/createSceneRendererHooks';
 import type { DriftingClouds } from '../nature/clouds';
@@ -71,49 +68,6 @@ function captureShader(material: THREE.MeshStandardMaterial): {
   };
   material.onBeforeCompile(shader as THREE.WebGLProgramParametersWithUniforms, {} as THREE.WebGLRenderer);
   return shader;
-}
-
-/**
- * JS port of the GLSL fract function.
- * GLSL's fract is x − floor(x), always in [0, 1).
- * JS modulo can return negative values for negative inputs; floor subtraction
- * matches GLSL behaviour precisely.
- */
-function glslFract(x: number): number {
-  return x - Math.floor(x);
-}
-
-/**
- * JS port of GLSL smoothstep(edge0, edge1, x).
- * Works correctly for inverted ranges (edge0 > edge1).
- */
-function glslSmoothstep(edge0: number, edge1: number, x: number): number {
-  const denom = edge1 - edge0;
-  if (Math.abs(denom) < 1e-12) return x <= edge0 ? 0 : 1;
-  const t = Math.max(0, Math.min(1, (x - edge0) / denom));
-  return t * t * (3 - 2 * t);
-}
-
-/**
- * JS port of the fin-ray intensity GLSL expression.
- * Returns the `ray` value [0, 1] for a vertex at the given Y position.
- * 1.0 = full brightening (at a ray centre); 0.0 = membrane between rays.
- */
-function finRayIntensity(y: number, freq: number, halfRayWidth: number): number {
-  const finPhase = y * freq;
-  const t = glslFract(finPhase);
-  const halfDist = Math.min(t, 1.0 - t);
-  return glslSmoothstep(halfRayWidth, 0.0, halfDist);
-}
-
-/**
- * Counts distinct ray BANDS (integer-phase crossings) across the Y interval
- * [yMin, yMax] for the given frequency.  This is the number of ray centres
- * that fall inside the interval (each is where finPhase is an integer).
- */
-function countRayBands(yMin: number, yMax: number, freq: number): number {
-  if (freq === 0) return 0;
-  return Math.floor(yMax * freq) - Math.ceil(yMin * freq) + 1;
 }
 
 /**
@@ -214,128 +168,108 @@ describe('fishFinRayShader GLSL injection', () => {
  *       → each ray is sub-pixel but the count assertion still catches the
  *         deviation: expect(100).toBe(8) fails.
  */
-describe('fishFinRayShader ray count — plain fish pectoral fin', () => {
-  it('pectoral fin gets exactly BONY_FISH_FIN_RAY_CONFIG.raysPerSpan ray bands across its Y span', () => {
-    const { wingLeft } = createPlainFishGeometries(
-      FISHTANK_CREATURE_SIZES.plainFish.length,
-      FISHTANK_CREATURE_SIZES.plainFish.width,
-    );
-    wingLeft.computeBoundingBox();
-    const bb = wingLeft.boundingBox!;
+describe('fishFinRayShader fan geometry', () => {
+  // Fin rays radiate from the body seam (issue #242): they converge at the root
+  // and spread toward the edge. The failure this pins is SILENT — banding on a
+  // raw model axis still compiles, still lights up, and still looks like "lines
+  // on a fin", but the lines are parallel. Measuring the spacing ratio between
+  // the root end and the tip end is what distinguishes the two: a true fan
+  // spreads proportionally to distance from the root (ratio == span ratio),
+  // whereas parallel bands give a ratio of exactly 1.
+  // Source geometry from the real scene renderer rather than calling the
+  // geometry factory directly: the renderer is what actually decides which
+  // frame each fin gets, and a test that constructs geometry by hand cannot
+  // see it passing the wrong one.
+  function barracudaGeometries() {
+    const renderer = makeFishtankRenderer() as unknown as {
+      barracudaPredatorGeometries: { wingLeft: THREE.BufferGeometry; tail?: THREE.BufferGeometry };
+    };
+    return renderer.barracudaPredatorGeometries;
+  }
 
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    applyFishFinRayShader(mat, wingLeft, BONY_FISH_FIN_RAY_CONFIG);
-    const freq = captureShader(mat).uniforms.uFinRayFreq.value;
+  const RATIO_AT = { near: 0.2, far: 1.0 };
 
-    // Geometric assertion: the number of ray-centre crossings inside [yMin, yMax].
-    const bands = countRayBands(bb.min.y, bb.max.y, freq);
-    expect(bands).toBe(BONY_FISH_FIN_RAY_CONFIG.raysPerSpan);
-    // Absolute value anchoring the test to the shipped constant (= 8).
-    expect(bands).toBe(8);
+  function rayFrame(geometry: THREE.BufferGeometry, config: typeof BONY_FISH_FIN_RAY_CONFIG, frame: typeof PECTORAL_FIN_FRAME) {
+    const material = new THREE.MeshStandardMaterial();
+    applyFishFinRayShader(material, geometry, config, frame);
+    const shader = {
+      vertexShader: '#include <color_vertex>',
+      fragmentShader: '#include <color_fragment>',
+      uniforms: {} as Record<string, { value: number }>,
+    };
+    material.onBeforeCompile!(shader as never, {} as never);
+    return shader;
+  }
 
-    wingLeft.dispose();
+  /** Chord distance between two adjacent rays at a given distance from the root. */
+  function raySpacingAt(freq: number, spanDistance: number): number {
+    return Math.tan(1 / freq) * spanDistance;
+  }
+
+  for (const [label, part, frame] of [
+    ['pectoral', 'wingLeft', PECTORAL_FIN_FRAME],
+    ['caudal', 'tail', CAUDAL_FIN_FRAME],
+  ] as const) {
+    it(`${label} fin rays fan out from the root rather than running parallel`, () => {
+      const geometries = barracudaGeometries();
+      const geometry = geometries[part]!;
+      const { uniforms, fragmentShader } = rayFrame(geometry, BARRACUDA_FIN_RAY_CONFIG, frame);
+
+      const freq = uniforms.uFinRayFreq.value;
+      const extent = uniforms.uFinRaySpanExtent.value;
+      const near = raySpacingAt(freq, extent * RATIO_AT.near);
+      const far = raySpacingAt(freq, extent * RATIO_AT.far);
+
+      // Parallel bands would give 1.0. A fan gives far/near == 1.0/0.2 == 5.
+      expect(far / near).toBeGreaterThan(3);
+
+      // ...and the shipped GLSL must actually compute that angle. The check
+      // above derives spacing from the uniforms with an angular formula of its
+      // own, so on its own it stays green even if the shader bands on a raw
+      // axis — which is precisely the regression this test exists to catch.
+      // Assert the fragment source divides chord by span through atan().
+      expect(fragmentShader).toMatch(/atan\(\s*finChord\s*,\s*max\(\s*finSpan/);
+    });
+  }
+
+  it('substitutes every axis placeholder — a survivor is a GLSL compile error', () => {
+    const geometries = barracudaGeometries();
+    for (const [part, frame] of [
+      ['wingLeft', PECTORAL_FIN_FRAME],
+      ['tail', CAUDAL_FIN_FRAME],
+    ] as const) {
+      const { fragmentShader } = rayFrame(geometries[part]!, BONY_FISH_FIN_RAY_CONFIG, frame);
+      // These tokens appear in the injected GLSL comment as well as the code, so
+      // a plain String.replace() substitutes only the comment and leaves the real
+      // reference intact. That produced a shader that failed to compile while
+      // every string-presence assertion stayed green.
+      expect(fragmentShader).not.toContain('FIN_SPAN_COMP');
+      expect(fragmentShader).not.toContain('FIN_CHORD_COMP');
+    }
   });
 
-  it('frequency encodes raysPerSpan / ySpan exactly (so Math.round(freq * ySpan) == raysPerSpan)', () => {
-    const { wingLeft } = createPlainFishGeometries(
-      FISHTANK_CREATURE_SIZES.plainFish.length,
-      FISHTANK_CREATURE_SIZES.plainFish.width,
-    );
-    wingLeft.computeBoundingBox();
-    const ySpan = wingLeft.boundingBox!.max.y - wingLeft.boundingBox!.min.y;
+  it('reads a different axis pair for the caudal fin than for the pectorals', () => {
+    const geometries = barracudaGeometries();
+    const pectoral = rayFrame(geometries.wingLeft, BONY_FISH_FIN_RAY_CONFIG, PECTORAL_FIN_FRAME);
+    const caudal = rayFrame(geometries.tail!, BONY_FISH_FIN_RAY_CONFIG, CAUDAL_FIN_FRAME);
 
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    applyFishFinRayShader(mat, wingLeft, BONY_FISH_FIN_RAY_CONFIG);
-    const freq = captureShader(mat).uniforms.uFinRayFreq.value;
-
-    // freq * ySpan should reproduce raysPerSpan with floating-point tolerance.
-    expect(freq * ySpan).toBeCloseTo(BONY_FISH_FIN_RAY_CONFIG.raysPerSpan, 4);
-
-    wingLeft.dispose();
-  });
-});
-
-describe('fishFinRayShader ray count — barracuda pectoral fin', () => {
-  it('barracuda pectoral fin gets exactly BARRACUDA_FIN_RAY_CONFIG.raysPerSpan ray bands', () => {
-    const { wingLeft } = createBarracudaGeometries(
-      FISHTANK_CREATURE_SIZES.barracuda.length,
-      FISHTANK_CREATURE_SIZES.barracuda.width,
-    );
-    wingLeft.computeBoundingBox();
-    const bb = wingLeft.boundingBox!;
-
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    applyFishFinRayShader(mat, wingLeft, BARRACUDA_FIN_RAY_CONFIG);
-    const freq = captureShader(mat).uniforms.uFinRayFreq.value;
-
-    const bands = countRayBands(bb.min.y, bb.max.y, freq);
-    expect(bands).toBe(BARRACUDA_FIN_RAY_CONFIG.raysPerSpan);
-    // Absolute value anchoring the test.
-    expect(bands).toBe(8);
-
-    wingLeft.dispose();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Brightness delta: JS port of GLSL measures correct lightening
-// ---------------------------------------------------------------------------
-
-/**
- * Falsification:
- *   (b) Set BONY_FISH_FIN_RAY_CONFIG.brightness = 0
- *       → brighteningAtRay = 0, expect(0).toBeGreaterThan(0) fails.
- */
-describe('fishFinRayShader brightness delta', () => {
-  it('ray centre has non-zero brightening equal to config.brightness', () => {
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    const geo = new THREE.BoxGeometry(0.1, 2, 0.1);
-    applyFishFinRayShader(mat, geo, BONY_FISH_FIN_RAY_CONFIG);
-    const { uniforms } = captureShader(mat);
-    const freq = uniforms.uFinRayFreq.value;
-    const halfRayWidth = uniforms.uFinRayHalfWidth.value;
-    const brightness = uniforms.uFinRayBrightness.value;
-
-    // At y = 1/freq, finPhase = 1.0 → fract(1.0) = 0 → halfDist = 0 → ray = 1.
-    // Brightening = brightness * 1.0 = brightness.
-    const yRayCentre = 1 / freq;
-    const intensity = finRayIntensity(yRayCentre, freq, halfRayWidth);
-    expect(intensity).toBeCloseTo(1.0, 3); // ray value should be 1 at the centre
-    const brighteningAtRay = brightness * intensity;
-    expect(brighteningAtRay).toBeGreaterThan(0);
-    expect(brighteningAtRay).toBeCloseTo(BONY_FISH_FIN_RAY_CONFIG.brightness, 4);
+    const axesOf = (src: string) => [...new Set(src.match(/vFinRayPos\.[xyz]/g) ?? [])].sort().join(',');
+    // The two fins lie in different planes. Using the pectoral frame on the
+    // caudal fin strikes the fan from a point off the geometry entirely, which
+    // still renders — just wrongly.
+    expect(axesOf(pectoral.fragmentShader)).not.toBe(axesOf(caudal.fragmentShader));
   });
 
-  it('membrane between rays (halfDist = 0.5) has zero brightening', () => {
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    const geo = new THREE.BoxGeometry(0.1, 2, 0.1);
-    applyFishFinRayShader(mat, geo, BONY_FISH_FIN_RAY_CONFIG);
-    const { uniforms } = captureShader(mat);
-    const freq = uniforms.uFinRayFreq.value;
-    const halfRayWidth = uniforms.uFinRayHalfWidth.value;
-    const brightness = uniforms.uFinRayBrightness.value;
+  it('gives the caudal fin its own program cache key', () => {
+    const geometries = barracudaGeometries();
+    const pectoralMaterial = new THREE.MeshStandardMaterial();
+    const caudalMaterial = new THREE.MeshStandardMaterial();
+    applyFishFinRayShader(pectoralMaterial, geometries.wingLeft, BONY_FISH_FIN_RAY_CONFIG, PECTORAL_FIN_FRAME);
+    applyFishFinRayShader(caudalMaterial, geometries.tail!, BONY_FISH_FIN_RAY_CONFIG, CAUDAL_FIN_FRAME);
 
-    // At y = 0.5/freq, finPhase = 0.5 → fract(0.5) = 0.5 → halfDist = 0.5.
-    // 0.5 > halfRayWidth (= 0.12) so smoothstep(0.12, 0, 0.5) = 0 → ray = 0.
-    const yMembrane = 0.5 / freq;
-    const intensity = finRayIntensity(yMembrane, freq, halfRayWidth);
-    expect(intensity).toBeCloseTo(0.0, 3);
-    const brighteningAtMembrane = brightness * intensity;
-    expect(brighteningAtMembrane).toBeCloseTo(0, 6);
-  });
-
-  it('ray brightness drops to zero at the edge of the ray half-width', () => {
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
-    const geo = new THREE.BoxGeometry(0.1, 2, 0.1);
-    applyFishFinRayShader(mat, geo, BONY_FISH_FIN_RAY_CONFIG);
-    const { uniforms } = captureShader(mat);
-    const freq = uniforms.uFinRayFreq.value;
-    const halfRayWidth = uniforms.uFinRayHalfWidth.value;
-
-    // At y = (1 + halfRayWidth) / freq, halfDist = halfRayWidth → smoothstep edge → 0.
-    const yEdge = (1 + halfRayWidth) / freq;
-    const intensityAtEdge = finRayIntensity(yEdge, freq, halfRayWidth);
-    expect(intensityAtEdge).toBeCloseTo(0.0, 3);
+    // Without the frame in the cache key three.js reuses the pectoral program
+    // for the caudal fin and the caudal frame silently does nothing.
+    expect(pectoralMaterial.customProgramCacheKey!()).not.toBe(caudalMaterial.customProgramCacheKey!());
   });
 });
 

@@ -30,6 +30,8 @@ import {
   applyFishFinRayShader,
   BONY_FISH_FIN_RAY_CONFIG,
   BARRACUDA_FIN_RAY_CONFIG,
+  PECTORAL_FIN_FRAME,
+  CAUDAL_FIN_FRAME,
 } from '../styles/fishtank/fishFinRayShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
@@ -690,7 +692,29 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     const config = geometries === this.barracudaPredatorGeometries
       ? BARRACUDA_FIN_RAY_CONFIG
       : BONY_FISH_FIN_RAY_CONFIG;
-    applyFishFinRayShader(material, geometries.wingLeft, config);
+    applyFishFinRayShader(material, geometries.wingLeft, config, PECTORAL_FIN_FRAME);
+  }
+
+  /**
+   * The caudal fin does NOT share the pectoral material — Renderer3D clones the
+   * wing material for it, and Material.clone() copies neither onBeforeCompile
+   * nor customProgramCacheKey. Without this hook the tail fin would be the one
+   * fin with no rays at all.
+   *
+   * It also needs its own frame: the caudal panel lies in YZ and runs aft along
+   * -Y, whereas the pectorals lie in XY and run outward along +X. Reusing the
+   * pectoral frame here would strike the fan from a point off the geometry
+   * entirely.
+   */
+  patchTailMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    if (!geometries.tail) return;
+    if (geometries === this.unicornPredatorGeometries) return;
+    if (geometries === this.sharkPredatorGeometries) return;
+
+    const config = geometries === this.barracudaPredatorGeometries
+      ? BARRACUDA_FIN_RAY_CONFIG
+      : BONY_FISH_FIN_RAY_CONFIG;
+    applyFishFinRayShader(material, geometries.tail, config, CAUDAL_FIN_FRAME);
   }
 
   dispose(): void {

@@ -58,22 +58,31 @@ export const BARRACUDA_FIN_RAY_CONFIG: FishFinRayConfig = {
  * injected via onBeforeCompile.
  *
  * Visual model:
- *   Real bony-fish fins consist of evenly-spaced radial spines (fin rays)
- *   connected by a thin membrane. This shader approximates that appearance by
- *   creating periodic bright bands along the fin's Y (fish-spine) axis.  Each
- *   band is a smooth Gaussian-like spike centred on an integer phase value
- *   (`vFinRayPos.y × uFinRayFreq`), with the membrane between bands staying at
- *   the fin's natural colour.
+ *   Real bony-fish fins are stiffened by spines that all originate at the body
+ *   seam and FAN OUT toward the edge, so they converge at the root and spread
+ *   at the tip (see the reference drawing on issue #242).
  *
- *   At typical side-on tank-viewing angle, the Y-axis bands appear as parallel
- *   light lines running from root to tip — the characteristic radiating-spine
- *   look of a real fish fin.
+ *   This is therefore an ANGULAR pattern, not a linear one. Banding on a single
+ *   model axis (e.g. `fract(position.y * freq)`) produces evenly spaced
+ *   PARALLEL lines whose spacing at the root equals their spacing at the tip —
+ *   which reads as corrugation, not as rays. The rays must be bands of constant
+ *   ANGLE about the root.
+ *
+ * Fin frame:
+ *   Each fin is a near-flat panel, but the two fin types lie in different planes
+ *   and are rooted at opposite ends of different axes (measured on shipped
+ *   geometry):
+ *
+ *     pectoral (wingLeft):  X 0.00 → 4.01 (root at X=0), Y = chord, Z flat (0.04)
+ *     caudal   (tail):      Y -16.0 → -26.6 (root at max Y), Z = chord, X flat (0.12)
+ *
+ *   So the caller supplies which axis runs root→tip (`spanAxis`/`spanSign`) and
+ *   which runs across the fin (`chordAxis`). The root point and the fin's true
+ *   angular extent are then measured from the geometry rather than assumed.
  *
  * Frequency derivation:
- *   `uFinRayFreq = raysPerSpan / ySpan`, where `ySpan` is the full Y extent of
- *   the representative fin geometry (wingLeft). Using the fin's own Y span
- *   gives a consistent ray count regardless of absolute creature size — a small
- *   tetra and a large barracuda each show exactly `raysPerSpan` ray bands.
+ *   Rays are spread evenly across the fin's MEASURED angular extent, so each fin
+ *   shows exactly `raysPerSpan` rays regardless of its size or aspect ratio.
  *
  * Composition:
  *   Composes safely with fishUndulationShader by capturing the REST-SPACE
@@ -96,23 +105,97 @@ export const BARRACUDA_FIN_RAY_CONFIG: FishFinRayConfig = {
  *                     span is used to derive `uFinRayFreq`.
  * @param config       Per-species ray config.
  */
+/** Which model axis a fin runs along. */
+export type FinAxis = 'x' | 'y' | 'z';
+
+const AXIS_INDEX: Record<FinAxis, 0 | 1 | 2> = { x: 0, y: 1, z: 2 };
+
+/**
+ * Describes how a particular fin sits in model space, so the fan can be built
+ * about its real root instead of assuming an axis. See the doc block above for
+ * the measured values of the shipped fins.
+ */
+export interface FinRayFrame {
+  /** Axis running from the body seam out to the fin edge. */
+  spanAxis: FinAxis;
+  /** +1 if the tip is at the axis maximum, -1 if it is at the minimum. */
+  spanSign: 1 | -1;
+  /** Axis running across the fin (the chord). */
+  chordAxis: FinAxis;
+}
+
+/** Pectoral fins extrude outward along +X from the body wall at X = 0. */
+export const PECTORAL_FIN_FRAME: FinRayFrame = { spanAxis: 'x', spanSign: 1, chordAxis: 'y' };
+
+/** The caudal fin extends aft along -Y; its chord is vertical (Z). */
+export const CAUDAL_FIN_FRAME: FinRayFrame = { spanAxis: 'y', spanSign: -1, chordAxis: 'z' };
+
+/**
+ * Measures the fan origin and angular extent of a fin from its actual vertices.
+ *
+ * The root is taken at the seam end of the span axis, centred on the chord
+ * *there* rather than on the whole-geometry chord centre: fins are tapered, so
+ * the chord midpoint at the root is generally not the bounding-box midpoint,
+ * and a fan struck from the wrong origin sprays asymmetrically.
+ */
+function measureFinFrame(
+  geometry: THREE.BufferGeometry,
+  frame: FinRayFrame,
+): { rootSpan: number; rootChord: number; halfAngle: number; spanExtent: number } {
+  const pos = geometry.getAttribute('position');
+  const si = AXIS_INDEX[frame.spanAxis];
+  const ci = AXIS_INDEX[frame.chordAxis];
+  const read = (i: number, axis: 0 | 1 | 2) =>
+    axis === 0 ? pos.getX(i) : axis === 1 ? pos.getY(i) : pos.getZ(i);
+
+  // Seam end of the span axis: the extreme OPPOSITE the tip.
+  let rootSpan = frame.spanSign > 0 ? Infinity : -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    const v = read(i, si);
+    rootSpan = frame.spanSign > 0 ? Math.min(rootSpan, v) : Math.max(rootSpan, v);
+  }
+
+  // Chord centre in a thin slab at the seam, and the widest angle any vertex
+  // subtends about that origin. Both are measured, not assumed.
+  let spanExtent = 0;
+  for (let i = 0; i < pos.count; i++) {
+    spanExtent = Math.max(spanExtent, Math.abs(read(i, si) - rootSpan));
+  }
+  const slab = Math.max(1e-6, spanExtent * 0.05);
+  let chordMin = Infinity;
+  let chordMax = -Infinity;
+  for (let i = 0; i < pos.count; i++) {
+    if (Math.abs(read(i, si) - rootSpan) > slab) continue;
+    const c = read(i, ci);
+    chordMin = Math.min(chordMin, c);
+    chordMax = Math.max(chordMax, c);
+  }
+  const rootChord = Number.isFinite(chordMin) ? (chordMin + chordMax) * 0.5 : 0;
+
+  let halfAngle = 0;
+  for (let i = 0; i < pos.count; i++) {
+    const s = (read(i, si) - rootSpan) * frame.spanSign;
+    if (s <= 1e-4) continue;
+    halfAngle = Math.max(halfAngle, Math.abs(Math.atan2(read(i, ci) - rootChord, s)));
+  }
+  // Guard against a degenerate fin collapsing the fan to a single line.
+  return { rootSpan, rootChord, halfAngle: Math.max(halfAngle, 1e-3), spanExtent };
+}
+
 export function applyFishFinRayShader(
   material: THREE.MeshStandardMaterial,
   finGeometry: THREE.BufferGeometry,
   config: FishFinRayConfig,
+  frame: FinRayFrame = PECTORAL_FIN_FRAME,
 ): void {
   if (config.raysPerSpan === 0) return;
 
-  if (!finGeometry.boundingBox) finGeometry.computeBoundingBox();
-  const bb = finGeometry.boundingBox!;
-  // Frequency derived from the fin's own Y span so the band count is consistent
-  // across species. A small tetra pectoral fin (Y span ≈ 1.7 world units) and a
-  // barracuda pectoral fin (Y span ≈ 3.5 world units) both show `raysPerSpan`
-  // bands with the same visual density.
-  const ySpan = Math.max(1e-6, bb.max.y - bb.min.y);
-  const freq = config.raysPerSpan / ySpan;
+  const { rootSpan, rootChord, halfAngle, spanExtent } = measureFinFrame(finGeometry, frame);
+  // Spread `raysPerSpan` rays evenly across the fin's measured angular extent,
+  // so the count is independent of fin size and aspect ratio.
+  const freq = config.raysPerSpan / (2 * halfAngle);
 
-  const cacheKey = `aiboids-fin-ray-v1:${freq.toFixed(5)}:${config.brightness.toFixed(4)}:${config.halfRayWidth.toFixed(4)}`;
+  const cacheKey = `aiboids-fin-ray-v2:${frame.spanAxis}${frame.spanSign}${frame.chordAxis}:${freq.toFixed(5)}:${rootSpan.toFixed(4)}:${rootChord.toFixed(4)}:${config.brightness.toFixed(4)}:${config.halfRayWidth.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -141,7 +224,7 @@ export function applyFishFinRayShader(
     // --- Fragment shader ---
     // Declare the varying (in) and uniforms at the top.
     shader.fragmentShader =
-      `varying vec3 vFinRayPos;\nuniform float uFinRayFreq;\nuniform float uFinRayBrightness;\nuniform float uFinRayHalfWidth;\n` +
+      `varying vec3 vFinRayPos;\nuniform float uFinRayFreq;\nuniform float uFinRayBrightness;\nuniform float uFinRayHalfWidth;\nuniform float uFinRayRootSpan;\nuniform float uFinRayRootChord;\nuniform float uFinRaySpanSign;\nuniform float uFinRaySpanExtent;\n` +
       shader.fragmentShader;
 
     // Inject the ray pattern immediately after color_fragment, which has
@@ -152,27 +235,55 @@ export function applyFishFinRayShader(
       '#include <color_fragment>',
       `#include <color_fragment>
   {
-    // Fin-ray pattern: periodic bright lines along the fish-spine (Y) axis.
+    // Fin-ray pattern: rays of constant ANGLE about the fin root, so they
+    // converge at the body seam and fan out toward the edge (issue #242).
     // vFinRayPos is the rest-space (pre-undulation) vertex position, so the
-    // pattern stays fixed to the fin skin regardless of animation.
-    // Y = fish spine; bands repeat every 1/uFinRayFreq world units, giving
-    // uFinRayFreq * ySpan = raysPerSpan evenly-spaced rays across the fin.
-    float finPhase = vFinRayPos.y * uFinRayFreq;
-    float t = fract( finPhase );
+    // pattern stays welded to the fin skin regardless of animation.
+    //
+    // The span/chord components below are substituted per fin type: the
+    // pectoral fin runs out along +X with a Y chord, the caudal fin runs aft
+    // along -Y with a Z chord. Banding on a raw axis instead would give
+    // parallel lines, which read as corrugation rather than as rays.
+    float finSpan  = ( FIN_SPAN_COMP - uFinRayRootSpan ) * uFinRaySpanSign;
+    float finChord = FIN_CHORD_COMP - uFinRayRootChord;
+    // Angle subtended at the root. Clamping span to a small positive value
+    // keeps the few vertices exactly ON the seam (span == 0) from producing a
+    // ±PI/2 discontinuity that would draw a hard line down the attachment.
+    float finAngle = atan( finChord, max( finSpan, 1e-4 ) );
+    float t = fract( finAngle * uFinRayFreq );
     // halfDist = 0 at each integer phase (= ray centre), 0.5 at mid-gap.
     float halfDist = min( t, 1.0 - t );
     // Smooth bright spike at each ray, zero in the membrane between rays.
     float ray = smoothstep( uFinRayHalfWidth, 0.0, halfDist );
+    // Fade the rays out at the very root: all rays meet there, so at full
+    // strength the convergence point burns out into a bright blob.
+    ray *= smoothstep( 0.0, 0.12, finSpan / max( uFinRaySpanExtent, 1e-4 ) );
     // Lighten diffuseColor at each ray. Adding brightness lifts toward white;
     // clamped to [0,1] so we never blow out. Colours are in LINEAR space.
     diffuseColor.rgb = min( vec3( 1.0 ), diffuseColor.rgb + uFinRayBrightness * ray );
   }`,
     );
 
+    // Substitute the per-fin axis components. These are compile-time swizzles
+    // rather than uniforms because they select which component is read; the
+    // chosen axes are part of customProgramCacheKey so three.js does not reuse
+    // another fin's compiled program (a cache collision here silently no-ops
+    // the whole change).
+    // replaceAll, not replace: these tokens must not survive anywhere in the
+    // source. A single leftover is a GLSL compile error that blacks out every
+    // patched fin, and shader-string tests do not catch it.
+    shader.fragmentShader = shader.fragmentShader
+      .replaceAll('FIN_SPAN_COMP', `vFinRayPos.${frame.spanAxis}`)
+      .replaceAll('FIN_CHORD_COMP', `vFinRayPos.${frame.chordAxis}`);
+
     Object.assign(shader.uniforms, {
       uFinRayFreq: { value: freq },
       uFinRayBrightness: { value: config.brightness },
       uFinRayHalfWidth: { value: config.halfRayWidth },
+      uFinRayRootSpan: { value: rootSpan },
+      uFinRayRootChord: { value: rootChord },
+      uFinRaySpanSign: { value: frame.spanSign },
+      uFinRaySpanExtent: { value: spanExtent },
     });
   };
 
