@@ -414,8 +414,20 @@ export const WING_UNDULATION_CONFIG: WingUndulationConfig = {
   // Real birds' primaries trail the shoulder far more than the first pass
   // suggested — the tip visibly whips through the stroke rather than gently
   // bowing. Raised from 0.06 / 0.6π after review of the shipped motion.
-  amplitudeFraction: 0.15,
-  tipPhaseLagRad: Math.PI * 0.95,
+  // 0.06 → 0.15 → 0.34. The last step was only possible once the normals were
+  // corrected analytically: until then the lighting error grew with the
+  // deflection, and grew DIFFERENTLY per wing geometry, so raising it broke the
+  // flat-panel small bird and the thin-solid dragon in different ways.
+  amplitudeFraction: 0.34,
+  // Not 0.95π. At that lag the tip is nearly ANTI-phase with the shoulder, so
+  // the wing writhes in an S rather than one stroke rolling outward. At 0.7π
+  // the tip still clearly trails but reaches the bottom just after the shoulder
+  // has started back up — that overlap is what reads as a slap.
+  tipPhaseLagRad: Math.PI * 0.7,
+  // Squares the wave up so the tip dwells at its extremes and crosses between
+  // them faster: more peak tip speed without bowing the wing any further.
+  // This is the k of tanh(k·sin θ)/tanh(k), so 0 would be a plain sine.
+  slapSharpness: 2,
 };
 
 // Unicorn tail streaming config. "upBiasFraction" gives the steady upward

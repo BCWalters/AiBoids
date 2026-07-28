@@ -6,6 +6,7 @@ import {
   mergePositionOnlyGeometries,
   pushJointBarrel,
   smoothNormalsByPosition,
+  subdivideGeometryWithAttributes,
 } from '../../../geometry/sharedGeometry';
 import type { PartDrive, Triple } from '../../../motion/rig';
 import { buildFingeredWingGeometry } from './birdSharedGeometry';
@@ -117,6 +118,14 @@ function addRainbowVertexColorsByDistance(
  *   UNICORN_LEG_SOCK_COLOR — so the geometry has to be told the tint outright
  *   instead of relying on the per-instance colour to supply it.
  */
+/**
+ * Spanwise subdivision of the unicorn wing. Higher than the dragon's because
+ * the source is far coarser — a 6-triangle fan — so 6 is what takes it from 7
+ * distinct spanwise stations to a wave-carrying ~40. The wing is 18 vertices,
+ * so even at 6 it stays under a thousand.
+ */
+const UNICORN_WING_WAVE_DIVISIONS = 6;
+
 export function createUnicornGeometries(
   length: number,
   width: number,
@@ -126,8 +135,19 @@ export function createUnicornGeometries(
 
   const wingSpan = length * 1.3;
   const wingChord = length * 0.6;
-  const wingLeft = addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, 1), wingSpan);
-  const wingRight = addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, -1), wingSpan);
+  // Subdivided AFTER the rainbow colours are baked, so the colour ramp is
+  // interpolated along with the positions rather than re-derived on a mesh that
+  // has changed underneath it. The unsubdivided wing is a 6-triangle fan with
+  // only 7 distinct spanwise stations, on which the undulation wave cannot be
+  // represented at all — it snapped between poses instead of flexing.
+  const wingLeft = subdivideGeometryWithAttributes(
+    addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, 1), wingSpan),
+    UNICORN_WING_WAVE_DIVISIONS,
+  );
+  const wingRight = subdivideGeometryWithAttributes(
+    addRainbowVertexColors(buildFingeredWingGeometry(wingSpan, wingChord, -1), wingSpan),
+    UNICORN_WING_WAVE_DIVISIONS,
+  );
   // Seat the wing root midway between the two hips, per direct feedback that
   // the wings sat too far back — they now come off the barrel roughly halfway
   // between the front and rear legs, where a winged horse's shoulder would be,
