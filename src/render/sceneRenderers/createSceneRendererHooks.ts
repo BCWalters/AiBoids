@@ -297,6 +297,27 @@ export interface SceneRendererHooks {
    * pattern). Scenes that don't need it can omit the method entirely.
    */
   patchBodyMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
+  /**
+   * Optional hook to patch the tail MeshStandardMaterial, called the same way
+   * as patchBodyMaterial but only when the creature actually has a tail.
+   *
+   * The tail needs its own hook because it does NOT share the body's material:
+   * Renderer3D clones the WING material for it (so monster tails read leathery
+   * like the wings), so a body-only patch never reaches the tail. Any surface
+   * treatment meant to run over the whole creature — the dragon's scales, say —
+   * has to be applied here as well or it stops abruptly at the tail joint.
+   */
+  patchTailMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
+  /**
+   * Optional hook to patch the wing MeshStandardMaterial.
+   *
+   * IMPORTANT: this is invoked once per wing material INSTANCE, not once per
+   * creature. The two wings do not share a material — the right wing gets a
+   * clone — and THREE.Material.clone() copies neither onBeforeCompile nor
+   * customProgramCacheKey, so a patch applied before cloning silently reaches
+   * only the left wing.
+   */
+  patchWingMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
   dispose: () => void;
 }
 
