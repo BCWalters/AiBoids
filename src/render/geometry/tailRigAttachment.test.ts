@@ -20,12 +20,20 @@ import type { CreatureGeometries } from './sharedGeometry';
  * The shark is a subtler cautionary tale. It carried an elaborate pivot
  * apparatus — an exported fraction, a helper, and a paragraph explaining that
  * pivoting at the fin's root was what stopped the root sweeping out through the
- * body — and every bit of it was inert, because the fin sweeps about Y and the
- * pivot was offset only in Y. See the perpendicular-offset test below. Because
- * nothing downstream could observe the value, it drifted freely: it was being
- * computed from a fictional "reference length" of 4.0 rather than the shark's
- * real length of 36, and a later pass rationalised the mismatch as deliberate
- * tuning. Dead parameters don't stay correct; they stay unfalsifiable.
+ * body — and every bit of it was inert, because the fin swept about Y and the
+ * pivot was offset only in Y. Because nothing downstream could observe the
+ * value, it drifted freely: it was being computed from a fictional "reference
+ * length" of 4.0 rather than the shark's real length of 36, and a later pass
+ * rationalised the mismatch as deliberate tuning. Dead parameters don't stay
+ * correct; they stay unfalsifiable.
+ *
+ * The perpendicular-offset test below used to record that inertness as an
+ * expected fact, and noted that it would flip "if someone gives a fish tail an
+ * off-axis sweep". That has now happened. Sweeping about Y was never a sway at
+ * all — it was a roll about the fin's own length, which drove the upper and
+ * lower lobes in opposite directions and traced an X rather than a beat. Both
+ * fish now yaw about MODEL_UP, so their pivots are live for the first time and
+ * the apparatus finally does the job it always claimed to.
  */
 
 const CREATURES: { name: string; geometries: CreatureGeometries }[] = [
@@ -75,14 +83,15 @@ describe('swaying tails pivot about their own root', () => {
       it('has a pivot offset perpendicular to its own sway axis', () => {
         // A pivot only does anything in the components perpendicular to the
         // rotation axis: translating *along* the axis commutes with the
-        // rotation, so that component cancels out exactly. The fish tails fail
-        // this — they sweep about Y and are offset only in Y, making their
-        // pivots precise no-ops. That is why the shark's long-documented
-        // "pivot fix" never actually did anything, and why feeding it a
-        // fictional reference length went unnoticed for so long. Asserted per
-        // creature rather than globally so the fact stays on the record: if
-        // someone gives a fish tail an off-axis sweep, this flips and they
-        // find out the pivot has started mattering.
+        // rotation, so that component cancels out exactly.
+        //
+        // Every swaying tail must now clear this. The fish used to fail it —
+        // they swept about Y and were offset only in Y, making their pivots
+        // precise no-ops, which is why the shark's long-documented "pivot fix"
+        // never did anything and why feeding it a fictional reference length
+        // went unnoticed. Correcting the sway axis to MODEL_UP made those
+        // pivots load-bearing, so a wrong pivot value is now observable
+        // instead of inert: it drags the fin root out through the peduncle.
         const [ax, ay, az] = geometries.tailRig!.axis;
         const [px, py, pz] = geometries.tailRig!.pivot;
         const alongAxis = px * ax + py * ay + pz * az;
@@ -91,7 +100,7 @@ describe('swaying tails pivot about their own root', () => {
           py - alongAxis * ay,
           pz - alongAxis * az,
         );
-        expect(perpendicular > 1e-6).toBe(name === 'dragon');
+        expect(perpendicular).toBeGreaterThan(1e-6);
       });
 
       it('rotates about a unit-length axis', () => {
@@ -105,13 +114,17 @@ describe('swaying tails pivot about their own root', () => {
     // Not interchangeable: a caudal fin is built as a vertical blade that
     // sweeps horizontally, while a dragon's whip tail sweeps vertically.
     // Swapping the axes would make each one scythe through its own body.
+    //
+    // The fish previously declared [0, 1, 0] here — the SPINE axis, which is
+    // neither of those. It rolled the blade about its own length, scissoring
+    // the upper and lower lobes in opposite directions. MODEL_UP is [0, 0, 1].
     const [shark, barracuda, dragon] = [
       createSharkGeometries(36, 15.84).tailRig!.axis,
       createBarracudaGeometries(27, 9.6).tailRig!.axis,
       createDragonGeometries(10, 4).tailRig!.axis,
     ];
-    expect(shark).toEqual([0, 1, 0]);
-    expect(barracuda).toEqual([0, 1, 0]);
+    expect(shark).toEqual([0, 0, 1]);
+    expect(barracuda).toEqual([0, 0, 1]);
     expect(dragon).toEqual([1, 0, 0]);
   });
 });

@@ -64,7 +64,15 @@ export function createSharkGeometries(rawLength: number, width: number): Creatur
     tail,
     // See SHARK_TAIL_PIVOT_FRACTION: hinging at the fin's own root keeps the
     // root end from sweeping out through the side of the body.
-    tailRig: swayingTailRig({ pivot: [0, sharkTailPivotY(rawLength), 0], axis: [0, 1, 0] }),
+    //
+    // Yaws about MODEL_UP (0,0,1), the dorsoventral axis, so the whole fin
+    // swings side to side as one unit. It used to rotate about (0,1,0) — the
+    // SPINE axis — which is a roll, not a sway: it drove the upper and lower
+    // lobes in OPPOSITE lateral directions, tracing an X. The shark's tail is
+    // heterocercal (upper lobe reaches z=+15.0, lower only z=-6.3), so the
+    // upper lobe swung 2.3x further than the lower and the scissor was
+    // impossible to miss. See sharkTailSway.test.ts.
+    tailRig: swayingTailRig({ pivot: [0, sharkTailPivotY(rawLength), 0], axis: [0, 0, 1] }),
   };
 }
 
