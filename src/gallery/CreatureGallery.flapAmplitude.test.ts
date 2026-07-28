@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { GALLERY_SPEED_FRACTION } from './CreatureGalleryController';
+import { GALLERY_SPEED_FRACTION, computeGalleryVelocity } from './CreatureGalleryController';
 import {
   FLAP_IDLE_AMPLITUDE,
   FLAP_SPEED_AMPLITUDE,
@@ -62,5 +62,31 @@ describe('CreatureGallery flap amplitude', () => {
 
   it('gallery amplitude exceeds idle (creature has visible speed-driven flap)', () => {
     expect(galleryAmplitude).toBeGreaterThan(FLAP_IDLE_AMPLITUDE);
+  });
+
+  // The three assertions above all read GALLERY_SPEED_FRACTION directly, so
+  // none of them can see issue #246's actual root cause: the posing code
+  // multiplying an un-normalised direction vector by maxSpeed, which yields
+  // |v| = 0.973 x maxSpeed no matter what the constant says. Verified by
+  // sabotage -- reverting the assignment to `maxSpeed * 0.9` left all three
+  // green. These two exercise the shipped computation instead.
+  describe('posed velocity (the wiring, not just the constant)', () => {
+    const maxSpeed = 37;
+    const velocity = computeGalleryVelocity({ maxSpeed });
+    const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
+
+    it('speed the renderer sees equals GALLERY_SPEED_FRACTION x maxSpeed', () => {
+      // computeSpeedFraction is speed / maxSpeed, so this is exactly the
+      // speedFraction fed to computeFlapAmplitude at render time.
+      expect(speed / maxSpeed).toBeCloseTo(GALLERY_SPEED_FRACTION, 6);
+    });
+
+    it('holds the 3/4 cruising direction (mostly +X, slight climb, some Z)', () => {
+      // Guards against "fixing" the magnitude by flattening the pose to a
+      // dead-straight +X charge, which loses the 3/4 framing.
+      expect(velocity.x / speed).toBeCloseTo(0.925, 2);
+      expect(velocity.y / speed).toBeCloseTo(0.123, 2);
+      expect(velocity.z / speed).toBeCloseTo(0.36, 2);
+    });
   });
 });

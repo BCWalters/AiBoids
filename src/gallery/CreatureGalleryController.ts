@@ -62,11 +62,37 @@ export const GALLERY_SPEED_FRACTION = 0.6;
 // a slight pitch-up (Y) and lateral (Z) component so the 3/4-front pose reads
 // as active cruising flight rather than a dead-straight charge at the camera.
 // Derived from the original (0.9, 0.12, 0.35) direction vector; normalised so
-// the speed fraction above controls the actual magnitude.
-const _GALLERY_DIR_X = 0.9;
-const _GALLERY_DIR_Y = 0.12;
-const _GALLERY_DIR_Z = 0.35;
-const _GALLERY_DIR_LEN = Math.sqrt(_GALLERY_DIR_X ** 2 + _GALLERY_DIR_Y ** 2 + _GALLERY_DIR_Z ** 2);
+// GALLERY_SPEED_FRACTION alone controls the magnitude.
+const GALLERY_DIR_X = 0.9;
+const GALLERY_DIR_Y = 0.12;
+const GALLERY_DIR_Z = 0.35;
+const GALLERY_DIR_LEN = Math.sqrt(GALLERY_DIR_X ** 2 + GALLERY_DIR_Y ** 2 + GALLERY_DIR_Z ** 2);
+
+/**
+ * The exact velocity poseGalleryCreatureIfReady assigns to the isolated
+ * creature.
+ *
+ * Extracted as a pure exported function on purpose. Issue #246's root cause
+ * was that the direction vector (0.9, 0.12, 0.35) was multiplied by maxSpeed
+ * componentwise without being normalised first, so |v| came out at 0.973 x
+ * maxSpeed and the flap read as a near-maximum power stroke. A test that only
+ * asserts on GALLERY_SPEED_FRACTION cannot see that class of bug at all --
+ * the constant stays correct while the assignment ignores it. Keeping the
+ * whole computation here means the test exercises the shipped wiring, so
+ * reintroducing an un-normalised assignment fails.
+ */
+export function computeGalleryVelocity({ maxSpeed }: { maxSpeed: number }): {
+  x: number;
+  y: number;
+  z: number;
+} {
+  const cruiseSpeed = maxSpeed * GALLERY_SPEED_FRACTION;
+  return {
+    x: (GALLERY_DIR_X / GALLERY_DIR_LEN) * cruiseSpeed,
+    y: (GALLERY_DIR_Y / GALLERY_DIR_LEN) * cruiseSpeed,
+    z: (GALLERY_DIR_Z / GALLERY_DIR_LEN) * cruiseSpeed,
+  };
+}
 
 function readGalleryCreatureFromURL(): { creatureSpecies: GalleryCreature; distance: number | null } | null {
   const searchParams = new URLSearchParams(window.location.search);
@@ -391,10 +417,10 @@ export class CreatureGalleryController {
     creature.position.z = center.z;
 
     const maxSpeed = GALLERY_PREDATOR_CREATURES.has(creatureSpecies) ? params.predatorMaxSpeed : params.boidMaxSpeed;
-    const cruiseSpeed = maxSpeed * GALLERY_SPEED_FRACTION;
-    creature.velocity.x = (_GALLERY_DIR_X / _GALLERY_DIR_LEN) * cruiseSpeed;
-    creature.velocity.y = (_GALLERY_DIR_Y / _GALLERY_DIR_LEN) * cruiseSpeed;
-    creature.velocity.z = (_GALLERY_DIR_Z / _GALLERY_DIR_LEN) * cruiseSpeed;
+    const velocity = computeGalleryVelocity({ maxSpeed });
+    creature.velocity.x = velocity.x;
+    creature.velocity.y = velocity.y;
+    creature.velocity.z = velocity.z;
 
     params.running = false;
     this.galleryPosed = true;
