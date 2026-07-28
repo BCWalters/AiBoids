@@ -118,16 +118,6 @@ export function applyDragonScaleShader(
   // silently render with the body's program and lose its own plane.
   const planeSwizzle = patternPlane === 'yz' ? 'vDragonScalePos.z' : 'vDragonScalePos.x';
 
-  // `aScaleMask` is 1 where scales should be drawn and 0 where they must be
-  // suppressed (the eye discs — a keel groove across an iris makes the eye read
-  // as scaly rather than wet). A missing vertex attribute reads as 0 in GLSL,
-  // which would silently strip scales off every surface that doesn't set one,
-  // so default it to all-ones here rather than relying on callers.
-  if (!bodyGeometry.getAttribute('aScaleMask')) {
-    const vertexCount = bodyGeometry.getAttribute('position').count;
-    bodyGeometry.setAttribute('aScaleMask', new THREE.BufferAttribute(new Float32Array(vertexCount).fill(1), 1));
-  }
-
   const cacheKey = `aiboids-dragon-scale-v3:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleKeelDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
@@ -145,19 +135,19 @@ export function applyDragonScaleShader(
     // Declare the varying at the top so it survives Three.js's GLSL version
     // transform (varying → out in WebGL 2 / GLSL 300 ES).
     shader.vertexShader =
-      `varying vec3 vDragonScalePos;\nvarying float vScaleMask;\nattribute float aScaleMask;\n` + shader.vertexShader;
+      `varying vec3 vDragonScalePos;\nvarying float vScaleSuppress;\nattribute float aScaleSuppress;\n` + shader.vertexShader;
     // Capture the REST-space (pre-deformation) model position right before
     // vColor is set. Using the rest position means the scale pattern stays
     // fixed to the skin regardless of any body animation applied later.
     shader.vertexShader = shader.vertexShader.replace(
       '#include <color_vertex>',
-      `vDragonScalePos = position;\nvScaleMask = aScaleMask;\n#include <color_vertex>`,
+      `vDragonScalePos = position;\nvScaleSuppress = aScaleSuppress;\n#include <color_vertex>`,
     );
 
     // --- Fragment shader ---
     // Declare the varying (in) and uniforms at the top.
     shader.fragmentShader =
-      `varying vec3 vDragonScalePos;\nvarying float vScaleMask;\nuniform float uDragonScaleFreq;\nuniform float uScaleEdgeDarkness;\nuniform float uScaleKeelDarkness;\nuniform float uScaleGloss;\n` +
+      `varying vec3 vDragonScalePos;\nvarying float vScaleSuppress;\nuniform float uDragonScaleFreq;\nuniform float uScaleEdgeDarkness;\nuniform float uScaleKeelDarkness;\nuniform float uScaleGloss;\n` +
       shader.fragmentShader;
 
     // Inject the scale pattern AFTER roughnessmap_fragment. That chunk sets
@@ -168,10 +158,21 @@ export function applyDragonScaleShader(
     // Both diffuseColor and roughnessFactor are mutable locals — writing to
     // them is valid in all GLSL versions. We never write to vColor (read-only
     // `in` in GLSL 300 ES) or to roughness (a uniform).
+    // The aScaleSuppress attribute is 1 on vertices that must NOT be scaled (the
+    // eye and nostril discs — a keel groove across an iris makes the eye read as
+    // scaly skin rather than wet) and 0 everywhere else.
+    //
+    // The sense is deliberately "suppress" rather than "draw". A missing vertex
+    // attribute reads as 0 in GLSL, and this shader is applied to the wing and
+    // tail materials using the BODY geometry (so all three share one pattern
+    // frequency and the scale rows run continuously across the seams) — so the
+    // wing and tail meshes never carry this attribute at all. With a "draw"
+    // mask they read 0 and lose their scales entirely; with "suppress" they
+    // read 0 and correctly keep them.
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <roughnessmap_fragment>',
       `#include <roughnessmap_fragment>
-  if ( vScaleMask > 0.5 ) {
+  if ( vScaleSuppress < 0.5 ) {
     // Overlapping reptilian scale pattern on the YZ body plane.
     // Y = spine axis (tail→head); Z = dorsal-ventral axis.
     // Alternate spine rows are staggered by half a cell (brick/hex layout)

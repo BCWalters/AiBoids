@@ -519,7 +519,7 @@ function buildSurfaceConformedDisc(opts: {
 
 /**
  * A merged-in facial detail. `scales: false` marks vertices that must be
- * excluded from the procedural scale shader via the `aScaleMask` attribute.
+ * excluded from the procedural scale shader via the `aScaleSuppress` attribute.
  */
 type DragonFacePart = { geometry: THREE.BufferGeometry; color: THREE.Color; scales?: boolean };
 
@@ -550,10 +550,12 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   ];
   const merged = mergeGeometriesWithColor(entries);
 
-  // Build the scale mask in the SAME order the parts were merged, so each
-  // entry's vertices land on the right run of the attribute.
+  // Build the scale-suppression flags in the SAME order the parts were merged,
+  // so each entry's vertices land on the right run of the attribute. Zero
+  // (= "scale me normally") is the default, which is also what the shader sees
+  // for any geometry that never sets this attribute at all.
   {
-    const mask = new Float32Array(merged.getAttribute('position').count);
+    const suppress = new Float32Array(merged.getAttribute('position').count);
     let offset = 0;
     for (const entry of entries) {
       // mergeGeometriesWithColor de-indexes every part, so an indexed part
@@ -561,10 +563,10 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
       const count = entry.geometry.index
         ? entry.geometry.index.count
         : entry.geometry.getAttribute('position').count;
-      mask.fill(entry.scales === false ? 0 : 1, offset, offset + count);
+      if (entry.scales === false) suppress.fill(1, offset, offset + count);
       offset += count;
     }
-    merged.setAttribute('aScaleMask', new THREE.BufferAttribute(mask, 1));
+    merged.setAttribute('aScaleSuppress', new THREE.BufferAttribute(suppress, 1));
   }
   latheGeometry.dispose();
   snoutCap.dispose();
