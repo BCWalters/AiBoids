@@ -15,6 +15,7 @@ import {
   applyTailGradient,
   getBirdBodyRearTipY,
   type TailGradient,
+  buildTuckedBirdLegs,
 } from './birdSharedGeometry';
 
 /**
@@ -136,7 +137,7 @@ export function createRealisticBirdGeometries(
         }
       : undefined,
   );
-  const legs = buildSmallBirdLegsGeometry(length, width, legsColor);
+  const legs = buildSmallBirdLegsGeometry(length, width, legsColor, body);
   const tailRig = swayingTailRig({ pivot: [0, getBirdBodyRearTipY(length), 0], axis: [1, 0, 0] });
 
   return { body, wingLeft, wingRight, tail, tailRig, beak, legs: singleLegPart(legs) };
@@ -573,46 +574,28 @@ export const SMALL_BIRD_DEFAULT_LEGS_COLOR = new THREE.Color(0x7a6450);
  * the belly. Vertex colors are white so the per-instance leg color set by
  * the renderer (BoidSpeciesConfig.legsColor) multiplies through unchanged.
  */
-function buildSmallBirdLegsGeometry(length: number, width: number, legsColor: THREE.Color): THREE.BufferGeometry {
+function buildSmallBirdLegsGeometry(
+  length: number,
+  width: number,
+  legsColor: THREE.Color,
+  body: THREE.BufferGeometry,
+): THREE.BufferGeometry {
   const scaledWidth = width * BODY_NARROW_SCALE;
-  const legRadius = scaledWidth * 0.048;
-  // Short tucked legs — feet sit just below the belly surface.
-  const legLength = length * 0.042;
-  const toeLength = length * 0.055;
-  const footY = -length * 0.22;
-  // Hip flush against the belly: at footY the body radius ≈ 0.241*sw;
-  // with x = 0.025*sw the surface Z ≈ 0.240*sw.
-  const hipZ = -scaledWidth * 0.240;
-  const footZ = hipZ - legLength * 0.9;
-
-  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
-    const x = side * scaledWidth * 0.001;
-    const leg = new THREE.CylinderGeometry(legRadius * 0.85, legRadius, legLength, 6);
-    leg.rotateX(Math.PI / 2);
-    leg.translate(x, footY, hipZ - legLength * 0.5);
-
-    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
-      const toe = new THREE.ConeGeometry(legRadius * 0.38, toeLength, 5);
-      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
-      return toe;
-    };
-    // Three forward toes spread slightly around the tip.
-    const toes = [
-      makeToe(side * legRadius * 0.5, toeLength * 0.04),
-      makeToe(0, toeLength * 0.1),
-      makeToe(-side * legRadius * 0.5, toeLength * 0.04),
-    ];
-    // One hind toe pointing backward (rotated 180° along X).
-    const hindToe = new THREE.ConeGeometry(legRadius * 0.28, toeLength * 0.6, 5);
-    hindToe.rotateX(Math.PI);
-    hindToe.translate(x, footY - toeLength * 0.26, footZ + toeLength * 0.02);
-    return mergePositionOnlyGeometries([leg, ...toes, hindToe]);
-  };
-
-  const both = mergePositionOnlyGeometries([buildLeg(1), buildLeg(-1)]);
-  // Bake the species leg color as vertex color; renderer sets instance color
-  // to (1,1,1) so the baked color passes through unchanged.
-  return mergeGeometriesWithColor([{ geometry: both, color: legsColor }]);
+  const legs = buildTuckedBirdLegs({
+    body,
+    length,
+    width: scaledWidth,
+    footY: -length * 0.22,
+    legX: scaledWidth * 0.085,
+    legRadius: scaledWidth * 0.026,
+    toeLength: length * 0.055,
+    toeRadius: scaledWidth * 0.022,
+    toeSpread: scaledWidth * 0.03,
+    footDrop: 0.05,
+  });
+  // Vertex colours carry the species leg colour; the renderer sets the
+  // instance colour to white so this passes through unchanged.
+  return mergeGeometriesWithColor([{ geometry: legs, color: legsColor }]);
 }
 
 

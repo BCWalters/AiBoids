@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import { BIRD_FEATHER_MASK_ATTRIBUTE } from '../birdFeatherShader';
 import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildDiscCapGeometry, singleLegPart, swayingTailRig, mirrorGeometryAcrossX, subdivideTriangleSoup } from '../../../geometry/sharedGeometry';
-import { buildHookedBeakGeometry, getBirdBodyRearTipY } from './birdSharedGeometry';
+import { buildHookedBeakGeometry, getBirdBodyRearTipY, buildTuckedBirdLegs } from './birdSharedGeometry';
 
 /**
  * Hawk predator geometry — split out from the shared "realistic bird"
@@ -396,7 +396,15 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   // match the back plumage so it reads as continuous dark feathering.
   // Must match the rump radius in the profile above. It was left at 0.04 when
   // the rump was widened, which left the lathe open at the back.
+  // The rump opening is not a circle. `shapeHawkCrossSection` squeezes the
+  // lathe laterally and deepens it through the keel, so the hole at the back of
+  // the bird is an ellipse running from about -0.16 to +0.11 of body width in
+  // z, while only 0.104 wide in x. A plain disc of the profile radius therefore
+  // stands proud at the sides and leaves the sky showing above and below it.
+  // Putting the cap through the same shaping makes it match by construction,
+  // whatever the profile does next.
   const tailCap = buildDiscCapGeometry(bodyRearY, width * 0.115, 32);
+  shapeHawkCrossSection(tailCap, keelFadeStartY, keelFadeEndY, crownStartY);
 
   // A raptor's bill is big, deep and hooked. The old call produced something
   // barely a tenth of the body long, curled 28 degrees and squashed vertically
@@ -492,59 +500,22 @@ function buildHawkLegsGeometry({
 }: {
   length: number;
   width: number;
-  /** The finished torso, so the hip can be measured rather than guessed. */
   body: THREE.BufferGeometry;
 }): THREE.BufferGeometry {
-  const legRadius = width * 0.052;
-  const legLength = length * 0.048;
-  const toeLength = length * 0.082;
-  // Back toward tail, matching where a real raptor's ankle sits.
-  const footY = -length * 0.28;
-
-  // The hip used to be a hard-coded `-width * 0.242`, copied by hand off the
-  // lathe profile of the day. Deepening the keel moved the belly below it and
-  // swallowed the legs whole, with nothing in the geometry to say so. Measure
-  // the body instead, so the legs track whatever the profile does next.
-  const position = body.getAttribute('position') as THREE.BufferAttribute;
-  const band = length * 0.04;
-  let hipZ = 0;
-  let bodyBottom = 0;
-  for (let i = 0; i < position.count; i++) {
-    const z = position.getZ(i);
-    bodyBottom = Math.min(bodyBottom, z);
-    if (Math.abs(position.getY(i) - footY) <= band) hipZ = Math.min(hipZ, z);
-  }
-  // Clear the deepest point of the keel too, not just the belly directly above
-  // the foot — otherwise the toes disappear inside the chest from head on.
-  const footZ = Math.min(hipZ - legLength * 0.9, bodyBottom - legLength * 0.5);
-
-  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
-    const x = side * width * 0.001;
-    // Spans hip to foot, so the shank never leaves a gap when the foot has to
-    // drop further to clear the keel.
-    const shank = hipZ - footZ;
-    const leg = new THREE.CylinderGeometry(legRadius * 0.82, legRadius, shank, 6);
-    leg.rotateX(Math.PI / 2);
-    leg.translate(x, footY, hipZ - shank * 0.5);
-
-    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
-      const toe = new THREE.ConeGeometry(legRadius * 0.40, toeLength, 5);
-      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
-      return toe;
-    };
-    const toes = [
-      makeToe(side * legRadius * 0.6, toeLength * 0.04),
-      makeToe(0, toeLength * 0.1),
-      makeToe(-side * legRadius * 0.6, toeLength * 0.04),
-    ];
-    const hallux = new THREE.ConeGeometry(legRadius * 0.32, toeLength * 0.65, 5);
-    hallux.rotateX(Math.PI);
-    hallux.translate(x, footY - toeLength * 0.28, footZ + toeLength * 0.02);
-    return mergePositionOnlyGeometries([leg, ...toes, hallux]);
-  };
-
-  const both = mergePositionOnlyGeometries([buildLeg(1), buildLeg(-1)]);
-  return mergeGeometriesWithColor([{ geometry: both, color: TALONS_COLOR }]);
+  const legs = buildTuckedBirdLegs({
+    body,
+    length,
+    width,
+    // Back toward the tail, matching where a real raptor's ankle sits.
+    footY: -length * 0.28,
+    legX: width * 0.075,
+    legRadius: width * 0.017,
+    toeLength: length * 0.075,
+    toeRadius: width * 0.019,
+    toeSpread: width * 0.026,
+    footDrop: 0.075,
+  });
+  return mergeGeometriesWithColor([{ geometry: legs, color: TALONS_COLOR }]);
 }
 
 /**

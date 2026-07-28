@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildTuckedBirdLegs } from './birdSharedGeometry';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import { BIRD_FEATHER_MASK_ATTRIBUTE } from '../birdFeatherShader';
 import {
@@ -436,7 +437,7 @@ export function createParrotGeometries(
     const wingRight = buildParrotWingGeometry(wingSpan, wingChord, -1);
 
     const tail = buildParrotTailGeometry(length, width);
-    const legs = buildParrotLegsGeometry(length, width);
+    const legs = buildParrotLegsGeometry(length, width, body);
     const tailRig = swayingTailRig({ pivot: [0, length * PARROT_TAIL_ROOT_Y_FACTOR, 0], axis: [1, 0, 0] });
 
     return { body, wingLeft, wingRight, tail, tailRig, legs: singleLegPart(legs) };
@@ -1175,39 +1176,24 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   return geometry;
 }
 
-function buildParrotLegsGeometry(length: number, width: number): THREE.BufferGeometry {
-  const legRadius = width * 0.038;
-  const legLength = length * 0.105;
-  const toeLength = length * 0.074;
-  const footY = -length * 0.18;
-  const hipZ = -width * 0.08;
-  const footZ = hipZ - legLength * 0.95;
-  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
-    const x = side * width * 0.115;
-    const leg = new THREE.CylinderGeometry(legRadius * 0.92, legRadius, legLength, 8);
-    leg.rotateX(Math.PI / 2);
-    leg.translate(x, footY, hipZ - legLength * 0.5);
-
-    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
-      const toe = new THREE.ConeGeometry(legRadius * 0.42, toeLength, 6);
-      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
-      return toe;
-    };
-    const toes = [
-      makeToe(side * legRadius * 0.55, toeLength * 0.05),
-      makeToe(0, toeLength * 0.12),
-      makeToe(-side * legRadius * 0.55, toeLength * 0.05),
-    ];
-    const hindToe = new THREE.ConeGeometry(legRadius * 0.3, toeLength * 0.62, 6);
-    hindToe.rotateX(Math.PI);
-    hindToe.translate(x, footY - toeLength * 0.28, footZ + toeLength * 0.02);
-    return mergePositionOnlyGeometries([leg, ...toes, hindToe]);
-  };
-  const left = buildLeg(1);
-  const right = buildLeg(-1);
-  return mergeGeometriesWithColor([
-    { geometry: mergePositionOnlyGeometries([left, right]), color: ACTIVE_PARROT_PALETTE.feet },
-  ]);
+function buildParrotLegsGeometry(
+  length: number,
+  width: number,
+  body: THREE.BufferGeometry,
+): THREE.BufferGeometry {
+  const legs = buildTuckedBirdLegs({
+    body,
+    length,
+    width,
+    footY: -length * 0.18,
+    legX: width * 0.115,
+    legRadius: width * 0.03,
+    toeLength: length * 0.074,
+    toeRadius: width * 0.024,
+    toeSpread: width * 0.032,
+    footDrop: 0.022,
+  });
+  return mergeGeometriesWithColor([{ geometry: legs, color: ACTIVE_PARROT_PALETTE.feet }]);
 }
 
 /**
