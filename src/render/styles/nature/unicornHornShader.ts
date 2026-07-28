@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 /**
  * Per-vertex tag marking which of the merged unicorn body's vertices belong to
@@ -64,10 +65,10 @@ export const UNICORN_HORN_CONFIG: UnicornHornConfig = {
  * final lit colour rather than on the albedo, where it would just be multiplied
  * back down by the lighting.
  *
- * Composes safely with any previously-installed patch: it captures the existing
- * onBeforeCompile and calls it first, and augments customProgramCacheKey rather
- * than replacing it. On the unicorn the body material already carries the hair
- * shader, so this is not hypothetical.
+ * Composes safely with any previously-installed patch: installed via
+ * patchMaterial, which chains onBeforeCompile and composes the cache key. On the
+ * unicorn the body material already carries the hair shader, so this is not
+ * hypothetical.
  *
  * ⚠️  Clone-before-patch rule: THREE.Material.clone() silently drops both
  * onBeforeCompile and customProgramCacheKey. Clone first, then patch each clone.
@@ -87,65 +88,58 @@ export function applyUnicornHornShader(
   // program compiled for different settings.
   const cacheKey = `aiboids-unicorn-horn-v1:${config.metalness.toFixed(4)}:${config.roughness.toFixed(4)}:${config.glow.toFixed(4)}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      shader.vertexShader =
+        `varying float vHornMask;\nattribute float ${UNICORN_HORN_MASK_ATTRIBUTE};\n` + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <color_vertex>',
+        `vHornMask = ${UNICORN_HORN_MASK_ATTRIBUTE};\n#include <color_vertex>`,
+      );
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
+      shader.fragmentShader =
+        `varying float vHornMask;\nuniform float uHornMetalness;\nuniform float uHornRoughness;\nuniform float uHornGlow;\n` +
+        shader.fragmentShader;
 
-    shader.vertexShader =
-      `varying float vHornMask;\nattribute float ${UNICORN_HORN_MASK_ATTRIBUTE};\n` + shader.vertexShader;
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <color_vertex>',
-      `vHornMask = ${UNICORN_HORN_MASK_ATTRIBUTE};\n#include <color_vertex>`,
-    );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <metalnessmap_fragment>',
+        `#include <metalnessmap_fragment>
+    {
+      // vHornMask interpolates to a fraction across the ring of triangles where
+      // the horn's base meets the skull, which is exactly what we want: the metal
+      // fades into the coat over one band rather than stopping on a hard line.
+      float hornMask = clamp(vHornMask, 0.0, 1.0);
+      metalnessFactor = mix(metalnessFactor, uHornMetalness, hornMask);
+      roughnessFactor = mix(roughnessFactor, uHornRoughness, hornMask);
+    }`,
+      );
 
-    shader.fragmentShader =
-      `varying float vHornMask;\nuniform float uHornMetalness;\nuniform float uHornRoughness;\nuniform float uHornGlow;\n` +
-      shader.fragmentShader;
-
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <metalnessmap_fragment>',
-      `#include <metalnessmap_fragment>
-  {
-    // vHornMask interpolates to a fraction across the ring of triangles where
-    // the horn's base meets the skull, which is exactly what we want: the metal
-    // fades into the coat over one band rather than stopping on a hard line.
-    float hornMask = clamp(vHornMask, 0.0, 1.0);
-    metalnessFactor = mix(metalnessFactor, uHornMetalness, hornMask);
-    roughnessFactor = mix(roughnessFactor, uHornRoughness, hornMask);
-  }`,
-    );
-
-    if (config.glow > 0) {
-      // Chunk name differs across three.js versions; patch whichever is present
-      // rather than assuming, so a dependency bump degrades to "no glow"
-      // instead of to a silently unpatched shader.
-      const glowSnippet = (chunk: string) => `${chunk}
-  {
-    // diffuseColor.rgb still holds the horn's baked gold at this point, so the
-    // glow is tinted by the horn's own colour instead of washing it toward white.
-    gl_FragColor.rgb += diffuseColor.rgb * uHornGlow * clamp(vHornMask, 0.0, 1.0);
-  }`;
-      for (const chunk of ['#include <opaque_fragment>', '#include <output_fragment>']) {
-        if (shader.fragmentShader.includes(chunk)) {
-          shader.fragmentShader = shader.fragmentShader.replace(chunk, glowSnippet(chunk));
-          break;
+      if (config.glow > 0) {
+        // Chunk name differs across three.js versions; patch whichever is present
+        // rather than assuming, so a dependency bump degrades to "no glow"
+        // instead of to a silently unpatched shader.
+        const glowSnippet = (chunk: string) => `${chunk}
+    {
+      // diffuseColor.rgb still holds the horn's baked gold at this point, so the
+      // glow is tinted by the horn's own colour instead of washing it toward white.
+      gl_FragColor.rgb += diffuseColor.rgb * uHornGlow * clamp(vHornMask, 0.0, 1.0);
+    }`;
+        for (const chunk of ['#include <opaque_fragment>', '#include <output_fragment>']) {
+          if (shader.fragmentShader.includes(chunk)) {
+            shader.fragmentShader = shader.fragmentShader.replace(chunk, glowSnippet(chunk));
+            break;
+          }
         }
       }
-    }
 
-    Object.assign(shader.uniforms, {
-      uHornMetalness: { value: config.metalness },
-      uHornRoughness: { value: config.roughness },
-      uHornGlow: { value: config.glow },
-    });
-  };
-
-  material.needsUpdate = true;
+      Object.assign(shader.uniforms, {
+        uHornMetalness: { value: config.metalness },
+        uHornRoughness: { value: config.roughness },
+        uHornGlow: { value: config.glow },
+      });
+    },
+  });
 }

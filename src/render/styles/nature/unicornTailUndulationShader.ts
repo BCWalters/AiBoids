@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 /**
  * Vertex-shader undulation for the unicorn's streaming tail (issue #251).
@@ -101,33 +102,26 @@ function patchTailMaterial(
     `aiboids-unicorn-tail-undulation-v1:${rootY.toFixed(4)}:${tipY.toFixed(4)}:` +
     `${upBias.toFixed(4)}:${amplitude.toFixed(4)}:${waveNumber.toFixed(4)}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      Object.assign(shader.uniforms, {
+        uTailRootY: { value: rootY },
+        uTailTipY: { value: tipY },
+        uTailUpBias: { value: upBias },
+        uTailAmplitude: { value: amplitude },
+        uTailWaveNumber: { value: waveNumber },
+      });
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
-
-    Object.assign(shader.uniforms, {
-      uTailRootY: { value: rootY },
-      uTailTipY: { value: tipY },
-      uTailUpBias: { value: upBias },
-      uTailAmplitude: { value: amplitude },
-      uTailWaveNumber: { value: waveNumber },
-    });
-
-    shader.vertexShader = vertexDeclarations() + shader.vertexShader;
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>\n${vertexDisplacementSnippet()}`,
-    );
-  };
-
-  material.needsUpdate = true;
+      shader.vertexShader = vertexDeclarations() + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\n${vertexDisplacementSnippet()}`,
+      );
+    },
+  });
 }
 
 /**

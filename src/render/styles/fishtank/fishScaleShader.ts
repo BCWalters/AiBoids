@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 export interface FishScaleConfig {
   /**
@@ -112,9 +113,8 @@ export const SHARK_SCALE_CONFIG: FishScaleConfig = {
  * before undulation) so the scale pattern does not swim across the skin when
  * the fish body undulates (#219).
  *
- * Composes safely with fishUndulationShader: captures any existing
- * onBeforeCompile and calls it first via previousCompile?.(shader, renderer),
- * and augments customProgramCacheKey rather than replacing it. Scale patches
+ * Composes safely with fishUndulationShader: installed via patchMaterial,
+ * which chains onBeforeCompile and composes the cache key. Scale patches
  * #include <color_vertex> (vertex) and #include <roughnessmap_fragment>
  * (fragment); undulation patches #include <begin_vertex> and
  * #include <beginnormal_vertex> — no overlap, either order works.
@@ -161,105 +161,98 @@ export function applyFishScaleShader(
   const planeSwizzle = patternPlane === 'yz' ? 'vFishScalePos.z' : 'vFishScalePos.x';
   const cacheKey = `aiboids-fish-scale-v5:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      // --- Vertex shader ---
+      // Declare the varying at the top so it survives Three.js's GLSL version
+      // transform (varying → out in WebGL 2 / GLSL 300 ES).
+      shader.vertexShader =
+        `varying vec3 vFishScalePos;\nvarying float vScaleSuppress;\nattribute float aScaleSuppress;\n`
+        + shader.vertexShader;
+      // Capture the REST-space (pre-undulation) model position right before
+      // vColor is set. Using the rest position means the scale pattern stays
+      // fixed to the skin even as the body undulates (#219).
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <color_vertex>',
+        `vFishScalePos = position;\nvScaleSuppress = aScaleSuppress;\n#include <color_vertex>`,
+      );
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
+      // --- Fragment shader ---
+      // Declare the varying (in) and uniforms at the top.
+      shader.fragmentShader =
+        `varying vec3 vFishScalePos;\nvarying float vScaleSuppress;\nuniform float uFishScaleFreq;\nuniform float uScaleEdgeDarkness;\nuniform float uScaleGloss;\n` +
+        shader.fragmentShader;
 
-    // --- Vertex shader ---
-    // Declare the varying at the top so it survives Three.js's GLSL version
-    // transform (varying → out in WebGL 2 / GLSL 300 ES).
-    shader.vertexShader =
-      `varying vec3 vFishScalePos;\nvarying float vScaleSuppress;\nattribute float aScaleSuppress;\n`
-      + shader.vertexShader;
-    // Capture the REST-space (pre-undulation) model position right before
-    // vColor is set. Using the rest position means the scale pattern stays
-    // fixed to the skin even as the body undulates (#219).
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <color_vertex>',
-      `vFishScalePos = position;\nvScaleSuppress = aScaleSuppress;\n#include <color_vertex>`,
-    );
+      // Inject the scale pattern AFTER roughnessmap_fragment. That chunk sets
+      // roughnessFactor (a local float), which we can then reduce for gloss.
+      // roughnessmap_fragment comes after color_fragment, so diffuseColor
+      // already carries the folded-in vColor at this point.
+      //
+      // Both diffuseColor and roughnessFactor are mutable locals — writing to
+      // them is valid in all GLSL versions. We never write to vColor (read-only
+      // `in` in GLSL 300 ES) or to roughness (a uniform).
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+    // Parts that are not skin opt OUT of the scale pattern via aScaleSuppress.
+    // The sense is SUPPRESS (1 = skip) deliberately: a geometry that never
+    // declares the attribute reads 0 in GLSL, so the default is "scaled", which
+    // is what every body and fin wants. An INCLUDE sense would silently strip
+    // the pattern off every geometry that forgot to set it.
+    if ( vScaleSuppress < 0.5 )
+    {
+      // Shingled arc scale pattern in the selected body plane.
+      // Y = spine axis (tail→head); second axis is Z (thicker bodies) or
+      // X (flatter bodies where Z would collapse the pattern into stripes).
+      // Alternate spine rows are staggered by half a cell (brick/hex layout)
+      // so scale arcs interlock. Pattern uses rest-space vFishScalePos so it
+      // does not swim with body undulation.
+      vec2 sp = vec2( vFishScalePos.y, ${planeSwizzle} ) * uFishScaleFreq;
+      sp.y += floor( sp.x ) * 0.5;
+      vec2 fp = fract( sp ) - 0.5;
 
-    // --- Fragment shader ---
-    // Declare the varying (in) and uniforms at the top.
-    shader.fragmentShader =
-      `varying vec3 vFishScalePos;\nvarying float vScaleSuppress;\nuniform float uFishScaleFreq;\nuniform float uScaleEdgeDarkness;\nuniform float uScaleGloss;\n` +
-      shader.fragmentShader;
+      // Elliptical radius from this cell's scale centre, elongated on the
+      // dorsoventral axis so the scales read as wider than tall.
+      float r = length( vec2( fp.x, fp.y * 1.25 ) );
+      // Elliptical radius to the row-above scale centre (one spine-cell toward
+      // head). Where rAbove < kScaleR the current scale is hidden beneath the
+      // row above, producing the shingled crescent rather than a full circle.
+      float rAbove = length( vec2( fp.x + 1.0, fp.y * 1.25 ) );
 
-    // Inject the scale pattern AFTER roughnessmap_fragment. That chunk sets
-    // roughnessFactor (a local float), which we can then reduce for gloss.
-    // roughnessmap_fragment comes after color_fragment, so diffuseColor
-    // already carries the folded-in vColor at this point.
-    //
-    // Both diffuseColor and roughnessFactor are mutable locals — writing to
-    // them is valid in all GLSL versions. We never write to vColor (read-only
-    // `in` in GLSL 300 ES) or to roughness (a uniform).
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <roughnessmap_fragment>',
-      `#include <roughnessmap_fragment>
-  // Parts that are not skin opt OUT of the scale pattern via aScaleSuppress.
-  // The sense is SUPPRESS (1 = skip) deliberately: a geometry that never
-  // declares the attribute reads 0 in GLSL, so the default is "scaled", which
-  // is what every body and fin wants. An INCLUDE sense would silently strip
-  // the pattern off every geometry that forgot to set it.
-  if ( vScaleSuppress < 0.5 )
-  {
-    // Shingled arc scale pattern in the selected body plane.
-    // Y = spine axis (tail→head); second axis is Z (thicker bodies) or
-    // X (flatter bodies where Z would collapse the pattern into stripes).
-    // Alternate spine rows are staggered by half a cell (brick/hex layout)
-    // so scale arcs interlock. Pattern uses rest-space vFishScalePos so it
-    // does not swim with body undulation.
-    vec2 sp = vec2( vFishScalePos.y, ${planeSwizzle} ) * uFishScaleFreq;
-    sp.y += floor( sp.x ) * 0.5;
-    vec2 fp = fract( sp ) - 0.5;
+      // Scale radius: > 0.5 so adjacent rows overlap and only a crescent is
+      // exposed. Must match FISH_SCALE_RADIUS exported from fishScaleShader.ts.
+      const float kScaleR = 0.62;
 
-    // Elliptical radius from this cell's scale centre, elongated on the
-    // dorsoventral axis so the scales read as wider than tall.
-    float r = length( vec2( fp.x, fp.y * 1.25 ) );
-    // Elliptical radius to the row-above scale centre (one spine-cell toward
-    // head). Where rAbove < kScaleR the current scale is hidden beneath the
-    // row above, producing the shingled crescent rather than a full circle.
-    float rAbove = length( vec2( fp.x + 1.0, fp.y * 1.25 ) );
+      // Smooth visibility mask: 1 = exposed crescent, 0 = hidden by row above.
+      float visible = smoothstep( kScaleR - 0.04, kScaleR + 0.04, rAbove );
 
-    // Scale radius: > 0.5 so adjacent rows overlap and only a crescent is
-    // exposed. Must match FISH_SCALE_RADIUS exported from fishScaleShader.ts.
-    const float kScaleR = 0.62;
+      // Free-edge arc: thin darkened band at the trailing boundary of the scale.
+      float edge = smoothstep( kScaleR - 0.10, kScaleR, r )
+                 * ( 1.0 - smoothstep( kScaleR, kScaleR + 0.06, r ) );
 
-    // Smooth visibility mask: 1 = exposed crescent, 0 = hidden by row above.
-    float visible = smoothstep( kScaleR - 0.04, kScaleR + 0.04, rAbove );
+      // --- Colour: darken the free edge of each exposed scale crescent ---
+      diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness * edge * visible;
 
-    // Free-edge arc: thin darkened band at the trailing boundary of the scale.
-    float edge = smoothstep( kScaleR - 0.10, kScaleR, r )
-               * ( 1.0 - smoothstep( kScaleR, kScaleR + 0.06, r ) );
+      // --- Reflectivity: reduce roughness at scale centres for highlights ---
+      // roughnessFactor is a local float (set by roughnessmap_fragment above);
+      // it is safe to assign to it here.
+      // Slight per-cell gloss variation avoids a uniform plastic sheen.
+      vec2 cell = floor( sp );
+      float cellNoise = fract( sin( dot( cell, vec2( 127.1, 311.7 ) ) ) * 43758.5453 );
+      float glossJitter = mix( 0.85, 1.15, cellNoise );
+      float scaleGloss = uScaleGloss * glossJitter * max( 0.0, 1.0 - r / kScaleR ) * visible;
+      roughnessFactor = clamp( roughnessFactor - scaleGloss, 0.0, 1.0 );
+    }`,
+      );
 
-    // --- Colour: darken the free edge of each exposed scale crescent ---
-    diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness * edge * visible;
-
-    // --- Reflectivity: reduce roughness at scale centres for highlights ---
-    // roughnessFactor is a local float (set by roughnessmap_fragment above);
-    // it is safe to assign to it here.
-    // Slight per-cell gloss variation avoids a uniform plastic sheen.
-    vec2 cell = floor( sp );
-    float cellNoise = fract( sin( dot( cell, vec2( 127.1, 311.7 ) ) ) * 43758.5453 );
-    float glossJitter = mix( 0.85, 1.15, cellNoise );
-    float scaleGloss = uScaleGloss * glossJitter * max( 0.0, 1.0 - r / kScaleR ) * visible;
-    roughnessFactor = clamp( roughnessFactor - scaleGloss, 0.0, 1.0 );
-  }`,
-    );
-
-    Object.assign(shader.uniforms, {
-      uFishScaleFreq: { value: freq },
-      uScaleEdgeDarkness: { value: config.edgeDarkness },
-      uScaleGloss: { value: config.scaleGloss },
-    });
-  };
-
-  material.needsUpdate = true;
+      Object.assign(shader.uniforms, {
+        uFishScaleFreq: { value: freq },
+        uScaleEdgeDarkness: { value: config.edgeDarkness },
+        uScaleGloss: { value: config.scaleGloss },
+      });
+    },
+  });
 }

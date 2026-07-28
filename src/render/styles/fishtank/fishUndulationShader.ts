@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 import type { FishUndulationConfig } from '../../sceneRenderers/createSceneRendererHooks';
 
 export interface FishUndulationInstanceState {
@@ -108,22 +109,35 @@ function applyUndulationPatchToVertexShader(vertexShader: string, withNormals: b
   return shader;
 }
 
+/**
+ * The shadow and point-light-shadow passes need the same spine bend as the beauty
+ * pass, or a swimming fish casts a rigid shadow.
+ *
+ * This previously set no cache key at all. three.js's program cache is GLOBAL and
+ * keyed on the cache key alone (WebGLPrograms.acquireProgram), so a keyless
+ * patched depth material is eligible to be handed a program compiled for any
+ * other depth material with matching parameters — including an unpatched one,
+ * which would drop the bend from the shadow, or another species', which would
+ * bake in the wrong helper source. Which one wins depends on draw order.
+ */
 function applyDepthLikeMaterialPatch(
   material: THREE.MeshDepthMaterial | THREE.MeshDistanceMaterial,
   uniforms: FishUndulationUniforms,
 ): void {
-  const previousCompile = material.onBeforeCompile;
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
-    Object.assign(shader.uniforms, {
-      uFishHeadPosition: { value: uniforms.headPosition },
-      uFishTailPosition: { value: uniforms.tailPosition },
-      uFishAmplitude: { value: uniforms.amplitude },
-      uFishWaveNumber: { value: uniforms.waveNumber },
-    });
-    shader.vertexShader = vertexUniformAndHelpers() + shader.vertexShader;
-    shader.vertexShader = applyUndulationPatchToVertexShader(shader.vertexShader, false);
-  };
+  patchMaterial({
+    material,
+    cacheKey: `aiboids-fish-undulation-depth-v1:${uniforms.headPosition.toFixed(5)}:${uniforms.tailPosition.toFixed(5)}`,
+    patch: (shader) => {
+      Object.assign(shader.uniforms, {
+        uFishHeadPosition: { value: uniforms.headPosition },
+        uFishTailPosition: { value: uniforms.tailPosition },
+        uFishAmplitude: { value: uniforms.amplitude },
+        uFishWaveNumber: { value: uniforms.waveNumber },
+      });
+      shader.vertexShader = vertexUniformAndHelpers() + shader.vertexShader;
+      shader.vertexShader = applyUndulationPatchToVertexShader(shader.vertexShader, false);
+    },
+  });
 }
 
 function cloneGeometryWithUndulationPhase({
@@ -148,24 +162,20 @@ function applyUndulationPatchToMesh({
 }): void {
   const undulationKey = `aiboids-fish-undulation-v2:${uniforms.headPosition.toFixed(5)}:${uniforms.tailPosition.toFixed(5)}`;
   const material = mesh.material as THREE.MeshStandardMaterial;
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
-  material.customProgramCacheKey = () => {
-    const baseKey = previousCacheKey?.() ?? '';
-    return baseKey.length ? `${baseKey}|${undulationKey}` : undulationKey;
-  };
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
-    Object.assign(shader.uniforms, {
-      uFishHeadPosition: { value: uniforms.headPosition },
-      uFishTailPosition: { value: uniforms.tailPosition },
-      uFishAmplitude: { value: uniforms.amplitude },
-      uFishWaveNumber: { value: uniforms.waveNumber },
-    });
-    shader.vertexShader = vertexUniformAndHelpers() + shader.vertexShader;
-    shader.vertexShader = applyUndulationPatchToVertexShader(shader.vertexShader, true);
-  };
-  material.needsUpdate = true;
+  patchMaterial({
+    material,
+    cacheKey: undulationKey,
+    patch: (shader) => {
+      Object.assign(shader.uniforms, {
+        uFishHeadPosition: { value: uniforms.headPosition },
+        uFishTailPosition: { value: uniforms.tailPosition },
+        uFishAmplitude: { value: uniforms.amplitude },
+        uFishWaveNumber: { value: uniforms.waveNumber },
+      });
+      shader.vertexShader = vertexUniformAndHelpers() + shader.vertexShader;
+      shader.vertexShader = applyUndulationPatchToVertexShader(shader.vertexShader, true);
+    },
+  });
 
   const depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   applyDepthLikeMaterialPatch(depthMaterial, uniforms);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 /**
  * Per-vertex strength attribute for the plumage pattern: 1 = full plumage,
@@ -148,9 +149,8 @@ export const PARROT_FEATHER_CONFIG: BirdFeatherConfig = {
  * captured before any deformation in the vertex shader) so the feather
  * pattern stays fixed to the skin regardless of animation.
  *
- * Composes safely with any previously-installed onBeforeCompile patch:
- * captures any existing onBeforeCompile and calls it first, and augments
- * customProgramCacheKey rather than replacing it.
+ * Composes safely with any previously-installed patch: installed via
+ * patchMaterial, which chains onBeforeCompile and composes the cache key.
  *
  * GLSL safety: the injected fragment code writes only to diffuseColor (a
  * local vec4) and roughnessFactor (a local float).  It never writes to vColor:
@@ -215,116 +215,109 @@ export function applyBirdFeatherShader(
     `${config.barbDarkness.toFixed(4)}:${config.barbGloss.toFixed(4)}:` +
     `${config.barbRachis.toFixed(4)}:${hasMask ? 'masked' : 'full'}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      // --- Vertex shader ---
+      // Declare the varying at the top so it survives Three.js's GLSL version
+      // transform (varying → out in WebGL 2 / GLSL 300 ES).
+      shader.vertexShader =
+        `varying vec3 vBirdFeatherPos;\n` +
+        (hasMask
+          ? `attribute float ${BIRD_FEATHER_MASK_ATTRIBUTE};\nvarying float vBirdFeatherMask;\n`
+          : '') +
+        shader.vertexShader;
+      // Capture the REST-space (pre-deformation) model position right before
+      // vColor is set.  Using the rest position means the feather pattern stays
+      // fixed to the skin regardless of any animation applied later.
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <color_vertex>',
+        `vBirdFeatherPos = position;\n` +
+          (hasMask ? `vBirdFeatherMask = ${BIRD_FEATHER_MASK_ATTRIBUTE};\n` : '') +
+          `#include <color_vertex>`,
+      );
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
+      // --- Fragment shader ---
+      // Declare the varying (in) and uniforms at the top.
+      shader.fragmentShader =
+        `varying vec3 vBirdFeatherPos;\nuniform float uBarbFreq;\nuniform float uBarbFreqLong;\nuniform float uBarbDarkness;\nuniform float uBarbGloss;\nuniform float uBarbRachis;\n` +
+        (hasMask ? `varying float vBirdFeatherMask;\n` : '') +
+        shader.fragmentShader;
 
-    // --- Vertex shader ---
-    // Declare the varying at the top so it survives Three.js's GLSL version
-    // transform (varying → out in WebGL 2 / GLSL 300 ES).
-    shader.vertexShader =
-      `varying vec3 vBirdFeatherPos;\n` +
-      (hasMask
-        ? `attribute float ${BIRD_FEATHER_MASK_ATTRIBUTE};\nvarying float vBirdFeatherMask;\n`
-        : '') +
-      shader.vertexShader;
-    // Capture the REST-space (pre-deformation) model position right before
-    // vColor is set.  Using the rest position means the feather pattern stays
-    // fixed to the skin regardless of any animation applied later.
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <color_vertex>',
-      `vBirdFeatherPos = position;\n` +
-        (hasMask ? `vBirdFeatherMask = ${BIRD_FEATHER_MASK_ATTRIBUTE};\n` : '') +
-        `#include <color_vertex>`,
-    );
+      // Inject the feather pattern AFTER roughnessmap_fragment.  That chunk
+      // sets roughnessFactor (a local float), which we can then reduce for
+      // gloss.  roughnessmap_fragment comes after color_fragment, so
+      // diffuseColor already carries the folded-in vColor at this point.
+      //
+      // Both diffuseColor and roughnessFactor are mutable locals — writing to
+      // them is valid in all GLSL versions.  We never write to vColor (read-only
+      // `in` in GLSL 300 ES) or to roughness (a uniform).
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+    {
+      // Overlapping flight-feather pattern, staggered rows (brick layout).
+      // Y = spine axis (tail->head) and is the feather's LONG axis; it is
+      // tiled at uBarbFreqLong, a fraction of the cross-axis frequency, so
+      // each cell is several times longer than it is wide.  Second axis =
+      // dorsoventral (yz) or wing span (yx), chosen per mesh to avoid stripe
+      // collapse on near-flat wing panels.  Uses rest-space vBirdFeatherPos.
+      // Applied as a strength multiplier on each of the three pattern terms
+      // rather than as a branch, so a geometry can fade the pattern out
+      // gradually. At 0 every term contributes nothing, which is exactly what a
+      // hard opt-out needs, so bare parts stay untouched either way.
+      float featherStrength = ${hasMask ? 'clamp( vBirdFeatherMask, 0.0, 1.0 )' : '1.0'};
+      vec2 sp = vec2( vBirdFeatherPos.y * uBarbFreqLong, ${planeSwizzle} * uBarbFreq );
+      sp.y += floor( sp.x ) * 0.5;
+      vec2 fp = fract( sp ) - 0.5;  // cell-local coords in [-0.5, 0.5]
 
-    // --- Fragment shader ---
-    // Declare the varying (in) and uniforms at the top.
-    shader.fragmentShader =
-      `varying vec3 vBirdFeatherPos;\nuniform float uBarbFreq;\nuniform float uBarbFreqLong;\nuniform float uBarbDarkness;\nuniform float uBarbGloss;\nuniform float uBarbRachis;\n` +
-      (hasMask ? `varying float vBirdFeatherMask;\n` : '') +
-      shader.fragmentShader;
+      // Vane outline.  Slightly wider than tall in cell space on top of the
+      // world-space elongation above, giving a blade that comes to a rounded
+      // point rather than an even oval.
+      float r      = length( vec2( fp.x * 0.86, fp.y ) );
+      float rAhead = length( vec2( ( fp.x + 1.0 ) * 0.86, fp.y ) );
 
-    // Inject the feather pattern AFTER roughnessmap_fragment.  That chunk
-    // sets roughnessFactor (a local float), which we can then reduce for
-    // gloss.  roughnessmap_fragment comes after color_fragment, so
-    // diffuseColor already carries the folded-in vColor at this point.
-    //
-    // Both diffuseColor and roughnessFactor are mutable locals — writing to
-    // them is valid in all GLSL versions.  We never write to vColor (read-only
-    // `in` in GLSL 300 ES) or to roughness (a uniform).
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <roughnessmap_fragment>',
-      `#include <roughnessmap_fragment>
-  {
-    // Overlapping flight-feather pattern, staggered rows (brick layout).
-    // Y = spine axis (tail->head) and is the feather's LONG axis; it is
-    // tiled at uBarbFreqLong, a fraction of the cross-axis frequency, so
-    // each cell is several times longer than it is wide.  Second axis =
-    // dorsoventral (yz) or wing span (yx), chosen per mesh to avoid stripe
-    // collapse on near-flat wing panels.  Uses rest-space vBirdFeatherPos.
-    // Applied as a strength multiplier on each of the three pattern terms
-    // rather than as a branch, so a geometry can fade the pattern out
-    // gradually. At 0 every term contributes nothing, which is exactly what a
-    // hard opt-out needs, so bare parts stay untouched either way.
-    float featherStrength = ${hasMask ? 'clamp( vBirdFeatherMask, 0.0, 1.0 )' : '1.0'};
-    vec2 sp = vec2( vBirdFeatherPos.y * uBarbFreqLong, ${planeSwizzle} * uBarbFreq );
-    sp.y += floor( sp.x ) * 0.5;
-    vec2 fp = fract( sp ) - 0.5;  // cell-local coords in [-0.5, 0.5]
+      // Vane radius > 0.5 so successive feathers overlap along their length,
+      // exposing only the trailing part of each (the visible blade edge).
+      const float kBarbR = 0.58;
 
-    // Vane outline.  Slightly wider than tall in cell space on top of the
-    // world-space elongation above, giving a blade that comes to a rounded
-    // point rather than an even oval.
-    float r      = length( vec2( fp.x * 0.86, fp.y ) );
-    float rAhead = length( vec2( ( fp.x + 1.0 ) * 0.86, fp.y ) );
+      // Smooth visibility mask: 1 = exposed blade, 0 = hidden by the one ahead.
+      float visible = smoothstep( kBarbR - 0.04, kBarbR + 0.04, rAhead );
 
-    // Vane radius > 0.5 so successive feathers overlap along their length,
-    // exposing only the trailing part of each (the visible blade edge).
-    const float kBarbR = 0.58;
+      // Soft free-edge arc: wider than dragon scales (0.20 vs 0.14) so
+      // feathers read as plumage rather than hard reptilian plates.
+      float edge = smoothstep( kBarbR - 0.20, kBarbR, r )
+                 * ( 1.0 - smoothstep( kBarbR, kBarbR + 0.10, r ) );
 
-    // Smooth visibility mask: 1 = exposed blade, 0 = hidden by the one ahead.
-    float visible = smoothstep( kBarbR - 0.04, kBarbR + 0.04, rAhead );
+      // Rachis: the pale shaft running down the blade's midline.  Scales have
+      // no midline, so this is the cue that most strongly separates "feather"
+      // from "scale".  Confined to the exposed part of the vane and faded out
+      // towards the tip so it does not run past the end of the blade.
+      float rachis = ( 1.0 - smoothstep( 0.0, 0.10, abs( fp.y ) ) )
+                   * ( 1.0 - smoothstep( kBarbR * 0.55, kBarbR, r ) )
+                   * visible;
 
-    // Soft free-edge arc: wider than dragon scales (0.20 vs 0.14) so
-    // feathers read as plumage rather than hard reptilian plates.
-    float edge = smoothstep( kBarbR - 0.20, kBarbR, r )
-               * ( 1.0 - smoothstep( kBarbR, kBarbR + 0.10, r ) );
+      // --- Colour: darken the trailing arc, lift the shaft ---
+      // Writes only to diffuseColor (mutable local).  vColor is read-only in
+      // GLSL 300 ES; assigning to it causes a link error that blacks the scene.
+      diffuseColor.rgb *= 1.0 - uBarbDarkness * edge * visible * featherStrength;
+      diffuseColor.rgb *= 1.0 + uBarbRachis * rachis * featherStrength;
 
-    // Rachis: the pale shaft running down the blade's midline.  Scales have
-    // no midline, so this is the cue that most strongly separates "feather"
-    // from "scale".  Confined to the exposed part of the vane and faded out
-    // towards the tip so it does not run past the end of the blade.
-    float rachis = ( 1.0 - smoothstep( 0.0, 0.10, abs( fp.y ) ) )
-                 * ( 1.0 - smoothstep( kBarbR * 0.55, kBarbR, r ) )
-                 * visible;
+      // --- Reflectivity: blade centres catch a gentle soft sheen ---
+      float gloss = uBarbGloss * max( 0.0, 1.0 - r / kBarbR ) * visible * featherStrength;
+      roughnessFactor = clamp( roughnessFactor - gloss, 0.0, 1.0 );
+    }`,
+      );
 
-    // --- Colour: darken the trailing arc, lift the shaft ---
-    // Writes only to diffuseColor (mutable local).  vColor is read-only in
-    // GLSL 300 ES; assigning to it causes a link error that blacks the scene.
-    diffuseColor.rgb *= 1.0 - uBarbDarkness * edge * visible * featherStrength;
-    diffuseColor.rgb *= 1.0 + uBarbRachis * rachis * featherStrength;
-
-    // --- Reflectivity: blade centres catch a gentle soft sheen ---
-    float gloss = uBarbGloss * max( 0.0, 1.0 - r / kBarbR ) * visible * featherStrength;
-    roughnessFactor = clamp( roughnessFactor - gloss, 0.0, 1.0 );
-  }`,
-    );
-
-    Object.assign(shader.uniforms, {
-      uBarbFreq: { value: freq },
-      uBarbFreqLong: { value: freqLong },
-      uBarbDarkness: { value: config.barbDarkness },
-      uBarbGloss: { value: config.barbGloss },
-      uBarbRachis: { value: config.barbRachis },
-    });
-  };
-
-  material.needsUpdate = true;
+      Object.assign(shader.uniforms, {
+        uBarbFreq: { value: freq },
+        uBarbFreqLong: { value: freqLong },
+        uBarbDarkness: { value: config.barbDarkness },
+        uBarbGloss: { value: config.barbGloss },
+        uBarbRachis: { value: config.barbRachis },
+      });
+    },
+  });
 }
