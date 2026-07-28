@@ -10,6 +10,8 @@ import {
 import {
   extrudeRingGeometryAlongX,
   latheBodyRadiusAt,
+  fishtankFinThickness,
+  type FinThicknessSample,
 } from './fishSharedGeometry';
 
 // Fish tank style: this file originally started as a duplicate of
@@ -203,7 +205,11 @@ const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
  */
 const DORSAL_FIN_BURY_FRACTION = 0.88; // sink the root slightly below the surface, never above it
 
-function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
+function buildDorsalFinParts(
+  length: number,
+  width: number,
+  profile: THREE.Vector2[],
+): { mainFin: THREE.BufferGeometry; secondFin: THREE.BufferGeometry } {
   const halfLen = length * 0.5;
 
   const mainRootY = halfLen * 0.02;
@@ -215,7 +221,7 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const mainRoot = new THREE.Vector3(0, mainRootY, mainRootZ);
   const mainBack = new THREE.Vector3(0, mainBackY, mainBackZ);
   const mainTip = new THREE.Vector3(0, mainTipY, mainRootZ + mainFinHeight);
-  const mainThickness = width * 0.09;
+  const mainThickness = fishtankFinThickness(width);
   const mainFin = extrudeRingGeometryAlongX([mainRoot, mainBack, mainTip], mainThickness);
 
   const secondRootY = -halfLen * 0.58;
@@ -227,9 +233,14 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const secondRoot = new THREE.Vector3(0, secondRootY, secondRootZ);
   const secondBack = new THREE.Vector3(0, secondBackY, secondBackZ);
   const secondTip = new THREE.Vector3(0, secondTipY, secondRootZ + secondFinHeight);
-  const secondThickness = width * 0.06;
+  const secondThickness = fishtankFinThickness(width);
   const secondFin = extrudeRingGeometryAlongX([secondRoot, secondBack, secondTip], secondThickness);
 
+  return { mainFin, secondFin };
+}
+
+function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
+  const { mainFin, secondFin } = buildDorsalFinParts(length, width, profile);
   return mergePositionOnlyGeometries([mainFin, secondFin]);
 }
 
@@ -291,7 +302,7 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
   const leadingShoulder = new THREE.Vector3(leadingShoulderX, rootY + chord * 0.15, 0);
   const tip = new THREE.Vector3(tipX, rootY - chord * 0.25, 0);
   const trailingSweep = new THREE.Vector3(trailingSweepX, rootY - chord * 0.75, 0);
-  const thickness = chord * 0.08;
+  const thickness = fishtankFinThickness(chord);
   return extrudeRingGeometry([root, leadingShoulder, tip, trailingSweep], thickness);
 }
 
@@ -358,6 +369,31 @@ function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeom
   const upperTip = new THREE.Vector3(0, -halfLen * 1.42, width * 0.95);
   const notch = new THREE.Vector3(0, -halfLen * 1.12, width * 0.08);
   const lowerTip = new THREE.Vector3(0, -halfLen * 1.22, -width * 0.4);
-  const thickness = width * 0.06;
+  const thickness = fishtankFinThickness(width);
   return extrudeRingGeometryAlongX([root, upperTip, notch, lowerTip], thickness);
+}
+
+export function createSharkFinThicknessSamples(rawLength: number, width: number): FinThicknessSample[] {
+  const length = rawLength * SHARK_LENGTH_SCALE;
+  const profile = buildSharkBodyProfile(length * 0.5, width);
+  const finSpan = length * 0.32;
+  const finChord = length * 0.2;
+  const { mainFin, secondFin } = buildDorsalFinParts(length, width, profile);
+  return [
+    { label: 'main-dorsal', geometry: mainFin, referenceSize: width, thinAxis: 'x' },
+    { label: 'second-dorsal', geometry: secondFin, referenceSize: width, thinAxis: 'x' },
+    {
+      label: 'pectoral-left',
+      geometry: buildPectoralFinGeometry(length, finSpan, finChord, 1),
+      referenceSize: finChord,
+      thinAxis: 'z',
+    },
+    {
+      label: 'pectoral-right',
+      geometry: buildPectoralFinGeometry(length, finSpan, finChord, -1),
+      referenceSize: finChord,
+      thinAxis: 'z',
+    },
+    { label: 'caudal', geometry: buildCaudalFinGeometry(length, width), referenceSize: width, thinAxis: 'x' },
+  ];
 }

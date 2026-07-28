@@ -13,6 +13,8 @@ import {
   bakeCountershadeColors,
   bakeLengthBandColors,
   bakeUpperFlankMarkColors,
+  fishtankFinThickness,
+  type FinThicknessSample,
 } from './fishSharedGeometry';
 
 // Fish tank style: the small-species instances (Fish / Goldfish / Clownfish /
@@ -129,9 +131,7 @@ function buildDorsalFinGeometry(length: number, width: number, heightFactor: num
   const rearBase = new THREE.Vector3(0, rearBaseY, baseZ);
   const rearTop = new THREE.Vector3(0, rearBaseY + topInset, baseZ + finHeight);
   const frontTop = new THREE.Vector3(0, frontBaseY - topInset, baseZ + finHeight);
-  // As thin as possible flank-to-flank while still a real 3D prism (not a
-  // zero-width sheet that would vanish edge-on).
-  const thickness = width * 0.02;
+  const thickness = fishtankFinThickness(width);
   return extrudeRingGeometryAlongX([frontBase, rearBase, rearTop, frontTop], thickness);
 }
 
@@ -153,7 +153,7 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
   const leadingBulge = new THREE.Vector3(leadingBulgeX, rootY + chord * 0.4, 0);
   const tip = new THREE.Vector3(tipX, rootY - chord * 0.1, 0);
   const trailingBulge = new THREE.Vector3(trailingBulgeX, rootY - chord * 0.5, 0);
-  const thickness = chord * 0.08;
+  const thickness = fishtankFinThickness(chord);
   return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
 }
 
@@ -169,7 +169,12 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
  * back-and-down to tips that reach outside the body's vertical extent, leaving
  * a V-notch between them at the rear. Static (does not flap).
  */
-function buildCaudalFinGeometry(length: number, width: number, spread: number, heightStretch: number): THREE.BufferGeometry {
+function buildCaudalFinLobes(
+  length: number,
+  width: number,
+  spread: number,
+  heightStretch: number,
+): { upperLobe: THREE.BufferGeometry; lowerLobe: THREE.BufferGeometry } {
   // Reaches back from the peduncle (very back of the body). The body is a solid
   // tapering lathe, so the fin's base simply embeds into the rear of the body.
   const finLength = length * 0.24;
@@ -187,9 +192,14 @@ function buildCaudalFinGeometry(length: number, width: number, spread: number, h
   const baseLower = new THREE.Vector3(0, rootBackY, -notchHalf);
   const upperTip = new THREE.Vector3(0, rootBackY - finLength, tipHeight);
   const lowerTip = new THREE.Vector3(0, rootBackY - finLength, -tipHeight);
-  const thickness = width * 0.05;
+  const thickness = fishtankFinThickness(width);
   const upperLobe = extrudeRingGeometryAlongX([baseTop, upperTip, baseLower], thickness);
   const lowerLobe = extrudeRingGeometryAlongX([baseTop, lowerTip, baseLower], thickness);
+  return { upperLobe, lowerLobe };
+}
+
+function buildCaudalFinGeometry(length: number, width: number, spread: number, heightStretch: number): THREE.BufferGeometry {
+  const { upperLobe, lowerLobe } = buildCaudalFinLobes(length, width, spread, heightStretch);
   return mergePositionOnlyGeometries([upperLobe, lowerLobe]);
 }
 
@@ -256,35 +266,68 @@ function buildFishVariant(length: number, width: number, variant: FishVariant): 
   return { body, wingLeft, wingRight, tail };
 }
 
+function buildFishVariantFinThicknessSamples(length: number, width: number, variant: FishVariant): FinThicknessSample[] {
+  const fins = { ...DEFAULT_FIN_SIZING, ...(variant.fins ?? {}) };
+  const proportions: BodyProportions = {
+    ...variant.proportions,
+    sideSquash: variant.proportions.sideSquash * SMALL_FISH_SIDE_SQUASH_SCALE,
+    heightStretch: variant.proportions.heightStretch * SMALL_FISH_BODY_DEPTH_SCALE,
+  };
+  const span = length * fins.pectoralSpanFactor;
+  const chord = length * fins.pectoralChordFactor;
+  const dorsal = buildDorsalFinGeometry(
+    length,
+    width,
+    fins.dorsalHeightFactor * SMALL_FISH_DORSAL_HEIGHT_SCALE,
+    proportions.heightStretch,
+  );
+  const wingLeft = buildPectoralFinGeometry(length, span, chord, 1);
+  const wingRight = buildPectoralFinGeometry(length, span, chord, -1);
+  const { upperLobe, lowerLobe } = buildCaudalFinLobes(length, width, fins.caudalSpreadFactor, proportions.heightStretch);
+  return [
+    { label: 'dorsal', geometry: dorsal, referenceSize: width, thinAxis: 'x' },
+    { label: 'pectoral-left', geometry: wingLeft, referenceSize: chord, thinAxis: 'z' },
+    { label: 'pectoral-right', geometry: wingRight, referenceSize: chord, thinAxis: 'z' },
+    { label: 'caudal-upper-lobe', geometry: upperLobe, referenceSize: width, thinAxis: 'x' },
+    { label: 'caudal-lower-lobe', geometry: lowerLobe, referenceSize: width, thinAxis: 'x' },
+  ];
+}
+
 
 // ---------------------------------------------------------------------------
 // Per-species variants. Colors chosen to read as the real fish; geometry
 // proportions give each species a distinct, recognizable silhouette.
 // ---------------------------------------------------------------------------
 
+const PLAIN_FISH_BACK = new THREE.Color(0x6f7c63);
+const PLAIN_FISH_BELLY = new THREE.Color(0xd7dcd0);
+const PLAIN_FISH_VARIANT: FishVariant = {
+  proportions: { sideSquash: 0.465, heightStretch: 0.675 },
+  profile: (h, w) => [
+    new THREE.Vector2(0, -h * 1.0),
+    new THREE.Vector2(w * 0.14, -h * 0.82),
+    new THREE.Vector2(w * 0.3, -h * 0.5),
+    new THREE.Vector2(w * 0.46, -h * 0.15),
+    new THREE.Vector2(w * 0.44, h * 0.15),
+    new THREE.Vector2(w * 0.3, h * 0.45),
+    new THREE.Vector2(w * 0.16, h * 0.68),
+    new THREE.Vector2(0, h * 0.85),
+  ],
+  bakeBody: (body) => bakeCountershadeColors(body, PLAIN_FISH_BACK, PLAIN_FISH_BELLY),
+  dorsalColor: new THREE.Color(0x7c8a70),
+  pectoralColor: new THREE.Color(0x9aa690),
+  tailColor: new THREE.Color(0x7c8a70),
+};
+
 /** Plain fish ("Fish"): a streamlined, mildly-compressed body with natural
  * countershading (olive-steel back fading to a pale silver belly) and muted
  * olive-gray fins — a believable generic minnow/baitfish. */
 export function createPlainFishGeometries(length: number, width: number): CreatureGeometries {
-  const back = new THREE.Color(0x6f7c63);
-  const belly = new THREE.Color(0xd7dcd0);
-  return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.465, heightStretch: 0.675 },
-    profile: (h, w) => [
-      new THREE.Vector2(0, -h * 1.0),
-      new THREE.Vector2(w * 0.14, -h * 0.82),
-      new THREE.Vector2(w * 0.3, -h * 0.5),
-      new THREE.Vector2(w * 0.46, -h * 0.15),
-      new THREE.Vector2(w * 0.44, h * 0.15),
-      new THREE.Vector2(w * 0.3, h * 0.45),
-      new THREE.Vector2(w * 0.16, h * 0.68),
-      new THREE.Vector2(0, h * 0.85),
-    ],
-    bakeBody: (body) => bakeCountershadeColors(body, back, belly),
-    dorsalColor: new THREE.Color(0x7c8a70),
-    pectoralColor: new THREE.Color(0x9aa690),
-    tailColor: new THREE.Color(0x7c8a70),
-  });
+  return buildFishVariant(length, width, PLAIN_FISH_VARIANT);
+}
+
+export function createPlainFishFinThicknessSamples(length: number, width: number): FinThicknessSample[] {
+  return buildFishVariantFinThicknessSamples(length, width, PLAIN_FISH_VARIANT);
 }
 
 /**
@@ -300,68 +343,80 @@ export const GOLDFISH_FISHTANK_PALETTE = {
 } as const;
 
 
+const GOLDFISH_BACK = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.back);
+const GOLDFISH_BELLY = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.belly);
+const GOLDFISH_FIN_COLOR = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.fin);
+const GOLDFISH_VARIANT: FishVariant = {
+  proportions: { sideSquash: 0.54, heightStretch: 0.86 },
+  profile: (h, w) => [
+    new THREE.Vector2(0, -h * 1.0),
+    new THREE.Vector2(w * 0.2, -h * 0.76),
+    new THREE.Vector2(w * 0.44, -h * 0.42),
+    new THREE.Vector2(w * 0.56, -h * 0.08),
+    new THREE.Vector2(w * 0.54, h * 0.22),
+    new THREE.Vector2(w * 0.38, h * 0.5),
+    new THREE.Vector2(w * 0.2, h * 0.72),
+    new THREE.Vector2(0, h * 0.87),
+  ],
+  bakeBody: (body) => bakeCountershadeColors(body, GOLDFISH_BACK, GOLDFISH_BELLY),
+  dorsalColor: GOLDFISH_FIN_COLOR,
+  pectoralColor: GOLDFISH_FIN_COLOR,
+  tailColor: GOLDFISH_FIN_COLOR,
+  fins: {
+    dorsalHeightFactor: 1.15,
+    pectoralSpanFactor: 0.4,
+    pectoralChordFactor: 0.34,
+    caudalSpreadFactor: 1.0,
+  },
+};
+
 /** Goldfish: a deep, rounded, chunky body in rich orange fading to a lighter
  * gold belly, with large flowing orange fins. */
 export function createGoldfishGeometries(length: number, width: number): CreatureGeometries {
-  const back = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.back);
-  const belly = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.belly);
-  const finColor = new THREE.Color(GOLDFISH_FISHTANK_PALETTE.fin);
-  return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.54, heightStretch: 0.86 },
-    profile: (h, w) => [
-      new THREE.Vector2(0, -h * 1.0),
-      new THREE.Vector2(w * 0.2, -h * 0.76),
-      new THREE.Vector2(w * 0.44, -h * 0.42),
-      new THREE.Vector2(w * 0.56, -h * 0.08),
-      new THREE.Vector2(w * 0.54, h * 0.22),
-      new THREE.Vector2(w * 0.38, h * 0.5),
-      new THREE.Vector2(w * 0.2, h * 0.72),
-      new THREE.Vector2(0, h * 0.87),
-    ],
-    bakeBody: (body) => bakeCountershadeColors(body, back, belly),
-    dorsalColor: finColor,
-    pectoralColor: finColor,
-    tailColor: finColor,
-    fins: {
-      dorsalHeightFactor: 1.15,
-      pectoralSpanFactor: 0.4,
-      pectoralChordFactor: 0.34,
-      caudalSpreadFactor: 1.0,
-    },
-  });
+  return buildFishVariant(length, width, GOLDFISH_VARIANT);
 }
+
+export function createGoldfishFinThicknessSamples(length: number, width: number): FinThicknessSample[] {
+  return buildFishVariantFinThicknessSamples(length, width, GOLDFISH_VARIANT);
+}
+
+const CLOWNFISH_BODY_COLOR = new THREE.Color(0xf4661c);
+const CLOWNFISH_BAND_COLOR = new THREE.Color(0xf7f4ee);
+const CLOWNFISH_EDGE_COLOR = new THREE.Color(0x1a120c);
+const CLOWNFISH_FIN_COLOR = new THREE.Color(0xf4661c);
+const CLOWNFISH_VARIANT: FishVariant = {
+  proportions: { sideSquash: 0.495, heightStretch: 0.75 },
+  profileSubdivide: 4,
+  profile: (h, w) => [
+    new THREE.Vector2(0, -h * 0.95),
+    new THREE.Vector2(w * 0.24, -h * 0.68),
+    new THREE.Vector2(w * 0.46, -h * 0.34),
+    new THREE.Vector2(w * 0.52, h * 0.0),
+    new THREE.Vector2(w * 0.5, h * 0.28),
+    new THREE.Vector2(w * 0.34, h * 0.55),
+    new THREE.Vector2(w * 0.18, h * 0.75),
+    new THREE.Vector2(0, h * 0.9),
+  ],
+  bakeBody: (body, halfLen) =>
+    bakeLengthBandColors(body, halfLen, CLOWNFISH_BODY_COLOR, CLOWNFISH_BAND_COLOR, CLOWNFISH_EDGE_COLOR, [
+      { from: 0.6, to: 0.72 }, // head band, just behind the eye
+      { from: 0.38, to: 0.5 }, // mid-body band
+      { from: 0.14, to: 0.22 }, // peduncle band
+    ], 0.03),
+  dorsalColor: CLOWNFISH_FIN_COLOR,
+  pectoralColor: CLOWNFISH_FIN_COLOR,
+  tailColor: CLOWNFISH_FIN_COLOR,
+  eyeRadiusFactor: 0.045,
+};
 
 /** Clownfish: a stubby oval orange body crossed by three white vertical bands
  * outlined in black, with orange fins. */
 export function createClownfishGeometries(length: number, width: number): CreatureGeometries {
-  const bodyColor = new THREE.Color(0xf4661c);
-  const band = new THREE.Color(0xf7f4ee);
-  const edge = new THREE.Color(0x1a120c);
-  const finColor = new THREE.Color(0xf4661c);
-  return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.495, heightStretch: 0.75 },
-    profileSubdivide: 4,
-    profile: (h, w) => [
-      new THREE.Vector2(0, -h * 0.95),
-      new THREE.Vector2(w * 0.24, -h * 0.68),
-      new THREE.Vector2(w * 0.46, -h * 0.34),
-      new THREE.Vector2(w * 0.52, h * 0.0),
-      new THREE.Vector2(w * 0.5, h * 0.28),
-      new THREE.Vector2(w * 0.34, h * 0.55),
-      new THREE.Vector2(w * 0.18, h * 0.75),
-      new THREE.Vector2(0, h * 0.9),
-    ],
-    bakeBody: (body, halfLen) =>
-      bakeLengthBandColors(body, halfLen, bodyColor, band, edge, [
-        { from: 0.6, to: 0.72 }, // head band, just behind the eye
-        { from: 0.38, to: 0.5 }, // mid-body band
-        { from: 0.14, to: 0.22 }, // peduncle band
-      ], 0.03),
-    dorsalColor: finColor,
-    pectoralColor: finColor,
-    tailColor: finColor,
-    eyeRadiusFactor: 0.045,
-  });
+  return buildFishVariant(length, width, CLOWNFISH_VARIANT);
+}
+
+export function createClownfishFinThicknessSamples(length: number, width: number): FinThicknessSample[] {
+  return buildFishVariantFinThicknessSamples(length, width, CLOWNFISH_VARIANT);
 }
 
 /** See GOLDFISH_FISHTANK_PALETTE for why these are exported. */
@@ -372,42 +427,52 @@ export const BLUE_TANG_FISHTANK_PALETTE = {
 } as const;
 
 
+const BLUE_TANG_BODY_COLOR = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.body);
+const BLUE_TANG_MARK_COLOR = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.mark);
+const BLUE_TANG_TAIL_COLOR = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.tail);
+const BLUE_TANG_VARIANT: FishVariant = {
+  proportions: { sideSquash: 0.375, heightStretch: 1.0 },
+  profileSubdivide: 4,
+  profile: (h, w) => [
+    new THREE.Vector2(0, -h * 0.9),
+    new THREE.Vector2(w * 0.26, -h * 0.6),
+    new THREE.Vector2(w * 0.52, -h * 0.26),
+    new THREE.Vector2(w * 0.62, h * 0.06),
+    new THREE.Vector2(w * 0.56, h * 0.36),
+    new THREE.Vector2(w * 0.4, h * 0.6),
+    new THREE.Vector2(w * 0.2, h * 0.78),
+    new THREE.Vector2(0, h * 0.9),
+  ],
+  bakeBody: (body, halfLen) =>
+    // zFrom is a surface-normal fraction (0 = belly, 0.5 = the widest
+    // point of the flank, 1 = the dorsal ridge), not a bounding-box
+    // height fraction. 0.5 puts the mark's lower edge exactly on the
+    // widest point at every station along the body. The previous 0.42
+    // was a bounding-box fraction and happened to land on the widest
+    // point at mid-body, but crept to half-way down the belly side at
+    // the narrow peduncle -- 0.5 reproduces the mid-body look and holds
+    // it constant.
+    bakeUpperFlankMarkColors(body, BLUE_TANG_BODY_COLOR, BLUE_TANG_MARK_COLOR, halfLen, {
+      zFrom: 0.5,
+      lengthFrom: 0.12,
+      lengthTo: 0.72,
+    }),
+  dorsalColor: BLUE_TANG_MARK_COLOR,
+  pectoralColor: BLUE_TANG_TAIL_COLOR,
+  tailColor: BLUE_TANG_TAIL_COLOR,
+  fins: {
+    dorsalHeightFactor: 0.7,
+    caudalSpreadFactor: 0.7,
+  },
+  eyeRadiusFactor: 0.045,
+};
+
 /** Blue Tang: a tall, disc-shaped, strongly-compressed royal-blue body with a
  * black "palette" marking across the upper flank and a bright yellow tail. */
 export function createBlueTangGeometries(length: number, width: number): CreatureGeometries {
-  const blue = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.body);
-  const mark = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.mark);
-  const yellow = new THREE.Color(BLUE_TANG_FISHTANK_PALETTE.tail);
-  return buildFishVariant(length, width, {
-    proportions: { sideSquash: 0.375, heightStretch: 1.0 },
-    profileSubdivide: 4,
-    profile: (h, w) => [
-      new THREE.Vector2(0, -h * 0.9),
-      new THREE.Vector2(w * 0.26, -h * 0.6),
-      new THREE.Vector2(w * 0.52, -h * 0.26),
-      new THREE.Vector2(w * 0.62, h * 0.06),
-      new THREE.Vector2(w * 0.56, h * 0.36),
-      new THREE.Vector2(w * 0.4, h * 0.6),
-      new THREE.Vector2(w * 0.2, h * 0.78),
-      new THREE.Vector2(0, h * 0.9),
-    ],
-    bakeBody: (body, halfLen) =>
-      // zFrom is a surface-normal fraction (0 = belly, 0.5 = the widest
-      // point of the flank, 1 = the dorsal ridge), not a bounding-box
-      // height fraction. 0.5 puts the mark's lower edge exactly on the
-      // widest point at every station along the body. The previous 0.42
-      // was a bounding-box fraction and happened to land on the widest
-      // point at mid-body, but crept to half-way down the belly side at
-      // the narrow peduncle -- 0.5 reproduces the mid-body look and holds
-      // it constant.
-      bakeUpperFlankMarkColors(body, blue, mark, halfLen, { zFrom: 0.5, lengthFrom: 0.12, lengthTo: 0.72 }),
-    dorsalColor: mark,
-    pectoralColor: yellow,
-    tailColor: yellow,
-    fins: {
-      dorsalHeightFactor: 0.7,
-      caudalSpreadFactor: 0.7,
-    },
-    eyeRadiusFactor: 0.045,
-  });
+  return buildFishVariant(length, width, BLUE_TANG_VARIANT);
+}
+
+export function createBlueTangFinThicknessSamples(length: number, width: number): FinThicknessSample[] {
+  return buildFishVariantFinThicknessSamples(length, width, BLUE_TANG_VARIANT);
 }

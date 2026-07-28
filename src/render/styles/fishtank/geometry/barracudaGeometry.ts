@@ -7,7 +7,12 @@ import {
   buildEyeDotsGeometry,
   swayingTailRig,
 } from '../../../geometry/sharedGeometry';
-import { extrudeRingGeometryAlongX, latheBodyRadiusAt } from './fishSharedGeometry';
+import {
+  extrudeRingGeometryAlongX,
+  latheBodyRadiusAt,
+  fishtankFinThickness,
+  type FinThicknessSample,
+} from './fishSharedGeometry';
 
 /**
  * Barracuda predator geometry (the normal fishtank predator): a very long,
@@ -182,7 +187,16 @@ function bakeDorsalVentralGradient(geometry: THREE.BufferGeometry, minZ: number,
  * single tall triangular sail. Kept in one merged body geometry so the
  * dorsal-ventral gradient bakes dark-gray tops and pale bellies onto them.
  */
-function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
+function buildDorsalFinParts(
+  length: number,
+  width: number,
+  profile: THREE.Vector2[],
+): {
+  firstFin: THREE.BufferGeometry;
+  firstBellyFin: THREE.BufferGeometry;
+  secondFin: THREE.BufferGeometry;
+  secondBellyFin: THREE.BufferGeometry;
+} {
   const halfLen = length * 0.5;
   const bury = 0.9;
 
@@ -191,9 +205,10 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const firstFrontZ = latheBodyRadiusAt(firstFrontY, profile) * BODY_HEIGHT_STRETCH * bury;
   const firstBackZ = latheBodyRadiusAt(firstBackY, profile) * BODY_HEIGHT_STRETCH * bury;
   const firstTip = new THREE.Vector3(0, -halfLen * 0.15, firstBackZ + width * 0.195);
+  const firstThickness = fishtankFinThickness(width);
   const firstFin = extrudeRingGeometryAlongX(
     [new THREE.Vector3(0, firstFrontY, firstFrontZ), new THREE.Vector3(0, firstBackY, firstBackZ), firstTip],
-    width * 0.05,
+    firstThickness,
   );
   // Mirror the first dorsal onto the belly (negate Z). Kept in the same merged
   // body geometry so the dorsal-ventral gradient bakes belly colors onto it.
@@ -203,7 +218,7 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
       new THREE.Vector3(0, firstBackY, -firstBackZ),
       new THREE.Vector3(0, firstTip.y, -firstTip.z),
     ],
-    width * 0.05,
+    firstThickness,
   );
 
   const secondFrontY = -halfLen * 0.5;
@@ -211,9 +226,10 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
   const secondFrontZ = latheBodyRadiusAt(secondFrontY, profile) * BODY_HEIGHT_STRETCH * bury;
   const secondBackZ = latheBodyRadiusAt(secondBackY, profile) * BODY_HEIGHT_STRETCH * bury;
   const secondTip = new THREE.Vector3(0, -halfLen * 0.76, secondBackZ + width * 0.1275);
+  const secondThickness = fishtankFinThickness(width);
   const secondFin = extrudeRingGeometryAlongX(
     [new THREE.Vector3(0, secondFrontY, secondFrontZ), new THREE.Vector3(0, secondBackY, secondBackZ), secondTip],
-    width * 0.045,
+    secondThickness,
   );
   // Mirror the second dorsal onto the belly (negate Z).
   const secondBellyFin = extrudeRingGeometryAlongX(
@@ -222,9 +238,14 @@ function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.V
       new THREE.Vector3(0, secondBackY, -secondBackZ),
       new THREE.Vector3(0, secondTip.y, -secondTip.z),
     ],
-    width * 0.045,
+    secondThickness,
   );
 
+  return { firstFin, firstBellyFin, secondFin, secondBellyFin };
+}
+
+function buildDorsalFinsGeometry(length: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
+  const { firstFin, firstBellyFin, secondFin, secondBellyFin } = buildDorsalFinParts(length, width, profile);
   return mergePositionOnlyGeometries([firstFin, firstBellyFin, secondFin, secondBellyFin]);
 }
 
@@ -413,7 +434,7 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
   const tip = new THREE.Vector3(tipX, rootY - chord * 0.3, 0);
   const trailingSweep = new THREE.Vector3(span * 0.6 * side, rootY - chord * 0.78, 0);
   const root = new THREE.Vector3(0, rootY, 0);
-  return extrudeRingGeometry([root, leadingShoulder, tip, trailingSweep], chord * 0.06);
+  return extrudeRingGeometry([root, leadingShoulder, tip, trailingSweep], fishtankFinThickness(chord));
 }
 
 /**
@@ -428,8 +449,35 @@ function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeom
   const upperTip = new THREE.Vector3(0, -halfLen * 1.46, width * 0.36);
   const notch = new THREE.Vector3(0, -halfLen * 1.32, 0);
   const lowerTip = new THREE.Vector3(0, -halfLen * 1.46, -width * 0.36);
-  const fin = extrudeRingGeometryAlongX([root, upperTip, notch, lowerTip], width * 0.05);
+  const fin = extrudeRingGeometryAlongX([root, upperTip, notch, lowerTip], fishtankFinThickness(width));
   return bakeCaudalTipColors(fin, peduncleY, halfLen * 1.46);
+}
+
+export function createBarracudaFinThicknessSamples(rawLength: number, width: number): FinThicknessSample[] {
+  const length = rawLength * BARRACUDA_LENGTH_SCALE;
+  const profile = buildBarracudaBodyProfile(length * 0.5, width);
+  const finSpan = length * 0.11;
+  const finChord = length * 0.095;
+  const { firstFin, firstBellyFin, secondFin, secondBellyFin } = buildDorsalFinParts(length, width, profile);
+  return [
+    { label: 'first-dorsal', geometry: firstFin, referenceSize: width, thinAxis: 'x' },
+    { label: 'first-belly', geometry: firstBellyFin, referenceSize: width, thinAxis: 'x' },
+    { label: 'second-dorsal', geometry: secondFin, referenceSize: width, thinAxis: 'x' },
+    { label: 'second-belly', geometry: secondBellyFin, referenceSize: width, thinAxis: 'x' },
+    {
+      label: 'pectoral-left',
+      geometry: buildPectoralFinGeometry(length, finSpan, finChord, 1),
+      referenceSize: finChord,
+      thinAxis: 'z',
+    },
+    {
+      label: 'pectoral-right',
+      geometry: buildPectoralFinGeometry(length, finSpan, finChord, -1),
+      referenceSize: finChord,
+      thinAxis: 'z',
+    },
+    { label: 'caudal', geometry: buildCaudalFinGeometry(length, width), referenceSize: width, thinAxis: 'x' },
+  ];
 }
 
 /**

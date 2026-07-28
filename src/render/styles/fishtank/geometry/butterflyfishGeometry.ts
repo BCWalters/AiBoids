@@ -10,6 +10,8 @@ import {
   extrudeRingGeometryAlongX,
   bakeVerticalStripeColors,
   latheBodyRadiusAt,
+  fishtankFinThickness,
+  type FinThicknessSample,
 } from './fishSharedGeometry';
 
 // Fish tank style: the "parrot" boid species' fishtank-exclusive
@@ -162,7 +164,7 @@ function buildDorsalFinGeometry(halfLen: number, width: number, profile: THREE.V
   const backTip = new THREE.Vector3(0, backRootY + halfLen * 0.1, backRootZ + finHeight * 0.55);
   const frontTip = new THREE.Vector3(0, frontRootY - halfLen * 0.05, frontRootZ + finHeight);
 
-  const thickness = width * 0.05;
+  const thickness = fishtankFinThickness(width);
   return extrudeRingGeometryAlongX([frontRoot, backRoot, backTip, frontTip], thickness);
 }
 
@@ -187,7 +189,7 @@ function buildAnalFinGeometry(halfLen: number, width: number, profile: THREE.Vec
   const backTip = new THREE.Vector3(0, backRootY + halfLen * 0.08, backRootZ - finHeight * 0.6);
   const frontTip = new THREE.Vector3(0, frontRootY - halfLen * 0.05, frontRootZ - finHeight);
 
-  const thickness = width * 0.05;
+  const thickness = fishtankFinThickness(width);
   return extrudeRingGeometryAlongX([frontRoot, backRoot, backTip, frontTip], thickness);
 }
 
@@ -208,7 +210,7 @@ function buildPectoralFinGeometry(length: number, span: number, chord: number, s
   const leadingBulge = new THREE.Vector3(leadingBulgeX, rootY + chord * 0.35, 0);
   const tip = new THREE.Vector3(tipX, rootY - chord * 0.1, 0);
   const trailingBulge = new THREE.Vector3(trailingBulgeX, rootY - chord * 0.5, 0);
-  const thickness = chord * 0.08;
+  const thickness = fishtankFinThickness(chord);
   return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
 }
 
@@ -231,6 +233,45 @@ function buildCaudalFinGeometry(length: number, width: number): THREE.BufferGeom
   const upperTip = new THREE.Vector3(0, peduncleY - halfLen * 0.32, width * 0.42);
   const midOut = new THREE.Vector3(0, peduncleY - halfLen * 0.42, 0); // bulges slightly outward, not notched
   const lowerTip = new THREE.Vector3(0, peduncleY - halfLen * 0.32, -width * 0.42);
-  const thickness = width * 0.05;
+  const thickness = fishtankFinThickness(width);
   return extrudeRingGeometryAlongX([root, upperTip, midOut, lowerTip], thickness);
+}
+
+export function createButterflyfishFinThicknessSamples(length: number, width: number): FinThicknessSample[] {
+  const halfLen = length * 0.5;
+  const profile = buildButterflyfishBodyProfile(halfLen, width);
+  const finSpan = length * 0.24;
+  const finChord = length * 0.22;
+  return [
+    {
+      label: 'dorsal',
+      geometry: buildDorsalFinGeometry(halfLen, width, profile),
+      referenceSize: width,
+      thinAxis: 'x',
+    },
+    {
+      label: 'anal',
+      geometry: buildAnalFinGeometry(halfLen, width, profile),
+      referenceSize: width,
+      thinAxis: 'x',
+    },
+    {
+      label: 'pectoral-left',
+      geometry: buildPectoralFinGeometry(length, finSpan, finChord, 1),
+      referenceSize: finChord,
+      thinAxis: 'z',
+    },
+    {
+      label: 'pectoral-right',
+      geometry: buildPectoralFinGeometry(length, finSpan, finChord, -1),
+      referenceSize: finChord,
+      thinAxis: 'z',
+    },
+    {
+      label: 'caudal',
+      geometry: buildCaudalFinGeometry(length, width),
+      referenceSize: width,
+      thinAxis: 'x',
+    },
+  ];
 }

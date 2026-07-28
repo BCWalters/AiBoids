@@ -6,6 +6,11 @@ import {
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
 } from '../../../geometry/sharedGeometry';
+import {
+  extrudeRingGeometryAlongX,
+  fishtankFinThickness,
+  type FinThicknessSample,
+} from './fishSharedGeometry';
 
 /**
  * Fish-tank "unicorn" predator geometry: reskinned into a classic
@@ -229,7 +234,7 @@ function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeom
   ];
   // Thin membrane: just enough X-depth to stay 3D (not vanish edge-on) while
   // reading as a delicate, wispy sail rather than a solid keel.
-  const fin = extrudeAlongXGeometry(outline, width * 0.014);
+  const fin = extrudeRingGeometryAlongX(outline, fishtankFinThickness(width));
   // Rainbow the sail like the pectoral fins: violet where it roots against the
   // back (top-front of the outline), red at the free outer edge. The dorsal is
   // merged into the body mesh (pink instanceColor), so bake as a ratio relative
@@ -298,7 +303,7 @@ function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): 
   const tip = new THREE.Vector3(side * (surfaceX + span), rootY - chord * 0.1, rootZ);
   const trailingBulge = new THREE.Vector3(side * (surfaceX + span * 0.45), rootY - chord * 0.5, rootZ);
   // As thin as possible while still catching light and not disappearing edge-on.
-  const thickness = width * 0.008;
+  const thickness = fishtankFinThickness(chord);
   const geometry = extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
   // Rainbow the fin from its root (violet, where it meets the flank) to the
   // blade tip (red), matching the unicorn's wings. These fins render on their
@@ -340,6 +345,7 @@ function extrudeAlongXGeometry(ring: THREE.Vector3[], thickness: number): THREE.
     pushOutward(front[0], front[i], front[i + 1]);
     pushOutward(back[0], back[i], back[i + 1]);
   }
+
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
     pushOutward(front[i], back[i], back[j]);
@@ -350,6 +356,30 @@ function extrudeAlongXGeometry(ring: THREE.Vector3[], thickness: number): THREE.
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.computeVertexNormals();
   return geometry;
+}
+
+export function createSeaHorseFinThicknessSamples(length: number, width: number): FinThicknessSample[] {
+  const chord = length * 0.13;
+  return [
+    {
+      label: 'dorsal',
+      geometry: buildDorsalFinGeometry(length, width),
+      referenceSize: width,
+      thinAxis: 'x',
+    },
+    {
+      label: 'pectoral-left',
+      geometry: buildPectoralFinGeometry(length, width, 1),
+      referenceSize: chord,
+      thinAxis: 'z',
+    },
+    {
+      label: 'pectoral-right',
+      geometry: buildPectoralFinGeometry(length, width, -1),
+      referenceSize: chord,
+      thinAxis: 'z',
+    },
+  ];
 }
 
 function buildCurledTailGeometry(length: number, width: number): THREE.BufferGeometry {
