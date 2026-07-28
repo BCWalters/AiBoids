@@ -813,10 +813,22 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
     // back upward after the main downward sweep, instead of the curve
     // just bottoming out and staying down — the classic "flick" silhouette
     // real dragon tails are drawn with, rather than a limp noodle.
-    const droop = zOffset + length * 0.2 * Math.sin(t * Math.PI * 2.2) - length * 0.46 * Math.pow(t, 1.35);
+    // Ease the S-bend in from zero at the root (#278). The arc term rises
+    // fast: at its raw value the tail's centreline is already 0.175 wu above
+    // the body axis where it crosses the rump plane, which shoved the tube off
+    // the opening and left sky showing along the bottom and both sides. Fading
+    // it in lets the tail leave the body axially and pick the curve up outside.
+    const arcEase = THREE.MathUtils.smoothstep(t, 0, 0.28);
+    const droop = zOffset + arcEase * length * 0.2 * Math.sin(t * Math.PI * 2.2) - length * 0.46 * Math.pow(t, 1.35);
     const sway = length * 0.16 * Math.sin(t * Math.PI * 0.85);
     path.push(new THREE.Vector3(sway, y, droop));
-    radii.push(width * 0.255 * (1 - t) + width * 0.02 * t * (1 - t)); // base radius 25% slimmer
+    // Base taper, plus a short root flare that decays by t≈0.2. The flare is
+    // what actually seals the joint: the tube has to be wider than the rump
+    // opening (0.208 wu) where it crosses, and the plain taper only reached
+    // 0.193 wu there. It also reads correctly — real tails are thickest where
+    // they meet the body.
+    const rootFlare = width * 0.18 * Math.max(0, 1 - t / 0.2);
+    radii.push(width * 0.255 * (1 - t) + width * 0.02 * t * (1 - t) + rootFlare);
   }
   radii[radii.length - 1] = 0; // sharp spike tip
 
