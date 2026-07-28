@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
+import { BIRD_FEATHER_MASK_ATTRIBUTE } from '../birdFeatherShader';
 import {
   mergeGeometriesWithColor,
   extrudeRingGeometry,
@@ -23,7 +24,7 @@ import {
  */
 
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
-interface ParrotPalette {
+export interface ParrotPalette {
   beak: THREE.Color;
   feet: THREE.Color;
   eyeOuter: THREE.Color;
@@ -63,7 +64,8 @@ interface ParrotPalette {
 }
 
 const GREEN_FOCUS_PARROT_PALETTE: ParrotPalette = {
-  faceSkin: new THREE.Color(0xe8e4d8),
+  // Military macaw: a red forehead/lore blaze, not a pale patch.
+  faceSkin: new THREE.Color(0xc4302b),
   beakUpper: new THREE.Color(0xe0dccb),
   beakLower: new THREE.Color(0x2a2a2a),
   beak: new THREE.Color(0xe35d2b),
@@ -120,7 +122,9 @@ const SCARLET_FOCUS_PARROT_PALETTE: ParrotPalette = {
 };
 
 const PURPLE_LAVENDER_FOCUS_PARROT_PALETTE: ParrotPalette = {
-  faceSkin: new THREE.Color(0xeae4f5),
+  // Invented species, so the patch just needs to read as bare skin against the
+  // plumage rather than as a highlight on it: a warm grey-pink.
+  faceSkin: new THREE.Color(0xd9bfc6),
   beakUpper: new THREE.Color(0x2a2436),
   beakLower: new THREE.Color(0x1a1622),
   beak: new THREE.Color(0x161616),
@@ -163,13 +167,108 @@ let ACTIVE_PARROT_PALETTE: ParrotPalette = GREEN_FOCUS_PARROT_PALETTE;
 // this single baked color works correctly across every macaw color
 // pattern in PARROT_COLOR_PATTERNS.
 const EYE_COLOR = new THREE.Color(0x0d0b08);
-const PARROT_EYE_SIDE_ANGLE_DEG = 90;
-const PARROT_EYE_BOTTOM_OUTWARD_CANT_DEG = 18;
 const PARROT_BODY_LATHE_SEGMENTS = 32;
 const PARROT_BODY_SLIM_SCALE = 0.8;
-const PARROT_HEAD_TILT_RAD = THREE.MathUtils.degToRad(-21);
-const PARROT_HEAD_TILT_BLEND_START_FRAC = 0.3;
-const PARROT_BEAK_DOWN_PITCH_RAD = THREE.MathUtils.degToRad(-8);
+const PARROT_HEAD_TILT_RAD = THREE.MathUtils.degToRad(-28);
+/**
+ * Where the head-tilt shear starts to ramp in, as a fraction of halfLen. The
+ * tilt is a bend, so it folds the surface into itself whenever the bend radius
+ * (`span / angle`) drops below the body's own radius at that height. At the old
+ * 0.3 the ramp had only 0.08 * halfLen ≈ 0.36 to work with against a 21° tilt,
+ * giving a radius of ~0.98 against a body radius of ~1.30 — comfortably inside
+ * the fold threshold, which is what produced the flat overhanging ledge at the
+ * neck. Spreading the same tilt over a longer span raises the radius to ~3.5.
+ */
+const PARROT_HEAD_TILT_BLEND_START_FRAC = 0.05;
+const PARROT_BEAK_DOWN_PITCH_RAD = THREE.MathUtils.degToRad(-24);
+/**
+ * How far the front of the skull is raked back, as a shear of Y by Z across the
+ * face region (forehead forward, chin back).
+ *
+ * A parrot's skull does not taper to a point at the front. It is cut off by a
+ * steeply slanted plane, and the two mandibles are wedges seated into that cut:
+ * the upper fills the top of it, the lower fills the bottom, and the gape line
+ * where they meet runs forward and slightly down from just below the eye. The
+ * lathe can only close on its own axis, which yields a forward-pointing cone —
+ * so the rake has to be sheared in afterwards. Without it the face reads as a
+ * snout tapering to a point, and worse, it forces the beak onto the body axis
+ * where it can only emerge horizontally.
+ */
+const PARROT_FACE_RAKE = 0.22;
+
+/**
+ * Radius thresholds, as fractions of the body's widest profile radius, over
+ * which the plumage pattern fades out towards a lathe's collapsing ends.
+ *
+ * The full threshold sits below the brow radius so the crown and forehead keep
+ * their plumage; only the face proper and the very tip of the tail root, where
+ * the surface has no Z extent left to tile across, go smooth.
+ */
+/**
+ * Lateral compression of the head, blended in from the neck.
+ *
+ * A lathe is circular in cross-section, but a parrot's head is not: seen
+ * face-on it is markedly narrower than it is tall, which is most of why the
+ * face reads as a parrot rather than as a generic bird. X is squeezed and Z
+ * stretched slightly to compensate so the skull keeps its volume instead of
+ * simply getting smaller.
+ */
+const PARROT_HEAD_NARROW_X = 0.52;
+const PARROT_HEAD_TALL_Z = 1.0;
+
+/**
+ * Extra flattening of the crown — the dorsal (+z) half of the head only —
+ * blended in over the same band as the narrowing.
+ *
+ * Applied one-sided so the skull loses height above the eye without the chin
+ * and throat riding up with it. A parrot's crown sits only a little above the
+ * base of the beak; a symmetric squash moves both surfaces and keeps the same
+ * silhouette, just smaller.
+ */
+const PARROT_HEAD_CROWN_FLATTEN = 0.86;
+
+/**
+ * The same flattening for the ventral (-z) half — the throat and chin.
+ *
+ * Left unflattened, the underside keeps its full radius right up to the face
+ * and then has to fall away sharply to meet the beak, which reads as a jowl
+ * sticking out under the chin. Taking the two halves in separately lets the
+ * head lose depth top and bottom without the silhouette developing a step at
+ * either end.
+ */
+const PARROT_HEAD_CHIN_FLATTEN = 0.62;
+
+/**
+ * Where the head narrowing starts, as a fraction of the body half-length.
+ * Well below the neck so the transition is long enough to read as a taper.
+ */
+const PARROT_HEAD_NARROW_START_FRAC = 0.02;
+
+/**
+ * Extra lateral squash applied to the mandibles on top of the head's.
+ *
+ * The beak cones are built at the face-plane radius, so narrowing the head
+ * alone leaves the beak exactly as wide as the face it plugs into and the join
+ * reads as a flat wall. Squashing it a little further leaves the face slightly
+ * wider than the beak, which is what the reference photos show. Applied to X
+ * only: the cone radius also sets the beak's depth in profile, and that profile
+ * is already correct.
+ */
+const PARROT_BEAK_NARROW_X = 0.8;
+
+/**
+ * How much of a disk's own bulge is sunk back into the skull, as a fraction of
+ * the sagitta of the chord it cuts.
+ *
+ * A flat disk laid on a convex surface stands proud of it by that sagitta at
+ * the rim. Sinking most — not all — of it leaves the eye set into the head
+ * rather than stuck onto it, while keeping the ring clear of the surface so it
+ * cannot be clipped by it.
+ */
+const PARROT_EYE_SET_IN_FRAC = 0.3;
+
+const PARROT_FEATHER_FADE_BARE_RADIUS_FRAC = 0.2;
+const PARROT_FEATHER_FADE_FULL_RADIUS_FRAC = 0.52;
 const PARROT_TAIL_ROOT_Y_FACTOR = -0.46;
 
 /**
@@ -179,9 +278,15 @@ const PARROT_TAIL_ROOT_Y_FACTOR = -0.46;
  * it is fully bare, at the beak. The eye sits at 0.79, so the patch surrounds
  * it rather than stopping short of it — that wrap is what makes it read as a
  * macaw's bare face rather than as a pale muzzle.
+ *
+ * Kept tight around the eye and lore. An earlier, much broader version reached
+ * back over roughly half the head, which is fine when the skin is near-white but
+ * turns into a blotch once a palette paints it a strong colour (the green
+ * profile's red military-macaw blaze). The bare skin should be a facial marking,
+ * not a second colour field competing with the plumage.
  */
-const PARROT_FACE_PATCH_START_FRAC = 0.50;
-const PARROT_FACE_PATCH_FULL_FRAC = 0.86;
+const PARROT_FACE_PATCH_START_FRAC = 0.70;
+const PARROT_FACE_PATCH_FULL_FRAC = 0.90;
 
 /**
  * How far up the head the bare patch is allowed to climb, expressed as the
@@ -189,7 +294,7 @@ const PARROT_FACE_PATCH_FULL_FRAC = 0.86;
  * fully feathered coloured crown above the bare skin, so the patch has to be
  * cut off before the top of the head or the bird loses its cap.
  */
-const PARROT_FACE_PATCH_CROWN_LIMIT = 0.42;
+const PARROT_FACE_PATCH_CROWN_LIMIT = 0.24;
 
 /**
  * Number of trailing-edge flight feathers per wing.
@@ -217,36 +322,80 @@ const PARROT_FEATHER_COUNT = 20;
 const PARROT_FEATHER_BASE_HALF_GAP = 0.048;
 
 /**
- * Alternating out-of-plane offset applied to successive flight feathers, as a
- * fraction of chord. Because the bases now overlap, coplanar vanes would fuse
- * into a single slab; separating each neighbouring pair by twice this keeps the
- * overlap reading as distinct layered feathers.
+ * Shingle offset between successive flight feathers, as a fraction of chord.
+ * Because the bases overlap, coplanar vanes would fuse into a single slab;
+ * separating each neighbouring pair keeps the overlap reading as layered
+ * feathers.
+ *
+ * This is applied in ONE direction only (see PARROT_FEATHER_SEAT_FRAC). An
+ * earlier version alternated it about the wing's mid-plane, which put every
+ * even-indexed feather's upper face above the panel's own upper surface: near
+ * the root, where feather and panel overlap in plan, half the fan poked through
+ * the top of the wing. Bending the wing changed which ones breached, so
+ * feather-shaped patches flickered on and off across the wing during the flap.
  */
-const PARROT_FEATHER_SHINGLE_FRAC = 0.006;
+const PARROT_FEATHER_SHINGLE_FRAC = 0.012;
 
 /**
- * Radius of the tail-root connector as a fraction of body width. Real birds
- * have no bump here; this exists only to stop the fan's roots reading as a
- * hard collar against the rump, so it is sized to be as inconspicuous as it
- * can be while still covering the joint.
+ * Depth below the wing panel's mid-plane at which the whole flight-feather fan
+ * is seated, as a fraction of chord.
+ *
+ * Every feather vertex ends up at or below `-chord * this`, and the panel's
+ * upper surface is at `+chord * 0.006`, so no feather can ever surface through
+ * the top of the wing no matter how the undulation shader bends it. Real
+ * primaries emerge from under the covert layer too, so seating rather than
+ * centring them is also the more correct arrangement.
  */
-const PARROT_TAIL_CONNECTOR_RADIUS_FRAC = 0.098;
+const PARROT_FEATHER_SEAT_FRAC = 0.011;
+
+
+export type ParrotPaletteProfile =
+  | 'green-focus'
+  | 'blue-gold-focus'
+  | 'scarlet-focus'
+  | 'purple-lavender-focus'
+  | 'neutral';
+
+const PARROT_PALETTES: Record<ParrotPaletteProfile, ParrotPalette> = {
+  'green-focus': GREEN_FOCUS_PARROT_PALETTE,
+  'blue-gold-focus': BLUE_GOLD_FOCUS_PARROT_PALETTE,
+  'scarlet-focus': SCARLET_FOCUS_PARROT_PALETTE,
+  'purple-lavender-focus': PURPLE_LAVENDER_FOCUS_PARROT_PALETTE,
+  neutral: NEUTRAL_PARROT_PALETTE,
+};
+
+/**
+ * A profile's baked palette. Exported so tests can assert against the colours
+ * the geometry is actually built from, rather than restating the hexes and
+ * letting the two copies drift apart.
+ */
+export function parrotPaletteFor(profile: ParrotPaletteProfile): Readonly<ParrotPalette> {
+  return PARROT_PALETTES[profile];
+}
+
+export function parrotFaceSkinColor(profile: ParrotPaletteProfile): THREE.Color {
+  return PARROT_PALETTES[profile].faceSkin;
+}
+
+/**
+ * Vertex count of the wing panel, which `buildParrotWingGeometry` merges first
+ * and so owns as the leading prefix of the wing buffer: 9 boundary segments, one
+ * upper and one lower triangle each, 3 vertices per triangle.
+ *
+ * Exported for tests, which need a set of vertices whose up/down side is known
+ * from position alone. Only the panel qualifies: it straddles z = 0, while the
+ * flight feathers are seated entirely below it (PARROT_FEATHER_SEAT_FRAC) so
+ * both of their faces sit at negative z.
+ */
+export const PARROT_WING_PANEL_VERTEX_COUNT = 9 * 2 * 3;
 
 export function createParrotGeometries(
   length: number,
   width: number,
-  paletteProfile: 'green-focus' | 'blue-gold-focus' | 'scarlet-focus' | 'purple-lavender-focus' | 'neutral' = 'green-focus',
+  paletteProfile: ParrotPaletteProfile = 'green-focus',
 ): CreatureGeometries {
   const previousPalette = ACTIVE_PARROT_PALETTE;
-  ACTIVE_PARROT_PALETTE = paletteProfile === 'neutral'
-    ? NEUTRAL_PARROT_PALETTE
-    : paletteProfile === 'blue-gold-focus'
-      ? BLUE_GOLD_FOCUS_PARROT_PALETTE
-      : paletteProfile === 'scarlet-focus'
-        ? SCARLET_FOCUS_PARROT_PALETTE
-      : paletteProfile === 'purple-lavender-focus'
-        ? PURPLE_LAVENDER_FOCUS_PARROT_PALETTE
-        : GREEN_FOCUS_PARROT_PALETTE;
+  ACTIVE_PARROT_PALETTE = PARROT_PALETTES[paletteProfile];
   try {
     const body = buildParrotBodyGeometry(length, width);
 
@@ -286,7 +435,7 @@ export function createParrotGeometries(
 // bird shapes — 25% narrower, 10% longer, pivoting at the neck pinch so
 // only the head region (not the neck/torso below it) stretches.
 const HEAD_NARROW_SCALE = 0.78;
-const HEAD_LENGTHEN_SCALE = 1.12;
+const HEAD_LENGTHEN_SCALE = 0.98;
 const HEAD_START_FRAC = 0.38; // neck pinch
 const HEAD_END_FRAC = HEAD_START_FRAC + (0.9 - HEAD_START_FRAC) * HEAD_LENGTHEN_SCALE; // face point (was faceY = halfLen*0.9)
 
@@ -299,9 +448,19 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   // gentle, step down) so the head reads as a rounded mass with a
   // distinctly narrower face the beak grows out of, rather than the
   // beak's base being the same girth as the whole skull.
-  const faceRadius = width * 0.145 * HEAD_NARROW_SCALE;
+  const faceRadius = width * 0.168 * HEAD_NARROW_SCALE;
   const faceY = halfLen * HEAD_END_FRAC;
+  // How far past the beak-attach point the skull closes over. The lathe is
+  // capped by its OWN profile at both ends rather than being left open and
+  // patched with separate parts. Previously the front opening was plugged with
+  // a scaled sphere and the rear with a flat disk, and both read as exactly
+  // what they were: a ball stuck on the face where the beak attaches, and a
+  // dark disk showing above and below the tail. Real parrots have neither —
+  // the head runs out of the body in one continuous taper and the beak simply
+  // emerges from the front of it.
+  const faceTipSpan = faceRadius * 0.34;
   const profile = [
+    new THREE.Vector2(width * 0.004, -halfLen * 1.0), // rear closes on the axis
     new THREE.Vector2(width * 0.045 * PARROT_BODY_SLIM_SCALE, -halfLen * 0.95), // tail-root taper
     new THREE.Vector2(width * 0.21 * PARROT_BODY_SLIM_SCALE, -halfLen * 0.65),
     new THREE.Vector2(width * 0.3 * PARROT_BODY_SLIM_SCALE, -halfLen * 0.2), // belly bulge
@@ -316,17 +475,32 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
     // Every radius/position past this point is additionally scaled by
     // HEAD_NARROW_SCALE/HEAD_LENGTHEN_SCALE above.
     new THREE.Vector2(width * 0.26 * PARROT_BODY_SLIM_SCALE, halfLen * HEAD_START_FRAC), // neck pinch
-    new THREE.Vector2(width * 0.29 * HEAD_NARROW_SCALE * PARROT_BODY_SLIM_SCALE, halfLen * headFrac(0.5)), // head base
-    new THREE.Vector2(width * 0.32 * HEAD_NARROW_SCALE * PARROT_BODY_SLIM_SCALE, halfLen * headFrac(0.62)), // crown, kept near front-body diameter
-    new THREE.Vector2(width * 0.27 * HEAD_NARROW_SCALE * PARROT_BODY_SLIM_SCALE, halfLen * headFrac(0.74)), // forehead
-    new THREE.Vector2(width * 0.22 * HEAD_NARROW_SCALE, halfLen * headFrac(0.84)), // brow, just above the eyes
+    // Monotone rise to a single crown and then a monotone fall to the face.
+    // Radii that wobble between these points put a bump and a dip in the
+    // silhouette, which reads as a lumpy skull rather than a rounded one.
+    new THREE.Vector2(width * 0.30 * HEAD_NARROW_SCALE * PARROT_BODY_SLIM_SCALE, halfLen * headFrac(0.52)), // head base
+    new THREE.Vector2(width * 0.315 * HEAD_NARROW_SCALE * PARROT_BODY_SLIM_SCALE, halfLen * headFrac(0.63)), // crown
+    new THREE.Vector2(width * 0.275 * HEAD_NARROW_SCALE * PARROT_BODY_SLIM_SCALE, halfLen * headFrac(0.76)), // forehead
+    new THREE.Vector2(width * 0.232 * HEAD_NARROW_SCALE, halfLen * headFrac(0.87)), // brow, just above the eyes
     new THREE.Vector2(faceRadius, faceY), // face, where the beak attaches
+    // Skull closes over past the beak attach point, tangent-ish to the taper
+    // above it, so the front of the head is the lathe's own surface.
+    new THREE.Vector2(faceRadius * 0.72, faceY + faceTipSpan * 0.45),
+    new THREE.Vector2(faceRadius * 0.42, faceY + faceTipSpan * 0.78),
+    new THREE.Vector2(width * 0.004, faceY + faceTipSpan),
   ];
   // Spline-resample the authored silhouette so the flat-shaded lathe reads
   // as a smooth surface (many gently-varying facets) instead of a few long
   // banded ones; PARROT_BODY_LATHE_SEGMENTS is already raised to 32.
   const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
   const torso = new THREE.LatheGeometry(smoothProfile, PARROT_BODY_LATHE_SEGMENTS);
+  // Sampled here, before the rake and the head pitch, because the lathe radius
+  // is what drives the smear and only an unrotated lathe has hypot(x, z) equal
+  // to its profile radius.
+  const torsoFeatherFade = sampleLatheFeatherFade(
+    torso,
+    width * 0.31 * PARROT_BODY_SLIM_SCALE,
+  );
   // The bare facial patch spans from just behind the eye forward to the beak.
   // Measured off the same headFrac scale the eye and face use so it tracks any
   // future change to head proportions instead of being a fixed magic Y.
@@ -334,50 +508,213 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
     startY: halfLen * headFrac(PARROT_FACE_PATCH_START_FRAC),
     fullY: halfLen * headFrac(PARROT_FACE_PATCH_FULL_FRAC),
   });
+  // Ramped from the neck pinch so the transition out of the circular body is
+  // gradual, which is what keeps this from looking like a pinched-on head.
+  // Ramped from the chest rather than from the neck pinch. Starting at the
+  // pinch put the whole narrowing — and the one-sided crown flattening with it
+  // — inside a short span, which creased the back of the neck into a hard
+  // step. Spreading it over the body makes the head grow out of the torso.
+  const headNarrowStartY = halfLen * PARROT_HEAD_NARROW_START_FRAC;
+  const headNarrowFullY = halfLen * headFrac(0.88);
+  narrowHeadCrossSection(torso, headNarrowStartY, headNarrowFullY);
+  rakeFacePlaneBack(
+    torso,
+    halfLen * headFrac(0.58),
+    halfLen * headFrac(1.02),
+    PARROT_FACE_RAKE,
+  );
+  // Sampled here — after the narrowing and the rake, before the pitch — because
+  // this is the last moment the head still sits on the untilted Y axis, and
+  // both the eyes and the torso get the same pitch afterwards.
+  const eyeY = halfLen * headFrac(0.833);
+  const eyeZ = width * 0.052 * HEAD_NARROW_SCALE;
+  const eyeAnchor = sampleSurfaceAnchor(torso, eyeY, eyeZ);
   pitchHeadRegionDown(torso, headTiltBlendStartY, headTiltPivotY, PARROT_HEAD_TILT_RAD);
 
   // Two-part macaw beak: a large, strongly hooked upper mandible that
   // overhangs a shorter, triangular lower mandible with a slight gape.
-  const beak = buildSolidParrotBeakGeometry(faceY, faceRadius, length * 0.29);
+  const beak = buildSolidParrotBeakGeometry(faceY, faceRadius, length * 0.4);
+  narrowHeadCrossSection(beak.upper, headNarrowStartY, headNarrowFullY);
+  narrowHeadCrossSection(beak.lower, headNarrowStartY, headNarrowFullY);
+  beak.upper.scale(PARROT_BEAK_NARROW_X, 1, 1);
+  beak.lower.scale(PARROT_BEAK_NARROW_X, 1, 1);
   const beakPitchPivotY = faceY + faceRadius * 0.22;
   rotateGeometryAroundXPivot(beak.upper, beakPitchPivotY, PARROT_BEAK_DOWN_PITCH_RAD);
   rotateGeometryAroundXPivot(beak.lower, beakPitchPivotY, PARROT_BEAK_DOWN_PITCH_RAD);
   rotateGeometryAroundXPivot(beak.upper, headTiltPivotY, PARROT_HEAD_TILT_RAD);
   rotateGeometryAroundXPivot(beak.lower, headTiltPivotY, PARROT_HEAD_TILT_RAD);
 
-  // Close the rear lathe opening; the face opening is sealed by the
-  // socket filler below to avoid a visible "crown-like" frontal disk.
-  const rearCap = buildDoubleSidedDiskCap(-halfLen * 0.95, width * 0.07, 12);
+  // No rear disk cap and no face socket filler: the profile above closes the
+  // lathe on the axis at both ends, so there is no opening left to patch.
 
-  // Keep one internal filler at the face opening so the beak/body
-  // junction never reveals the lathe cavity from front angles.
-  // Radius must stay above faceRadius after the scale below, or the lathe's
-  // face opening reappears as a hole. x: 1.12*0.96 = 1.075, z: 1.12*0.902 =
-  // 1.010 — both still cover it, with the bulge trimmed back so the dome no
-  // longer reads as a ball stuck on the front of the head.
-  const beakSocketFill = new THREE.SphereGeometry(faceRadius * 1.12, 12, 10);
-  beakSocketFill.scale(0.96, 0.9, 0.902);
-  beakSocketFill.translate(0, faceY - length * 0.004, -length * 0.02 + faceRadius * 0.26);
-  rotateGeometryAroundXPivot(beakSocketFill, headTiltPivotY, PARROT_HEAD_TILT_RAD);
-
-  const eyeY = halfLen * headFrac(0.79);
-  const eyeX = width * 0.252 * HEAD_NARROW_SCALE * PARROT_BODY_SLIM_SCALE;
-  const eyeZ = width * 0.084 * HEAD_NARROW_SCALE;
-  const eyeRing = buildParrotEyeDisks(eyeX, eyeY, eyeZ, width * 0.02925 * HEAD_NARROW_SCALE, width * 0.004);
-  const pupils = buildParrotEyeDisks(eyeX, eyeY, eyeZ, width * 0.01603125 * HEAD_NARROW_SCALE, width * 0.007);
+  const ringThickness = width * 0.004;
+  const ringRadius = width * 0.02925 * HEAD_NARROW_SCALE;
+  const eyeRing = buildParrotEyeDisks(eyeAnchor, ringRadius, ringThickness);
+  // Built on the same anchor so the two stay concentric and coplanar; the pupil
+  // is thicker, so it still reads proud of the ring it sits in.
+  const pupils = buildParrotEyeDisks(eyeAnchor, width * 0.01603125 * HEAD_NARROW_SCALE, width * 0.007);
   rotateGeometryAroundXPivot(eyeRing, headTiltPivotY, PARROT_HEAD_TILT_RAD);
   rotateGeometryAroundXPivot(pupils, headTiltPivotY, PARROT_HEAD_TILT_RAD);
 
-  return mergeGeometriesWithColor([
-    { geometry: torso, color: WHITE_VERTEX_COLOR },
-    { geometry: rearCap, color: WHITE_VERTEX_COLOR },
-    // Flat bare-skin colour, NOT a dorsal→ventral gradient: see ParrotPalette.faceSkin.
-    { geometry: beakSocketFill, color: ACTIVE_PARROT_PALETTE.faceSkin },
-    { geometry: eyeRing, color: ACTIVE_PARROT_PALETTE.eyeOuter },
-    { geometry: beak.upper, color: ACTIVE_PARROT_PALETTE.beakUpper },
-    { geometry: beak.lower, color: ACTIVE_PARROT_PALETTE.beakLower },
-    { geometry: pupils, color: EYE_COLOR },
-  ]);
+  // The beak and the eyes are keratin, not plumage. They are merged into the
+  // body mesh, so without an explicit mask the body's feather shader tiles its
+  // barb pattern straight across them and the beak comes out textured.
+  const parts: Array<{
+    geometry: THREE.BufferGeometry;
+    color: THREE.Color;
+    feather: number | Float32Array;
+  }> = [
+    { geometry: torso, color: WHITE_VERTEX_COLOR, feather: torsoFeatherFade },
+    { geometry: eyeRing, color: ACTIVE_PARROT_PALETTE.eyeOuter, feather: 0 },
+    { geometry: beak.upper, color: ACTIVE_PARROT_PALETTE.beakUpper, feather: 0 },
+    { geometry: beak.lower, color: ACTIVE_PARROT_PALETTE.beakLower, feather: 0 },
+    { geometry: pupils, color: EYE_COLOR, feather: 0 },
+  ];
+  const merged = mergeGeometriesWithColor(parts.map(({ geometry, color }) => ({ geometry, color })));
+  const mask = new Float32Array(merged.getAttribute('position').count);
+  let offset = 0;
+  for (const part of parts) {
+    // Counts must come from the INDEX where there is one: the merge
+    // de-indexes, so an indexed part contributes index.count vertices, not
+    // position.count. The lathe torso alone expands 2145 -> 12096. A per-vertex
+    // fade has to be expanded through that same index to stay aligned.
+    const index = part.geometry.index;
+    const count = index?.count ?? part.geometry.getAttribute('position').count;
+    if (typeof part.feather === 'number') {
+      mask.fill(part.feather, offset, offset + count);
+    } else {
+      for (let i = 0; i < count; i++) {
+        mask[offset + i] = part.feather[index ? index.getX(i) : i];
+      }
+    }
+    offset += count;
+  }
+  merged.setAttribute(BIRD_FEATHER_MASK_ATTRIBUTE, new THREE.BufferAttribute(mask, 1));
+  return merged;
+}
+
+/**
+ * Shears the front of the skull backwards along Z so the beak-bearing face is a
+ * slanted plane rather than an axial point. Ramped in from the brow so the
+ * crown and the back of the head are untouched.
+ */
+/**
+ * Per-vertex plumage strength for a lathe, driven by its profile radius.
+ *
+ * The feather pattern is a 2D tiling whose second axis is a world coordinate —
+ * Z for body-plane meshes. A lathe's Z extent at any point is twice its profile
+ * radius, so as the profile closes onto the axis at the face and the tail root
+ * that coordinate stops varying and the cells degenerate into lengthwise
+ * stripes. This is the same failure the wings hit when textured in the wrong
+ * plane, except here it is confined to the collapsing ends of one mesh.
+ *
+ * Fading the pattern out below a radius threshold turns the smear into clean
+ * skin. Parrots read correctly this way: the face around the cere is bare skin
+ * in life, not plumage.
+ *
+ * @param maxRadius the lathe's widest profile radius, used to keep the
+ *   thresholds proportional so they survive changes to body proportions.
+ */
+function sampleLatheFeatherFade(
+  geometry: THREE.BufferGeometry,
+  maxRadius: number,
+): Float32Array {
+  const position = geometry.getAttribute('position');
+  const fade = new Float32Array(position.count);
+  const bare = maxRadius * PARROT_FEATHER_FADE_BARE_RADIUS_FRAC;
+  const full = maxRadius * PARROT_FEATHER_FADE_FULL_RADIUS_FRAC;
+  for (let i = 0; i < position.count; i++) {
+    const radius = Math.hypot(position.getX(i), position.getZ(i));
+    fade[i] = THREE.MathUtils.smoothstep(radius, bare, full);
+  }
+  return fade;
+}
+
+/**
+ * Squeezes a head region laterally, ramping the effect in over `blendStartY`
+ * so the neck stays circular and the change reads as a gradual narrowing
+ * rather than a step in the silhouette.
+ *
+ * Must run before the face rake and the head pitch: both rotate Y against Z,
+ * after which a Y-driven ramp no longer follows the head's own axis. Applied
+ * to the beak and eyes as well as the skull, otherwise those keep their
+ * original width and stand proud of the narrowed surface.
+ */
+interface SurfaceAnchor {
+  point: THREE.Vector3;
+  normal: THREE.Vector3;
+}
+
+/**
+ * The point on `geometry`'s right-hand side nearest a given (y, z), with its
+ * outward normal.
+ *
+ * Detail geometry laid onto the body — the eyes — has to follow the surface it
+ * sits on. A hand-set cant angle only matches one particular skull: change the
+ * head's proportions and the same disk digs into the surface on one side while
+ * floating off it on the other, which is exactly what a narrower head caused.
+ * Reading the surface's own normal makes the placement follow the geometry.
+ *
+ * Only x > 0 is considered, so the result is unambiguous: a body cross-section
+ * crosses any given z twice, once per side.
+ */
+function sampleSurfaceAnchor(geometry: THREE.BufferGeometry, y: number, z: number): SurfaceAnchor {
+  const position = geometry.getAttribute('position');
+  const normal = geometry.getAttribute('normal');
+  let best = -1;
+  let bestDistance = Infinity;
+  for (let i = 0; i < position.count; i++) {
+    if (position.getX(i) <= 0) continue;
+    const dy = position.getY(i) - y;
+    const dz = position.getZ(i) - z;
+    const distance = dy * dy + dz * dz;
+    if (distance >= bestDistance) continue;
+    bestDistance = distance;
+    best = i;
+  }
+  if (best < 0) {
+    throw new Error('sampleSurfaceAnchor: geometry has no vertices with x > 0');
+  }
+  return {
+    point: new THREE.Vector3(position.getX(best), position.getY(best), position.getZ(best)),
+    normal: new THREE.Vector3(normal.getX(best), normal.getY(best), normal.getZ(best)).normalize(),
+  };
+}
+
+function narrowHeadCrossSection(
+  geometry: THREE.BufferGeometry,
+  blendStartY: number,
+  fullY: number,
+): void {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  for (let i = 0; i < position.count; i++) {
+    const t = THREE.MathUtils.smoothstep(position.getY(i), blendStartY, fullY);
+    if (t <= 0) continue;
+    position.setX(i, position.getX(i) * THREE.MathUtils.lerp(1, PARROT_HEAD_NARROW_X, t));
+    const z = position.getZ(i);
+    const zScale =
+      PARROT_HEAD_TALL_Z * (z > 0 ? PARROT_HEAD_CROWN_FLATTEN : PARROT_HEAD_CHIN_FLATTEN);
+    position.setZ(i, z * THREE.MathUtils.lerp(1, zScale, t));
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+function rakeFacePlaneBack(
+  geometry: THREE.BufferGeometry,
+  rakeStartY: number,
+  rakeFullY: number,
+  rake: number,
+): void {
+  const position = geometry.getAttribute('position');
+  for (let i = 0; i < position.count; i++) {
+    const y = position.getY(i);
+    const weight = THREE.MathUtils.smoothstep(y, rakeStartY, rakeFullY);
+    if (weight <= 0) continue;
+    position.setY(i, y + rake * position.getZ(i) * weight);
+  }
+  position.needsUpdate = true;
+  geometry.computeVertexNormals();
 }
 
 function pitchHeadRegionDown(
@@ -409,58 +746,30 @@ function rotateGeometryAroundXPivot(geometry: THREE.BufferGeometry, pivotY: numb
   geometry.translate(0, pivotY, 0);
 }
 
-function buildDoubleSidedDiskCap(y: number, radius: number, segments: number): THREE.BufferGeometry {
-  const positions: number[] = [];
-  for (let i = 0; i < segments; i++) {
-    const a0 = (i / segments) * Math.PI * 2;
-    const a1 = ((i + 1) / segments) * Math.PI * 2;
-    const x0 = Math.cos(a0) * radius;
-    const z0 = Math.sin(a0) * radius;
-    const x1 = Math.cos(a1) * radius;
-    const z1 = Math.sin(a1) * radius;
-    positions.push(
-      0, y, 0,
-      x0, y, z0,
-      x1, y, z1,
-      0, y, 0,
-      x1, y, z1,
-      x0, y, z0,
-    );
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.computeVertexNormals();
-  return geometry;
-}
 
 function buildParrotEyeDisks(
-  eyeX: number,
-  eyeY: number,
-  eyeZ: number,
+  anchor: SurfaceAnchor,
   radius: number,
   thickness: number,
 ): THREE.BufferGeometry {
-  const sideTiltRad = THREE.MathUtils.degToRad(90 - PARROT_EYE_SIDE_ANGLE_DEG);
   const buildEyeDisk = (side: 1 | -1): THREE.BufferGeometry => {
     const disk = new THREE.CylinderGeometry(radius, radius, thickness, 16);
-    const axis = new THREE.Vector3(side * Math.cos(sideTiltRad), Math.sin(sideTiltRad), 0).normalize();
-    const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
-    const lowerOutwardCant = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      -side * THREE.MathUtils.degToRad(PARROT_EYE_BOTTOM_OUTWARD_CANT_DEG),
+    const normal = new THREE.Vector3(side * anchor.normal.x, anchor.normal.y, anchor.normal.z);
+    disk.applyQuaternion(
+      new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal),
     );
-    disk.applyQuaternion(rotation);
-    disk.applyQuaternion(lowerOutwardCant);
-    disk.translate(
-      side * (eyeX + thickness * Math.cos(sideTiltRad) * 1.0),
-      eyeY + thickness * Math.sin(sideTiltRad) * 0.4,
-      eyeZ,
-    );
+    // The skull's local radius, which sets how far a flat disk of this size
+    // stands off it. Sinking by that amount is what stops the eye reading as a
+    // sticker laid on the surface; a smaller disk sinks less, so the pupil ends
+    // up correctly proud of the ring it shares an anchor with.
+    const skullRadius = Math.max(Math.abs(anchor.point.x), radius);
+    const sagitta = (radius * radius) / (2 * skullRadius);
+    const centre = new THREE.Vector3(side * anchor.point.x, anchor.point.y, anchor.point.z)
+      .addScaledVector(normal, -sagitta * PARROT_EYE_SET_IN_FRAC);
+    disk.translate(centre.x, centre.y, centre.z);
     return disk;
   };
-  const left = buildEyeDisk(1);
-  const right = buildEyeDisk(-1);
-  return mergePositionOnlyGeometries([left, right]);
+  return mergePositionOnlyGeometries([buildEyeDisk(1), buildEyeDisk(-1)]);
 }
 
 function buildSolidParrotBeakGeometry(
@@ -468,12 +777,15 @@ function buildSolidParrotBeakGeometry(
   faceRadius: number,
   beakLen: number,
 ): { upper: THREE.BufferGeometry; lower: THREE.BufferGeometry } {
-  const upperLen = beakLen * 0.4464;
-  const lowerLen = beakLen * 0.252;
+  const upperLen = beakLen * 0.46;
+  const lowerLen = beakLen * 0.3;
 
   // Upper beak mostly straight; the final section is explicitly rotated
   // downward so the hook is visibly curved (not just a slight skew).
-  const upper = new THREE.ConeGeometry(faceRadius * 0.54, upperLen, 18, 10);
+  // Base is sized to the face it grows out of rather than being noticeably
+  // narrower, so the upper mandible reads as continuing the head's taper. A
+  // narrow base left the closed front of the skull visible around it as a bulb.
+  const upper = new THREE.ConeGeometry(faceRadius * 0.98, upperLen, 18, 10);
   upper.scale(1, 1, 0.8);
   const upperPos = upper.getAttribute('position');
   const upperYMin = -upperLen * 0.5;
@@ -501,11 +813,14 @@ function buildSolidParrotBeakGeometry(
   }
   upperPos.needsUpdate = true;
   upper.computeVertexNormals();
-  upper.translate(0, faceY + upperLen * 0.54 + beakLen * 0.1, beakLen * 0.045);
+  // Seated into the TOP of the raked face cut, not on the body axis: the upper
+  // mandible's base is dorsal of centre, which is what lets its culmen leave the
+  // forehead as a continuation of the forehead's own curve.
+  upper.translate(0, faceY + upperLen * 0.3, -faceRadius * 0.08);
 
   // Triangular lower mandible (slightly open) so the upper hook visibly
   // overlaps it in side profile.
-  const lower = new THREE.ConeGeometry(faceRadius * 0.5, lowerLen, 3);
+  const lower = new THREE.ConeGeometry(faceRadius * 0.62, lowerLen, 3);
   lower.rotateY(Math.PI / 3);
   lower.scale(1, 1, 0.74);
   const lowerPos = lower.getAttribute('position');
@@ -525,8 +840,12 @@ function buildSolidParrotBeakGeometry(
   }
   lowerPos.needsUpdate = true;
   lower.computeVertexNormals();
-  lower.rotateX(THREE.MathUtils.degToRad(1));
-  lower.translate(0, faceY + lowerLen * 0.82 + faceRadius * 0.45, -beakLen * 0.13);
+  // The lower mandible fills the BOTTOM of the same cut, so it sits ventral of
+  // centre and further back — the rake means the chin is behind the forehead.
+  // It has to protrude past the gape or the upper hook simply swallows it, which
+  // is what made it look like the lower half of the beak had been removed.
+  lower.rotateX(THREE.MathUtils.degToRad(-30));
+  lower.translate(0, faceY + lowerLen * 0.24, -faceRadius * 0.82);
 
   return { upper, lower };
 }
@@ -549,7 +868,9 @@ function buildSolidParrotBeakGeometry(
  * vanish edge-on.
  */
 function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeometry {
-  const thickness = width * 0.046;
+  // Slimmer than the wing panel. The tail is a stack of individual quills, not
+  // a membrane, so thickness here only exists to stop it vanishing edge-on.
+  const thickness = width * 0.024;
 
   // Root sits at (or slightly ahead of, for guaranteed overlap) the
   // body lathe's own tail-root profile point (-halfLen*0.95 = -length*0.475
@@ -559,28 +880,29 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
   const rootY = length * PARROT_TAIL_ROOT_Y_FACTOR;
 
   const featherCount = 9;
-  const maxSpreadDeg = 34; // total angular spread of the fan, center feather at 0deg
-  const maxLen = length * 0.7875; // center (longest) feather length
-  const minLenFrac = 0.54; // outermost feathers' length relative to maxLen
+  const maxSpreadDeg = 30; // total angular spread of the fan, center feather at 0deg
+  const maxLen = length * 0.86; // center (longest) feather length
+  const minLenFrac = 0.5; // outermost feathers' length relative to maxLen
   // Distribute tail-feather roots across a short horizontal span instead
   // of pinning every feather to a single center point, so the tail reads
   // as emerging from the full rump width rather than a needle point.
   const rootHalfSpan = width * 0.052;
 
   const featherGeometries: THREE.BufferGeometry[] = [];
-  // Blend tail fan into the body so the root doesn't read as a hard collar.
-  // Kept deliberately small: it is a cosmetic filler, and real birds have no
-  // bump here at all, so the less of it that shows the better.
-  const rootBlend = new THREE.SphereGeometry(width * PARROT_TAIL_CONNECTOR_RADIUS_FRAC, 10, 8);
-  rootBlend.scale(1.1, 0.56, 0.76);
-  rootBlend.translate(0, rootY + length * 0.019, -length * 0.012);
-  featherGeometries.push(rootBlend);
-  // Vertex count of the connector, captured AFTER the same non-indexed
-  // conversion the merge performs, so tintParrotTailGradient can address
-  // exactly this prefix of the merged buffer. mergePositionOnlyGeometries
-  // appends in order and the connector is pushed first, so its vertices are
-  // the merged geometry's leading `connectorVertexCount` entries.
-  const connectorVertexCount = rootBlend.toNonIndexed().getAttribute('position').count;
+  // Upper/lower tail coverts. The fan's roots are now full-width (see
+  // rootHalfWidth) and so are considerably wider than the body's own taper where
+  // they meet it, leaving the outer roots jutting out of the rump's silhouette.
+  // Real birds cover exactly this joint with a block of short coverts, so this
+  // is a shape that belongs on the bird rather than a filler.
+  //
+  // It needs no special colour handling: it is merged into the tail and picked
+  // up by tintParrotTailGradient, which keys off the vertex normal, so its top
+  // takes the tail colour and its underside the belly colour with nothing
+  // stranded in between.
+  const coverts = new THREE.SphereGeometry(width * 0.118, 16, 12);
+  coverts.scale(1, 1.15, 0.46);
+  coverts.translate(0, rootY + length * 0.028, -length * 0.006);
+  featherGeometries.push(coverts);
   for (let i = 0; i < featherCount; i++) {
     // -1 (leftmost) .. 0 (center) .. +1 (rightmost)
     const t = (i / (featherCount - 1)) * 2 - 1;
@@ -592,61 +914,48 @@ function buildParrotTailGeometry(length: number, width: number): THREE.BufferGeo
     const dirY = -Math.cos(angle); // fan opens backward (-Y)
     const droop = -length * 0.09 * lenFrac; // longer feathers droop a bit more
 
-    // Vane outline: a slender quill at the root widening to its
-    // fullest a bit past the middle, then tapering to a fine point —
-    // built as a 4-point diamond (root, left-bulge, tip, right-bulge)
-    // rather than a plain thin sliver, so each feather reads as a real
-    // vane rather than a wire.
     const perpX = Math.cos(angle);
     const perpY = Math.sin(angle);
-    const vaneHalfWidth = width * 0.082 * lenFrac;
-    const bulgeAt = 0.55; // fraction along the feather where it's widest
+    // Widest at the rump and tapering monotonically to a fine point, the way a
+    // real tail feather is shaped. The previous outline was a diamond that
+    // pinched to nothing at the root and bulged widest at 55% of its length,
+    // which gave the fan a leaf-like silhouette, made it look bloated halfway
+    // down, and left the roots too narrow to cover the joint on their own.
+    const rootHalfWidth = width * 0.09 * lenFrac;
+    // (fraction along the feather, half-width as a fraction of the root's)
+    const taper: [number, number][] = [
+      [0.3, 0.7],
+      [0.58, 0.45],
+      [0.8, 0.25],
+      [0.93, 0.1],
+    ];
 
-    const root = new THREE.Vector3(t * rootHalfSpan, rootY, 0);
-    const bulgeCenterX = dirX * featherLen * bulgeAt;
-    const bulgeCenterY = rootY + dirY * featherLen * bulgeAt;
-    const leftBulge = new THREE.Vector3(
-      bulgeCenterX - perpX * vaneHalfWidth,
-      bulgeCenterY - perpY * vaneHalfWidth,
-      droop * bulgeAt,
-    );
-    const rightBulge = new THREE.Vector3(
-      bulgeCenterX + perpX * vaneHalfWidth,
-      bulgeCenterY + perpY * vaneHalfWidth,
-      droop * bulgeAt,
-    );
-    const tipCoreX = dirX * featherLen;
-    const tipCoreY = rootY + dirY * featherLen;
-    const tipHalfWidth = vaneHalfWidth * 0.52;
-    const leftShoulder = new THREE.Vector3(
-      dirX * featherLen * 0.84 - perpX * vaneHalfWidth * 0.72,
-      rootY + dirY * featherLen * 0.84 - perpY * vaneHalfWidth * 0.72,
-      droop * 0.84,
-    );
-    const rightShoulder = new THREE.Vector3(
-      dirX * featherLen * 0.84 + perpX * vaneHalfWidth * 0.72,
-      rootY + dirY * featherLen * 0.84 + perpY * vaneHalfWidth * 0.72,
-      droop * 0.84,
-    );
-    const leftTip = new THREE.Vector3(
-      tipCoreX - perpX * tipHalfWidth,
-      tipCoreY - perpY * tipHalfWidth,
-      droop * 0.98,
-    );
-    const tipCap = new THREE.Vector3(dirX * featherLen * 1.04, rootY + dirY * featherLen * 1.04, droop * 1.05);
-    const rightTip = new THREE.Vector3(
-      tipCoreX + perpX * tipHalfWidth,
-      tipCoreY + perpY * tipHalfWidth,
-      droop * 0.98,
+    const at = (frac: number, halfWidthFrac: number, sideSign: 1 | -1): THREE.Vector3 => {
+      const halfWidth = rootHalfWidth * halfWidthFrac * sideSign;
+      return new THREE.Vector3(
+        t * rootHalfSpan + dirX * featherLen * frac + perpX * halfWidth,
+        rootY + dirY * featherLen * frac + perpY * halfWidth,
+        droop * frac,
+      );
+    };
+    const tip = new THREE.Vector3(
+      t * rootHalfSpan + dirX * featherLen,
+      rootY + dirY * featherLen,
+      droop,
     );
 
-    featherGeometries.push(
-      extrudeRingGeometry([root, leftBulge, leftShoulder, leftTip, tipCap, rightTip, rightShoulder, rightBulge], thickness),
-    );
+    const ring = [
+      at(0, 1, -1),
+      ...taper.map(([frac, hw]) => at(frac, hw, -1)),
+      tip,
+      ...[...taper].reverse().map(([frac, hw]) => at(frac, hw, 1)),
+      at(0, 1, 1),
+    ];
+    featherGeometries.push(extrudeRingGeometry(ring, thickness));
   }
 
   const geometry = mergePositionOnlyGeometries(featherGeometries);
-  tintParrotTailGradient(geometry, rootY, maxLen, connectorVertexCount);
+  tintParrotTailGradient(geometry, rootY, maxLen);
   return geometry;
 }
 
@@ -684,14 +993,32 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     [0.22 * span * s, -chord * 0.46, 0],
   ];
 
+  // The panel is a triangle fan, but `root` sits OUTSIDE the boundary loop it
+  // fans to (every boundary x is at least 0.22 * span, and the root is on the
+  // axis at x = 0). For the one segment that wraps from the last boundary point
+  // back to the first, that puts the root on the opposite side of the edge and
+  // reverses the triangle's winding — so its computed normal points the other
+  // way from the rest of the panel's, and the colour pass, which reads the side
+  // off the normal, painted that corner of the wing root with the wrong face's
+  // colour. Ordering each triangle by its actual signed area keeps the whole
+  // panel consistently wound regardless of where the fan origin falls.
   for (let i = 0; i < boundary.length; i++) {
     const next = boundary[(i + 1) % boundary.length];
+    // `* s` because mirroring the wing negates x and so flips the sign of every
+    // cross product with it; the comparison has to follow the wing's handedness
+    // rather than assume the left one's.
+    const signedArea =
+      (boundary[i][0] - root[0]) * (next[1] - root[1]) -
+      (boundary[i][1] - root[1]) * (next[0] - root[0]);
+    const windsForward = signedArea * s < 0;
+    const a = windsForward ? boundary[i] : next;
+    const b = windsForward ? next : boundary[i];
     const rootTop: number[] = [root[0], root[1], sheetHalfThickness];
-    const aTop: number[] = [boundary[i][0], boundary[i][1], sheetHalfThickness];
-    const bTop: number[] = [next[0], next[1], sheetHalfThickness];
+    const aTop: number[] = [a[0], a[1], sheetHalfThickness];
+    const bTop: number[] = [b[0], b[1], sheetHalfThickness];
     const rootBottom: number[] = [root[0], root[1], -sheetHalfThickness];
-    const aBottom: number[] = [boundary[i][0], boundary[i][1], -sheetHalfThickness];
-    const bBottom: number[] = [next[0], next[1], -sheetHalfThickness];
+    const aBottom: number[] = [a[0], a[1], -sheetHalfThickness];
+    const bBottom: number[] = [b[0], b[1], -sheetHalfThickness];
     pushTri(rootTop, aTop, bTop);
     pushTri(rootBottom, bBottom, aBottom);
   }
@@ -746,23 +1073,28 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
     const capHalfWidth = rootHalfWidth * 0.4;
     const capMidHalfWidth = capHalfWidth * 0.6;
     const zDroop = -chord * (0.008 + 0.04 * t);
-    // Shingling: adjacent vanes now OVERLAP in plan (halfGap exceeds their
+    // Shingling: adjacent vanes overlap in plan (halfGap exceeds their
     // spacing), so without a z separation they would intersect as one fused
-    // slab. Alternating successive feathers above/below the mean plane keeps
-    // every neighbouring pair a full vane-thickness apart, which is what makes
-    // the overlap read as layered feathers. An alternation is used rather than
-    // a monotonic ramp because a ramp across ~20 feathers either accumulates
-    // into a visibly warped trailing edge or leaves neighbours too close to
-    // separate; the alternation is bounded and depends only on the pair.
-    const shingleZ = (i % 2 === 0 ? 1 : -1) * chord * PARROT_FEATHER_SHINGLE_FRAC;
+    // slab. Successive feathers are stepped DOWNWARD only — never up — so the
+    // whole fan stays below the panel's upper surface; see
+    // PARROT_FEATHER_SHINGLE_FRAC for what the old symmetric alternation did.
+    // A two-step alternation is used rather than a monotonic ramp because a
+    // ramp across ~20 feathers either accumulates into a visibly warped
+    // trailing edge or leaves neighbours too close to separate.
+    const seatZ = -chord * PARROT_FEATHER_SEAT_FRAC;
+    const shingleZ = (i % 2 === 0 ? 0 : -1) * chord * PARROT_FEATHER_SHINGLE_FRAC;
     const toPoint = (dist: number, halfWidth: number, sideSign: 1 | -1, z: number): THREE.Vector3 =>
       new THREE.Vector3(
         midBase[0] + forward.x * dist + sideward.x * halfWidth * sideSign,
         midBase[1] + forward.y * dist + sideward.y * halfWidth * sideSign,
-        z + shingleZ,
+        seatZ + z + shingleZ,
       );
+    // Roots are deliberately NOT shingled: every feather starts on the same
+    // seat plane so the fan emerges from one continuous trailing edge, and each
+    // vane then steps down to its own layer. Shingling the roots too would open
+    // a gap between the odd feathers and the covert strip.
     const ring = [
-      new THREE.Vector3(baseA[0], baseA[1], 0),
+      new THREE.Vector3(baseA[0], baseA[1], seatZ),
       toPoint(shoulderDist, shoulderHalfWidth, -1, zDroop * 0.58),
       toPoint(tipDist, tipHalfWidth, -1, zDroop * 0.94),
       toPoint(capDist * 0.97, capHalfWidth, -1, zDroop),
@@ -772,7 +1104,7 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
       toPoint(capDist * 0.97, capHalfWidth, 1, zDroop),
       toPoint(tipDist, tipHalfWidth, 1, zDroop * 0.94),
       toPoint(shoulderDist, shoulderHalfWidth, 1, zDroop * 0.58),
-      new THREE.Vector3(baseB[0], baseB[1], 0),
+      new THREE.Vector3(baseB[0], baseB[1], seatZ),
     ];
     // Keep a tiny amount of volume so feathers stay 3D, but minimize
     // top/bottom protrusion off the wing plane.
@@ -785,7 +1117,7 @@ function buildParrotWingGeometry(span: number, chord: number, side: 1 | -1): THR
   baseWing.dispose();
   trailingCovertStrip.dispose();
   fingerGeometries.forEach((f) => f.dispose());
-  tintParrotWingRegions(geometry, chord);
+  tintParrotWingRegions(geometry, chord, side);
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -938,116 +1270,102 @@ function tintParrotTorsoRegions(
 }
 
 /**
- * Bakes the tail fan's colours.
+ * Bakes the tail fan's colours: a root→tip ramp along the feather, crossed with
+ * a dorsal/ventral split.
  *
- * `connectorVertexCount` leading vertices are the root-blend connector, which
- * is tinted on a *sharpened* dorsal/ventral split rather than the feathers'
- * smooth crossfade. That distinction matters and is not cosmetic:
+ * Two things here are deliberate and both exist to keep the fan from going grey.
  *
- * The crossfade lerps `tailRoot` to `belly` in RGB, and on several palettes
- * those are near-complementary (blue-gold is literally blue → gold), so the
- * middle of the interpolation passes through a desaturated grey. A feather is a
- * thin flat vane spanning almost no Z, so it samples one end of the crossfade
- * and the grey never appears. The connector is a rounded blob whose surface
- * sweeps the entire Z range, so it renders the whole ramp — including a broad
- * band of that grey right where it meets the rump, which read as the connector
- * being unpainted or see-through. Snapping the connector's blend to one endpoint
- * or the other collapses the grey to a single ring of triangles while leaving the
- * feathers' intentionally soft gradient untouched.
+ * Interpolation is in HSL, not RGB. Every endpoint pair involved — tailRoot to
+ * tailTip and belly to tailTip — is near-complementary on some palette (blue-gold
+ * ramps literally blue → gold), and the straight line between complementary
+ * colours in RGB passes through desaturated grey. Ramping in HSL travels around
+ * the hue wheel instead, holding saturation up across the whole feather. This is
+ * what the tail's washed-out middle band was.
+ *
+ * The dorsal/ventral side is decided by the sign of the vertex NORMAL, with no
+ * blend band at all. Position is unusable: a feather is only `thickness` deep, so
+ * its upper and lower faces sit at nearly identical z while the gravity droop
+ * moves the tip several times that far along the same axis — a positional test
+ * reads "far down the tail" as "underside" and paints the tips with the belly
+ * colour. And the split is binary rather than smooth because more than half of a
+ * feather's vertices belong to its extruded rim, where the normal is
+ * perpendicular to both faces; any blend band strands all of them mid-ramp, which
+ * drew a grey hairline outline around every feather.
  */
-function tintParrotTailGradient(
-  geometry: THREE.BufferGeometry,
-  rootY: number,
-  maxLen: number,
-  connectorVertexCount = 0,
-): void {
+function tintParrotTailGradient(geometry: THREE.BufferGeometry, rootY: number, maxLen: number): void {
   const pos = geometry.getAttribute('position');
-  geometry.computeBoundingBox();
-  const minZ = geometry.boundingBox?.min.z ?? -maxLen * 0.08;
+  geometry.computeVertexNormals();
+  const normal = geometry.getAttribute('normal');
   const colors = new Float32Array(pos.count * 3);
   const tipY = rootY - maxLen * 1.08;
   const span = Math.max(1e-5, rootY - tipY);
+  const scratch = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
-    const z = pos.getZ(i);
     const t = THREE.MathUtils.smoothstep(THREE.MathUtils.clamp((rootY - y) / span, 0, 1), 0, 1);
-    let undersideWeight = THREE.MathUtils.smoothstep(
-      THREE.MathUtils.clamp(((-z) - minZ * 0.12) / Math.max(1e-5, -minZ * 0.88), 0, 1),
-      0,
-      1,
-    );
-    if (i < connectorVertexCount) {
-      // Push the blend towards 0 or 1 so the connector is almost entirely one
-      // colour or the other, and only a narrow seam sits in the muddy middle.
-      undersideWeight = THREE.MathUtils.smoothstep(undersideWeight, 0.4, 0.6);
-    }
-    const topR = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.tailRoot.r, ACTIVE_PARROT_PALETTE.tailTip.r, t);
-    const topG = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.tailRoot.g, ACTIVE_PARROT_PALETTE.tailTip.g, t);
-    const topB = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.tailRoot.b, ACTIVE_PARROT_PALETTE.tailTip.b, t);
-    const undersideTipT = THREE.MathUtils.smoothstep(t, 0, 1);
-    const undersideR = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.r, ACTIVE_PARROT_PALETTE.tailTip.r, undersideTipT);
-    const undersideG = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.g, ACTIVE_PARROT_PALETTE.tailTip.g, undersideTipT);
-    const undersideB = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.belly.b, ACTIVE_PARROT_PALETTE.tailTip.b, undersideTipT);
-    colors[i * 3] = THREE.MathUtils.lerp(topR, undersideR, undersideWeight);
-    colors[i * 3 + 1] = THREE.MathUtils.lerp(topG, undersideG, undersideWeight);
-    colors[i * 3 + 2] = THREE.MathUtils.lerp(topB, undersideB, undersideWeight);
+    const underside = normal.getZ(i) < 0;
+    scratch.copy(underside ? ACTIVE_PARROT_PALETTE.belly : ACTIVE_PARROT_PALETTE.tailRoot);
+    scratch.lerpHSL(ACTIVE_PARROT_PALETTE.tailTip, t);
+    colors[i * 3] = scratch.r;
+    colors[i * 3 + 1] = scratch.g;
+    colors[i * 3 + 2] = scratch.b;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
 
-function tintParrotWingRegions(geometry: THREE.BufferGeometry, chord: number): void {
+/**
+ * Bakes the wing's colours: a front→rear ramp along the chord, crossed with a
+ * topside/underside split.
+ *
+ * Like the tail (see tintParrotTailGradient) the split is taken from the sign of
+ * the vertex NORMAL and the ramps are interpolated in HSL.
+ *
+ * Driving it from position.z is what turned the whole underside of the wing a
+ * dull grey-brown. The panel is only `chord * 0.012` thick, so both of its faces
+ * sit within a hair of z = 0; the positional blend put the lower face at roughly
+ * the halfway point of a lerp from a blue topside to a gold underside, and the
+ * midpoint of a blue→gold RGB lerp is mud. The underside was never being painted
+ * gold at all — it was being painted the average of gold and blue.
+ */
+function tintParrotWingRegions(geometry: THREE.BufferGeometry, chord: number, side: 1 | -1): void {
   const pos = geometry.getAttribute('position');
   geometry.computeBoundingBox();
+  geometry.computeVertexNormals();
+  const normal = geometry.getAttribute('normal');
   const minY = geometry.boundingBox?.min.y ?? -chord * 0.62;
   const maxY = geometry.boundingBox?.max.y ?? chord * 0.62;
-  const minZ = geometry.boundingBox?.min.z ?? -chord * 0.08;
   const ySpan = Math.max(1e-5, maxY - minY);
   const colors = new Float32Array(pos.count * 3);
+  const scratch = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
     const frontToBackT = THREE.MathUtils.smoothstep(
-      THREE.MathUtils.clamp((y - minY) / ySpan, 0, 1),
+      THREE.MathUtils.clamp((pos.getY(i) - minY) / ySpan, 0, 1),
       0,
       1,
     );
-    const undersideWeight = Math.max(
-      THREE.MathUtils.smoothstep(
-        THREE.MathUtils.clamp(((-z) - chord * 0.001) / Math.max(1e-5, chord * 0.01), 0, 1),
-        0,
-        1,
-      ),
-      Math.pow(
-        THREE.MathUtils.smoothstep(
-          THREE.MathUtils.clamp(((-z) - minZ * 0.08) / Math.max(1e-5, -minZ * 0.44), 0, 1),
-          0,
-          1,
-        ),
-        0.6,
-      ),
-    );
-
-    const topsideR = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.wingTopRear.r, ACTIVE_PARROT_PALETTE.wingTopFront.r, frontToBackT);
-    const topsideG = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.wingTopRear.g, ACTIVE_PARROT_PALETTE.wingTopFront.g, frontToBackT);
-    const topsideB = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.wingTopRear.b, ACTIVE_PARROT_PALETTE.wingTopFront.b, frontToBackT);
-
-    const rearGrayWeight = Math.pow(1 - frontToBackT, 2.4);
-    const undersideR = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.wingUndersideFront.r, ACTIVE_PARROT_PALETTE.wingUndersideRear.r, rearGrayWeight);
-    const undersideG = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.wingUndersideFront.g, ACTIVE_PARROT_PALETTE.wingUndersideRear.g, rearGrayWeight);
-    const undersideB = THREE.MathUtils.lerp(ACTIVE_PARROT_PALETTE.wingUndersideFront.b, ACTIVE_PARROT_PALETTE.wingUndersideRear.b, rearGrayWeight);
-
-    const undersideMix = Math.pow(undersideWeight, 0.72);
-    const targetR = THREE.MathUtils.lerp(topsideR, undersideR, undersideMix);
-    const targetG = THREE.MathUtils.lerp(topsideG, undersideG, undersideMix);
-    const targetB = THREE.MathUtils.lerp(topsideB, undersideB, undersideMix);
-
-    const strength = THREE.MathUtils.lerp(0.99, 1.0, undersideWeight);
-    const r = THREE.MathUtils.lerp(1, targetR, strength);
-    const g = THREE.MathUtils.lerp(1, targetG, strength);
-    const b = THREE.MathUtils.lerp(1, targetB, strength);
-    colors[i * 3] = r;
-    colors[i * 3 + 1] = g;
-    colors[i * 3 + 2] = b;
+    // Two sign corrections, both about winding rather than about geometry.
+    //
+    // The right wing is built by negating x, which reverses every triangle's
+    // winding and so flips the sign of its computed normals; without folding
+    // `side` back in, one wing comes out with its two sides swapped.
+    //
+    // The `> 0` is not a typo. Elsewhere in this file +z is dorsal (the torso's
+    // crown normal, the tail's gravity droop into -z). The wing panel and the
+    // extruded feathers are both wound the other way round, so their computed
+    // normals point into the body rather than out of it, and the vertex whose
+    // normal reads +z is the one on the ventral face.
+    if (normal.getZ(i) * side > 0) {
+      scratch
+        .copy(ACTIVE_PARROT_PALETTE.wingUndersideFront)
+        .lerpHSL(ACTIVE_PARROT_PALETTE.wingUndersideRear, Math.pow(1 - frontToBackT, 2.4));
+    } else {
+      scratch
+        .copy(ACTIVE_PARROT_PALETTE.wingTopRear)
+        .lerpHSL(ACTIVE_PARROT_PALETTE.wingTopFront, frontToBackT);
+    }
+    colors[i * 3] = scratch.r;
+    colors[i * 3 + 1] = scratch.g;
+    colors[i * 3 + 2] = scratch.b;
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }

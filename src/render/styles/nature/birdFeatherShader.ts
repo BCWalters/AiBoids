@@ -1,5 +1,17 @@
 import * as THREE from 'three';
 
+/**
+ * Per-vertex strength attribute for the plumage pattern: 1 = full plumage,
+ * 0 = no pattern at all (bare keratin such as the beak and eye).
+ *
+ * Intermediate values fade the pattern out smoothly. That matters wherever a
+ * lathe collapses towards its axis: the pattern's second axis is a world
+ * coordinate, so as the surface radius shrinks that coordinate stops varying
+ * and the cells smear into lengthwise stripes. Fading the strength to 0 over
+ * the collapsing region replaces the smear with clean skin instead.
+ */
+export const BIRD_FEATHER_MASK_ATTRIBUTE = 'aFeatherMask';
+
 export interface BirdFeatherConfig {
   /**
    * Number of feather-barb cells across the reference span of the body
@@ -188,10 +200,20 @@ export function applyBirdFeatherShader(
   // pattern, or two families would share one compiled variant.
   const planeSwizzle =
     patternPlane === 'yz' ? 'vBirdFeatherPos.z' : 'vBirdFeatherPos.x';
+  // Bare parts merged into a bird's body mesh — beak, eyes, cere — are keratin
+  // and must not carry plumage, and regions where the surface collapses onto
+  // the lathe axis must fade out before the cells smear into stripes. A
+  // geometry controls both per-vertex by supplying a `aFeatherMask` attribute
+  // (1 = full plumage, 0 = bare, in between = faded). The attribute cannot
+  // simply be declared unconditionally: when a geometry lacks it the shader
+  // would read 0 and the pattern would vanish from every bird, so its presence
+  // has to gate the injected GLSL — and therefore also the cache key, or a
+  // masked mesh would silently reuse an unmasked mesh's compiled program.
+  const hasMask = bodyGeometry.getAttribute(BIRD_FEATHER_MASK_ATTRIBUTE) != null;
   const cacheKey =
     `aiboids-bird-feather-v2:${patternPlane}:${freq.toFixed(5)}:${freqLong.toFixed(5)}:` +
     `${config.barbDarkness.toFixed(4)}:${config.barbGloss.toFixed(4)}:` +
-    `${config.barbRachis.toFixed(4)}`;
+    `${config.barbRachis.toFixed(4)}:${hasMask ? 'masked' : 'full'}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -207,19 +229,27 @@ export function applyBirdFeatherShader(
     // --- Vertex shader ---
     // Declare the varying at the top so it survives Three.js's GLSL version
     // transform (varying → out in WebGL 2 / GLSL 300 ES).
-    shader.vertexShader = `varying vec3 vBirdFeatherPos;\n` + shader.vertexShader;
+    shader.vertexShader =
+      `varying vec3 vBirdFeatherPos;\n` +
+      (hasMask
+        ? `attribute float ${BIRD_FEATHER_MASK_ATTRIBUTE};\nvarying float vBirdFeatherMask;\n`
+        : '') +
+      shader.vertexShader;
     // Capture the REST-space (pre-deformation) model position right before
     // vColor is set.  Using the rest position means the feather pattern stays
     // fixed to the skin regardless of any animation applied later.
     shader.vertexShader = shader.vertexShader.replace(
       '#include <color_vertex>',
-      `vBirdFeatherPos = position;\n#include <color_vertex>`,
+      `vBirdFeatherPos = position;\n` +
+        (hasMask ? `vBirdFeatherMask = ${BIRD_FEATHER_MASK_ATTRIBUTE};\n` : '') +
+        `#include <color_vertex>`,
     );
 
     // --- Fragment shader ---
     // Declare the varying (in) and uniforms at the top.
     shader.fragmentShader =
       `varying vec3 vBirdFeatherPos;\nuniform float uBarbFreq;\nuniform float uBarbFreqLong;\nuniform float uBarbDarkness;\nuniform float uBarbGloss;\nuniform float uBarbRachis;\n` +
+      (hasMask ? `varying float vBirdFeatherMask;\n` : '') +
       shader.fragmentShader;
 
     // Inject the feather pattern AFTER roughnessmap_fragment.  That chunk
@@ -240,6 +270,11 @@ export function applyBirdFeatherShader(
     // each cell is several times longer than it is wide.  Second axis =
     // dorsoventral (yz) or wing span (yx), chosen per mesh to avoid stripe
     // collapse on near-flat wing panels.  Uses rest-space vBirdFeatherPos.
+    // Applied as a strength multiplier on each of the three pattern terms
+    // rather than as a branch, so a geometry can fade the pattern out
+    // gradually. At 0 every term contributes nothing, which is exactly what a
+    // hard opt-out needs, so bare parts stay untouched either way.
+    float featherStrength = ${hasMask ? 'clamp( vBirdFeatherMask, 0.0, 1.0 )' : '1.0'};
     vec2 sp = vec2( vBirdFeatherPos.y * uBarbFreqLong, ${planeSwizzle} * uBarbFreq );
     sp.y += floor( sp.x ) * 0.5;
     vec2 fp = fract( sp ) - 0.5;  // cell-local coords in [-0.5, 0.5]
@@ -273,11 +308,11 @@ export function applyBirdFeatherShader(
     // --- Colour: darken the trailing arc, lift the shaft ---
     // Writes only to diffuseColor (mutable local).  vColor is read-only in
     // GLSL 300 ES; assigning to it causes a link error that blacks the scene.
-    diffuseColor.rgb *= 1.0 - uBarbDarkness * edge * visible;
-    diffuseColor.rgb *= 1.0 + uBarbRachis * rachis;
+    diffuseColor.rgb *= 1.0 - uBarbDarkness * edge * visible * featherStrength;
+    diffuseColor.rgb *= 1.0 + uBarbRachis * rachis * featherStrength;
 
     // --- Reflectivity: blade centres catch a gentle soft sheen ---
-    float gloss = uBarbGloss * max( 0.0, 1.0 - r / kBarbR ) * visible;
+    float gloss = uBarbGloss * max( 0.0, 1.0 - r / kBarbR ) * visible * featherStrength;
     roughnessFactor = clamp( roughnessFactor - gloss, 0.0, 1.0 );
   }`,
     );
