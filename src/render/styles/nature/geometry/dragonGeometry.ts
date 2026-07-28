@@ -43,6 +43,24 @@ export function createDragonGeometries(length: number, width: number): CreatureG
   };
 }
 
+// --- Resolution constants -------------------------------------------------
+
+/**
+ * Radial segments for the dragon body LatheGeometry.  Raising from 32 → 48
+ * removes the faceted "sides-of-a-barrel" look on the torso and neck without
+ * a prohibitive polygon increase (1.5× lateral triangles).  Exported so the
+ * creatureSmoothness regression test can assert the exact resulting
+ * triangle count against this constant (issue #262).
+ */
+export const DRAGON_BODY_RADIAL_SEGMENTS = 48;
+
+/**
+ * Cross-section sides for the dragon tail tube.  Raising from 6 → 10 makes
+ * the tail read as a round tapered whip rather than a hexagonal prism
+ * (issue #262).  Exported for the same regression test as above.
+ */
+export const DRAGON_TAIL_TUBE_SIDES = 10;
+
 // --- Shared volumetric helpers -------------------------------------------
 
 /**
@@ -322,9 +340,10 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   const profile = buildDragonBodyProfile(halfLen, width);
   // Spline-resample the authored silhouette so the flat-shaded lathe reads
   // as a smooth surface (many gently-varying facets) instead of a few long
-  // banded ones; raise radial segments to 32 for the same reason.
+  // banded ones; raise radial segments to DRAGON_BODY_RADIAL_SEGMENTS for
+  // the same reason.
   const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
-  const latheGeometry = new THREE.LatheGeometry(smoothProfile, 32);
+  const latheGeometry = new THREE.LatheGeometry(smoothProfile, DRAGON_BODY_RADIAL_SEGMENTS);
   // Seal the open snout-tip lathe ring with a disc cap so it no longer reads
   // as a see-through hole viewed straight on from the front.
   const snoutCap = buildDiscCapGeometry(halfLen * SNOUT_TIP_FRACTION, width * 0.015, 16);
@@ -730,7 +749,7 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   }
   radii[radii.length - 1] = 0; // sharp spike tip
 
-  positions.push(...buildTube(path, radii, 6));
+  positions.push(...buildTube(path, radii, DRAGON_TAIL_TUBE_SIDES));
 
   // Small dorsal fins standing proud of the tube (roughly +Z/dorsal in
   // the tail's own resting frame), shrinking toward the tip. Sampled at
