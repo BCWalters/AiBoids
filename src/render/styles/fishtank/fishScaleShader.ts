@@ -12,26 +12,41 @@ export interface FishScaleConfig {
    */
   scalesPerLength: number;
   /**
-   * Darkness multiplier applied at each scale's trailing arc edge.
+   * Darkness multiplier applied at each scale's trailing arc (free edge).
    * 0 = no effect (skips patching entirely); 1 = fully black edge.
    */
   edgeDarkness: number;
+  /**
+   * Roughness reduction at each scale's centre. 0 = no highlight; 1 = fully
+   * specular. Keep subtle — 0.15–0.30 reads as "somewhat reflective" without
+   * turning fish into chrome.
+   */
+  scaleGloss: number;
 }
+
+/**
+ * Internal shader constant: scale-circle radius in normalised cell coordinates.
+ * Exported so the JS test port can use the same value as the GLSL constant.
+ * Values > 0.5 mean adjacent circles overlap, creating the shingled crescent.
+ */
+export const FISH_SCALE_RADIUS = 0.62 as const;
 
 /**
  * Bony plate scales for small fish (Tetra, Goldfish, Clownfish, Blue Tang)
  * and Butterflyfish. Ten visible scale cells across the dorsoventral (Z) body
- * span, with a quarter-darkened arc rim.
+ * span, with a quarter-darkened arc rim and subtle per-scale highlights.
  */
 export const BONY_FISH_SCALE_CONFIG: FishScaleConfig = {
   scalesPerLength: 10,
   edgeDarkness: 0.25,
+  scaleGloss: 0.25,
 };
 
 /** Six crosswise scale cells for the barracuda's elongated body. */
 export const BARRACUDA_SCALE_CONFIG: FishScaleConfig = {
   scalesPerLength: 6,
   edgeDarkness: 0.15,
+  scaleGloss: 0.2,
 };
 
 /**
@@ -43,28 +58,52 @@ export const BARRACUDA_SCALE_CONFIG: FishScaleConfig = {
 export const SHARK_SCALE_CONFIG: FishScaleConfig = {
   scalesPerLength: 6,
   edgeDarkness: 0,
+  scaleGloss: 0,
 };
 
 /**
- * Patches a MeshStandardMaterial with a procedural fish-scale pattern
- * injected via onBeforeCompile. The scale effect multiplies into the
- * existing vertex colour — it never replaces it, so species colour patterns
- * (clownfish bands, blue-tang flank mark, goldfish countershading) are
- * fully preserved.
+ * Patches a MeshStandardMaterial with a procedural shingled fish-scale
+ * pattern injected via onBeforeCompile.
  *
- * Scale density proportional to fish body: uFishScaleFreq is derived as
- * config.scalesPerLength / zSpan, where zSpan is the full dorsoventral (Z)
- * extent of the body bounding box. Using the Z span as reference gives
- * isotropic cell sizes in world space — a goldfish (zSpan ≈ 1.9 units) and
- * a barracuda (zSpan ≈ 6.8 units) both get physically appropriate absolute
- * scale sizes rather than cell counts that blow up on one axis.
+ * Visual model (Part 1 — overlap):
+ *   Scales are shingled like roof tiles. Each scale's full circle has radius
+ *   FISH_SCALE_RADIUS in normalised cell coordinates; because that radius
+ *   exceeds 0.5, adjacent-row circles overlap. The "row above" (one cell
+ *   toward the head) covers the head-facing portion of each scale, leaving
+ *   only the tail-facing crescent (free edge) exposed. The crescent boundary
+ *   follows the arc of the row-above circle, not a straight horizontal cut,
+ *   so the result reads as natural shingled scales rather than circles or
+ *   stripes. Alternate spine rows are staggered by half a cell (brick layout)
+ *   so scale arcs interlock rather than lining up in a square grid.
+ *
+ * Visual model (Part 2 — reflectivity):
+ *   roughnessFactor (a local float set by roughnessmap_fragment) is reduced
+ *   at each scale centre so scales catch specular highlights. The reduction
+ *   falls to zero at the scale edge and in gaps, keeping it subtle.
+ *
+ * Scale density: uFishScaleFreq is derived as config.scalesPerLength / zSpan,
+ * where zSpan is the full dorsoventral (Z) extent of the body bounding box.
+ * Using the Z span as reference gives isotropic cell sizes in world space —
+ * a goldfish (zSpan ≈ 1.9 units) and a barracuda (zSpan ≈ 6.8 units) both
+ * get physically appropriate absolute scale sizes.
+ *
+ * Pattern is evaluated in rest-space position (vFishScalePos = position
+ * before undulation) so the scale pattern does not swim across the skin when
+ * the fish body undulates (#219).
  *
  * Composes safely with fishUndulationShader: captures any existing
  * onBeforeCompile and calls it first via previousCompile?.(shader, renderer),
  * and augments customProgramCacheKey rather than replacing it. Scale patches
- * #include <color_vertex> (vertex) and #include <color_fragment> (fragment);
- * undulation patches #include <begin_vertex> and #include <beginnormal_vertex>
- * — no overlap, either order works.
+ * #include <color_vertex> (vertex) and #include <roughnessmap_fragment>
+ * (fragment); undulation patches #include <begin_vertex> and
+ * #include <beginnormal_vertex> — no overlap, either order works.
+ *
+ * GLSL safety: the injected fragment code writes only to diffuseColor (a
+ * local vec4) and roughnessFactor (a local float). It never writes to vColor
+ * or roughness: vColor is a read-only `in` under GLSL 300 ES (assigning to it
+ * would fail with "l-value required"), and roughness is a uniform. Both
+ * diffuseColor and roughnessFactor are mutable locals, assignable in all
+ * GLSL versions three.js targets.
  */
 export function applyFishScaleShader(
   material: THREE.MeshStandardMaterial,
@@ -82,7 +121,7 @@ export function applyFishScaleShader(
   // barracuda ≈2 crosswise cells (the Z span is ~5× shorter than Y span).
   const zSpan = Math.max(1e-6, bb.max.z - bb.min.z);
   const freq = config.scalesPerLength / zSpan;
-  const cacheKey = `aiboids-fish-scale-v2:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}`;
+  const cacheKey = `aiboids-fish-scale-v3:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -100,8 +139,9 @@ export function applyFishScaleShader(
     // transform (varying → out in WebGL 2 / GLSL 300 ES).
     shader.vertexShader =
       `varying vec3 vFishScalePos;\n` + shader.vertexShader;
-    // Capture the model-space position right before vColor is set so both
-    // are available in the fragment shader without UV dependency.
+    // Capture the REST-space (pre-undulation) model position right before
+    // vColor is set. Using the rest position means the scale pattern stays
+    // fixed to the skin even as the body undulates (#219).
     shader.vertexShader = shader.vertexShader.replace(
       '#include <color_vertex>',
       `vFishScalePos = position;\n#include <color_vertex>`,
@@ -110,39 +150,64 @@ export function applyFishScaleShader(
     // --- Fragment shader ---
     // Declare the varying (in) and uniforms at the top.
     shader.fragmentShader =
-      `varying vec3 vFishScalePos;\nuniform float uFishScaleFreq;\nuniform float uScaleEdgeDarkness;\n` +
+      `varying vec3 vFishScalePos;\nuniform float uFishScaleFreq;\nuniform float uScaleEdgeDarkness;\nuniform float uScaleGloss;\n` +
       shader.fragmentShader;
-    // Modulate the pattern into diffuseColor *after* color_fragment has
-    // folded vColor in. It must not touch vColor itself: three.js upgrades
-    // these shaders to GLSL 300 ES, where `varying` becomes `in` in the
-    // fragment stage and inputs are read-only — assigning to vColor fails to
-    // link with "l-value required (can't modify an input)" and takes the whole
-    // scene down. diffuseColor is a local vec4, so it is assignable, and
-    // because both are componentwise multiplies the result is identical.
+
+    // Inject the scale pattern AFTER roughnessmap_fragment. That chunk sets
+    // roughnessFactor (a local float), which we can then reduce for gloss.
+    // roughnessmap_fragment comes after color_fragment, so diffuseColor
+    // already carries the folded-in vColor at this point.
+    //
+    // Both diffuseColor and roughnessFactor are mutable locals — writing to
+    // them is valid in all GLSL versions. We never write to vColor (read-only
+    // `in` in GLSL 300 ES) or to roughness (a uniform).
     shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <color_fragment>',
-      `#include <color_fragment>
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>
   {
-    // Overlapping-arc scale pattern on the YZ body plane.
-    // Y = spine axis (tail to head); Z = dorsal-ventral axis.
-    // Offset alternating spine columns by half a cell so the shingles
-    // stagger the way real fish scales do.
+    // Shingled arc scale pattern on the YZ body plane.
+    // Y = spine axis (tail→head); Z = dorsal-ventral axis.
+    // Alternate spine rows are staggered by half a cell (brick/hex layout)
+    // so scale arcs interlock. Pattern uses rest-space vFishScalePos so it
+    // does not swim with body undulation.
     vec2 sp = vec2( vFishScalePos.y, vFishScalePos.z ) * uFishScaleFreq;
     sp.y += floor( sp.x ) * 0.5;
     vec2 fp = fract( sp ) - 0.5;
-    // Thin elliptical rim, elongated along the spine (fp.x) to match the
-    // orientation of real scales. Measured over a unit cell, 71.7% of the
-    // surface is untouched and the mean multiplier is 0.962, so this reads
-    // as scale edges rather than darkening the whole fish.
-    float r = length( vec2( fp.x, fp.y * 1.6 ) );
-    float rim = smoothstep( 0.34, 0.44, r ) * ( 1.0 - smoothstep( 0.44, 0.52, r ) );
-    diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness * rim;
+
+    // Elliptical radius from this cell's scale centre, elongated on the
+    // dorsoventral axis so the scales read as wider than tall.
+    float r = length( vec2( fp.x, fp.y * 1.25 ) );
+    // Elliptical radius to the row-above scale centre (one spine-cell toward
+    // head). Where rAbove < kScaleR the current scale is hidden beneath the
+    // row above, producing the shingled crescent rather than a full circle.
+    float rAbove = length( vec2( fp.x + 1.0, fp.y * 1.25 ) );
+
+    // Scale radius: > 0.5 so adjacent rows overlap and only a crescent is
+    // exposed. Must match FISH_SCALE_RADIUS exported from fishScaleShader.ts.
+    const float kScaleR = 0.62;
+
+    // Smooth visibility mask: 1 = exposed crescent, 0 = hidden by row above.
+    float visible = smoothstep( kScaleR - 0.04, kScaleR + 0.04, rAbove );
+
+    // Free-edge arc: thin darkened band at the trailing boundary of the scale.
+    float edge = smoothstep( kScaleR - 0.10, kScaleR, r )
+               * ( 1.0 - smoothstep( kScaleR, kScaleR + 0.06, r ) );
+
+    // --- Colour: darken the free edge of each exposed scale crescent ---
+    diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness * edge * visible;
+
+    // --- Reflectivity: reduce roughness at scale centres for highlights ---
+    // roughnessFactor is a local float (set by roughnessmap_fragment above);
+    // it is safe to assign to it here.
+    float scaleGloss = uScaleGloss * max( 0.0, 1.0 - r / kScaleR ) * visible;
+    roughnessFactor = clamp( roughnessFactor - scaleGloss, 0.0, 1.0 );
   }`,
     );
 
     Object.assign(shader.uniforms, {
       uFishScaleFreq: { value: freq },
       uScaleEdgeDarkness: { value: config.edgeDarkness },
+      uScaleGloss: { value: config.scaleGloss },
     });
   };
 

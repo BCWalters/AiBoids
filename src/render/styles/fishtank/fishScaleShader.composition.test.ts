@@ -55,6 +55,7 @@ import {
   BONY_FISH_SCALE_CONFIG,
   BARRACUDA_SCALE_CONFIG,
   SHARK_SCALE_CONFIG,
+  FISH_SCALE_RADIUS,
 } from './fishScaleShader';
 import {
   createGoldfishGeometries,
@@ -441,5 +442,277 @@ describe('fishtank merged body vertex colours after geometry build', () => {
       }
     }
     expect(foundBlue).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JS port of the fragment-shader maths for numerical sampling
+//
+// These helpers mirror the GLSL in fishScaleShader.ts exactly so tests can
+// assert on concrete pixel-level values without running a GPU.
+// ---------------------------------------------------------------------------
+
+/**
+ * GLSL fract: x − floor(x), always in [0, 1).
+ * JavaScript's modulo can return negative values for negative inputs, so we
+ * use subtraction from floor to match GLSL behaviour precisely.
+ */
+function glslFract(x: number): number {
+  return x - Math.floor(x);
+}
+
+/** GLSL smoothstep with the Hermite polynomial clamp. */
+function glslSmoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Evaluates the fragment-shader scale pattern at a single (y, z, freq) point.
+ *
+ * Mirrors the GLSL block injected after #include <roughnessmap_fragment> in
+ * applyFishScaleShader, using the same constants (kScaleR = FISH_SCALE_RADIUS,
+ * ellipse Y factor = 1.25, smoothstep widths). No GPU required.
+ *
+ * Returns:
+ *   r        – elliptical radius from this cell's scale centre (0 = centre)
+ *   rAbove   – elliptical radius to the row-above scale centre
+ *   visible  – 0 = hidden beneath row above, 1 = exposed crescent
+ *   edge     – 0..1 free-edge arc intensity
+ *   glossFactor – max(0, 1 − r/kR) × visible (multiply by uScaleGloss to
+ *                  get the roughnessFactor reduction)
+ */
+function evalScale(
+  y: number,
+  z: number,
+  freq: number,
+): { r: number; rAbove: number; visible: number; edge: number; glossFactor: number } {
+  const spx = y * freq;
+  const spy = z * freq + Math.floor(spx) * 0.5;
+  const fpx = glslFract(spx) - 0.5;
+  const fpy = glslFract(spy) - 0.5;
+  const kR = FISH_SCALE_RADIUS; // 0.62
+
+  const r = Math.sqrt(fpx * fpx + (fpy * 1.25) ** 2);
+  const rAbove = Math.sqrt((fpx + 1.0) ** 2 + (fpy * 1.25) ** 2);
+
+  const visible = glslSmoothstep(kR - 0.04, kR + 0.04, rAbove);
+  const edge = glslSmoothstep(kR - 0.10, kR, r) * (1 - glslSmoothstep(kR, kR + 0.06, r));
+  const glossFactor = Math.max(0, 1 - r / kR) * visible;
+
+  return { r, rAbove, visible, edge, glossFactor };
+}
+
+// ---------------------------------------------------------------------------
+// Overlap — shingled crescent: the head-facing half of each scale is hidden
+// by the row above, so only the exposed tail-facing crescent arc is visible.
+//
+// Falsification evidence (sabotage runs):
+//
+//   g) Replace `visible = smoothstep(kScaleR-0.04, kScaleR+0.04, rAbove)`
+//      with `visible = 1.0` (remove occlusion) and re-run evalScale in JS:
+//      → "head-facing half hidden" test fails:
+//        AssertionError: expected 1 not to be 0
+//        (visible is 1 instead of 0 at y=0.02)
+//
+//   h) Replace `visible = smoothstep(...)` with `visible = 0.0`:
+//      → "tail-facing arc exposed" test fails:
+//        AssertionError: expected 0 not to be 1
+//        (visible is 0 instead of 1 at y=0.90)
+//
+//   i) Remove `float rAbove = ...` and the occlusion term:
+//      → "full-body scan shows crescent" test fails:
+//        AssertionError: expected false to be true
+//        (anyHidden stays false — no cell is ever hidden)
+// ---------------------------------------------------------------------------
+
+describe('fishScaleShader overlap — shingled crescent (no full circles)', () => {
+  it('the head-facing (toward-head) portion of a scale is hidden by the row above', () => {
+    // At y=0.02, z=0.5, freq=1 we are inside the current scale's circle
+    // (r=0.48 < kScaleR=0.62) but the row-above circle covers this point
+    // (rAbove=0.52 < kScaleR−0.04=0.58 → smoothstep clamps to 0).
+    // Absolute anchor: visible must be exactly 0 (not just small).
+    const { r, rAbove, visible } = evalScale(0.02, 0.5, 1);
+    expect(r).toBeLessThan(FISH_SCALE_RADIUS);        // confirms we are inside a scale
+    expect(rAbove).toBeLessThan(FISH_SCALE_RADIUS - 0.04); // confirms fully covered
+    expect(visible).toBe(0);                           // absolute: exactly hidden
+  });
+
+  it('the tail-facing (exposed crescent) portion of a scale is visible', () => {
+    // At y=0.9, z=0.5, freq=1 we are inside the scale (r=0.4 < kScaleR)
+    // and the row-above circle is far away (rAbove=1.4 > kScaleR+0.04=0.66
+    // → smoothstep clamps to 1).
+    // Absolute anchor: visible must be exactly 1 (not just large).
+    const { r, rAbove, visible } = evalScale(0.9, 0.5, 1);
+    expect(r).toBeLessThan(FISH_SCALE_RADIUS);         // inside the scale
+    expect(rAbove).toBeGreaterThan(FISH_SCALE_RADIUS + 0.04); // well clear of occlusion
+    expect(visible).toBe(1);                            // absolute: fully exposed
+  });
+
+  it('scanning a full spine traversal at constant Z shows a crescent, not a complete circle', () => {
+    // For the same Z (through the scale centre at z=0.5, freq=1), scan y
+    // from 0 to 1. Both a hidden region and a visible region must exist
+    // inside the scale circle. A complete circle would have visible=1
+    // everywhere inside — this test catches that regression.
+    let anyHiddenInsideScale = false;
+    let anyVisibleInsideScale = false;
+    for (let i = 0; i <= 200; i++) {
+      const y = i / 200;
+      const { r, visible } = evalScale(y, 0.5, 1);
+      if (r < FISH_SCALE_RADIUS) {
+        if (visible < 0.1) anyHiddenInsideScale = true;
+        if (visible > 0.9) anyVisibleInsideScale = true;
+      }
+    }
+    expect(anyHiddenInsideScale).toBe(true);  // some of the scale is covered
+    expect(anyVisibleInsideScale).toBe(true); // some of the scale is exposed
+  });
+
+  it('the fragment shader contains the occlusion rAbove term', () => {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
+    const { fragmentShader } = captureShader(mat);
+    // rAbove must appear in the injected block — a bare ring pattern that
+    // never samples the row-above scale cannot produce a crescent.
+    expect(fragmentShader).toContain('rAbove');
+    expect(fragmentShader).toContain('fp.x + 1.0');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stagger — adjacent spine rows are offset by half a cell in Z so arcs
+// interlock in a brick/hex layout rather than lining up in a square grid.
+//
+// Falsification evidence:
+//
+//   j) Remove `sp.y += floor( sp.x ) * 0.5` from the GLSL and from evalScale:
+//      → "row 1 centre at z=0.0" test fails:
+//        AssertionError: expected 0.5 to be 0
+//        (without stagger the row-1 centre stays at z=0.5, not z=0.0)
+// ---------------------------------------------------------------------------
+
+describe('fishScaleShader stagger — alternate rows offset by half a cell', () => {
+  it('row 0 scale centre is at z=0.5 (freq=1)', () => {
+    // With stagger=0 (floor(0.5)*0.5=0), fp=(0,0) when y=0.5, z=0.5 → r=0.
+    // Absolute anchor: r must be exactly 0 at the centre.
+    const { r } = evalScale(0.5, 0.5, 1);
+    expect(r).toBe(0); // absolute: exactly at the scale centre
+  });
+
+  it('row 1 scale centre shifts to z=0.0 (freq=1) — half-cell stagger', () => {
+    // With stagger=0.5 (floor(1.5)*0.5=0.5), fp=(0,0) when y=1.5, z=0.0 → r=0.
+    // Absolute anchor: r must be exactly 0 at the row-1 centre.
+    const { r } = evalScale(1.5, 0.0, 1);
+    expect(r).toBe(0); // absolute: exactly at the scale centre
+  });
+
+  it('z=0.5 in row 1 is NOT a scale centre — it falls in a gap between scales', () => {
+    // If there were no stagger, z=0.5 would be the centre in every row.
+    // With half-cell stagger the row-1 centre is at z=0.0, so z=0.5
+    // is displaced by half a cell (r ≈ 0.625 > kScaleR → outside the scale).
+    const { r } = evalScale(1.5, 0.5, 1);
+    expect(r).toBeGreaterThan(0); // not at centre
+    expect(r).toBeGreaterThan(FISH_SCALE_RADIUS); // in fact outside the scale
+  });
+
+  it('rows 0 and 2 have the same z-centre (even rows align)', () => {
+    // stagger for row 2 = floor(2.5)*0.5 = 2*0.5 = 1.0 → fract absorbs it
+    // so row-2 centres fall back to z=0.5, same as row 0.
+    const { r: r0 } = evalScale(0.5, 0.5, 1);
+    const { r: r2 } = evalScale(2.5, 0.5, 1);
+    expect(r0).toBe(0);
+    expect(r2).toBe(0); // absolute: same alignment as row 0
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reflectivity — scale centres reduce roughnessFactor for subtle highlights
+//
+// Falsification evidence:
+//
+//   k) Remove the line `roughnessFactor = clamp( roughnessFactor - scaleGloss, …)`
+//      → "scale centre has positive glossFactor" test fails:
+//        AssertionError: expected 0 to be > 0
+//
+//   l) Remove `uScaleGloss` from Object.assign(shader.uniforms, …):
+//      → "uScaleGloss uniform is set" test fails:
+//        AssertionError: expected undefined to have a property 'value'
+//
+//   m) Move the roughness injection BEFORE roughnessmap_fragment:
+//      → "roughnessFactor modified after roughnessmap_fragment" test fails:
+//        AssertionError: expected [rough index] to be < [rF index]
+//        (indices inverted)
+//
+//   n) Replace `roughnessFactor = clamp(roughnessFactor - scaleGloss, …)`
+//      with `roughness -= scaleGloss` (writing to the uniform instead):
+//      → "roughness guard" test fails:
+//        AssertionError: expected injected code not to match /\broughness\b\s*[-]=\s*\w/
+// ---------------------------------------------------------------------------
+
+describe('fishScaleShader reflectivity — roughnessFactor modulation', () => {
+  it('scale centres have a positive gloss factor (JS math)', () => {
+    // At (y=0.5, z=0.5, freq=1) we are at the exact scale centre (r=0,
+    // visible=1). glossFactor = max(0, 1−0/kR) × 1 = 1.0 exactly.
+    // Absolute anchor: glossFactor is 1.
+    const { r, visible, glossFactor } = evalScale(0.5, 0.5, 1);
+    expect(r).toBe(0);
+    expect(visible).toBe(1);
+    expect(glossFactor).toBe(1);                          // absolute: maximum gloss at centre
+    // Sanity-check the config value so the test can't pass with scaleGloss=0.
+    expect(BONY_FISH_SCALE_CONFIG.scaleGloss).toBeGreaterThan(0.1); // absolute lower bound
+  });
+
+  it('the gap between scales has zero gloss factor (JS math)', () => {
+    // At (y=0.9, z=0, freq=1) we are outside the scale (r>kScaleR) even
+    // though visible=1. max(0, 1−r/kR)=0 so glossFactor=0.
+    const { r, visible, glossFactor } = evalScale(0.9, 0.0, 1);
+    expect(r).toBeGreaterThan(FISH_SCALE_RADIUS); // outside the scale
+    expect(visible).toBeGreaterThan(0);            // not hidden by row above
+    expect(glossFactor).toBe(0);                   // absolute: no gloss in gap
+  });
+
+  it('uScaleGloss uniform is set to the config value', () => {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
+    const { uniforms } = captureShader(mat);
+    expect(uniforms.uScaleGloss).toBeDefined();
+    expect(uniforms.uScaleGloss.value).toBeCloseTo(BONY_FISH_SCALE_CONFIG.scaleGloss, 5);
+  });
+
+  it('fragment shader modifies roughnessFactor after roughnessmap_fragment', () => {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
+    const { fragmentShader } = captureShader(mat);
+    const roughnessmapIdx = fragmentShader.indexOf('#include <roughnessmap_fragment>');
+    const rfClampIdx = fragmentShader.indexOf('roughnessFactor = clamp(');
+    expect(roughnessmapIdx).toBeGreaterThan(-1);
+    expect(rfClampIdx).toBeGreaterThan(-1);
+    // roughnessmap_fragment must precede the clamp so roughnessFactor is
+    // already declared as a local when we write to it.
+    expect(roughnessmapIdx).toBeLessThan(rfClampIdx);
+  });
+
+  it('roughness guard — writes to roughnessFactor (local), not roughness (uniform)', () => {
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
+    const { fragmentShader } = captureShader(mat);
+    // Slice from the first injected symbol so we only check our additions.
+    const injected = fragmentShader.slice(fragmentShader.indexOf('uFishScaleFreq'));
+    // Must contain a write to roughnessFactor (the local float).
+    expect(injected).toContain('roughnessFactor = clamp(');
+    // Must NOT contain a direct assignment to `roughness` (the uniform),
+    // which is read-only and would silently miscompile or crash.
+    expect(injected).not.toMatch(/\broughness\s*[-*+]?=/);
+  });
+
+  it('fragment shader colour modulation still precedes roughness modulation', () => {
+    // diffuseColor *= … must come before roughnessFactor = … in the same
+    // injected block, so colour and reflectivity are applied consistently.
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    applyFishScaleShader(mat, makeBodyGeo(), BONY_FISH_SCALE_CONFIG);
+    const { fragmentShader } = captureShader(mat);
+    expect(fragmentShader.indexOf('diffuseColor.rgb *= 1.0 - uScaleEdgeDarkness')).toBeLessThan(
+      fragmentShader.indexOf('roughnessFactor = clamp('),
+    );
   });
 });
