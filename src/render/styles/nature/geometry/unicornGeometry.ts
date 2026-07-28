@@ -152,19 +152,23 @@ function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGe
   const hornGeometry = buildUnicornHornGeometry(pollY, pollZ, pollRadius);
   const earsGeometry = buildUnicornEarsGeometry(pollY, pollZ, pollRadius);
   const eyesGeometry = buildUnicornEyesGeometry(headTop.y, headTop.z, headTop.radius);
-  const maneGeometry = buildUnicornManeGeometry(length, width, pollY, pollZ, pollRadius);
+  // The mane is deliberately absent. buildUnicornManeGeometry built a single
+  // chunky 4-sided box-section strand draped along +X only, so the neck read
+  // as smooth and round from the left and hard-edged and blocky from the
+  // right — an asymmetry that looked like a modelling defect rather than
+  // hair. A bare, smooth neck reads better than a one-sided blocky one, so
+  // it stays off until there's a real mane (many fine strands, or a shaped
+  // crest sitting symmetrically on the topline).
   const merged = mergeGeometriesWithColor([
     { geometry: bodyGeometry, color: new THREE.Color(0xffffff) },
     { geometry: hornGeometry, color: UNICORN_HORN_COLOR },
     { geometry: earsGeometry, color: new THREE.Color(0xffffff) },
     { geometry: eyesGeometry, color: UNICORN_EYE_COLOR },
-    { geometry: maneGeometry, color: new THREE.Color(0xffffff) },
   ]);
   bodyGeometry.dispose();
   hornGeometry.dispose();
   earsGeometry.dispose();
   eyesGeometry.dispose();
-  maneGeometry.dispose();
   return merged;
 }
 
@@ -172,11 +176,19 @@ function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGe
 // Gold, to make the horn stand out clearly against the lavender body
 // rather than blending in as just another body-colored bump.
 const UNICORN_HORN_COLOR = new THREE.Color(0xffd54a);
-// Legs tinted very light lavender so they harmonise with the lavender
-// per-instance body color without disappearing into it; hooves are tinted
-// dark gray so they read as a distinct hoof rather than continuing the body's color.
-const UNICORN_LEG_COLOR = new THREE.Color(0xd8cef0); // very light lavender
+// Legs carry a neutral multiplier so they render in exactly the per-instance
+// body color. They used to be tinted a lighter lavender (0xd8cef0) to
+// "harmonise" with the body, but a near-match reads as a mismatch: the legs
+// looked like separate paler parts stuck onto the horse. Hooves stay dark
+// gray so they still read as a distinct hoof.
+const UNICORN_LEG_COLOR = new THREE.Color(0xffffff);
 const UNICORN_HOOF_COLOR = new THREE.Color(0x3a3a3a);
+// Leg cross-section, as fractions of body width. Module-level rather than
+// local so the front-leg placement below can be expressed in terms of the
+// leg's own front-to-back depth instead of a magic number that would drift
+// out of step if the legs were ever made thicker or thinner.
+const UNICORN_LEG_HALF_WIDTH_FRAC = 0.09;
+const UNICORN_LEG_HALF_DEPTH_FRAC = 0.07;
 // Near-black "dark dot" eyes.
 const UNICORN_EYE_COLOR = new THREE.Color(0x101014);
 // Multiplied against the lavender per-instance body tint (not an
@@ -185,6 +197,14 @@ const UNICORN_EYE_COLOR = new THREE.Color(0x101014);
 const UNICORN_MUZZLE_TINT = new THREE.Color(0.55, 0.35, 0.75);
 // Neutral multiplier (no tint) for spine rings without an explicit color.
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
+// Top-of-body tint for the vertical body gradient. Multiplied against the
+// per-instance lavender (0xc9a8f0), so components above 1 lighten rather than
+// darken. Red and green are lifted well past 1 while blue is left almost
+// alone, which walks the lavender toward a very light pink over the topline
+// while the underside keeps the body color exactly as it is. Applied per
+// vertex by height within each body ring, not per ring, so the transition is
+// smooth around the barrel rather than banded along the spine.
+const UNICORN_TOP_TINT = new THREE.Color(1.42, 1.3, 1.04);
 
 
 /**
@@ -330,6 +350,34 @@ function buildHorseBodyProfileGeometry(
   });
   const ringColors: THREE.Color[] = spine.map((point) => point.color ?? WHITE_VERTEX_COLOR);
 
+  /**
+   * Vertical body gradient: the underside keeps the per-instance body color
+   * exactly, and the topline fades to a very light pink.
+   *
+   * Graded per vertex by its height *within its own ring* rather than by
+   * absolute Z. The spine rises and falls a lot between rump, withers and
+   * muzzle, so an absolute-Z ramp would put the light end on the head and the
+   * dark end on the tail — a front-to-back gradient, not a top-to-bottom one.
+   * Normalising against each ring's own half-height instead means every
+   * cross-section runs body-color at its belly to pink at its spine, all the
+   * way along the horse.
+   *
+   * Each ring's own tint (the muzzle's darker purple, say) is preserved and
+   * the height tint multiplies on top of it, so the muzzle still reads darker
+   * while still catching light along its bridge.
+   */
+  const smoothstep01 = (t: number) => t * t * (3 - 2 * t);
+  const gradedColorAt = (base: THREE.Color, vertex: THREE.Vector3, point: SpinePoint): THREE.Color => {
+    const halfHeight = point.radius * (point.zScale ?? 1);
+    if (halfHeight < 1e-6) return base;
+    const t = THREE.MathUtils.clamp(0.5 + (0.5 * (vertex.z - point.z)) / halfHeight, 0, 1);
+    const tint = WHITE_VERTEX_COLOR.clone().lerp(UNICORN_TOP_TINT, smoothstep01(t));
+    return base.clone().multiply(tint);
+  };
+  const ringVertexColors: THREE.Color[][] = rings.map((ring, i) =>
+    ring.map((vertex) => gradedColorAt(ringColors[i], vertex, spine[i])),
+  );
+
   const positions: number[] = [];
   const colors: number[] = [];
   const pushOutwardTri = (
@@ -364,8 +412,8 @@ function buildHorseBodyProfileGeometry(
   for (let i = 0; i < rings.length - 1; i++) {
     const ringA = rings[i];
     const ringB = rings[i + 1];
-    const colorA = ringColors[i];
-    const colorB = ringColors[i + 1];
+    const colorA = ringVertexColors[i];
+    const colorB = ringVertexColors[i + 1];
     const center = new THREE.Vector3(
       0,
       (spine[i].y + spine[i + 1].y) / 2,
@@ -373,8 +421,8 @@ function buildHorseBodyProfileGeometry(
     );
     for (let j = 0; j < segments; j++) {
       const k = (j + 1) % segments;
-      pushOutwardTri(ringA[j], colorA, ringA[k], colorA, ringB[j], colorB, center);
-      pushOutwardTri(ringA[k], colorA, ringB[k], colorB, ringB[j], colorB, center);
+      pushOutwardTri(ringA[j], colorA[j], ringA[k], colorA[k], ringB[j], colorB[j], center);
+      pushOutwardTri(ringA[k], colorA[k], ringB[k], colorB[k], ringB[j], colorB[j], center);
     }
   }
 
@@ -388,14 +436,22 @@ function buildHorseBodyProfileGeometry(
   // muzzle itself.)
   const tipIndex = spine.length - 1;
   const tipRing = rings[tipIndex];
-  const tipColor = ringColors[tipIndex];
+  const tipColor = ringVertexColors[tipIndex];
   // A point behind the tip (toward the previous ring) so pushOutwardTri
   // can correctly tell the cap's outward direction is forward (+Y).
   const tipCapBehind = new THREE.Vector3(0, spine[tipIndex - 1].y, spine[tipIndex - 1].z);
   const tipCenter = new THREE.Vector3(0, spine[tipIndex].y, spine[tipIndex].z);
   for (let j = 0; j < segments; j++) {
     const k = (j + 1) % segments;
-    pushOutwardTri(tipCenter, tipColor, tipRing[j], tipColor, tipRing[k], tipColor, tipCapBehind);
+    pushOutwardTri(
+      tipCenter,
+      gradedColorAt(ringColors[tipIndex], tipCenter, spine[tipIndex]),
+      tipRing[j],
+      tipColor[j],
+      tipRing[k],
+      tipColor[k],
+      tipCapBehind,
+    );
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -554,8 +610,8 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
     lowerBuffer: Buffer,
   ): THREE.Vector3 {
     const legLength = length * 0.38;
-    const legHalfWidth = width * 0.09;
-    const legHalfDepth = width * 0.07;
+    const legHalfWidth = width * UNICORN_LEG_HALF_WIDTH_FRAC;
+    const legHalfDepth = width * UNICORN_LEG_HALF_DEPTH_FRAC;
     const flareX = hipX * 1.05;
 
     const hip = new THREE.Vector3(hipX, hipY, hipZ);
@@ -610,7 +666,14 @@ function buildUnicornLegParts(length: number, width: number): CreatureLegPart[] 
     return knee;
   }
 
-  const frontY = length * 0.02; // near the chest
+  // Front hips pulled back by one full leg depth. At length*0.02 the shoulder
+  // sat forward of the chest's own front surface, so the top of each front leg
+  // stood outside the body and only the thin joint barrel bridged the gap —
+  // the legs read as hanging off the chest by a thread. Backing off by the
+  // leg's own front-to-back depth (2 x half-depth) seats the hip socket inside
+  // the chest bulge, the same reasoning that fixed the rear legs below.
+  const frontLegDepth = width * UNICORN_LEG_HALF_DEPTH_FRAC * 2;
+  const frontY = length * 0.02 - frontLegDepth; // seated inside the chest
   // Rear hip Y was -length*0.42 — *behind* the body's own rear-most spine
   // point (the tail root sits at -halfLen*0.8 = -length*0.4, see
   // buildHorseBodyProfileGeometry), so the back legs floated in empty
@@ -765,31 +828,40 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
     return ring;
   };
 
-  function pushTubeSegment(
-    a: THREE.Vector3,
-    b: THREE.Vector3,
-    halfXa: number,
-    halfYa: number,
-    halfXb: number,
-    halfYb: number,
-    capStart: boolean,
-    capEnd: boolean,
-    color: THREE.Color,
-  ) {
-    const direction = new THREE.Vector3().subVectors(b, a);
-    const ringA = ringAt(a, direction, halfXa, halfYa);
-    const ringB = ringAt(b, direction, halfXb, halfYb);
-    for (let s = 0; s < TAIL_SIDES; s++) {
-      const t = (s + 1) % TAIL_SIDES;
-      pushTri(ringA[s], ringB[s], ringB[t], color);
-      pushTri(ringA[s], ringB[t], ringA[t], color);
+  /**
+   * Emits the tube walls from a list of rings that are SHARED between adjacent
+   * segments, plus the two end caps.
+   *
+   * The previous version built each segment independently, calling ringAt
+   * twice per segment — once for its own start and once for its own end. Every
+   * interior joint therefore got two different rings at the same center: one
+   * oriented to the incoming segment's direction, one to the outgoing
+   * segment's. Because the tail bends at every joint those two rings did not
+   * coincide, so the surface tore open and the tail read as a row of separate
+   * sausages with visible breaks between them. ringAt also mutates the
+   * transported frame, so calling it twice per point advanced the frame twice
+   * as fast as intended.
+   *
+   * Now there is exactly one ring per point, built on the bisector of the
+   * incoming and outgoing directions (a mitre joint) so it meets both segments
+   * squarely. Adjacent segments reference the same vertices, which makes the
+   * surface genuinely continuous — no gap can reappear, because there is no
+   * longer a second ring to disagree with.
+   */
+  function pushTubeFromRings(rings: THREE.Vector3[][], color: THREE.Color) {
+    for (let i = 0; i < rings.length - 1; i++) {
+      const ringA = rings[i];
+      const ringB = rings[i + 1];
+      for (let s = 0; s < TAIL_SIDES; s++) {
+        const t = (s + 1) % TAIL_SIDES;
+        pushTri(ringA[s], ringB[s], ringB[t], color);
+        pushTri(ringA[s], ringB[t], ringA[t], color);
+      }
     }
-    if (capStart) {
-      for (let s = 1; s < TAIL_SIDES - 1; s++) pushTri(ringA[0], ringA[s + 1], ringA[s], color);
-    }
-    if (capEnd) {
-      for (let s = 1; s < TAIL_SIDES - 1; s++) pushTri(ringB[0], ringB[s], ringB[s + 1], color);
-    }
+    const first = rings[0];
+    for (let s = 1; s < TAIL_SIDES - 1; s++) pushTri(first[0], first[s + 1], first[s], color);
+    const last = rings[rings.length - 1];
+    for (let s = 1; s < TAIL_SIDES - 1; s++) pushTri(last[0], last[s], last[s + 1], color);
   }
 
   // Longer than the previous stubby tail — a real flowing horse tail
@@ -837,21 +909,22 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
   // of the square cross-section.
   const halfWidthAt = (i: number) =>
     THREE.MathUtils.lerp(rootHalfWidth, tipHalfWidth, i / (points.length - 1));
-  for (let i = 0; i < points.length - 1; i++) {
-    const halfXa = halfWidthAt(i);
-    const halfXb = halfWidthAt(i + 1);
-    pushTubeSegment(
-      points[i],
-      points[i + 1],
-      halfXa,
-      halfXa * 0.8,
-      halfXb,
-      halfXb * 0.8,
-      i === 0,
-      i === points.length - 2,
-      WHITE_VERTEX_COLOR,
-    );
-  }
+
+  // One ring per point. At an interior joint the ring uses the average of the
+  // incoming and outgoing directions so it mitres between the two segments
+  // instead of matching only one of them; the ends just use their single
+  // adjacent direction.
+  const tailRings = points.map((point, i) => {
+    const incoming = i > 0 ? new THREE.Vector3().subVectors(point, points[i - 1]) : null;
+    const outgoing =
+      i < points.length - 1 ? new THREE.Vector3().subVectors(points[i + 1], point) : null;
+    const direction = new THREE.Vector3();
+    if (incoming) direction.add(incoming.normalize());
+    if (outgoing) direction.add(outgoing.normalize());
+    const halfMajor = halfWidthAt(i);
+    return ringAt(point, direction, halfMajor, halfMajor * 0.8);
+  });
+  pushTubeFromRings(tailRings, WHITE_VERTEX_COLOR);
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
@@ -929,131 +1002,4 @@ function buildUnicornEarsGeometry(pollY: number, pollZ: number, pollRadius: numb
   }
 
   return mergePositionOnlyGeometries([buildEar(1), buildEar(-1)]);
-}
-
-
-/**
- * A flowing mane draping down one side of the neck from the poll back
- * toward the withers, matching the reference pegasus image's most
- * distinctive missing feature. Built the same way as the tail (true 3D
- * box segments — see pushBoxSegment in buildUnicornLegsGeometry/
- * buildUnicornTailGeometry — not a flat ribbon), tapering from a
- * thicker base near the poll to a thin wisp near the withers, and
- * offset to hang along +X (one side of the neck) with a slight
- * trailing lag (-Y) as if blown back in flight, rather than standing
- * straight up off the topline.
- */
-function buildUnicornManeGeometry(
-  length: number,
-  width: number,
-  pollY: number,
-  pollZ: number,
-  pollRadius: number,
-): THREE.BufferGeometry {
-  const halfLen = length * 0.5;
-  const positions: number[] = [];
-  const colors: number[] = [];
-  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, color: THREE.Color) => {
-    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-    colors.push(color.r, color.g, color.b, color.r, color.g, color.b, color.r, color.g, color.b);
-  };
-
-  // Same outward-normal-safe box-segment helper duplicated in
-  // buildUnicornLegsGeometry/buildUnicornTailGeometry — each of these
-  // "hair"/"limb" builders stays self-contained rather than sharing a
-  // module-level helper, matching this file's existing pattern.
-  function pushBoxSegment(
-    a: THREE.Vector3,
-    b: THREE.Vector3,
-    halfX: number,
-    halfY: number,
-    capStart: boolean,
-    capEnd: boolean,
-    color: THREE.Color,
-  ) {
-    const corner = (p: THREE.Vector3, sx: number, sy: number) => new THREE.Vector3(p.x + sx * halfX, p.y + sy * halfY, p.z);
-    const signs: [number, number][] = [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ];
-    const ca = signs.map(([sx, sy]) => corner(a, sx, sy));
-    const cb = signs.map(([sx, sy]) => corner(b, sx, sy));
-    const axisCenter = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5);
-    const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, center: THREE.Vector3) => {
-      const e1 = new THREE.Vector3().subVectors(p1, p0);
-      const e2 = new THREE.Vector3().subVectors(p2, p0);
-      const normal = new THREE.Vector3().crossVectors(e1, e2);
-      const centroid = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3);
-      const outward = new THREE.Vector3().subVectors(centroid, center);
-      if (normal.dot(outward) < 0) {
-        pushTri(p0, p2, p1, color);
-      } else {
-        pushTri(p0, p1, p2, color);
-      }
-    };
-    for (let i = 0; i < 4; i++) {
-      const j = (i + 1) % 4;
-      pushOutward(ca[i], cb[i], cb[j], axisCenter);
-      pushOutward(ca[i], cb[j], ca[j], axisCenter);
-    }
-    if (capStart) {
-      pushOutward(ca[0], ca[1], ca[2], axisCenter);
-      pushOutward(ca[0], ca[2], ca[3], axisCenter);
-    }
-    if (capEnd) {
-      pushOutward(cb[0], cb[1], cb[2], axisCenter);
-      pushOutward(cb[0], cb[2], cb[3], axisCenter);
-    }
-  }
-
-  // Anchor points follow the same neck curve used in
-  // buildHorseBodyProfileGeometry's spine (withers -> poll), recomputed
-  // here from length/width rather than threading the whole spine array
-  // through — the mane only needs these four points, and they're cheap
-  // to re-derive from the same length-relative fractions. `radius`
-  // mirrors each point's actual neck cross-section radius there (also
-  // from that same spine array) so the mane can be pushed clear of the
-  // neck's own surface at each point, not just at the (much narrower)
-  // poll — using a single poll-sized offset for the whole mane buried
-  // most of it inside the thicker withers end of the neck.
-  const necklinePoints: { y: number; z: number; radius: number }[] = [
-    { y: halfLen * 0.08, z: length * 0.1, radius: width * 0.22 }, // withers
-    { y: halfLen * 0.147, z: length * 0.193, radius: width * 0.17 },
-    { y: halfLen * 0.207, z: length * 0.287, radius: width * 0.13 },
-    { y: pollY, z: pollZ, radius: pollRadius }, // poll (base of the mane, just behind the ears/horn)
-  ];
-
-  // Root sits a bit above the topline (so the mane reads as hair sitting
-  // on top of the neck, not buried inside it) and drapes slightly to one
-  // side (+X) with a small backward lag, growing more pronounced toward
-  // the withers end as if trailing in the airflow.
-  const points: THREE.Vector3[] = [];
-  const radii: number[] = [];
-  for (let i = necklinePoints.length - 1; i >= 0; i--) {
-    const t = (necklinePoints.length - 1 - i) / (necklinePoints.length - 1); // 0 at poll, 1 at withers
-    const p = necklinePoints[i];
-    const topOffset = p.radius * 0.7;
-    const sideDrape = width * 0.06 * (0.3 + t);
-    const backLag = length * 0.02 * t;
-    points.push(new THREE.Vector3(sideDrape, p.y - backLag, p.z + topOffset));
-    radii.push(p.radius);
-  }
-
-  // Thickness follows each segment's own neck radius (thicker where the
-  // neck itself is thicker, near the withers) rather than a single
-  // poll-sized value throughout, which read as too uniformly thin.
-  for (let i = 0; i < points.length - 1; i++) {
-    const avgRadius = (radii[i] + radii[i + 1]) / 2;
-    const halfX = avgRadius * 0.4;
-    const halfY = halfX * 0.9;
-    pushBoxSegment(points[i], points[i + 1], halfX, halfY, i === 0, i === points.length - 2, WHITE_VERTEX_COLOR);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
-  geometry.computeVertexNormals();
-  return geometry;
 }
