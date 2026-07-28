@@ -25,6 +25,7 @@ import {
   BARRACUDA_SCALE_CONFIG,
   SHARK_SCALE_CONFIG,
 } from '../styles/fishtank/fishScaleShader';
+import { applySeaHorsePlateShader, SEAHORSE_PLATE_CONFIG } from '../styles/fishtank/seaHorsePlateShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -648,8 +649,11 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   patchBodyMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
-    // Sea horse: not a fish — no scale pattern.
-    if (geometries === this.unicornPredatorGeometries) return;
+    // Sea horse: bony plates (dermal scutes), not fish scales.
+    if (geometries === this.unicornPredatorGeometries) {
+      applySeaHorsePlateShader(material, geometries.body, SEAHORSE_PLATE_CONFIG);
+      return;
+    }
 
     let config;
     if (geometries === this.sharkPredatorGeometries) {
