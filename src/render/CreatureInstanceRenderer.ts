@@ -41,6 +41,8 @@ import {
 import { composeArticulationChain, composePartArticulation } from './motion/partTransform';
 import { resolveDriveAngle, type RigPartDeclaration, type Triple } from './motion/rig';
 import type { FishUndulationInstanceState } from './styles/fishtank/fishUndulationShader';
+import type { WingUndulationInstanceState } from './styles/nature/wingUndulationShader';
+import type { UnicornTailUndulationInstanceState } from './styles/nature/unicornTailUndulationShader';
 
 /** One creature's instanced meshes: a body plus optional wing/tail/legs/beak parts. */
 export interface BoidRenderBatch {
@@ -59,6 +61,10 @@ export interface BoidRenderBatch {
   /** Small-bird-only: see CreatureGeometries.beak's doc comment. */
   beak?: THREE.InstancedMesh;
   fishUndulation?: FishUndulationInstanceState;
+  /** Per-instance phase buffer driving the wing-undulation vertex shader. */
+  wingUndulation?: WingUndulationInstanceState;
+  /** Per-instance phase + speed buffers for the unicorn tail streaming shader. */
+  tailUndulation?: UnicornTailUndulationInstanceState;
   /** Wing pivot declarations — mirrors CreatureGeometries.wingPivotLeft/Right.
    * When set, each wing articulates about its own root rather than the model
    * origin, keeping the fin root welded to the body through the flap cycle. */
@@ -278,6 +284,8 @@ export class CreatureInstanceRenderer {
   /** Per-creature accumulated flap phase (radians), integrated every frame. */
   private flapPhase = new WeakMap<Boid | Predator, number>();
   private fishUndulationPhase = new WeakMap<Boid | Predator, number>();
+  /** Per-unicorn accumulated tail undulation phase (radians), integrated every frame. */
+  private unicornTailPhase = new WeakMap<Boid | Predator, number>();
 
   /**
    * Cached combined model-space bounding box per render batch (see
@@ -528,6 +536,11 @@ export class CreatureInstanceRenderer {
       if (set.beak.instanceColor) set.beak.instanceColor.needsUpdate = true;
     }
     if (set.fishUndulation) set.fishUndulation.phaseAttribute.needsUpdate = true;
+    if (set.wingUndulation) set.wingUndulation.phaseAttribute.needsUpdate = true;
+    if (set.tailUndulation) {
+      set.tailUndulation.phaseAttribute.needsUpdate = true;
+      set.tailUndulation.speedFractionAttribute.needsUpdate = true;
+    }
   }
 
   private updateFishUndulationPhase({
@@ -619,7 +632,7 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       uprightStyle,
     });
-    this.applyWingFlapMatrices(set, index, flapAngle);
+    this.applyWingFlapMatrices(set, index, flapAngle, this.flapPhase.get(creature) ?? initialFlapPhase(creature.id));
 
     this.applyCreatureTailSwayMatrix({
       set,
@@ -634,6 +647,19 @@ export class CreatureInstanceRenderer {
       uprightStyle,
       tailFlareStrength,
     });
+
+    // Unicorn tail streaming — vertex-shader undulation biased upward by
+    // horizontal speed. Only runs when the batch carries a tailUndulation state.
+    if (set.tailUndulation) {
+      this.updateUnicornTailUndulation({
+        set,
+        index,
+        creature,
+        vel: velocity,
+        maxSpeed,
+        dt,
+      });
+    }
 
     // After the wing flap: reads the phase computeWingFlapAngle just advanced.
     this.applyCreatureLegSwingMatrix({
@@ -1015,7 +1041,12 @@ export class CreatureInstanceRenderer {
     mesh.setMatrixAt(index, this.dummy.matrix);
   }
 
-  private applyWingFlapMatrices(set: BoidRenderBatch, i: number, flapAngle: number): void {
+  private applyWingFlapMatrices(
+    set: BoidRenderBatch,
+    i: number,
+    flapAngle: number,
+    flapPhase: number,
+  ): void {
     // Wings mirror each other around the model's forward axis.
     // When the batch carries an explicit root pivot (e.g. seahorse pectoral fins
     // whose root sits on the body's side surface), articulate about that pivot so
@@ -1041,6 +1072,46 @@ export class CreatureInstanceRenderer {
       angle: -flapAngle,
       pivot: set.wingPivotRight ? this.tmpPivot : null,
     });
+    // Write per-instance flap phase for the wing-undulation vertex shader.
+    // Both wings share the same InstancedBufferAttribute (see applyWingUndulationShader).
+    if (set.wingUndulation) {
+      set.wingUndulation.phaseAttribute.setX(i, flapPhase);
+    }
+  }
+
+  /**
+   * Advances the unicorn-tail undulation phase and writes both the phase and
+   * the horizontal speed fraction to the per-instance attributes consumed by
+   * the vertex shader.
+   *
+   * Called unconditionally when `set.tailUndulation` is defined (unicorn only).
+   *
+   * "Horizontal speed" = √(vel.x² + vel.z²) in world space — Y is altitude,
+   * not horizontal. This matches the axis note in the problem statement.
+   */
+  private updateUnicornTailUndulation({
+    set,
+    index,
+    creature,
+    vel,
+    maxSpeed,
+    dt,
+  }: {
+    set: BoidRenderBatch;
+    index: number;
+    creature: Boid | Predator;
+    vel: { x: number; y: number; z: number };
+    maxSpeed: number;
+    dt: number;
+  }): void {
+    const state = set.tailUndulation!;
+    const previousPhase = this.unicornTailPhase.get(creature) ?? initialFlapPhase(creature.id);
+    const phase = previousPhase + state.omega * dt;
+    this.unicornTailPhase.set(creature, phase);
+    state.phaseAttribute.setX(index, phase);
+    const horizSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+    const speedFraction = maxSpeed > 0 ? THREE.MathUtils.clamp(horizSpeed / maxSpeed, 0, 1) : 0;
+    state.speedFractionAttribute.setX(index, speedFraction);
   }
 
   /**
