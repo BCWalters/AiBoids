@@ -30,13 +30,16 @@ export class DragonColorApplicator {
     set.wingRight.setColorAt(index, this.stateColor);
 
     if (set.tail) {
-      // Baked gradient tail (violet root → red tip): pass white so it shows
-      // through unchanged; otherwise fall back to the flat state color.
-      if (set.tail.geometry.getAttribute('color')) {
-        this.tailColor.setRGB(1, 1, 1);
-      } else {
-        this.tailColor.copy(this.stateColor);
-      }
+      // The tail takes the same state color as the body, in every case.
+      //
+      // It used to receive white whenever the tail geometry carried a baked
+      // 'color' attribute, so that an absolute baked gradient would show
+      // through unchanged. The tail now bakes a darkening MULTIPLIER instead
+      // (1 at the root, dark at the tip — see buildDragonTailGeometry), so
+      // handing it the state color makes the root land exactly on the body
+      // color and the tail darken from there. Passing white here would strand
+      // the tail at an untinted gray.
+      this.tailColor.copy(this.stateColor);
       set.tail.setColorAt(index, this.tailColor);
     }
 

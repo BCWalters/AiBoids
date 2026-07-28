@@ -769,13 +769,31 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
 
-  // Bake a root→tip color gradient: the tail root matches the dragon
-  // body color (DRAGON_PREDATOR_BASE, 0x502a7f) at the rump attachment,
-  // then darkens to almost black at the tip (per issue #73). The renderer
-  // detects the presence of this 'color' attribute and passes white as
-  // the instance color so the gradient shows through unchanged.
-  const rootColor = new THREE.Color(0x502a7f); // matches the dragon body base at the rump
-  const tipColor  = new THREE.Color(0x080314); // near-black at the tip
+  // Bake a root→tip darkening gradient as a MULTIPLIER (neutral white at the
+  // rump, dark at the tip) rather than as absolute colors.
+  //
+  // It used to bake absolute colors, root 0x502a7f to tip 0x080314, and the
+  // color applicator passed white as the tail's instance color so that
+  // gradient showed through untouched. That pinned the tail to one fixed
+  // palette while the body's instance color lerps from DRAGON_PREDATOR_BASE
+  // toward the brighter DRAGON_PREDATOR_HUNT as the dragon chases — so the
+  // two matched only at rest, and the moment the body brightened the tail
+  // stayed put and a visible seam opened at the joint.
+  //
+  // As a multiplier the root is exactly 1 and the tail therefore always starts
+  // at whatever color the body currently is, then darkens along its length. It
+  // tracks the hunt tint for free.
+  //
+  // The tip factor is derived from the two original colors rather than typed in
+  // by hand, so the tip keeps the exact appearance it has today whenever the
+  // body sits at its base color.
+  const legacyRootColor = new THREE.Color(0x502a7f); // the old baked root, equal to DRAGON_PREDATOR_BASE
+  const legacyTipColor = new THREE.Color(0x080314); // the old baked near-black tip
+  const tipFactor = new THREE.Color(
+    legacyTipColor.r / legacyRootColor.r,
+    legacyTipColor.g / legacyRootColor.g,
+    legacyTipColor.b / legacyRootColor.b,
+  );
   const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
   const colors = new Float32Array(posAttr.count * 3);
   const tailRootY = yOffset;
@@ -783,9 +801,9 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   for (let vi = 0; vi < posAttr.count; vi++) {
     const vy = posAttr.getY(vi);
     const t = THREE.MathUtils.clamp((vy - tailRootY) / (tailTipY - tailRootY), 0, 1);
-    colors[vi * 3]     = THREE.MathUtils.lerp(rootColor.r, tipColor.r, t);
-    colors[vi * 3 + 1] = THREE.MathUtils.lerp(rootColor.g, tipColor.g, t);
-    colors[vi * 3 + 2] = THREE.MathUtils.lerp(rootColor.b, tipColor.b, t);
+    colors[vi * 3]     = THREE.MathUtils.lerp(1, tipFactor.r, t);
+    colors[vi * 3 + 1] = THREE.MathUtils.lerp(1, tipFactor.g, t);
+    colors[vi * 3 + 2] = THREE.MathUtils.lerp(1, tipFactor.b, t);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
