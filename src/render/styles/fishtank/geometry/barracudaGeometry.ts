@@ -4,7 +4,6 @@ import {
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
-  buildEyeDotsGeometry,
   swayingTailRig,
 } from '../../../geometry/sharedGeometry';
 import {
@@ -12,6 +11,10 @@ import {
   latheBodyRadiusAt,
   fishtankFinThickness,
   type FinThicknessSample,
+  buildFlankEyeDiscsGeometry,
+  FISH_EYE_SURFACE_OFFSET,
+  FISH_EYE_DISC_THICKNESS,
+  setScaleSuppressAttribute,
 } from './fishSharedGeometry';
 
 /**
@@ -138,19 +141,34 @@ function buildBarracudaBodyGeometry(length: number, width: number): THREE.Buffer
 
   const eyeY = halfLen * 0.66;
   const eyeSurfaceRadius = latheBodyRadiusAt(eyeY, profile);
-  const eyeX = eyeSurfaceRadius * BODY_SIDE_SQUASH * 0.9; // just inside the flank
   const eyeZ = eyeSurfaceRadius * BODY_HEIGHT_STRETCH * 0.2; // slightly above the midline
-  const eyeRadius = width * 0.03;
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  const eyeRadius = width * 0.02;
+  // A disc that follows the flank. Note radius * sideSquash would be the
+  // surface only at z = 0; this eye sits above the midline where the section
+  // has already narrowed, which the flank solver accounts for.
+  const eyes = buildFlankEyeDiscsGeometry({
+    y: eyeY,
+    z: eyeZ,
+    radius: eyeRadius,
+    profile,
+    sideSquash: BODY_SIDE_SQUASH,
+    heightStretch: BODY_HEIGHT_STRETCH,
+    offset: eyeRadius * FISH_EYE_SURFACE_OFFSET,
+    thickness: eyeRadius * FISH_EYE_DISC_THICKNESS,
+  });
 
-  return mergeGeometriesWithColor([
-    { geometry: shell, color: FLANK_COLOR },
-    { geometry: lowerJaw, color: LOWER_JAW_COLOR },
-    { geometry: flankMarks, color: FLANK_MARK_COLOR },
-    { geometry: mouthCavity, color: MOUTH_CAVITY_COLOR },
-    { geometry: fangs, color: FANG_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
-  ]);
+  const parts = [
+    { geometry: shell, color: FLANK_COLOR, suppress: false },
+    { geometry: lowerJaw, color: LOWER_JAW_COLOR, suppress: false },
+    { geometry: flankMarks, color: FLANK_MARK_COLOR, suppress: false },
+    { geometry: mouthCavity, color: MOUTH_CAVITY_COLOR, suppress: true },
+    { geometry: fangs, color: FANG_COLOR, suppress: true },
+    // The eye is not skin: without this the scale pattern tiles over the disc.
+    { geometry: eyes, color: EYE_COLOR, suppress: true },
+  ];
+  const merged = mergeGeometriesWithColor(parts);
+  setScaleSuppressAttribute(merged, parts);
+  return merged;
 }
 
 /**

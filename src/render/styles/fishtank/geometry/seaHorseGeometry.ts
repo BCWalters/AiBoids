@@ -9,6 +9,7 @@ import {
   extrudeRingGeometryAlongX,
   fishtankFinThickness,
   type FinThicknessSample,
+  FISH_EYE_FLATTEN,
 } from './fishSharedGeometry';
 
 /**
@@ -156,7 +157,7 @@ function buildSeaHorseBodyGeometry(length: number, width: number): THREE.BufferG
   const { geometry: shell, crestY, crestZ, crestRadius, eyeX, eyeY, eyeZ, eyeRadius } = buildSeaHorseShellGeometry(length, width);
   const dorsalFin = buildDorsalFinGeometry(length, width);
   const horn = buildSeaHorseHornGeometry(crestY, crestZ, crestRadius);
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius, FISH_EYE_FLATTEN);
 
   // `plates: false` marks a part as NOT armoured skin, so the bony-plate
   // shader skips it. The dorsal fin is a translucent rainbow membrane, the horn
@@ -306,14 +307,15 @@ function buildSeaHorseShellGeometry(
   const eyeSecXScale = lerp(cheekA.xScale ?? 1, cheekB.xScale ?? 1, eyeBlend);
   // The head's side surface at this section sits at x = radius * xScale (the
   // squircle's widest point, at cross-section angle 0). Seat the eye center just
-  // inside that so the small sphere pokes out only slightly.
+  // inside that. The eye is flattened into a lens (FISH_EYE_FLATTEN) so it reads
+  // as a disc on the cheek; sinking it further than this would bury it outright.
   const eyeHalfWidth = eyeSecRadius * eyeSecXScale;
   return {
     geometry,
     crestY: crest.y,
     crestZ: crest.z,
     crestRadius: crest.radius,
-    eyeX: eyeHalfWidth * 0.82,
+    eyeX: eyeHalfWidth,
     eyeY: eyeSecY,
     eyeZ: eyeSecZ,
     eyeRadius: width * 0.022,

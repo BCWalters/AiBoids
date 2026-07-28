@@ -436,7 +436,7 @@ describe('FishtankSceneRenderer3D fish-scale silent regressions', () => {
     renderer.patchBodyMaterial(mat, geometries);
     const key = mat.customProgramCacheKey?.() ?? '';
 
-    expect(key).toContain('aiboids-fish-scale-v4');
+    expect(key).toContain('aiboids-fish-scale-v5');
     expect(key).toContain(`:${expectedPlane}:`);
   });
 
@@ -446,8 +446,8 @@ describe('FishtankSceneRenderer3D fish-scale silent regressions', () => {
     renderer.patchBodyMaterial(original, geometries);
     const cloned = original.clone();
 
-    expect(original.customProgramCacheKey?.() ?? '').toContain('aiboids-fish-scale-v4');
-    expect(cloned.customProgramCacheKey?.() ?? '').not.toContain('aiboids-fish-scale-v4');
+    expect(original.customProgramCacheKey?.() ?? '').toContain('aiboids-fish-scale-v5');
+    expect(cloned.customProgramCacheKey?.() ?? '').not.toContain('aiboids-fish-scale-v5');
   });
 });
 

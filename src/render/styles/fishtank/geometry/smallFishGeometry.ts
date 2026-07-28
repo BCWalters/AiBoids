@@ -4,7 +4,6 @@ import {
   extrudeRingGeometry,
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
-  buildEyeDotsGeometry,
 } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometryAlongX,
@@ -14,6 +13,11 @@ import {
   bakeLengthBandColors,
   bakeUpperFlankMarkColors,
   fishtankFinThickness,
+  splineLatheRadiusAt,
+  buildFlankEyeDiscsGeometry,
+  setScaleSuppressAttribute,
+  FISH_EYE_SURFACE_OFFSET,
+  FISH_EYE_DISC_THICKNESS,
   type FinThicknessSample,
 } from './fishSharedGeometry';
 
@@ -118,18 +122,7 @@ function buildLatheBody(profile: THREE.Vector2[], proportions: BodyProportions):
  * Returns 0 beyond the profile's y range (nose and peduncle tips).
  */
 function fishBackZ(profile: THREE.Vector2[], heightStretch: number, y: number): number {
-  const pts = new THREE.SplineCurve(profile).getPoints(64);
-  let best = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const a = pts[i];
-    const b = pts[i + 1];
-    const lo = Math.min(a.y, b.y);
-    const hi = Math.max(a.y, b.y);
-    if (y < lo || y > hi) continue;
-    const t = hi === lo ? 0 : (y - a.y) / (b.y - a.y);
-    best = Math.max(best, a.x + (b.x - a.x) * t);
-  }
-  return Math.max(0, best) * heightStretch;
+  return splineLatheRadiusAt(y, profile) * heightStretch;
 }
 
 /**
@@ -355,17 +348,32 @@ function buildFishVariant(length: number, width: number, variant: FishVariant): 
     variant.dorsalColor,
   );
 
-  const eyeRadius = width * (variant.eyeRadiusFactor ?? 0.04);
+  const eyeRadius = width * (variant.eyeRadiusFactor ?? 0.026);
   const eyeY = halfLen * 0.62;
-  const eyeX = width * 0.22 * proportions.sideSquash;
   const eyeZ = width * 0.1 * proportions.heightStretch;
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  // A disc that follows the flank, so it is never clipped by the body's own
+  // curvature the way a flat plate is (these bodies are round enough that a
+  // flat eye visibly truncated into a crescent).
+  const eyes = buildFlankEyeDiscsGeometry({
+    y: eyeY,
+    z: eyeZ,
+    radius: eyeRadius,
+    profile,
+    sideSquash: proportions.sideSquash,
+    heightStretch: proportions.heightStretch,
+    offset: eyeRadius * FISH_EYE_SURFACE_OFFSET,
+    thickness: eyeRadius * FISH_EYE_DISC_THICKNESS,
+  });
 
-  const body = mergeGeometriesWithColor([
-    { geometry: coloredBody, color: UNUSED_MERGE_COLOR },
-    { geometry: dorsal, color: UNUSED_MERGE_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
-  ]);
+  const parts = [
+    { geometry: coloredBody, color: UNUSED_MERGE_COLOR, suppress: false },
+    { geometry: dorsal, color: UNUSED_MERGE_COLOR, suppress: false },
+    // The eye is not skin: without this the scale pattern tiles straight over
+    // the disc and a crescent of scale shows on top of it.
+    { geometry: eyes, color: EYE_COLOR, suppress: true },
+  ];
+  const body = mergeGeometriesWithColor(parts);
+  setScaleSuppressAttribute(body, parts);
 
   const span = length * fins.pectoralSpanFactor;
   const chord = length * fins.pectoralChordFactor;
@@ -519,7 +527,7 @@ const CLOWNFISH_VARIANT: FishVariant = {
   dorsalColor: CLOWNFISH_FIN_COLOR,
   pectoralColor: CLOWNFISH_FIN_COLOR,
   tailColor: CLOWNFISH_FIN_COLOR,
-  eyeRadiusFactor: 0.045,
+  eyeRadiusFactor: 0.03,
 };
 
 /** Clownfish: a stubby oval orange body crossed by three white vertical bands
@@ -577,6 +585,8 @@ const BLUE_TANG_VARIANT: FishVariant = {
     dorsalHeightFactor: 0.7,
     caudalSpreadFactor: 0.7,
   },
+  // Left larger than the other variants: the blue tang is a tall disc, so the
+  // same radius reads smaller against its body depth.
   eyeRadiusFactor: 0.045,
 };
 

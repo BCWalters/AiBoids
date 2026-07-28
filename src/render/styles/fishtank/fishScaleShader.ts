@@ -159,7 +159,7 @@ export function applyFishScaleShader(
     : measuredCrossSpan;
   const freq = config.scalesPerLength / crossSpan;
   const planeSwizzle = patternPlane === 'yz' ? 'vFishScalePos.z' : 'vFishScalePos.x';
-  const cacheKey = `aiboids-fish-scale-v4:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
+  const cacheKey = `aiboids-fish-scale-v5:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -176,19 +176,20 @@ export function applyFishScaleShader(
     // Declare the varying at the top so it survives Three.js's GLSL version
     // transform (varying → out in WebGL 2 / GLSL 300 ES).
     shader.vertexShader =
-      `varying vec3 vFishScalePos;\n` + shader.vertexShader;
+      `varying vec3 vFishScalePos;\nvarying float vScaleSuppress;\nattribute float aScaleSuppress;\n`
+      + shader.vertexShader;
     // Capture the REST-space (pre-undulation) model position right before
     // vColor is set. Using the rest position means the scale pattern stays
     // fixed to the skin even as the body undulates (#219).
     shader.vertexShader = shader.vertexShader.replace(
       '#include <color_vertex>',
-      `vFishScalePos = position;\n#include <color_vertex>`,
+      `vFishScalePos = position;\nvScaleSuppress = aScaleSuppress;\n#include <color_vertex>`,
     );
 
     // --- Fragment shader ---
     // Declare the varying (in) and uniforms at the top.
     shader.fragmentShader =
-      `varying vec3 vFishScalePos;\nuniform float uFishScaleFreq;\nuniform float uScaleEdgeDarkness;\nuniform float uScaleGloss;\n` +
+      `varying vec3 vFishScalePos;\nvarying float vScaleSuppress;\nuniform float uFishScaleFreq;\nuniform float uScaleEdgeDarkness;\nuniform float uScaleGloss;\n` +
       shader.fragmentShader;
 
     // Inject the scale pattern AFTER roughnessmap_fragment. That chunk sets
@@ -202,6 +203,12 @@ export function applyFishScaleShader(
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <roughnessmap_fragment>',
       `#include <roughnessmap_fragment>
+  // Parts that are not skin opt OUT of the scale pattern via aScaleSuppress.
+  // The sense is SUPPRESS (1 = skip) deliberately: a geometry that never
+  // declares the attribute reads 0 in GLSL, so the default is "scaled", which
+  // is what every body and fin wants. An INCLUDE sense would silently strip
+  // the pattern off every geometry that forgot to set it.
+  if ( vScaleSuppress < 0.5 )
   {
     // Shingled arc scale pattern in the selected body plane.
     // Y = spine axis (tail→head); second axis is Z (thicker bodies) or

@@ -725,22 +725,27 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       ? BARRACUDA_FIN_RAY_CONFIG
       : BONY_FISH_FIN_RAY_CONFIG;
     applyFishFinRayShader(material, geometries.wingLeft, config, PECTORAL_FIN_FRAME);
-    this.applyPectoralScales(material, geometries);
+    // The pectoral panel lies in the X/Y plane, so its scale pattern takes the
+    // 'yx' plane regardless of which plane the body chose.
+    this.applyFinScales(material, geometries, geometries.wingLeft, 'yx');
   }
 
   /**
-   * Lays the body's scale pattern over the pectoral fins so the fin reads as
-   * part of the same skin rather than a bare plate stuck to the flank. Chains
-   * on top of the fin-ray patch above (rays remain the dominant structure; the
-   * scales sit under them).
+   * Lays the body's scale pattern over a fin so it reads as part of the same
+   * skin rather than a bare plate stuck to the body. Chains on top of the
+   * fin-ray patch (rays remain the dominant structure; the scales sit under
+   * them).
    *
-   * The pectoral panel lies in the X/Y plane, so it takes the 'yx' pattern
-   * plane regardless of which plane the body chose — but its cell SIZE is
-   * driven by the body's own cross-span so the two match in world space.
+   * Cell SIZE is driven by the BODY's cross-span, not the fin's. Sizing cells
+   * from the fin's own span would give a fin the same NUMBER of scales as the
+   * whole flank, so each would be several times too small and the fin would
+   * read as a different material.
    */
-  private applyPectoralScales(
+  private applyFinScales(
     material: THREE.MeshStandardMaterial,
     geometries: CreatureGeometries,
+    finGeometry: THREE.BufferGeometry,
+    plane: FishScalePlane,
   ): void {
     const scaleConfig = geometries === this.barracudaPredatorGeometries
       ? BARRACUDA_SCALE_CONFIG
@@ -751,7 +756,7 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
     const bodyCrossSpan = bodyPlane === 'yz'
       ? bodyBox.max.z - bodyBox.min.z
       : bodyBox.max.x - bodyBox.min.x;
-    applyFishScaleShader(material, geometries.wingLeft, scaleConfig, 'yx', bodyCrossSpan);
+    applyFishScaleShader(material, finGeometry, scaleConfig, plane, bodyCrossSpan);
   }
 
   /**
@@ -797,6 +802,11 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       ? BARRACUDA_FIN_RAY_CONFIG
       : BONY_FISH_FIN_RAY_CONFIG;
     applyFishFinRayShader(material, geometries.tail, config, CAUDAL_FIN_FRAME);
+    // The caudal panel lies in the Y/Z plane (it spans dorsal-to-ventral), so
+    // unlike the pectorals it takes the 'yz' pattern plane. Using 'yx' here
+    // would lay the pattern across the fin's thickness axis and collapse it
+    // into stripes.
+    this.applyFinScales(material, geometries, geometries.tail, 'yz');
   }
 
   dispose(): void {

@@ -363,6 +363,14 @@ export function buildDiscCapGeometry(y: number, radius: number, segments: number
 
 
 /**
+ * `flattenX` squashes each sphere along X into a shallow lens before it is
+ * placed. A round eye only reads as an eye on a body thick enough to carry it:
+ * on a laterally compressed fish the sphere protrudes further than the entire
+ * flank is thick and reads as a ball stuck to the head. Flattening turns it
+ * into a disc lying on the surface, and because the lens tapers to nothing at
+ * its rim it blends into the flank instead of cutting a hard circle. Defaults
+ * to 1 (a true sphere) so existing callers are unaffected.
+ *
  * A small paired-dot eye (two tiny spheres mirrored across the X axis) —
  * same technique as unicornGeometry.ts's buildUnicornEyesGeometry, shared
  * here so small-bird/hawk geometry can use it too. Baked as a near-black
@@ -370,12 +378,20 @@ export function buildDiscCapGeometry(y: number, radius: number, segments: number
  * body tint a given species/individual gets (near-black stays near-black
  * under any multiply).
  */
-export function buildEyeDotsGeometry(x: number, y: number, z: number, radius: number): THREE.BufferGeometry {
-  const left = new THREE.SphereGeometry(radius, 8, 6);
-  left.translate(x, y, z);
-  const right = new THREE.SphereGeometry(radius, 8, 6);
-  right.translate(-x, y, z);
-  return mergePositionOnlyGeometries([left, right]);
+export function buildEyeDotsGeometry(
+  x: number,
+  y: number,
+  z: number,
+  radius: number,
+  flattenX = 1,
+): THREE.BufferGeometry {
+  const build = (side: 1 | -1) => {
+    const sphere = new THREE.SphereGeometry(radius, 8, 6);
+    if (flattenX !== 1) sphere.scale(flattenX, 1, 1);
+    sphere.translate(x * side, y, z);
+    return sphere;
+  };
+  return mergePositionOnlyGeometries([build(1), build(-1)]);
 }
 
 
