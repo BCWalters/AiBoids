@@ -44,6 +44,24 @@ export interface DragonScaleConfig {
  * and sits within the seahorse bony-plate range (0.44–0.82 wu), reading as
  * large, structural reptilian plates rather than fine fish-scale texture.
  */
+/**
+ * Which model-space plane the scale cells are laid out in.
+ *
+ * The pattern is 2D, so BOTH of its axes must actually vary across the surface
+ * being textured. Y (the spine axis) always varies, so only the second axis is
+ * selectable:
+ *
+ *  - 'yz' — for tube-like parts (body, tail), whose Z is the dorsoventral axis.
+ *  - 'yx' — for the membrane wings, which are near-flat panels in the XY plane.
+ *
+ * Getting this wrong does not merely rotate the pattern, it COLLAPSES it. The
+ * dragon wing spans X 2.796 and Y 2.527 but only Z 0.138, with 42% of its
+ * vertices at exactly Z = 0. Sampling it as 'yz' freezes the second coordinate,
+ * so the cells degenerate into parallel bands running out along the span —
+ * stripes, not scales.
+ */
+export type DragonScalePlane = 'yz' | 'yx';
+
 export const DRAGON_SCALE_CONFIG: DragonScaleConfig = {
   scalesPerLength: 20,
   edgeDarkness: 0.30,
@@ -83,6 +101,7 @@ export function applyDragonScaleShader(
   material: THREE.MeshStandardMaterial,
   bodyGeometry: THREE.BufferGeometry,
   config: DragonScaleConfig,
+  patternPlane: DragonScalePlane = 'yz',
 ): void {
   if (config.edgeDarkness === 0) return;
 
@@ -94,7 +113,11 @@ export function applyDragonScaleShader(
   // isotropic cell sizes in world space regardless of body proportions.
   const zSpan = Math.max(1e-6, bb.max.z - bb.min.z);
   const freq = config.scalesPerLength / zSpan;
-  const cacheKey = `aiboids-dragon-scale-v1:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleKeelDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
+  // patternPlane MUST be part of the cache key. three.js reuses a compiled
+  // program whenever the cache key matches, so omitting it would let the wing
+  // silently render with the body's program and lose its own plane.
+  const planeSwizzle = patternPlane === 'yz' ? 'vDragonScalePos.z' : 'vDragonScalePos.x';
+  const cacheKey = `aiboids-dragon-scale-v2:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleKeelDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -143,7 +166,7 @@ export function applyDragonScaleShader(
     // Alternate spine rows are staggered by half a cell (brick/hex layout)
     // so scale arcs interlock. Pattern uses rest-space vDragonScalePos so
     // it stays fixed to the skin.
-    vec2 sp = vec2( vDragonScalePos.y, vDragonScalePos.z ) * uDragonScaleFreq;
+    vec2 sp = vec2( vDragonScalePos.y, ${planeSwizzle} ) * uDragonScaleFreq;
     sp.y += floor( sp.x ) * 0.5;
     vec2 fp = fract( sp ) - 0.5;  // cell-local coords in [-0.5, 0.5]
 

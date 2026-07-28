@@ -714,12 +714,23 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
   for (let vi = 0; vi < posAttr.count; vi++) {
     maxOut = Math.max(maxOut, Math.abs(posAttr.getX(vi)));
   }
+  // The root stop is deliberately well BELOW 1, i.e. darker than the body
+  // rather than matching it. Matching the body reads as the membrane being
+  // pale right up to the shoulder, which flattens the join; seating it in
+  // shadow there reads as the membrane emerging from under the body, and gives
+  // the outward lightening a longer run to work across.
+  //
+  // Hue-neutral (a single scalar) on purpose: this is a shading term, so
+  // tinting it would fight the palette rather than sit underneath it. Values
+  // much below ~0.3 crush the inner membrane toward black and swallow the
+  // bone-tube silhouette; prefer lifting the tip to widen the range.
+  const rootFactor = 0.45;
   const colors = new Float32Array(posAttr.count * 3);
   for (let vi = 0; vi < posAttr.count; vi++) {
     const t = maxOut > 0 ? THREE.MathUtils.clamp(Math.abs(posAttr.getX(vi)) / maxOut, 0, 1) : 0;
-    colors[vi * 3]     = THREE.MathUtils.lerp(1, tipFactor.r, t);
-    colors[vi * 3 + 1] = THREE.MathUtils.lerp(1, tipFactor.g, t);
-    colors[vi * 3 + 2] = THREE.MathUtils.lerp(1, tipFactor.b, t);
+    colors[vi * 3]     = THREE.MathUtils.lerp(rootFactor, tipFactor.r, t);
+    colors[vi * 3 + 1] = THREE.MathUtils.lerp(rootFactor, tipFactor.g, t);
+    colors[vi * 3 + 2] = THREE.MathUtils.lerp(rootFactor, tipFactor.b, t);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 

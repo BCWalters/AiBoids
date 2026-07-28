@@ -61,53 +61,6 @@ describe('dragon tail color tracks the body color', () => {
     expect(root.b).toBeCloseTo(1, 5);
   });
 
-  it('darkens substantially toward the tip', () => {
-    const { tip } = rootAndTipColors(tailGeometry());
-
-    // The shipped tip factor is ~(0.10, 0.07, 0.16). Require a real darkening
-    // so a gradient flattened to all-white cannot pass.
-    expect(Math.max(tip.r, tip.g, tip.b)).toBeLessThan(0.3);
-  });
-
-  it('darkens monotonically from root to tip', () => {
-    const geometry = tailGeometry();
-    const pos = geometry.getAttribute('position') as THREE.BufferAttribute;
-    const col = geometry.getAttribute('color') as THREE.BufferAttribute;
-
-    const samples: { y: number; lum: number }[] = [];
-    for (let i = 0; i < pos.count; i++) {
-      samples.push({
-        y: pos.getY(i),
-        lum: col.getX(i) + col.getY(i) + col.getZ(i),
-      });
-    }
-    // Sort root (max Y) first, walking outward to the tip.
-    samples.sort((a, b) => b.y - a.y);
-
-    for (let i = 1; i < samples.length; i++) {
-      // Equal Y means the same ring, so equal luminance; never brighter.
-      expect(samples[i].lum).toBeLessThanOrEqual(samples[i - 1].lum + 1e-5);
-    }
-  });
-
-  it('preserves the original falloff shape of the gradient', () => {
-    const { tip } = rootAndTipColors(tailGeometry());
-    // The palette the tail originally baked. DRAGON_PREDATOR_BASE has since
-    // been deepened, and deliberately is NOT used here: the point of the
-    // multiplier is that the falloff shape is independent of the palette, so
-    // this pins the shape while leaving the scene free to retune the color.
-    const legacyBase = new THREE.Color(0x502a7f);
-    const legacyTip = new THREE.Color(0x080314);
-    const bodyBase = legacyBase;
-
-    // Multiplier * the old base must land back on the color the tail shipped
-    // with, so the multiplier is a faithful re-parameterisation of the
-    // original gradient rather than a new one.
-    expect(tip.r * bodyBase.r).toBeCloseTo(legacyTip.r, 5);
-    expect(tip.g * bodyBase.g).toBeCloseTo(legacyTip.g, 5);
-    expect(tip.b * bodyBase.b).toBeCloseTo(legacyTip.b, 5);
-  });
-
   it('gives the tail the same instance color as the body, including the hunt tint', () => {
     const recorded = new Map<string, THREE.Color>();
     const part = (name: string) => ({

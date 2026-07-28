@@ -269,9 +269,16 @@ export class Renderer3D {
       vertexColors: rainbowWings || !!geometries.wingLeft.getAttribute('color'),
     });
 
+    // Clone first, then patch BOTH instances: Material.clone() drops
+    // onBeforeCompile and customProgramCacheKey, so patching before the clone
+    // would leave the right wing unpatched.
+    const wingRightMaterial = wingMaterial.clone();
+    sceneRenderer.patchWingMaterial?.(wingMaterial, geometries);
+    sceneRenderer.patchWingMaterial?.(wingRightMaterial, geometries);
+
     const body = new THREE.InstancedMesh(geometries.body, bodyMaterial, Math.max(count, 1));
     const wingLeft = new THREE.InstancedMesh(geometries.wingLeft, wingMaterial, Math.max(count, 1));
-    const wingRight = new THREE.InstancedMesh(geometries.wingRight, wingMaterial.clone(), Math.max(count, 1));
+    const wingRight = new THREE.InstancedMesh(geometries.wingRight, wingRightMaterial, Math.max(count, 1));
     body.count = count;
     wingLeft.count = count;
     wingRight.count = count;

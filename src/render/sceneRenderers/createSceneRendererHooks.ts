@@ -308,6 +308,16 @@ export interface SceneRendererHooks {
    * has to be applied here as well or it stops abruptly at the tail joint.
    */
   patchTailMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
+  /**
+   * Optional hook to patch the wing MeshStandardMaterial.
+   *
+   * IMPORTANT: this is invoked once per wing material INSTANCE, not once per
+   * creature. The two wings do not share a material — the right wing gets a
+   * clone — and THREE.Material.clone() copies neither onBeforeCompile nor
+   * customProgramCacheKey, so a patch applied before cloning silently reaches
+   * only the left wing.
+   */
+  patchWingMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
   dispose: () => void;
 }
 

@@ -842,6 +842,18 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
+  patchWingMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
+    if (geometries === this.dragonPredatorGeometries) {
+      // Body geometry again, for the same shared-cell-size reason as the tail.
+      //
+      // The 'yx' plane is required here: the wing is a near-flat panel in XY
+      // (Z span 0.138 against X 2.796 / Y 2.527), so the body's 'yz' plane
+      // would freeze the pattern's second coordinate and render stripes
+      // running out along the span instead of scales.
+      applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG, 'yx');
+    }
+  }
+
   dispose(): void {
     // The nature env is owned by LazyEnvProvider and disposed there — do not
     // call dispose() on it here to avoid a double-dispose.
