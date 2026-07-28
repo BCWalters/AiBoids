@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import { createParrotGeometries } from './parrotGeometry';
 import { createRealisticBirdGeometries } from './smallBirdGeometry';
+import { createHawkGeometries } from './hawkGeometry';
 
 /**
  * A bird's two wings must be exact reflections of each other, in shape and in
@@ -75,6 +76,59 @@ function totalTriangleArea(wing: THREE.BufferGeometry): number {
   return total;
 }
 
+/**
+ * How many triangles face the opposite way to their mirror image.
+ *
+ * This is the assertion that actually has teeth on a wing carrying no vertex
+ * colours. Reflecting a mesh through x = 0 reverses the winding of every
+ * triangle, so a second wing built by negating x — rather than by reflecting
+ * the finished mesh — ends up with the same vertex positions, the same total
+ * area and the same colours, while every one of its faces points inwards.
+ *
+ * That is not cosmetic. Vertex normals are what the plumage pass reads to
+ * decide topside versus underside, and it is exactly how one parrot wing came
+ * to render its underside palette on top. Positions and area cannot see it.
+ *
+ * Triangles are matched by their mirrored centroid, and the comparison is on
+ * the sign of the x-flipped normal.
+ */
+function oppositelyWoundTriangles(left: THREE.BufferGeometry, right: THREE.BufferGeometry): number {
+  const faceNormals = (wing: THREE.BufferGeometry, mirror: boolean) => {
+    const position = wing.getAttribute('position') as THREE.BufferAttribute;
+    const out = new Map<string, THREE.Vector3>();
+    const a = new THREE.Vector3();
+    const b = new THREE.Vector3();
+    const c = new THREE.Vector3();
+    for (let i = 0; i + 2 < position.count; i += 3) {
+      a.fromBufferAttribute(position, i);
+      b.fromBufferAttribute(position, i + 1);
+      c.fromBufferAttribute(position, i + 2);
+      const normal = b.clone().sub(a).cross(c.clone().sub(a));
+      if (normal.lengthSq() < 1e-12) continue;
+      normal.normalize();
+      const centroid = a.clone().add(b).add(c).divideScalar(3);
+      if (mirror) {
+        centroid.x = -centroid.x;
+        normal.x = -normal.x;
+      }
+      out.set(
+        `${centroid.x.toFixed(4)}|${centroid.y.toFixed(4)}|${centroid.z.toFixed(4)}`,
+        normal,
+      );
+    }
+    return out;
+  };
+
+  const leftFaces = faceNormals(left, false);
+  const rightFaces = faceNormals(right, true);
+  let opposite = 0;
+  for (const [key, normal] of rightFaces) {
+    const match = leftFaces.get(key);
+    if (match && match.dot(normal) < 0) opposite++;
+  }
+  return opposite;
+}
+
 function measureMirror(left: THREE.BufferGeometry, right: THREE.BufferGeometry) {
   const byPosition = indexByPosition(left);
   const rightPosition = right.getAttribute('position') as THREE.BufferAttribute;
@@ -113,6 +167,7 @@ function measureMirror(left: THREE.BufferGeometry, right: THREE.BufferGeometry) 
     worstColourDelta,
     leftArea,
     areaDelta: Math.abs(leftArea - rightArea) / leftArea,
+    oppositelyWound: oppositelyWoundTriangles(left, right),
   };
 }
 
@@ -130,6 +185,7 @@ describe('wing mirror symmetry', () => {
     expect(result.worstColourDelta).toBeLessThanOrEqual(0.02);
     expect(result.leftArea).toBeGreaterThan(0);
     expect(result.areaDelta).toBeLessThanOrEqual(1e-6);
+    expect(result.oppositelyWound).toBe(0);
   });
 
   it('gives the small bird two wings that are exact reflections in shape', () => {
@@ -140,5 +196,22 @@ describe('wing mirror symmetry', () => {
     expect(result.unmatchedPositions).toBe(0);
     expect(result.leftArea).toBeGreaterThan(0);
     expect(result.areaDelta).toBeLessThanOrEqual(1e-6);
+    expect(result.oppositelyWound).toBe(0);
+  });
+
+  it('gives the hawk two wings that are exact reflections in shape', () => {
+    // The hawk's wing is built the same way, so it inherits the same trap: its
+    // panel is cambered and its feathers are laid out from a handed
+    // perpendicular, both of which quietly stop mirroring if the second wing is
+    // ever rebuilt with a sign pushed through its coordinates instead of being
+    // reflected as a finished mesh.
+    const geometries = createHawkGeometries(9.1, 6.24);
+    const result = measureMirror(geometries.wingLeft, geometries.wingRight);
+
+    expect(result.vertexCount).toBeGreaterThan(2000);
+    expect(result.unmatchedPositions).toBe(0);
+    expect(result.leftArea).toBeGreaterThan(0);
+    expect(result.areaDelta).toBeLessThanOrEqual(1e-6);
+    expect(result.oppositelyWound).toBe(0);
   });
 });

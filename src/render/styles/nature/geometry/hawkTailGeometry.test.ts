@@ -111,18 +111,59 @@ function maxFlankY(geo: THREE.BufferGeometry, xTolerance = 1e-4): number {
 // ---------------------------------------------------------------------------
 
 describe('hawk tail geometry — shape assertions', () => {
-  it('is a fan, not a kite: trailing-edge span ≥ 90 % of max span', () => {
-    // The old kite had a single rear vertex at X=0, giving trailing span = 0.
-    // The new fan has full half-span at the trailing edge, so this ratio → 1.
+  it('is a fan, not a kite: the trailing edge stays broad', () => {
+    // The old kite converged to a single rear vertex at X = 0, so its rear
+    // 10 % held only that one point and the ratio was 0.
+    //
+    // The threshold dropped from 0.9 when the flat trapezoid was replaced by
+    // individually modelled rectrices. A trapezoid's rear edge is a straight
+    // line, so every rear vertex sits at the same Y and the ratio is exactly
+    // 1; a spread fan's rear edge is an arc, so the outer feathers finish
+    // ahead of the central ones and the rear 10 % band legitimately holds
+    // only the middle of the tail. Measured:
+    //
+    //   kite (two designs ago)   0.00
+    //   flat trapezoid           1.00
+    //   feathered fan (current)  0.59
+    //
+    // 0.35 separates a tail that ends in a point from one that does not.
     const geo = tailGeom();
     const box = new THREE.Box3();
     box.setFromBufferAttribute(geo.getAttribute('position') as THREE.BufferAttribute);
     const maxSpan = box.max.x - box.min.x;
-    // "Trailing edge" = vertices in the rear 10 % of the tail's Y extent.
-    const yExtent   = box.max.y - box.min.y;
-    const trailing10pctY = box.min.y + yExtent * 0.10;
-    const trailingSpan = spanAtOrBehind(geo, trailing10pctY);
-    expect(trailingSpan / maxSpan).toBeGreaterThanOrEqual(0.9);
+    const yExtent = box.max.y - box.min.y;
+    const trailingSpan = spanAtOrBehind(geo, box.min.y + yExtent * 0.1);
+    expect(trailingSpan / maxSpan).toBeGreaterThanOrEqual(0.35);
+  });
+
+  it('is made of separate rectrices, not one solid sheet', () => {
+    // The assertion above passes for any broad outline, including the solid
+    // trapezoid this tail replaced. What actually changed is that the trailing
+    // edge is now scalloped, because it is a row of individual feathers.
+    //
+    // Walk the rear outline across the span and count the notches — the points
+    // where the rearmost vertex jumps forward and then back again. A solid
+    // outline has none.
+    const geo = tailGeom();
+    const pos = geo.getAttribute('position') as THREE.BufferAttribute;
+    const box = new THREE.Box3().setFromBufferAttribute(pos);
+    const bins = 80;
+    const rear = new Array<number>(bins).fill(Infinity);
+    for (let i = 0; i < pos.count; i++) {
+      const u = (pos.getX(i) - box.min.x) / (box.max.x - box.min.x);
+      const bin = Math.min(bins - 1, Math.max(0, Math.floor(u * bins)));
+      rear[bin] = Math.min(rear[bin], pos.getY(i));
+    }
+    const filled = rear.filter((y) => Number.isFinite(y));
+    let notches = 0;
+    for (let i = 1; i < filled.length - 1; i++) {
+      if (filled[i] > filled[i - 1] && filled[i] >= filled[i + 1]) notches += 1;
+    }
+    // 12 rectrices give 11 interior gaps; binning and overlap lose a few.
+    // Measured: 8 for this tail, 2 for the solid trapezoid it replaced (a
+    // convex outline still registers a couple of notches at the corners where
+    // the rear edge meets the flanks, so the floor cannot be 1).
+    expect(notches).toBeGreaterThanOrEqual(5);
   });
 
   it('is flat: Z-thickness < 10 % of X-span (horizontal surface)', () => {
@@ -138,6 +179,12 @@ describe('hawk tail geometry — shape assertions', () => {
   it('does not widen forward of the body rear tip', () => {
     // Matches the analogous assertion in birdTailAttachment.test.ts but for
     // the hawk-specific geometry factory path.
+    //
+    // This one has teeth: fanning the rectrices out puts each feather's base
+    // corners half a vane-width out along its own perpendicular, so an outer
+    // feather seated level with the rump has its leading corner ahead of the
+    // body and pokes through the bird's flank. The builder sets each root back
+    // by exactly that much, and this is what checks it.
     const bodyRearY = getBirdBodyRearTipY(LENGTH);
     expect(maxFlankY(tailGeom())).toBeLessThanOrEqual(bodyRearY + 1e-3);
   });

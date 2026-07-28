@@ -77,13 +77,17 @@ const NATURE_LARGEST_PREY_LENGTH = Math.max(
   NATURE_CREATURE_SIZES.parrot.length,
 );
 
-// Measured from the authored local geometry: the hawk beak tip sits ~0.538
+// Measured from the authored local geometry: the hawk beak tip sits ~0.558
 // body-lengths ahead of the origin, and the dragon's bent snout lands at
 // ~0.532 body-lengths forward after the neck/head rotations.
+//
+// The hawk figure moved from 0.538 when its beak was lengthened and hooked;
+// predatorCatchProfiles.mouthOffset.test.ts re-measures the shipped geometry,
+// so this constant has to be kept honest rather than left at its old value.
 export const NATURE_PREDATOR_CATCH_PROFILES: PredatorCatchProfiles = {
   [PredatorSpecies.Normal]: createPredatorCatchProfile(
     NATURE_CREATURE_SIZES.hawk.length,
-    0.538,
+    0.558,
     NATURE_LARGEST_PREY_LENGTH,
   ),
   [PredatorSpecies.Monster]: createPredatorCatchProfile(
