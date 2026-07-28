@@ -25,6 +25,16 @@ export interface FishScaleConfig {
 }
 
 /**
+ * Which model-space plane the scale cells are laid out in.
+ *
+ * The pattern is 2D, so BOTH of its axes must vary on the textured surface:
+ * - 'yz' for thicker/tube-like fish bodies (dorsoventral Z varies strongly)
+ * - 'yx' for flatter bodies where Z is near-constant and would collapse cells
+ *   into stripes.
+ */
+export type FishScalePlane = 'yz' | 'yx';
+
+/**
  * Internal shader constant: scale-circle radius in normalised cell coordinates.
  * Exported so the JS test port can use the same value as the GLSL constant.
  * Values > 0.5 mean adjacent circles overlap, creating the shingled crescent.
@@ -120,6 +130,7 @@ export function applyFishScaleShader(
   material: THREE.MeshStandardMaterial,
   bodyGeometry: THREE.BufferGeometry,
   config: FishScaleConfig,
+  patternPlane: FishScalePlane = 'yz',
 ): void {
   if (config.edgeDarkness === 0) return;
 
@@ -130,9 +141,15 @@ export function applyFishScaleShader(
   // (Y span ≈ 3.2, Z span ≈ 1.9) both get the same cell size per world unit
   // for the same scalesPerLength value. Using max.y alone would give the
   // barracuda ≈2 crosswise cells (the Z span is ~5× shorter than Y span).
-  const zSpan = Math.max(1e-6, bb.max.z - bb.min.z);
-  const freq = config.scalesPerLength / zSpan;
-  const cacheKey = `aiboids-fish-scale-v3:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
+  // Frequency is derived from the span of the SECOND pattern axis, which is
+  // whichever axis `patternPlane` selects. Deriving it from Z while laying the
+  // pattern out on X would make cells far too dense on flatter bodies.
+  const crossSpan = patternPlane === 'yz'
+    ? Math.max(1e-6, bb.max.z - bb.min.z)
+    : Math.max(1e-6, bb.max.x - bb.min.x);
+  const freq = config.scalesPerLength / crossSpan;
+  const planeSwizzle = patternPlane === 'yz' ? 'vFishScalePos.z' : 'vFishScalePos.x';
+  const cacheKey = `aiboids-fish-scale-v4:${patternPlane}:${freq.toFixed(5)}:${config.edgeDarkness.toFixed(4)}:${config.scaleGloss.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -176,12 +193,13 @@ export function applyFishScaleShader(
       '#include <roughnessmap_fragment>',
       `#include <roughnessmap_fragment>
   {
-    // Shingled arc scale pattern on the YZ body plane.
-    // Y = spine axis (tail→head); Z = dorsal-ventral axis.
+    // Shingled arc scale pattern in the selected body plane.
+    // Y = spine axis (tail→head); second axis is Z (thicker bodies) or
+    // X (flatter bodies where Z would collapse the pattern into stripes).
     // Alternate spine rows are staggered by half a cell (brick/hex layout)
     // so scale arcs interlock. Pattern uses rest-space vFishScalePos so it
     // does not swim with body undulation.
-    vec2 sp = vec2( vFishScalePos.y, vFishScalePos.z ) * uFishScaleFreq;
+    vec2 sp = vec2( vFishScalePos.y, ${planeSwizzle} ) * uFishScaleFreq;
     sp.y += floor( sp.x ) * 0.5;
     vec2 fp = fract( sp ) - 0.5;
 
@@ -210,7 +228,11 @@ export function applyFishScaleShader(
     // --- Reflectivity: reduce roughness at scale centres for highlights ---
     // roughnessFactor is a local float (set by roughnessmap_fragment above);
     // it is safe to assign to it here.
-    float scaleGloss = uScaleGloss * max( 0.0, 1.0 - r / kScaleR ) * visible;
+    // Slight per-cell gloss variation avoids a uniform plastic sheen.
+    vec2 cell = floor( sp );
+    float cellNoise = fract( sin( dot( cell, vec2( 127.1, 311.7 ) ) ) * 43758.5453 );
+    float glossJitter = mix( 0.85, 1.15, cellNoise );
+    float scaleGloss = uScaleGloss * glossJitter * max( 0.0, 1.0 - r / kScaleR ) * visible;
     roughnessFactor = clamp( roughnessFactor - scaleGloss, 0.0, 1.0 );
   }`,
     );

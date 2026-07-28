@@ -395,6 +395,62 @@ describe('FishtankSceneRenderer3D.patchBodyMaterial species routing', () => {
   });
 });
 
+describe('FishtankSceneRenderer3D fish-scale silent regressions', () => {
+  const BOID_FLAGS = { isNature: false, isFishtank: true, isOrganic: true };
+
+  function fishSetup() {
+    const renderer = makeFishtankRenderer();
+    const { geometries } = renderer.getBoidInstanceConfig(BoidSpecies.Normal, BOID_FLAGS);
+    return { renderer, geometries };
+  }
+
+  function fishPatternExpr(fragment: string): string {
+    return fragment.match(/vec2 sp = vec2\([^)]*\)/)?.[0] ?? '';
+  }
+
+  it('picks the non-collapsing body pattern plane from real body extents', () => {
+    const { renderer, geometries } = fishSetup();
+    geometries.body.computeBoundingBox();
+    const bb = geometries.body.boundingBox!;
+    const xSpan = bb.max.x - bb.min.x;
+    const zSpan = bb.max.z - bb.min.z;
+    const expectedAxis = zSpan >= xSpan ? 'vFishScalePos.z' : 'vFishScalePos.x';
+
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    renderer.patchBodyMaterial(mat, geometries);
+    const fragment = captureShader(mat).fragmentShader;
+    const spExpr = fishPatternExpr(fragment);
+
+    expect(spExpr).toContain(expectedAxis);
+  });
+
+  it('includes the selected pattern plane in customProgramCacheKey', () => {
+    const { renderer, geometries } = fishSetup();
+    geometries.body.computeBoundingBox();
+    const bb = geometries.body.boundingBox!;
+    const xSpan = bb.max.x - bb.min.x;
+    const zSpan = bb.max.z - bb.min.z;
+    const expectedPlane = zSpan >= xSpan ? 'yz' : 'yx';
+
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true });
+    renderer.patchBodyMaterial(mat, geometries);
+    const key = mat.customProgramCacheKey?.() ?? '';
+
+    expect(key).toContain('aiboids-fish-scale-v4');
+    expect(key).toContain(`:${expectedPlane}:`);
+  });
+
+  it('is lost by Material.clone(), so cloned instances must be patched explicitly', () => {
+    const { renderer, geometries } = fishSetup();
+    const original = new THREE.MeshStandardMaterial({ vertexColors: true });
+    renderer.patchBodyMaterial(original, geometries);
+    const cloned = original.clone();
+
+    expect(original.customProgramCacheKey?.() ?? '').toContain('aiboids-fish-scale-v4');
+    expect(cloned.customProgramCacheKey?.() ?? '').not.toContain('aiboids-fish-scale-v4');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Vertex colours: merged bodies still carry per-variant palette colours
 // ---------------------------------------------------------------------------
