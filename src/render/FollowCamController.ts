@@ -323,10 +323,21 @@ export class FollowCamController {
     );
     // Map the look-ahead point through toRenderedPosition so fishtank's 4×
     // scale is applied to both position and direction offset uniformly.
-    const lookAheadRender = renderer3D.toRenderedPosition(
+    // Then shift the result forward by noseOffset (rendered units) so the
+    // look-ahead is always ahead of the camera position.  Without this
+    // shift, creatures with a large nose extent (e.g. the shark — issue
+    // #259) push the camera beyond the body-centre look-ahead target,
+    // making the camera face backwards.  Shifting by noseOffset guarantees
+    // camera→look-ahead = h × POV_LOOK_AHEAD_SIM×worldScale, always > 0.
+    const lookAheadBase = renderer3D.toRenderedPosition(
       entity.position.x + h.x * POV_LOOK_AHEAD_SIM,
       entity.position.y + h.y * POV_LOOK_AHEAD_SIM,
       entity.position.z + h.z * POV_LOOK_AHEAD_SIM,
+    );
+    const lookAheadRender = new THREE.Vector3(
+      lookAheadBase.x + h.x * noseOffset,
+      lookAheadBase.y + h.y * noseOffset,
+      lookAheadBase.z + h.z * noseOffset,
     );
 
     if (!this._povInitialized) {
