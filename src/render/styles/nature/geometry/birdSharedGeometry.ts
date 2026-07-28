@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { extrudeRingGeometry } from '../../../geometry/sharedGeometry';
+import { extrudeRingGeometry, mergePositionOnlyGeometries } from '../../../geometry/sharedGeometry';
 
 /**
  * Bird-part geometry shared across the nature-scene bird species —
@@ -297,4 +297,111 @@ export function applyTailGradient(geo: THREE.BufferGeometry, gradient: TailGradi
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   }
+}
+
+/**
+ * Two tucked legs, seated against the bird's actual belly.
+ *
+ * Every bird in this scene had hand-written its own copy of this, and every
+ * copy carried the same two defects:
+ *
+ *   - The hip was a hard-coded constant with a comment recording the body
+ *     radius it had been read off — `-scaledWidth * 0.240`, `-width * 0.242`,
+ *     `-width * 0.08`. Those comments went stale the moment anyone reshaped a
+ *     body, and nothing in the geometry or the tests noticed. Reworking the
+ *     small bird left its legs buried inside its belly; deepening the hawk's
+ *     keel swallowed its legs whole.
+ *   - The two legs were placed at `±width * 0.001`, which is not a separation
+ *     at all. Both were drawn on the centreline, one inside the other, so the
+ *     bird flew with what looked like a single leg.
+ *
+ * So the hip is measured off the finished body here, and the caller has to say
+ * how far apart the legs go. The measurement makes the legs track whatever the
+ * profile does next, instead of having to be re-derived by hand every time.
+ *
+ * Returns an uncoloured geometry; callers apply their own plumage colour.
+ */
+export function buildTuckedBirdLegs({
+  body,
+  length,
+  width,
+  footY,
+  legX,
+  legRadius,
+  toeLength,
+  toeRadius,
+  toeSpread,
+  footDrop,
+}: {
+  /** The finished torso, so the hip can be measured rather than guessed. */
+  body: THREE.BufferGeometry;
+  length: number;
+  width: number;
+  /** Station along the spine. A bird's ankle sits well back toward the tail. */
+  footY: number;
+  /** Half the distance between the two legs. */
+  legX: number;
+  legRadius: number;
+  toeLength: number;
+  toeRadius: number;
+  /** Lateral spread of the outer two forward toes. */
+  toeSpread: number;
+  /**
+   * How far the foot hangs below the belly directly above it, in body lengths.
+   *
+   * Measured against the local belly rather than the lowest point of the whole
+   * body. A bird's keel is deepest at the chest, well forward of its ankle, so
+   * forcing the foot to clear the keel hangs it a long way below the belly it
+   * actually attaches to — on the parrot that was 17 % of body width, and the
+   * legs read as two pegs sticking out of its front rather than as feet tucked
+   * up in flight.
+   */
+  footDrop: number;
+}): THREE.BufferGeometry {
+  const position = body.getAttribute('position') as THREE.BufferAttribute;
+  const yBand = length * 0.05;
+  const xBand = Math.max(width * 0.05, legX * 0.6);
+
+  /** Depth of the belly surface directly above a given leg. */
+  const bellyAt = (x: number) => {
+    let z = 0;
+    for (let i = 0; i < position.count; i++) {
+      if (Math.abs(position.getY(i) - footY) > yBand) continue;
+      if (Math.abs(position.getX(i) - x) > xBand) continue;
+      z = Math.min(z, position.getZ(i));
+    }
+    return z;
+  };
+
+  const footZ = Math.min(bellyAt(legX), bellyAt(-legX)) - length * footDrop;
+
+  const buildLeg = (side: 1 | -1): THREE.BufferGeometry => {
+    const x = side * legX;
+    // The shank starts inside the belly rather than flush against it. The legs
+    // are their own instanced part and swing on the tuck rig, so a joint that
+    // only just touches opens into a gap as soon as it rotates.
+    const hipZ = bellyAt(x) + width * 0.06;
+    const shank = hipZ - footZ;
+    const leg = new THREE.CylinderGeometry(legRadius * 0.85, legRadius, shank, 8);
+    leg.rotateX(Math.PI / 2);
+    leg.translate(x, footY, hipZ - shank * 0.5);
+
+    const makeToe = (xOffset: number, yBias: number): THREE.BufferGeometry => {
+      const toe = new THREE.ConeGeometry(toeRadius, toeLength, 5);
+      toe.translate(x + xOffset, footY + yBias + toeLength * 0.45, footZ);
+      return toe;
+    };
+    const toes = [
+      makeToe(side * toeSpread, toeLength * 0.04),
+      makeToe(0, toeLength * 0.1),
+      makeToe(-side * toeSpread, toeLength * 0.04),
+    ];
+    // The hallux, pointing back the other way.
+    const hallux = new THREE.ConeGeometry(toeRadius * 0.8, toeLength * 0.62, 5);
+    hallux.rotateX(Math.PI);
+    hallux.translate(x, footY - toeLength * 0.27, footZ + toeLength * 0.02);
+    return mergePositionOnlyGeometries([leg, ...toes, hallux]);
+  };
+
+  return mergePositionOnlyGeometries([buildLeg(1), buildLeg(-1)]);
 }
