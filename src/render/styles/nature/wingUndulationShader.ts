@@ -45,6 +45,7 @@ export interface WingUndulationInstanceState {
 function vertexDeclarations(): string {
   return `
 attribute float wingUndulationPhase;
+uniform float uWingRoot;
 uniform float uWingSpan;
 uniform float uWingUndulationAmplitude;
 uniform float uWingUndulationWaveNumber;
@@ -56,6 +57,13 @@ function vertexDisplacementSnippet(): string {
   // The left-wing vertices sit at X < 0, right-wing at X > 0; abs() handles
   // both identically so a single attribute drives both meshes.
   //
+  // t is measured from the panel's OWN root (uWingRoot = the smallest |x| in
+  // the geometry), not from the model origin. Bird wings, and every fish fin
+  // but one, start at x = 0 exactly, so this is identical to |x| / span for
+  // them. The sea horse pectoral is the exception: its root is seated on the
+  // body's side surface at |x| ≈ 0.34, and measuring from the origin would
+  // hand the root a quarter of the deflection and tear it out of the flank.
+  //
   // A smoothstep envelope ensures zero displacement at the shoulder (the
   // pivot stays fixed through the rigid rotation) and ramps smoothly up to
   // the full deflection at the tip.
@@ -65,7 +73,7 @@ function vertexDisplacementSnippet(): string {
   // the tip always trails the root.
   return `
   if (uWingSpan > 1e-6) {
-    float wingT = clamp(abs(position.x) / uWingSpan, 0.0, 1.0);
+    float wingT = clamp((abs(position.x) - uWingRoot) / uWingSpan, 0.0, 1.0);
     float wingEnvelope = wingT * wingT * (3.0 - 2.0 * wingT);
     transformed.z += uWingUndulationAmplitude * wingEnvelope
                      * sin(wingUndulationPhase - uWingUndulationWaveNumber * wingT);
@@ -77,13 +85,14 @@ function vertexDisplacementSnippet(): string {
 
 function patchOneMaterial(
   material: THREE.MeshStandardMaterial,
+  root: number,
   span: number,
   config: WingUndulationConfig,
 ): void {
   const amplitude = span * config.amplitudeFraction;
   const waveNumber = config.tipPhaseLagRad;
   const cacheKey =
-    `aiboids-wing-undulation-v1:${span.toFixed(5)}:${amplitude.toFixed(5)}:${waveNumber.toFixed(5)}`;
+    `aiboids-wing-undulation-v2:${root.toFixed(5)}:${span.toFixed(5)}:${amplitude.toFixed(5)}:${waveNumber.toFixed(5)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -97,6 +106,7 @@ function patchOneMaterial(
     previousCompile?.(shader, renderer);
 
     Object.assign(shader.uniforms, {
+      uWingRoot: { value: root },
       uWingSpan: { value: span },
       uWingUndulationAmplitude: { value: amplitude },
       uWingUndulationWaveNumber: { value: waveNumber },
@@ -113,6 +123,36 @@ function patchOneMaterial(
 }
 
 /**
+ * Measures the panel's spanwise extent along X: `root` is the smallest |x| in
+ * the geometry (where the panel meets the body) and `span` is the distance
+ * from there out to the tip. Read from the positions rather than the bounding
+ * box because a bounding box cannot express "the panel starts at |x| = 0.34" —
+ * min.x and max.x straddle the origin for a mirrored pair.
+ */
+export function measureSpanwiseExtent(
+  geometry: THREE.BufferGeometry,
+): { root: number; span: number } {
+  const position = geometry.getAttribute('position');
+  if (!position) return { root: 0, span: 1 };
+  let root = Infinity;
+  let tip = 0;
+  for (let i = 0; i < position.count; i++) {
+    const ax = Math.abs(position.getX(i));
+    if (ax < root) root = ax;
+    if (ax > tip) tip = ax;
+  }
+  if (!Number.isFinite(root)) return { root: 0, span: 1 };
+  // Degenerate case: every vertex sits at the same |x|, so the panel has no
+  // spanwise extent to measure from its own root. Fall back to measuring from
+  // the model origin, which is what a panel like that can still undulate
+  // about. Without this the span would be ~0 and the amplitude with it, so the
+  // undulation would silently vanish rather than fail loudly.
+  const spanFromRoot = tip - root;
+  if (spanFromRoot < 1e-6) return { root: 0, span: Math.max(1e-6, tip) };
+  return { root, span: spanFromRoot };
+}
+
+/**
  * Clones a wing mesh's geometry (so the instanced phase attribute belongs only
  * to this batch, not shared across all batches), attaches the shared phase
  * attribute, patches the material, and derives the span from the bounding box.
@@ -124,15 +164,9 @@ function setupOneMesh(
 ): void {
   const geometry = mesh.geometry.clone();
   mesh.geometry = geometry;
-  if (!geometry.boundingBox) geometry.computeBoundingBox();
-  const span = geometry.boundingBox
-    ? Math.max(
-        Math.abs(geometry.boundingBox.min.x),
-        Math.abs(geometry.boundingBox.max.x),
-      )
-    : 1;
+  const { root, span } = measureSpanwiseExtent(geometry);
   geometry.setAttribute('wingUndulationPhase', phaseAttribute);
-  patchOneMaterial(mesh.material as THREE.MeshStandardMaterial, span, config);
+  patchOneMaterial(mesh.material as THREE.MeshStandardMaterial, root, span, config);
 }
 
 /**

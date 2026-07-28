@@ -28,12 +28,32 @@ import {
 } from '../styles/fishtank/fishScaleShader';
 import { applySeaHorsePlateShader, SEAHORSE_PLATE_CONFIG } from '../styles/fishtank/seaHorsePlateShader';
 import {
+  applyWingUndulationShader,
+  type WingUndulationConfig,
+  type WingUndulationInstanceState,
+} from '../styles/nature/wingUndulationShader';
+import {
   applyFishFinRayShader,
   BONY_FISH_FIN_RAY_CONFIG,
   BARRACUDA_FIN_RAY_CONFIG,
   PECTORAL_FIN_FRAME,
   CAUDAL_FIN_FRAME,
 } from '../styles/fishtank/fishFinRayShader';
+
+// Fin-undulation configs. amplitudeFraction is a fraction of the panel's own
+// root-to-tip span, so these scale automatically with creature size. Fish
+// pectorals are membranous webs over rays and bend far more through the beat
+// than a feathered wing, so both values run above the nature scene's bird
+// config (0.06 / 0.6π). The sea horse gets the most pronounced wave of all —
+// a real one holds station by rippling its pectorals continuously.
+const FISH_FIN_UNDULATION_CONFIG: WingUndulationConfig = {
+  amplitudeFraction: 0.11,
+  tipPhaseLagRad: Math.PI * 0.9,
+};
+const SEAHORSE_FIN_UNDULATION_CONFIG: WingUndulationConfig = {
+  amplitudeFraction: 0.16,
+  tipPhaseLagRad: Math.PI * 1.35,
+};
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -705,6 +725,61 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       ? BARRACUDA_FIN_RAY_CONFIG
       : BONY_FISH_FIN_RAY_CONFIG;
     applyFishFinRayShader(material, geometries.wingLeft, config, PECTORAL_FIN_FRAME);
+    // The pectoral panel lies in the X/Y plane, so its scale pattern takes the
+    // 'yx' plane regardless of which plane the body chose.
+    this.applyFinScales(material, geometries, geometries.wingLeft, 'yx');
+  }
+
+  /**
+   * Lays the body's scale pattern over a fin so it reads as part of the same
+   * skin rather than a bare plate stuck to the body. Chains on top of the
+   * fin-ray patch (rays remain the dominant structure; the scales sit under
+   * them).
+   *
+   * Cell SIZE is driven by the BODY's cross-span, not the fin's. Sizing cells
+   * from the fin's own span would give a fin the same NUMBER of scales as the
+   * whole flank, so each would be several times too small and the fin would
+   * read as a different material.
+   */
+  private applyFinScales(
+    material: THREE.MeshStandardMaterial,
+    geometries: CreatureGeometries,
+    finGeometry: THREE.BufferGeometry,
+    plane: FishScalePlane,
+  ): void {
+    const scaleConfig = geometries === this.barracudaPredatorGeometries
+      ? BARRACUDA_SCALE_CONFIG
+      : BONY_FISH_SCALE_CONFIG;
+    const bodyPlane = this.pickFishScalePlane(geometries.body);
+    if (!geometries.body.boundingBox) geometries.body.computeBoundingBox();
+    const bodyBox = geometries.body.boundingBox!;
+    const bodyCrossSpan = bodyPlane === 'yz'
+      ? bodyBox.max.z - bodyBox.min.z
+      : bodyBox.max.x - bodyBox.min.x;
+    applyFishScaleShader(material, finGeometry, scaleConfig, plane, bodyCrossSpan);
+  }
+
+  /**
+   * Fish pectoral fins are membranous webs stretched over rays — they bend
+   * through the beat far more than a feathered wing does, so both the
+   * amplitude and the root-to-tip phase lag run higher than the nature scene's
+   * bird config.
+   *
+   * Applies to every fishtank species that has pectoral fins, the sea horse
+   * included: a real sea horse holds station by rippling its pectorals, so it
+   * gets the most pronounced wave of all. This is the one species whose fin
+   * root does not sit at x = 0, which is why the shader measures each panel's
+   * own root (see measureSpanwiseExtent).
+   */
+  setupWingUndulation(
+    wingLeft: THREE.InstancedMesh,
+    wingRight: THREE.InstancedMesh,
+    geometries: CreatureGeometries,
+  ): WingUndulationInstanceState {
+    const config = geometries === this.unicornPredatorGeometries
+      ? SEAHORSE_FIN_UNDULATION_CONFIG
+      : FISH_FIN_UNDULATION_CONFIG;
+    return applyWingUndulationShader({ wingLeft, wingRight, config });
   }
 
   /**
@@ -727,6 +802,11 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
       ? BARRACUDA_FIN_RAY_CONFIG
       : BONY_FISH_FIN_RAY_CONFIG;
     applyFishFinRayShader(material, geometries.tail, config, CAUDAL_FIN_FRAME);
+    // The caudal panel lies in the Y/Z plane (it spans dorsal-to-ventral), so
+    // unlike the pectorals it takes the 'yz' pattern plane. Using 'yx' here
+    // would lay the pattern across the fin's thickness axis and collapse it
+    // into stripes.
+    this.applyFinScales(material, geometries, geometries.tail, 'yz');
   }
 
   dispose(): void {

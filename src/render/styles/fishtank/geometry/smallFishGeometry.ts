@@ -4,7 +4,6 @@ import {
   extrudeRingGeometry,
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
-  buildEyeDotsGeometry,
 } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometryAlongX,
@@ -14,6 +13,11 @@ import {
   bakeLengthBandColors,
   bakeUpperFlankMarkColors,
   fishtankFinThickness,
+  splineLatheRadiusAt,
+  buildFlankEyeDiscsGeometry,
+  setScaleSuppressAttribute,
+  FISH_EYE_SURFACE_OFFSET,
+  FISH_EYE_DISC_THICKNESS,
   type FinThicknessSample,
 } from './fishSharedGeometry';
 
@@ -76,6 +80,11 @@ const DEFAULT_FIN_SIZING: FinSizing = {
 const SMALL_FISH_BODY_DEPTH_SCALE = 0.75;
 const SMALL_FISH_SIDE_SQUASH_SCALE = 0.75;
 const SMALL_FISH_DORSAL_HEIGHT_SCALE = 0.75;
+//  - PECTORAL: the side fins are 15% smaller than their per-variant span/chord
+//    factors would give. Applied here rather than by editing each factor so the
+//    per-variant proportions (one variant deliberately runs larger fins) stay
+//    in their existing relative sizes.
+const SMALL_FISH_PECTORAL_SCALE = 0.85;
 
 /** Builds the shared lathe body (nose at +Y, peduncle at -Y) with the given
  * profile and lateral-compression proportions. The caller bakes the body's
@@ -101,22 +110,52 @@ function buildLatheBody(profile: THREE.Vector2[], proportions: BodyProportions):
 }
 
 /**
+ * Samples the fish's BACK surface height (local +Z) at a spine position `y`,
+ * from the same spline the lathe body is built from.
+ *
+ * The lathe revolves `profile` (radius, y) about Y and is then scaled by
+ * heightStretch on Z, so the back at a given y is simply radius(y) *
+ * heightStretch. Sampling the spline — not the raw control points — matters
+ * because buildLatheBody lathes the RESAMPLED curve, and the two differ by
+ * several units near the shoulder.
+ *
+ * Returns 0 beyond the profile's y range (nose and peduncle tips).
+ */
+function fishBackZ(profile: THREE.Vector2[], heightStretch: number, y: number): number {
+  return splineLatheRadiusAt(y, profile) * heightStretch;
+}
+
+/**
  * A natural-profile dorsal fin standing up (+Z) from the fish's back — the
  * single strongest silhouette cue that separates "a fish" from "a flattened
- * egg". The profile mimics a real small-fish dorsal: a steep leading edge rises
- * to a peak near the front, then a long gentle slope tapers back toward the
- * peduncle, so the fin reads as an organic ridge rather than a uniform spike
- * ("mohawk"). Five ring points define the outline; the fin is extruded
- * flank-to-flank along X via extrudeRingGeometryAlongX (a Z-axis extrusion
- * would leave it near-invisible edge-on).
+ * egg".
+ *
+ * The base FOLLOWS the back contour instead of running straight. Previously the
+ * whole base sat at one constant Z while the back is an arch, so at the fin's
+ * forward end the body surface was ~7 units below the base and the fin visibly
+ * hovered over the fish — read as a mohawk stuck on top rather than a fin
+ * growing out of the back (issue #258). The base is also sunk slightly into the
+ * body so no gap can open along it.
+ *
+ * The outer margin is a sampled curve rather than a few straight segments: it
+ * rises convexly from a low trailing edge to a peak forward of centre, then
+ * falls steeply to the leading edge, with a slight scallop between ray tips.
+ *
+ * Extruded flank-to-flank along X via extrudeRingGeometryAlongX (a Z-axis
+ * extrusion would leave it near-invisible edge-on).
  */
-function buildDorsalFinGeometry(length: number, width: number, heightFactor: number, heightStretch: number): THREE.BufferGeometry {
+function buildDorsalFinGeometry(
+  length: number,
+  width: number,
+  heightFactor: number,
+  heightStretch: number,
+  profile: THREE.Vector2[],
+): THREE.BufferGeometry {
   const halfLen = length * 0.5;
-  const finHeight = width * heightFactor * 0.28125; // 25% shorter (was * 0.375)
+  const finHeight = width * heightFactor * 0.28125;
   // Shift the whole fin forward (+Y, toward the head) so it sits over the
   // shoulder rather than mid-back.
   const forwardShift = halfLen * 0.2;
-  const baseZ = width * 0.3 * heightStretch;
   // Base extents, then extended 50% longer about their own midpoint so the
   // fin grows fore-and-aft without drifting off its forward position.
   const frontBaseY0 = halfLen * 0.12 + forwardShift;
@@ -124,42 +163,101 @@ function buildDorsalFinGeometry(length: number, width: number, heightFactor: num
   const baseMidY = (frontBaseY0 + rearBaseY0) * 0.5;
   const frontBaseY = baseMidY + (frontBaseY0 - baseMidY) * 1.5;
   const rearBaseY = baseMidY + (rearBaseY0 - baseMidY) * 1.5;
-  const baseLen = frontBaseY - rearBaseY;
-  // Natural profile: peak close to the leading edge, then a curved sweep back.
-  //   frontBase → rearBase  : bottom edge (along body surface)
-  //   rearBase  → rearTaper : short rear riser (≈18 % of finHeight)
-  //   rearTaper → midCurve  : long gentle slope up (≈62 % of finHeight)
-  //   midCurve  → peak      : final rise to the peak
-  //   peak      → frontBase : steep leading edge
-  const frontBase = new THREE.Vector3(0, frontBaseY, baseZ);
-  const rearBase  = new THREE.Vector3(0, rearBaseY,                      baseZ);
-  const rearTaper = new THREE.Vector3(0, rearBaseY  + baseLen * 0.20, baseZ + finHeight * 0.18);
-  const midCurve  = new THREE.Vector3(0, baseMidY   + baseLen * 0.08, baseZ + finHeight * 0.62);
-  const peak      = new THREE.Vector3(0, frontBaseY - baseLen * 0.12, baseZ + finHeight);
+
+  // Sink the base under the skin so the seam is never visible, and so the fin
+  // stays seated if the body profile is later retuned.
+  const EMBED = 0.94;
+  const baseAt = (y: number) => fishBackZ(profile, heightStretch, y) * EMBED;
+  const yAt = (s: number) => rearBaseY + (frontBaseY - rearBaseY) * s;
+
+  // Outer margin, sampled rear (s=0) to front (s=1). Peak sits forward of
+  // centre; the trailing half is a long gentle sweep and the leading edge is
+  // short and steep, which is the small-fish dorsal shape. The small
+  // alternations are ray-tip scalloping, not noise.
+  const margin: [number, number][] = [
+    [0.04, 0.06], [0.15, 0.19], [0.26, 0.30], [0.37, 0.39],
+    [0.47, 0.47], [0.57, 0.60], [0.66, 0.75], [0.74, 0.91],
+    [0.80, 1.00], [0.87, 0.84], [0.93, 0.55], [0.97, 0.26],
+  ];
+
+  // Ring order: base front -> rear along the body, then the outer margin back
+  // toward the front, so the boundary stays a simple non-self-intersecting loop.
+  //
+  // The base is sampled at the SAME stations as the margin (plus the two
+  // endpoints). Sampling the two edges at different Y positions would leave the
+  // fin with no well-defined thickness at any single Y, which makes its height
+  // profile impossible to measure from the built geometry.
+  const stations = margin.map(([s]) => s);
+  const ring: THREE.Vector3[] = [];
+  for (const s of [1, ...[...stations].reverse(), 0]) {
+    const y = yAt(s);
+    ring.push(new THREE.Vector3(0, y, baseAt(y)));
+  }
+  for (const [s, h] of margin) {
+    const y = yAt(s);
+    ring.push(new THREE.Vector3(0, y, baseAt(y) + finHeight * h));
+  }
+
   const thickness = fishtankFinThickness(width);
-  return extrudeRingGeometryAlongX([frontBase, rearBase, rearTaper, midCurve, peak], thickness);
+  return extrudeRingGeometryAlongX(ring, thickness);
 }
 
 /**
- * A small paddle/kite-shaped pectoral fin extending sideways near the gills.
- * `side` is +1 (toward +X / left) or -1 (mirrored). Rooted with a slight
- * forward (+Y) offset so it reads as attached near the gills. Built as a
- * 4-point kite extruded into a real prism (its ring lies in the X/Y plane, so
- * the shared Z-thickening helper is correct here) so it keeps a silhouette from
- * above/below. These use the wingLeft/wingRight slots so they get the existing
- * per-instance flap animation (reads as paddling/steering).
+ * A small rounded pectoral fin extending sideways near the gills. `side` is +1
+ * (toward +X / left) or -1 (mirrored). Rooted with a slight forward (+Y) offset
+ * so it reads as attached near the gills.
+ *
+ * Outlined as a curved paddle rather than the previous 4-point kite, whose few
+ * long straight edges met at hard corners and read as a blocky card stuck to
+ * the flank: the root is narrow so the blade tapers into the body, the leading
+ * edge bows forward, the tip is rounded, and the trailing edge is lightly
+ * scalloped between ray tips.
+ *
+ * Every ring point stays at z = 0. The ring lies in the X/Y plane and the
+ * shared helper thickens it along Z, so any Z variation in the outline would be
+ * indistinguishable from added thickness and would fatten the fin past its
+ * thickness budget.
+ *
+ * These use the wingLeft/wingRight slots so they get the existing per-instance
+ * flap animation (reads as paddling/steering).
  */
-function buildPectoralFinGeometry(length: number, span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
-  const rootY = length * 0.12;
-  const tipX = span * side;
-  const leadingBulgeX = span * 0.55 * side;
-  const trailingBulgeX = span * 0.45 * side;
-  const root = new THREE.Vector3(0, rootY, 0);
-  const leadingBulge = new THREE.Vector3(leadingBulgeX, rootY + chord * 0.4, 0);
-  const tip = new THREE.Vector3(tipX, rootY - chord * 0.1, 0);
-  const trailingBulge = new THREE.Vector3(trailingBulgeX, rootY - chord * 0.5, 0);
-  const thickness = fishtankFinThickness(chord);
-  return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
+function buildPectoralFinGeometry(length: number, rawSpan: number, rawChord: number, side: 1 | -1): THREE.BufferGeometry {
+  // Seated further aft (was 0.12) so the blade sits behind the gill line rather
+  // than crowding the eye — the forward rake below carries the outer blade
+  // toward the head, which pushed the whole fin visually forward.
+  const rootY = length * 0.02;
+  // The blade outline shrinks, but the extrusion thickness below is taken from
+  // the UNSCALED chord: thickness is how solid the fin is, not a dimension of
+  // its silhouette, and scaling it too would push these fins under the
+  // "genuinely 3D" floor that finThickness.test.ts guards.
+  const span = rawSpan * SMALL_FISH_PECTORAL_SCALE;
+  const chord = rawChord * SMALL_FISH_PECTORAL_SCALE;
+  // Forward rake: the blade's outboard end is carried toward the head, so the
+  // fin reads as held out from the gills rather than swept back along the body
+  // toward the tail. Applied as a function of span fraction so the root stays
+  // put and only the outer blade swings forward.
+  const RAKE = 0.34;
+  const pt = (f: number, c: number) =>
+    new THREE.Vector3(span * f * side, rootY + chord * (c + RAKE * f), 0);
+  const ring = [
+    // Narrow root, so the blade grows out of the flank instead of butting it.
+    pt(0, 0.12),
+    // Leading edge, bowed forward.
+    pt(0.30, 0.34),
+    pt(0.62, 0.38),
+    // Rounded tip.
+    pt(0.87, 0.22),
+    pt(1.0, -0.04),
+    // Trailing edge, scalloped between ray tips.
+    pt(0.88, -0.30),
+    pt(0.74, -0.24),
+    pt(0.58, -0.46),
+    pt(0.42, -0.38),
+    pt(0.22, -0.50),
+    pt(0.06, -0.26),
+  ];
+  const thickness = fishtankFinThickness(rawChord);
+  return extrudeRingGeometry(ring, thickness);
 }
 
 /**
@@ -246,21 +344,36 @@ function buildFishVariant(length: number, width: number, variant: FishVariant): 
   const coloredBody = variant.bakeBody(lathe, halfLen, width);
 
   const dorsal = bakeUniformColor(
-    buildDorsalFinGeometry(length, width, fins.dorsalHeightFactor * SMALL_FISH_DORSAL_HEIGHT_SCALE, proportions.heightStretch),
+    buildDorsalFinGeometry(length, width, fins.dorsalHeightFactor * SMALL_FISH_DORSAL_HEIGHT_SCALE, proportions.heightStretch, profile),
     variant.dorsalColor,
   );
 
-  const eyeRadius = width * (variant.eyeRadiusFactor ?? 0.04);
+  const eyeRadius = width * (variant.eyeRadiusFactor ?? 0.026);
   const eyeY = halfLen * 0.62;
-  const eyeX = width * 0.22 * proportions.sideSquash;
   const eyeZ = width * 0.1 * proportions.heightStretch;
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  // A disc that follows the flank, so it is never clipped by the body's own
+  // curvature the way a flat plate is (these bodies are round enough that a
+  // flat eye visibly truncated into a crescent).
+  const eyes = buildFlankEyeDiscsGeometry({
+    y: eyeY,
+    z: eyeZ,
+    radius: eyeRadius,
+    profile,
+    sideSquash: proportions.sideSquash,
+    heightStretch: proportions.heightStretch,
+    offset: eyeRadius * FISH_EYE_SURFACE_OFFSET,
+    thickness: eyeRadius * FISH_EYE_DISC_THICKNESS,
+  });
 
-  const body = mergeGeometriesWithColor([
-    { geometry: coloredBody, color: UNUSED_MERGE_COLOR },
-    { geometry: dorsal, color: UNUSED_MERGE_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
-  ]);
+  const parts = [
+    { geometry: coloredBody, color: UNUSED_MERGE_COLOR, suppress: false },
+    { geometry: dorsal, color: UNUSED_MERGE_COLOR, suppress: false },
+    // The eye is not skin: without this the scale pattern tiles straight over
+    // the disc and a crescent of scale shows on top of it.
+    { geometry: eyes, color: EYE_COLOR, suppress: true },
+  ];
+  const body = mergeGeometriesWithColor(parts);
+  setScaleSuppressAttribute(body, parts);
 
   const span = length * fins.pectoralSpanFactor;
   const chord = length * fins.pectoralChordFactor;
@@ -280,11 +393,14 @@ function buildFishVariantFinThicknessSamples(length: number, width: number, vari
   };
   const span = length * fins.pectoralSpanFactor;
   const chord = length * fins.pectoralChordFactor;
+  let profile = variant.profile(length * 0.5, width);
+  if (variant.profileSubdivide) profile = subdivideProfile(profile, variant.profileSubdivide);
   const dorsal = buildDorsalFinGeometry(
     length,
     width,
     fins.dorsalHeightFactor * SMALL_FISH_DORSAL_HEIGHT_SCALE,
     proportions.heightStretch,
+    profile,
   );
   const wingLeft = buildPectoralFinGeometry(length, span, chord, 1);
   const wingRight = buildPectoralFinGeometry(length, span, chord, -1);
@@ -411,7 +527,7 @@ const CLOWNFISH_VARIANT: FishVariant = {
   dorsalColor: CLOWNFISH_FIN_COLOR,
   pectoralColor: CLOWNFISH_FIN_COLOR,
   tailColor: CLOWNFISH_FIN_COLOR,
-  eyeRadiusFactor: 0.045,
+  eyeRadiusFactor: 0.03,
 };
 
 /** Clownfish: a stubby oval orange body crossed by three white vertical bands
@@ -469,6 +585,8 @@ const BLUE_TANG_VARIANT: FishVariant = {
     dorsalHeightFactor: 0.7,
     caudalSpreadFactor: 0.7,
   },
+  // Left larger than the other variants: the blue tang is a tall disc, so the
+  // same radius reads smaller against its body depth.
   eyeRadiusFactor: 0.045,
 };
 

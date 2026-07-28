@@ -4,12 +4,12 @@ import {
   buildEyeDotsGeometry,
   extrudeRingGeometry,
   mergeGeometriesWithColor,
-  mergePositionOnlyGeometries,
 } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometryAlongX,
   fishtankFinThickness,
   type FinThicknessSample,
+  FISH_EYE_FLATTEN,
 } from './fishSharedGeometry';
 
 /**
@@ -21,6 +21,21 @@ import {
  * render loop; tail is a true 3D curled tube instead of a fish caudal
  * fin.
  */
+/**
+ * The X coordinate of the pectoral fin root: the measured flank at the root's
+ * height, sunk inward by FIN_ROOT_EMBED.
+ *
+ * Single source of truth shared by buildPectoralFinGeometry and the wing pivot
+ * declared in createSeaHorseGeometries. These must agree exactly — a blade
+ * hinging about a point it is not attached to tears away from the flank
+ * mid-flap. Exported so tests can assert against the shipped value rather than
+ * re-deriving it.
+ */
+export function seaHorsePectoralRootX(length: number, width: number): number {
+  const spine = seaHorseSpine(length, width);
+  return seaHorseFlankX(spine, length * FIN_ROOT_Y_FRAC, length * FIN_ROOT_Z_FRAC) * FIN_ROOT_EMBED;
+}
+
 export function createSeaHorseGeometries(length: number, width: number): CreatureGeometries {
   const body = buildSeaHorseBodyGeometry(length, width);
   const wingLeft = buildPectoralFinGeometry(length, width, 1);
@@ -33,7 +48,9 @@ export function createSeaHorseGeometries(length: number, width: number): Creatur
   // the body surface. Declaring the root as the pivot keeps it welded.
   const finRootY = length * FIN_ROOT_Y_FRAC;
   const finRootZ = length * FIN_ROOT_Z_FRAC;
-  const finSurfaceX = width * FIN_SURFACE_X_FRAC;
+  // Must equal buildPectoralFinGeometry's root exactly, or the blade hinges
+  // about a point it is not attached to and tears away from the flank mid-flap.
+  const finSurfaceX = seaHorsePectoralRootX(length, width);
   return {
     body, wingLeft, wingRight, tail, beak,
     wingPivotLeft:  [finSurfaceX, finRootY, finRootZ],
@@ -98,19 +115,6 @@ const RAINBOW_LIGHTNESS = 0.62;
 // matching the shader's linear instanceColor*vertex multiply.
 const SEAHORSE_BODY_LINEAR = new THREE.Color(SEAHORSE_BODY_COLOR);
 
-// The small ridge/crest fins running down the head and belly midline read as
-// lavender rather than sharing the pink body color. They are merged into the
-// body mesh (pink instanceColor), so — like the dorsal rainbow — the lavender is
-// baked as a RATIO relative to the body color so instanceColor * ratio == the
-// lavender at idle, and it tracks the body through the hunt-highlight lerp.
-const SEAHORSE_FIN_COLOR = 0xc9b3e8;
-const SEAHORSE_FIN_LINEAR = new THREE.Color(SEAHORSE_FIN_COLOR);
-const SEAHORSE_FIN_RATIO = new THREE.Color().setRGB(
-  SEAHORSE_FIN_LINEAR.r / SEAHORSE_BODY_LINEAR.r,
-  SEAHORSE_FIN_LINEAR.g / SEAHORSE_BODY_LINEAR.g,
-  SEAHORSE_FIN_LINEAR.b / SEAHORSE_BODY_LINEAR.b,
-);
-
 // Pectoral fin root coordinates (fraction of length/width).
 // These are the single source of truth shared between buildPectoralFinGeometry
 // and createSeaHorseGeometries' wing-pivot declarations, so that any future
@@ -118,8 +122,18 @@ const SEAHORSE_FIN_RATIO = new THREE.Color().setRGB(
 // Exported so tests can anchor assertions on these concrete values instead of
 // copying them (a copied constant cannot detect a change to the original).
 export const FIN_ROOT_Y_FRAC = 0.03;
-export const FIN_ROOT_Z_FRAC = 0.05;
-export const FIN_SURFACE_X_FRAC = 0.15;
+/**
+ * Fore-aft position of the pectoral root, moved aft from 0.05 so the blade
+ * grows out of the flat mid-flank instead of the front edge where the body is
+ * already curving away — which is what made the fins read as unattached.
+ */
+export const FIN_ROOT_Z_FRAC = 0.0;
+/**
+ * How far inside the measured flank the pectoral root is sunk (1 = exactly on
+ * the skin). The root is deliberately buried so no gap can open at any point in
+ * the flap arc, or after any future retune of the body spine.
+ */
+export const FIN_ROOT_EMBED = 0.72;
 
 interface SpinePoint {
   y: number;
@@ -129,43 +143,74 @@ interface SpinePoint {
   zScale?: number;
 }
 
+/**
+ * A part merged into the seahorse body mesh. `plates: false` excludes the part
+ * from the bony-plate shader (see the aPlateSuppress build below).
+ */
+interface SeaHorseBodyPart {
+  geometry: THREE.BufferGeometry;
+  color: THREE.Color;
+  plates?: boolean;
+}
+
 function buildSeaHorseBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const { geometry: shell, crestY, crestZ, crestRadius, eyeX, eyeY, eyeZ, eyeRadius } = buildSeaHorseShellGeometry(length, width);
   const dorsalFin = buildDorsalFinGeometry(length, width);
-  const ridge = buildBodyRidgeGeometry(length, width);
   const horn = buildSeaHorseHornGeometry(crestY, crestZ, crestRadius);
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius, FISH_EYE_FLATTEN);
 
-  const merged = mergeGeometriesWithColor([
+  // `plates: false` marks a part as NOT armoured skin, so the bony-plate
+  // shader skips it. The dorsal fin is a translucent rainbow membrane, the horn
+  // is smooth keratin and the eyes are wet spheres — none of them are scutes,
+  // but all three are merged into the single body mesh the shader patches.
+  const entries: SeaHorseBodyPart[] = [
     { geometry: shell, color: WHITE_VERTEX_COLOR },
-    { geometry: dorsalFin, color: WHITE_VERTEX_COLOR },
-    { geometry: ridge, color: WHITE_VERTEX_COLOR },
-    { geometry: horn, color: HORN_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
-  ]);
+    { geometry: dorsalFin, color: WHITE_VERTEX_COLOR, plates: false },
+    { geometry: horn, color: HORN_COLOR, plates: false },
+    { geometry: eyes, color: EYE_COLOR, plates: false },
+  ];
+  const merged = mergeGeometriesWithColor(entries);
+
+  // Per-vertex "do not plate" flag, built in the SAME order as `entries`.
+  //
+  // The sense is deliberately SUPPRESS (1 = skip) rather than INCLUDE (1 = draw).
+  // A vertex attribute that a geometry never declares reads as 0 in GLSL, so
+  // with this sense the value GLSL invents is also the safe default — any
+  // geometry that never sets the flag is simply plated as normal. The inverted
+  // sense would silently strip the pattern off every unflagged mesh.
+  //
+  // mergeGeometriesWithColor de-indexes every part, so an INDEXED part
+  // contributes index.count vertices, not position.count. Using position.count
+  // here would misalign every part after the first.
+  const total = merged.getAttribute('position').count;
+  const suppress = new Float32Array(total);
+  let offset = 0;
+  for (const entry of entries) {
+    const partCount = entry.geometry.index
+      ? entry.geometry.index.count
+      : entry.geometry.getAttribute('position').count;
+    if (entry.plates === false) suppress.fill(1, offset, offset + partCount);
+    offset += partCount;
+  }
+  merged.setAttribute('aPlateSuppress', new THREE.BufferAttribute(suppress, 1));
+
   shell.dispose();
   dorsalFin.dispose();
-  ridge.dispose();
   horn.dispose();
   eyes.dispose();
   return merged;
 }
 
-function buildSeaHorseShellGeometry(
-  length: number,
-  width: number,
-): {
-  geometry: THREE.BufferGeometry;
-  crestY: number;
-  crestZ: number;
-  crestRadius: number;
-  eyeX: number;
-  eyeY: number;
-  eyeZ: number;
-  eyeRadius: number;
-} {
+/**
+ * The seahorse body spine, hoisted to module scope so that fin builders can ask
+ * where the body surface actually is instead of hard-coding coordinates that
+ * silently drift out of contact whenever the spine is retuned. Y is the sweep
+ * axis (tail -> head) and is monotonically increasing, which is what lets
+ * seaHorseSurfacePoint interpolate by Y.
+ */
+function seaHorseSpine(length: number, width: number): SpinePoint[] {
   const halfLen = length * 0.5;
-  const spine: SpinePoint[] = [
+  return [] = [
     // Radii here are widened another 25% (now ~0.078/0.219/0.344, cumulative
     // ~1.56x the original 0.05/0.14/0.22) so the body tapers more gradually
     // into the tail attachment, matching a correspondingly thinner tail base.
@@ -187,6 +232,60 @@ function buildSeaHorseShellGeometry(
     { y: halfLen * 0.28, z: length * 0.115, radius: width * 0.1, xScale: 0.32, zScale: 0.58 },
     { y: halfLen * 0.36, z: length * 0.025, radius: width * 0.072, xScale: 0.27, zScale: 0.42 },
   ];
+}
+
+/**
+ * The flank half-width (surface |X|) at spine height `y` and fore-aft position
+ * `z`, by solving the squircle cross-section for X.
+ *
+ * Parameterising instead by ANGLE would be awkward for seating a fin: the
+ * cross-section is deliberately boxy (squareness 3.6), so X barely
+ * changes over the flat flank while Z sweeps enormously — between angle 0 and
+ * -20 degrees Z moves ~15 units but X only ~0.4. Specifying a fin root by angle
+ * therefore makes its fore-aft placement wildly sensitive. This lets the root be
+ * expressed the way it is actually reasoned about: "at this height and this
+ * fore-aft position, sit exactly on the flank."
+ *
+ * Returns 0 for a `z` beyond the section's dorsoventral extent.
+ */
+function seaHorseFlankX(spine: SpinePoint[], y: number, z: number): number {
+  const squareness = 3.6;
+  let i = 0;
+  while (i < spine.length - 2 && spine[i + 1].y < y) i++;
+  const a = spine[i];
+  const b = spine[i + 1];
+  const span = b.y - a.y;
+  const t = span === 0 ? 0 : Math.min(1, Math.max(0, (y - a.y) / span));
+  const lerp = (u: number, v: number) => u + (v - u) * t;
+  const radius = lerp(a.radius, b.radius);
+  const xScale = lerp(a.xScale ?? 1, b.xScale ?? 1);
+  const zScale = lerp(a.zScale ?? 1, b.zScale ?? 1);
+  const centerZ = lerp(a.z, b.z);
+
+  const zHalf = radius * zScale;
+  if (zHalf <= 0) return 0;
+  // Invert z = r*zs*|sin|^(2/sq) for |sin|, then take |cos| = sqrt(1 - sin^2).
+  const zNorm = Math.min(1, Math.abs(z - centerZ) / zHalf);
+  const sin = Math.pow(zNorm, squareness / 2);
+  const cos = Math.sqrt(Math.max(0, 1 - sin * sin));
+  return radius * xScale * Math.pow(cos, 2 / squareness);
+}
+
+
+function buildSeaHorseShellGeometry(
+  length: number,
+  width: number,
+): {
+  geometry: THREE.BufferGeometry;
+  crestY: number;
+  crestZ: number;
+  crestRadius: number;
+  eyeX: number;
+  eyeY: number;
+  eyeZ: number;
+  eyeRadius: number;
+} {
+  const spine = seaHorseSpine(length, width);
 
   const geometry = buildSweptGeometry(spine, 12);
   const crest = spine[7];
@@ -208,14 +307,15 @@ function buildSeaHorseShellGeometry(
   const eyeSecXScale = lerp(cheekA.xScale ?? 1, cheekB.xScale ?? 1, eyeBlend);
   // The head's side surface at this section sits at x = radius * xScale (the
   // squircle's widest point, at cross-section angle 0). Seat the eye center just
-  // inside that so the small sphere pokes out only slightly.
+  // inside that. The eye is flattened into a lens (FISH_EYE_FLATTEN) so it reads
+  // as a disc on the cheek; sinking it further than this would bury it outright.
   const eyeHalfWidth = eyeSecRadius * eyeSecXScale;
   return {
     geometry,
     crestY: crest.y,
     crestZ: crest.z,
     crestRadius: crest.radius,
-    eyeX: eyeHalfWidth * 0.82,
+    eyeX: eyeHalfWidth,
     eyeY: eyeSecY,
     eyeZ: eyeSecZ,
     eyeRadius: width * 0.022,
@@ -228,10 +328,11 @@ function buildSeaHorseHornGeometry(crestY: number, crestZ: number, crestRadius: 
   // above it. The old +0.14*radius lift and +0.92*radius forward offset left a
   // visible gap between the horn base and the head; seating the base at
   // ~0.35*radius forward with a slight downward nudge closes it.
-  // 25% taller than before (1.4375x vs 1.15x) while keeping the SAME base point:
-  // the base sits at crestZ + crestRadius*0.3 (center = base + hornLength*0.5),
-  // so growing hornLength extends the tip forward without moving the base.
-  const hornLength = crestRadius * 1.4375;
+  // Grown a further 25% (1.796875x, cumulatively 1.5625x the original 1.15x)
+  // while keeping the SAME base point: the base sits at crestZ + crestRadius*0.3
+  // and the center at base + hornLength*0.5, so growing hornLength extends the
+  // tip forward without lifting the base off the crest.
+  const hornLength = crestRadius * 1.796875;
   const hornRadius = crestRadius * 0.28;
   // Build a spiraled cone: same dimensions as the old ConeGeometry but with a
   // single helical ridge to give it a coral/shell spiral-y texture. The ridge
@@ -367,114 +468,60 @@ function buildDorsalFinGeometry(length: number, width: number): THREE.BufferGeom
   return addRainbowVertexColors(fin, finRoot, finReach, true);
 }
 
-function buildBodyRidgeGeometry(length: number, width: number): THREE.BufferGeometry {
-  const spikes: THREE.BufferGeometry[] = [
-    buildRidgePlate(new THREE.Vector3(0, length * 0.13, length * 0.2), width * 0.09, width * 0.035),
-    buildRidgePlate(new THREE.Vector3(0, length * 0.06, length * 0.11), width * 0.08, width * 0.035),
-    buildRidgePlate(new THREE.Vector3(0, 0, 0), width * 0.075, width * 0.032),
-    buildRidgePlate(new THREE.Vector3(0, -length * 0.04, -length * 0.12), width * 0.06, width * 0.028),
-  ];
-  const merged = mergePositionOnlyGeometries(spikes);
-  spikes.forEach((geometry) => geometry.dispose());
-  // Paint the crest/belly ridge plates lavender. Baked as a solid per-vertex
-  // ratio relative to the body color so, once merged into the pink-instanceColor
-  // body mesh, instanceColor * ratio renders the lavender (see SEAHORSE_FIN_RATIO).
-  const count = merged.getAttribute('position').count;
-  const colors = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    colors[i * 3] = SEAHORSE_FIN_RATIO.r;
-    colors[i * 3 + 1] = SEAHORSE_FIN_RATIO.g;
-    colors[i * 3 + 2] = SEAHORSE_FIN_RATIO.b;
-  }
-  merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  return merged;
-}
-
-function buildRidgePlate(anchor: THREE.Vector3, height: number, thickness: number): THREE.BufferGeometry {
-  const front = new THREE.Vector3(0, anchor.y + height * 0.35, anchor.z);
-  const back = new THREE.Vector3(0, anchor.y - height * 0.35, anchor.z - height * 0.08);
-  const tip = new THREE.Vector3(0, anchor.y + height * 0.04, anchor.z + height);
-  // Thicken the spike along X (extrudeAlongX) rather than Z. These crest plates
-  // live in the Y-Z plane (all x=0); the shared extrudeRingGeometry would spread
-  // their depth along Z — the same plane the plate already spans — leaving them
-  // paper-thin edge-on from the front/back (the "2D fin" that vanished). Giving
-  // them width in X makes each spike a small solid ridge visible from any angle.
-  // Keep the spikes 3D (visible from any angle) but thin/wispy — a slim ridge,
-  // not a chunky slab.
-  return extrudeAlongXGeometry([front, back, tip], thickness * 0.55);
-}
-
 function buildPectoralFinGeometry(length: number, width: number, side: 1 | -1): THREE.BufferGeometry {
   // The animated "wing" slot. The shared engine flaps these about the body's
-  // long (vertical +Y) axis. The fin's root sits on the body's side surface at
-  // x = surfaceX (see FIN_SURFACE_X_FRAC), so it visibly hinges off the flank.
-  // The pivot is declared in createSeaHorseGeometries via wingPivotLeft/Right —
-  // the renderer articulates around that root instead of the model origin,
-  // keeping the root welded to the body through the full flap arc.
+  // long (vertical +Y) axis. The pivot is declared in createSeaHorseGeometries
+  // via wingPivotLeft/Right so the renderer articulates around the root rather
+  // than the model origin, keeping the root welded through the flap arc.
   const rootY = length * FIN_ROOT_Y_FRAC;
   const rootZ = length * FIN_ROOT_Z_FRAC;
-  // Body side surface at the shoulder section (~spine[4/5]): x = radius * xScale.
-  const surfaceX = width * FIN_SURFACE_X_FRAC;
+  // Seat the root at the MEASURED flank rather than a hard-coded half-width,
+  // and sink it inside the body. The old root sat at width * 0.15 while the
+  // real flank at that height is width * 0.1316, so the blade started 1.8 units
+  // proud of the skin and read as floating alongside the fish rather than
+  // growing out of it. Burying the root guarantees no gap can open at any
+  // point in the flap arc or after any future retune of the spine.
+  const rootX = seaHorsePectoralRootX(length, width);
+
   const span = width * 0.28; // blade reach outward from the flank
   const chord = length * 0.13;
-  const root = new THREE.Vector3(side * surfaceX, rootY, rootZ);
-  const leadingBulge = new THREE.Vector3(side * (surfaceX + span * 0.5), rootY + chord * 0.35, rootZ);
-  const tip = new THREE.Vector3(side * (surfaceX + span), rootY - chord * 0.1, rootZ);
-  const trailingBulge = new THREE.Vector3(side * (surfaceX + span * 0.45), rootY - chord * 0.5, rootZ);
+  const out = (f: number) => side * (rootX + span * f);
+
+  // Every ring point stays at constant rootZ. extrudeRingGeometry thickens the
+  // ring along Z, so any Z variation in the outline is indistinguishable from
+  // added thickness and would fatten the blade past the fin-thickness budget.
+  // The swept shape therefore lives entirely in X (span) and Y (chord).
+  //
+  // Silhouette: a real pectoral fin is a rounded, slightly swept paddle whose
+  // trailing edge is scalloped by the rays fanning through it, and it narrows
+  // as it meets the body. The previous outline was a 4-point quad, which reads
+  // as a flat card stuck to the flank. Ordered as a ring: leading edge outward,
+  // around the tip, then back along the scalloped trailing edge.
+  const ring = [
+    // Narrow root, so the blade tapers into the flank instead of butting it.
+    new THREE.Vector3(out(0), rootY + chord * 0.10, rootZ),
+    // Leading edge: bows forward, the stiff spine of the fin.
+    new THREE.Vector3(out(0.34), rootY + chord * 0.40, rootZ),
+    new THREE.Vector3(out(0.70), rootY + chord * 0.42, rootZ),
+    // Rounded tip.
+    new THREE.Vector3(out(0.94), rootY + chord * 0.24, rootZ),
+    new THREE.Vector3(out(1.0), rootY - chord * 0.02, rootZ),
+    // Trailing edge, scalloped between ray tips.
+    new THREE.Vector3(out(0.86), rootY - chord * 0.30, rootZ),
+    new THREE.Vector3(out(0.72), rootY - chord * 0.22, rootZ),
+    new THREE.Vector3(out(0.55), rootY - chord * 0.46, rootZ),
+    new THREE.Vector3(out(0.40), rootY - chord * 0.34, rootZ),
+    new THREE.Vector3(out(0.18), rootY - chord * 0.40, rootZ),
+    new THREE.Vector3(out(0.02), rootY - chord * 0.18, rootZ),
+  ];
   // As thin as possible while still catching light and not disappearing edge-on.
   const thickness = fishtankFinThickness(chord);
-  const geometry = extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
+  const geometry = extrudeRingGeometry(ring, thickness);
   // Rainbow the fin from its root (violet, where it meets the flank) to the
   // blade tip (red), matching the unicorn's wings. These fins render on their
   // own white-instanceColor mesh, so the baked color shows as pure rainbow.
+  const root = new THREE.Vector3(side * rootX, rootY, rootZ);
   return addRainbowVertexColors(geometry, root, span, false);
-}
-
-/**
- * Like extrudeRingGeometry, but gives the ring thickness along the X axis
- * instead of Z. Used for the seahorse dorsal fin, whose outline lives in the
- * Y-Z plane and therefore needs its solid depth spread sideways (±X) to read
- * as a 3D fin rather than a flat sheet. Seahorse-local so it doesn't disturb
- * the shared Z-extrude used by every other creature part.
- */
-function extrudeAlongXGeometry(ring: THREE.Vector3[], thickness: number): THREE.BufferGeometry {
-  const n = ring.length;
-  const half = thickness / 2;
-  const front = ring.map((p) => new THREE.Vector3(p.x + half, p.y, p.z));
-  const back = ring.map((p) => new THREE.Vector3(p.x - half, p.y, p.z));
-
-  const centroid = new THREE.Vector3();
-  ring.forEach((p) => centroid.add(p));
-  centroid.divideScalar(n);
-
-  const positions: number[] = [];
-  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) =>
-    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-  const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3) => {
-    const e1 = new THREE.Vector3().subVectors(p1, p0);
-    const e2 = new THREE.Vector3().subVectors(p2, p0);
-    const normal = new THREE.Vector3().crossVectors(e1, e2);
-    const triCentroid = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3);
-    const outward = new THREE.Vector3().subVectors(triCentroid, centroid);
-    if (normal.dot(outward) < 0) pushTri(p0, p2, p1);
-    else pushTri(p0, p1, p2);
-  };
-
-  for (let i = 1; i < n - 1; i++) {
-    pushOutward(front[0], front[i], front[i + 1]);
-    pushOutward(back[0], back[i], back[i + 1]);
-  }
-
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    pushOutward(front[i], back[i], back[j]);
-    pushOutward(front[i], back[j], front[j]);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.computeVertexNormals();
-  return geometry;
 }
 
 export function createSeaHorseFinThicknessSamples(length: number, width: number): FinThicknessSample[] {

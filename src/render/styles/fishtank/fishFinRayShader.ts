@@ -35,7 +35,7 @@ export interface FishFinRayConfig {
  */
 export const BONY_FISH_FIN_RAY_CONFIG: FishFinRayConfig = {
   raysPerSpan: 8,
-  brightness: 0.30,
+  brightness: 0.12,
   halfRayWidth: 0.12,
 };
 
@@ -49,7 +49,7 @@ export const BONY_FISH_FIN_RAY_CONFIG: FishFinRayConfig = {
  */
 export const BARRACUDA_FIN_RAY_CONFIG: FishFinRayConfig = {
   raysPerSpan: 8,
-  brightness: 0.25,
+  brightness: 0.10,
   halfRayWidth: 0.12,
 };
 
@@ -76,9 +76,11 @@ export const BARRACUDA_FIN_RAY_CONFIG: FishFinRayConfig = {
  *     pectoral (wingLeft):  X 0.00 → 4.01 (root at X=0), Y = chord, Z flat (0.04)
  *     caudal   (tail):      Y -16.0 → -26.6 (root at max Y), Z = chord, X flat (0.12)
  *
- *   So the caller supplies which axis runs root→tip (`spanAxis`/`spanSign`) and
- *   which runs across the fin (`chordAxis`). The root point and the fin's true
- *   angular extent are then measured from the geometry rather than assumed.
+ *   So the caller supplies which axis runs root→tip (`spanAxis`) and which runs
+ *   across the fin (`chordAxis`). The root END of the span axis, the root point
+ *   and the fin's true angular extent are all measured from the geometry rather
+ *   than assumed — which is what lets one frame drive both fins of a mirrored
+ *   pair.
  *
  * Frequency derivation:
  *   Rays are spread evenly across the fin's MEASURED angular extent, so each fin
@@ -118,17 +120,21 @@ const AXIS_INDEX: Record<FinAxis, 0 | 1 | 2> = { x: 0, y: 1, z: 2 };
 export interface FinRayFrame {
   /** Axis running from the body seam out to the fin edge. */
   spanAxis: FinAxis;
-  /** +1 if the tip is at the axis maximum, -1 if it is at the minimum. */
-  spanSign: 1 | -1;
   /** Axis running across the fin (the chord). */
   chordAxis: FinAxis;
 }
 
-/** Pectoral fins extrude outward along +X from the body wall at X = 0. */
-export const PECTORAL_FIN_FRAME: FinRayFrame = { spanAxis: 'x', spanSign: 1, chordAxis: 'y' };
+/**
+ * Pectoral fins extrude laterally along X from the body wall at X = 0.
+ *
+ * Deliberately carries no direction: the left fin spans x 0 → +1.37 and the
+ * right fin spans x −1.37 → 0, and both are driven from this one frame. See
+ * measureFinFrame for how the root is detected instead.
+ */
+export const PECTORAL_FIN_FRAME: FinRayFrame = { spanAxis: 'x', chordAxis: 'y' };
 
-/** The caudal fin extends aft along -Y; its chord is vertical (Z). */
-export const CAUDAL_FIN_FRAME: FinRayFrame = { spanAxis: 'y', spanSign: -1, chordAxis: 'z' };
+/** The caudal fin extends aft along Y; its chord is vertical (Z). */
+export const CAUDAL_FIN_FRAME: FinRayFrame = { spanAxis: 'y', chordAxis: 'z' };
 
 /**
  * Measures the fan origin and angular extent of a fin from its actual vertices.
@@ -148,12 +154,23 @@ function measureFinFrame(
   const read = (i: number, axis: 0 | 1 | 2) =>
     axis === 0 ? pos.getX(i) : axis === 1 ? pos.getY(i) : pos.getZ(i);
 
-  // Seam end of the span axis: the extreme OPPOSITE the tip.
-  let rootSpan = frame.spanSign > 0 ? Infinity : -Infinity;
+  // Seam end of the span axis, DETECTED rather than declared: a fin attaches to
+  // the body, so its root is whichever end of the span axis lies nearer the
+  // model origin, and its tip is the far end.
+  //
+  // This used to be a hard-coded spanSign on the frame, which silently broke
+  // mirrored fins. The left and right pectorals share one frame but span
+  // opposite directions (x 0 → +1.37 against x −1.37 → 0), so a fixed +1 made
+  // the right fin's span negative at every vertex — the root fade then
+  // evaluated to zero across the whole fin and its rays vanished entirely.
+  let spanMin = Infinity;
+  let spanMax = -Infinity;
   for (let i = 0; i < pos.count; i++) {
     const v = read(i, si);
-    rootSpan = frame.spanSign > 0 ? Math.min(rootSpan, v) : Math.max(rootSpan, v);
+    spanMin = Math.min(spanMin, v);
+    spanMax = Math.max(spanMax, v);
   }
+  const rootSpan = Math.abs(spanMin) <= Math.abs(spanMax) ? spanMin : spanMax;
 
   // Chord centre in a thin slab at the seam, and the widest angle any vertex
   // subtends about that origin. Both are measured, not assumed.
@@ -174,7 +191,10 @@ function measureFinFrame(
 
   let halfAngle = 0;
   for (let i = 0; i < pos.count; i++) {
-    const s = (read(i, si) - rootSpan) * frame.spanSign;
+    // abs(), not a signed multiply: every vertex of a correct fin lies on one
+    // side of its root plane, so the two are equal in magnitude — but abs() is
+    // mirror-safe and needs no direction to be declared up front.
+    const s = Math.abs(read(i, si) - rootSpan);
     if (s <= 1e-4) continue;
     halfAngle = Math.max(halfAngle, Math.abs(Math.atan2(read(i, ci) - rootChord, s)));
   }
@@ -195,7 +215,7 @@ export function applyFishFinRayShader(
   // so the count is independent of fin size and aspect ratio.
   const freq = config.raysPerSpan / (2 * halfAngle);
 
-  const cacheKey = `aiboids-fin-ray-v2:${frame.spanAxis}${frame.spanSign}${frame.chordAxis}:${freq.toFixed(5)}:${rootSpan.toFixed(4)}:${rootChord.toFixed(4)}:${config.brightness.toFixed(4)}:${config.halfRayWidth.toFixed(4)}`;
+  const cacheKey = `aiboids-fin-ray-v3:${frame.spanAxis}${frame.chordAxis}:${freq.toFixed(5)}:${rootSpan.toFixed(4)}:${rootChord.toFixed(4)}:${config.brightness.toFixed(4)}:${config.halfRayWidth.toFixed(4)}`;
 
   const previousCompile = material.onBeforeCompile;
   const previousCacheKey = material.customProgramCacheKey?.bind(material);
@@ -224,7 +244,7 @@ export function applyFishFinRayShader(
     // --- Fragment shader ---
     // Declare the varying (in) and uniforms at the top.
     shader.fragmentShader =
-      `varying vec3 vFinRayPos;\nuniform float uFinRayFreq;\nuniform float uFinRayBrightness;\nuniform float uFinRayHalfWidth;\nuniform float uFinRayRootSpan;\nuniform float uFinRayRootChord;\nuniform float uFinRaySpanSign;\nuniform float uFinRaySpanExtent;\n` +
+      `varying vec3 vFinRayPos;\nuniform float uFinRayFreq;\nuniform float uFinRayBrightness;\nuniform float uFinRayHalfWidth;\nuniform float uFinRayRootSpan;\nuniform float uFinRayRootChord;\nuniform float uFinRaySpanExtent;\n` +
       shader.fragmentShader;
 
     // Inject the ray pattern immediately after color_fragment, which has
@@ -244,7 +264,10 @@ export function applyFishFinRayShader(
     // pectoral fin runs out along +X with a Y chord, the caudal fin runs aft
     // along -Y with a Z chord. Banding on a raw axis instead would give
     // parallel lines, which read as corrugation rather than as rays.
-    float finSpan  = ( FIN_SPAN_COMP - uFinRayRootSpan ) * uFinRaySpanSign;
+    // abs() makes this mirror-safe: the left and right fins of a pair span
+    // opposite directions from the same root, so a signed span would go negative
+    // across one of them and the root fade below would erase its rays.
+    float finSpan  = abs( FIN_SPAN_COMP - uFinRayRootSpan );
     float finChord = FIN_CHORD_COMP - uFinRayRootChord;
     // Angle subtended at the root. Clamping span to a small positive value
     // keeps the few vertices exactly ON the seam (span == 0) from producing a
@@ -282,7 +305,6 @@ export function applyFishFinRayShader(
       uFinRayHalfWidth: { value: config.halfRayWidth },
       uFinRayRootSpan: { value: rootSpan },
       uFinRayRootChord: { value: rootChord },
-      uFinRaySpanSign: { value: frame.spanSign },
       uFinRaySpanExtent: { value: spanExtent },
     });
   };

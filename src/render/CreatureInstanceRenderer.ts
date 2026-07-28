@@ -37,8 +37,10 @@ import {
 import {
   advanceFishUndulationPhase,
   computeFishUndulationOmega,
+  sampleFishUndulationDisplacement,
 } from './motion/fishUndulationMath';
 import { composeArticulationChain, composePartArticulation } from './motion/partTransform';
+import { measureRootStation } from './geometry/sharedGeometry';
 import { resolveDriveAngle, type RigPartDeclaration, type Triple } from './motion/rig';
 import type { FishUndulationInstanceState } from './styles/fishtank/fishUndulationShader';
 import type { WingUndulationInstanceState } from './styles/nature/wingUndulationShader';
@@ -244,6 +246,15 @@ export class CreatureInstanceRenderer {
   private partPivotToOrigin = new THREE.Matrix4();
   private partOriginToPivot = new THREE.Matrix4();
   private partWorldMatrix = new THREE.Matrix4();
+  // Scratch objects for the fin-follows-body transform. Kept separate from the
+  // partPivot* scratch above because that set is live inside
+  // composePartArticulation while this one is being built.
+  private finFollowMatrix = new THREE.Matrix4();
+  private finFollowQuat = new THREE.Quaternion();
+  private finFollowToOrigin = new THREE.Matrix4();
+  private finFollowToPivot = new THREE.Matrix4();
+  private finFollowTranslation = new THREE.Matrix4();
+  private finFollowPivot = new THREE.Vector3();
   private tmpPivot = new THREE.Vector3();
   private tmpAxis = new THREE.Vector3();
   // Model-space articulation of each link in the leg chain, plus the running
@@ -284,6 +295,8 @@ export class CreatureInstanceRenderer {
   /** Per-creature accumulated flap phase (radians), integrated every frame. */
   private flapPhase = new WeakMap<Boid | Predator, number>();
   private fishUndulationPhase = new WeakMap<Boid | Predator, number>();
+  /** Where along the spine each batch's pectoral fins attach — see fishFinAxisPosition. */
+  private fishFinAxisPositions = new WeakMap<BoidRenderBatch, number>();
   /** Per-unicorn accumulated tail undulation phase (radians), integrated every frame. */
   private unicornTailPhase = new WeakMap<Boid | Predator, number>();
 
@@ -632,7 +645,7 @@ export class CreatureInstanceRenderer {
       flapBottomClipRad,
       uprightStyle,
     });
-    this.applyWingFlapMatrices(set, index, flapAngle, this.flapPhase.get(creature) ?? initialFlapPhase(creature.id));
+    this.applyWingFlapMatrices(set, index, flapAngle, this.flapPhase.get(creature) ?? initialFlapPhase(creature.id), creature);
 
     this.applyCreatureTailSwayMatrix({
       set,
@@ -1018,12 +1031,16 @@ export class CreatureInstanceRenderer {
     axis,
     angle,
     pivot,
+    localPrefix,
   }: {
     mesh: THREE.InstancedMesh;
     index: number;
     axis: THREE.Vector3;
     angle: number;
     pivot: THREE.Vector3 | null;
+    /** Model-space transform applied *outside* the articulation, i.e. body ·
+     * localPrefix · articulation. Used to ride the fish undulation. */
+    localPrefix?: THREE.Matrix4 | null;
   }): void {
     this.partQuat.setFromAxisAngle(axis, angle);
     this.dummy.quaternion.copy(this.bodyQuat);
@@ -1037,8 +1054,72 @@ export class CreatureInstanceRenderer {
       scratchToOrigin: this.partPivotToOrigin,
       scratchToPivot: this.partOriginToPivot,
     });
+    if (localPrefix) this.dummy.matrix.multiply(localPrefix);
     this.dummy.matrix.multiply(this.partPivotMatrix);
     mesh.setMatrixAt(index, this.dummy.matrix);
+  }
+
+  /**
+   * Where along the model's forward axis the pectoral fins are rooted, which is
+   * the spine station whose undulation they should follow.
+   *
+   * Taken from the declared wing pivot when there is one, otherwise measured
+   * from the fin's own root edge. Cached per batch — the geometry never moves.
+   */
+  private fishFinAxisPosition(set: BoidRenderBatch): number {
+    const cached = this.fishFinAxisPositions.get(set);
+    if (cached !== undefined) return cached;
+    const axisPosition = set.wingPivotLeft?.[1] ?? measureRootStation(set.wingLeft.geometry);
+    this.fishFinAxisPositions.set(set, axisPosition);
+    return axisPosition;
+  }
+
+  /**
+   * Builds the model-space transform that carries a pectoral fin along with the
+   * swimming body, or returns null when this batch doesn't undulate.
+   *
+   * The body is bent in the vertex shader while the fins are separate instanced
+   * meshes, so without this the flank swims out from under a fin that stays
+   * pinned to the model's centreline. On a short fish the gap is small enough to
+   * read as nothing; on the barracuda, long enough that the fins visibly detach.
+   *
+   * Two parts: the lateral displacement of the spine at the fin's own station,
+   * and a yaw that lines the fin up with the local spine tangent. The yaw is
+   * negated because a rotation of θ about +Z carries the forward axis (0,1,0) to
+   * (−sin θ, cos θ, 0), so matching a tangent of slope `s` needs θ = −atan(s).
+   */
+  private composeFishFinFollowMatrix(
+    set: BoidRenderBatch,
+    creature: Boid | Predator,
+  ): THREE.Matrix4 | null {
+    const undulation = set.fishUndulation;
+    if (!undulation) return null;
+    const axisPosition = this.fishFinAxisPosition(set);
+    const { lateralOffset, lateralSlope } = sampleFishUndulationDisplacement({
+      axisPosition,
+      headPosition: undulation.headPosition,
+      tailPosition: undulation.tailPosition,
+      amplitude: undulation.amplitude,
+      waveNumber: undulation.waveNumber,
+      phase: this.fishUndulationPhase.get(creature) ?? 0,
+    });
+    // The yaw has to turn the fin about its own root. Falling back to the model
+    // origin — as the flap articulation does for a pivotless wing — would swing
+    // the root itself sideways by roughly rootY * angle, which on the barracuda
+    // is larger than the displacement being corrected for.
+    this.finFollowPivot.set(set.wingPivotLeft?.[0] ?? 0, axisPosition, set.wingPivotLeft?.[2] ?? 0);
+    composePartArticulation({
+      target: this.finFollowMatrix,
+      axis: MODEL_UP_AXIS,
+      angle: -Math.atan(lateralSlope),
+      pivot: this.finFollowPivot,
+      scratchQuat: this.finFollowQuat,
+      scratchToOrigin: this.finFollowToOrigin,
+      scratchToPivot: this.finFollowToPivot,
+    });
+    this.finFollowTranslation.makeTranslation(lateralOffset, 0, 0);
+    this.finFollowMatrix.premultiply(this.finFollowTranslation);
+    return this.finFollowMatrix;
   }
 
   private applyWingFlapMatrices(
@@ -1046,6 +1127,7 @@ export class CreatureInstanceRenderer {
     i: number,
     flapAngle: number,
     flapPhase: number,
+    creature: Boid | Predator,
   ): void {
     // Wings mirror each other around the model's forward axis.
     // When the batch carries an explicit root pivot (e.g. seahorse pectoral fins
@@ -1055,12 +1137,17 @@ export class CreatureInstanceRenderer {
     if (set.wingPivotLeft) {
       this.tmpPivot.set(set.wingPivotLeft[0], set.wingPivotLeft[1], set.wingPivotLeft[2]);
     }
+    // Both fins ride the same spine station, so the follow transform is built
+    // once and reused — the pivot only enters through the yaw, and the two
+    // pivots differ solely in the sign of X, which a Z rotation ignores.
+    const finFollow = this.composeFishFinFollowMatrix(set, creature);
     this.applyArticulatedPartMatrix({
       mesh: set.wingLeft,
       index: i,
       axis: FORWARD_AXIS,
       angle: flapAngle,
       pivot: set.wingPivotLeft ? this.tmpPivot : null,
+      localPrefix: finFollow,
     });
     if (set.wingPivotRight) {
       this.tmpPivot.set(set.wingPivotRight[0], set.wingPivotRight[1], set.wingPivotRight[2]);
@@ -1071,6 +1158,7 @@ export class CreatureInstanceRenderer {
       axis: FORWARD_AXIS,
       angle: -flapAngle,
       pivot: set.wingPivotRight ? this.tmpPivot : null,
+      localPrefix: finFollow,
     });
     // Write per-instance flap phase for the wing-undulation vertex shader.
     // Both wings share the same InstancedBufferAttribute (see applyWingUndulationShader).

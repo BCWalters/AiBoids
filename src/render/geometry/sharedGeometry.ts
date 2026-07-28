@@ -363,6 +363,14 @@ export function buildDiscCapGeometry(y: number, radius: number, segments: number
 
 
 /**
+ * `flattenX` squashes each sphere along X into a shallow lens before it is
+ * placed. A round eye only reads as an eye on a body thick enough to carry it:
+ * on a laterally compressed fish the sphere protrudes further than the entire
+ * flank is thick and reads as a ball stuck to the head. Flattening turns it
+ * into a disc lying on the surface, and because the lens tapers to nothing at
+ * its rim it blends into the flank instead of cutting a hard circle. Defaults
+ * to 1 (a true sphere) so existing callers are unaffected.
+ *
  * A small paired-dot eye (two tiny spheres mirrored across the X axis) —
  * same technique as unicornGeometry.ts's buildUnicornEyesGeometry, shared
  * here so small-bird/hawk geometry can use it too. Baked as a near-black
@@ -370,12 +378,20 @@ export function buildDiscCapGeometry(y: number, radius: number, segments: number
  * body tint a given species/individual gets (near-black stays near-black
  * under any multiply).
  */
-export function buildEyeDotsGeometry(x: number, y: number, z: number, radius: number): THREE.BufferGeometry {
-  const left = new THREE.SphereGeometry(radius, 8, 6);
-  left.translate(x, y, z);
-  const right = new THREE.SphereGeometry(radius, 8, 6);
-  right.translate(-x, y, z);
-  return mergePositionOnlyGeometries([left, right]);
+export function buildEyeDotsGeometry(
+  x: number,
+  y: number,
+  z: number,
+  radius: number,
+  flattenX = 1,
+): THREE.BufferGeometry {
+  const build = (side: 1 | -1) => {
+    const sphere = new THREE.SphereGeometry(radius, 8, 6);
+    if (flattenX !== 1) sphere.scale(flattenX, 1, 1);
+    sphere.translate(x * side, y, z);
+    return sphere;
+  };
+  return mergePositionOnlyGeometries([build(1), build(-1)]);
 }
 
 
@@ -591,4 +607,44 @@ export function smoothNormalsByPosition(
 
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   return geometry;
+}
+
+/**
+ * The station along the model's forward axis (Y) where a laterally-projecting
+ * part is rooted to the body — the mean Y of the vertices closest to the
+ * model's centreline.
+ *
+ * Used to decide which point of a swimming body's spine a pectoral fin should
+ * follow. The part's bounding-box centre is *not* a substitute: fins are raked,
+ * so the centre sits well aft of the attachment (1.3 units on the barracuda,
+ * whose fin is a delta rooted at a single apex), and the fin would then track a
+ * part of the body it isn't attached to.
+ *
+ * `bandFraction` widens the selection from the single closest vertex to a slice
+ * of the part's lateral extent, so a fin with a root *edge* rather than a root
+ * point averages over that whole edge.
+ */
+export function measureRootStation(
+  geometry: THREE.BufferGeometry,
+  bandFraction = 0.1,
+): number {
+  const position = geometry.getAttribute('position');
+  if (!position || position.count === 0) return 0;
+  let minAbsX = Infinity;
+  let maxAbsX = 0;
+  for (let i = 0; i < position.count; i++) {
+    const absX = Math.abs(position.getX(i));
+    if (absX < minAbsX) minAbsX = absX;
+    if (absX > maxAbsX) maxAbsX = absX;
+  }
+  const band = minAbsX + bandFraction * (maxAbsX - minAbsX);
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < position.count; i++) {
+    if (Math.abs(position.getX(i)) <= band) {
+      sum += position.getY(i);
+      count++;
+    }
+  }
+  return count > 0 ? sum / count : 0;
 }

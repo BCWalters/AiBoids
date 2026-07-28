@@ -35,28 +35,45 @@ describe('small fish dorsal fin profile', () => {
     const bb = geom.boundingBox!;
     const midY       = (bb.max.y + bb.min.y) * 0.5;
     const finExtentY = bb.max.y - bb.min.y;
-    const maxZ       = bb.max.z;
-    const baseZ      = bb.min.z;
 
     const pos = geom.getAttribute('position') as THREE.BufferAttribute;
 
     // Collect Y-positions of all peak-height vertices and the max Z reached
     // in the rear (Y < midY) half of the fin.
+    // Fin height must be measured against the LOCAL base at each Y, not against
+    // the geometry's global min Z. The fin's base follows the curve of the
+    // fish's back (issue #258), so the base sits far higher over the shoulder
+    // than at either end — measuring from a single global floor would report
+    // the arch of the body as fin height and call a properly tapered fin a
+    // mohawk.
+    const bins = new Map<number, { lo: number; hi: number }>();
+    const BIN = finExtentY / 60;
+    for (let i = 0; i < pos.count; i++) {
+      const key = Math.round(pos.getY(i) / BIN);
+      const z = pos.getZ(i);
+      const bin = bins.get(key);
+      if (bin) {
+        bin.lo = Math.min(bin.lo, z);
+        bin.hi = Math.max(bin.hi, z);
+      } else {
+        bins.set(key, { lo: z, hi: z });
+      }
+    }
+    let peakHeight = 0;
+    for (const bin of bins.values()) peakHeight = Math.max(peakHeight, bin.hi - bin.lo);
+
     let peakYSum  = 0;
     let peakCount = 0;
-    let rearMaxZ  = baseZ;
-    const peakTol = (maxZ - baseZ) * 0.01;
-
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i);
-      const z = pos.getZ(i);
-      if (z >= maxZ - peakTol) {
+    let rearMaxHeight = 0;
+    const peakTol = peakHeight * 0.02;
+    for (const [key, bin] of bins) {
+      const y = key * BIN;
+      const height = bin.hi - bin.lo;
+      if (height >= peakHeight - peakTol) {
         peakYSum += y;
         peakCount++;
       }
-      if (y < midY) {
-        if (z > rearMaxZ) rearMaxZ = z;
-      }
+      if (y < midY) rearMaxHeight = Math.max(rearMaxHeight, height);
     }
     expect(peakCount).toBeGreaterThan(0);
     const peakY = peakYSum / peakCount;
@@ -72,7 +89,7 @@ describe('small fish dorsal fin profile', () => {
     // 2. The rear half should taper to well below the peak height.
     //    Old flat trapezoid: rearTop at full finHeight → rearFraction = 1.0 → fails.
     //    New profile: rearTaper at 18 % finHeight → rearFraction ≈ 0.18 → passes.
-    const rearFraction = (rearMaxZ - baseZ) / (maxZ - baseZ);
+    const rearFraction = rearMaxHeight / peakHeight;
     expect(
       rearFraction,
       'dorsal fin rear should taper to less than half its peak height',

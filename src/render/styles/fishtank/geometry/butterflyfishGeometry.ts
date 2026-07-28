@@ -9,9 +9,12 @@ import {
 import {
   extrudeRingGeometryAlongX,
   bakeVerticalStripeColors,
-  latheBodyRadiusAt,
+  splineLatheRadiusAt,
+  latheFlankXAt,
+  FISH_EYE_FLATTEN,
   fishtankFinThickness,
   type FinThicknessSample,
+  setScaleSuppressAttribute,
 } from './fishSharedGeometry';
 
 // Fish tank style: the "parrot" boid species' fishtank-exclusive
@@ -125,16 +128,36 @@ function buildButterflyfishBodyGeometry(length: number, width: number): THREE.Bu
   const merged = mergePositionOnlyGeometries([body, dorsalFin, analFin]);
   const striped = bakeVerticalStripeColors(merged, halfLen, STRIPE_COUNT, WHITE_VERTEX_COLOR, STRIPE_BAND_COLOR);
 
-  const eyeY = halfLen * 0.72;
-  const eyeX = width * 0.16 * BODY_SIDE_SQUASH;
-  const eyeZ = width * 0.1 * BODY_HEIGHT_STRETCH;
-  const eyeRadius = width * 0.06;
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  // Moved down and back from (0.72, 0.10). At the old spot the head has
+  // already tapered toward the mouth, and the eye disc's rim overhung the
+  // body's silhouette by 0.13 units — the eye literally stuck out past the
+  // outline. Here the rim keeps 0.36 units of clearance all the way round.
+  const eyeY = halfLen * 0.6;
+  const eyeZ = width * 0.05 * BODY_HEIGHT_STRETCH;
+  // 75% of the previous diameter.
+  const eyeRadius = width * 0.045;
+  // Seat the eye against the flank the body actually has at (eyeY, eyeZ)
+  // rather than at a hand-picked X. The old constant sat 0.04 units OUTSIDE
+  // that surface, and the sphere then added its full radius on top — on a body
+  // squashed to 0.18 in X the eye protruded further than the whole flank is
+  // thick and read as a black bean stuck to the head.
+  const flankX = latheFlankXAt({
+    y: eyeY,
+    z: eyeZ,
+    profile: controlProfile,
+    sideSquash: BODY_SIDE_SQUASH,
+    heightStretch: BODY_HEIGHT_STRETCH,
+  });
+  const eyes = buildEyeDotsGeometry(flankX, eyeY, eyeZ, eyeRadius, FISH_EYE_FLATTEN);
 
-  return mergeGeometriesWithColor([
-    { geometry: striped, color: WHITE_VERTEX_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
-  ]);
+  const parts = [
+    { geometry: striped, color: WHITE_VERTEX_COLOR, suppress: false },
+    // The eye is not skin: without this the scale pattern tiles over the disc.
+    { geometry: eyes, color: EYE_COLOR, suppress: true },
+  ];
+  const withEyes = mergeGeometriesWithColor(parts);
+  setScaleSuppressAttribute(withEyes, parts);
+  return withEyes;
 }
 
 /**
@@ -148,49 +171,121 @@ function buildButterflyfishBodyGeometry(length: number, width: number): THREE.Bu
  * (every point has X=0) — the same fix sharkGeometry.ts/fishGeometry.ts's
  * dorsal fins needed to avoid vanishing when viewed edge-on.
  */
-function buildDorsalFinGeometry(halfLen: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
-  const buryFraction = 0.9; // slightly buried below the surface, same trick as the shark's dorsal fins
-  const finHeight = width * 0.34;
+/**
+ * Builds one of the two median (dorsal / anal) sail fins.
+ *
+ * The base FOLLOWS the body contour instead of running as a straight chord
+ * between two endpoints. Both fins previously took a single root Z at each end
+ * and interpolated between them, but the butterflyfish back arches by more
+ * than half the fin's own height across that span, so the chord cut deep
+ * inside the body mid-base — up to 0.69 units against a 1.36-unit fin — and
+ * swallowed most of the sail exactly where it should be tallest. Sampling the
+ * surface at every station keeps a constant, shallow burial the whole way.
+ *
+ * `side` is +1 for the dorsal (up, +Z) and -1 for the anal fin (down, -Z);
+ * the outline is authored once in "height above the base" terms and mirrored.
+ *
+ * The base and the outer margin are sampled at the SAME stations. Sampling
+ * them at different Y positions would leave the fin with no well-defined
+ * thickness at any single Y, which makes its profile impossible to measure
+ * from the built geometry.
+ */
+function buildMedianFinGeometry({
+  width,
+  profile,
+  side,
+  frontY,
+  backY,
+  finHeight,
+  margin,
+}: {
+  width: number;
+  profile: THREE.Vector2[];
+  side: 1 | -1;
+  frontY: number;
+  backY: number;
+  finHeight: number;
+  margin: [number, number][];
+}): THREE.BufferGeometry {
+  // Sink the base under the skin so the seam is never visible, and so the fin
+  // stays seated if the body profile is later retuned.
+  const EMBED = 0.93;
+  const surfaceAt = (y: number) =>
+    splineLatheRadiusAt(y, profile) * BODY_HEIGHT_STRETCH * side;
+  const baseAt = (y: number) => surfaceAt(y) * EMBED;
+  const yAt = (t: number) => backY + (frontY - backY) * t;
 
-  const frontRootY = halfLen * 0.3;
-  const backRootY = -halfLen * 0.6;
-  const frontRootZ = latheBodyRadiusAt(frontRootY, profile) * BODY_HEIGHT_STRETCH * buryFraction;
-  const backRootZ = latheBodyRadiusAt(backRootY, profile) * BODY_HEIGHT_STRETCH * buryFraction;
-
-  const frontRoot = new THREE.Vector3(0, frontRootY, frontRootZ);
-  const backRoot = new THREE.Vector3(0, backRootY, backRootZ);
-  // Peaks higher near the front-middle, tapering back down toward the
-  // tail — a real butterflyfish's dorsal fin silhouette.
-  const backTip = new THREE.Vector3(0, backRootY + halfLen * 0.1, backRootZ + finHeight * 0.55);
-  const frontTip = new THREE.Vector3(0, frontRootY - halfLen * 0.05, frontRootZ + finHeight);
+  const stations = margin.map(([t]) => t);
+  const ring: THREE.Vector3[] = [];
+  // Ring order: along the base from front to rear, then back along the outer
+  // margin toward the front, so the boundary stays a simple loop that does not
+  // cross itself.
+  for (const t of [1, ...[...stations].reverse(), 0]) {
+    const y = yAt(t);
+    ring.push(new THREE.Vector3(0, y, baseAt(y)));
+  }
+  for (const [t, h] of margin) {
+    const y = yAt(t);
+    ring.push(new THREE.Vector3(0, y, baseAt(y) + finHeight * h * side));
+  }
 
   const thickness = fishtankFinThickness(width);
-  return extrudeRingGeometryAlongX([frontRoot, backRoot, backTip, frontTip], thickness);
+  return extrudeRingGeometryAlongX(ring, thickness);
 }
 
 /**
- * The anal (ventral) fin — a shorter, mirrored counterpart to the dorsal
- * fin along the belly, real butterflyfish's other prominent sail-like
- * fin. Shorter front-to-back and shallower than the dorsal fin (a real
- * anal fin base is noticeably smaller than the dorsal one), rooted the
- * same flush-to-surface way.
+ * The tall, sail-like dorsal fin running most of the length of the back. Real
+ * butterflyfish have a long dorsal base peaking toward the front-middle, which
+ * the margin below traces: a quick rise out of the rear, a long swell to a
+ * rounded peak forward of centre, then a short steep fall to the leading edge.
+ * The small alternations along the way are ray-tip scalloping, not noise.
+ *
+ * Built via extrudeRingGeometryAlongX since this fin's ring lies in the Y-Z
+ * plane (every point has X = 0) — the same fix sharkGeometry.ts's and
+ * smallFishGeometry.ts's dorsal fins needed to avoid vanishing edge-on.
+ */
+function buildDorsalFinGeometry(halfLen: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
+  // t = 0 at the rear of the base, t = 1 at the front.
+  const margin: [number, number][] = [
+    [0.03, 0.14], [0.11, 0.36], [0.20, 0.45], [0.29, 0.57],
+    [0.38, 0.63], [0.47, 0.74], [0.56, 0.81], [0.65, 0.92],
+    [0.73, 0.97], [0.80, 1.00], [0.87, 0.90], [0.93, 0.64],
+    [0.975, 0.31],
+  ];
+  return buildMedianFinGeometry({
+    width,
+    profile,
+    side: 1,
+    frontY: halfLen * 0.3,
+    backY: -halfLen * 0.6,
+    finHeight: width * 0.34,
+    margin,
+  });
+}
+
+/**
+ * The anal (ventral) fin — a shorter, mirrored counterpart to the dorsal fin
+ * along the belly, a real butterflyfish's other prominent sail-like fin.
+ * Shorter front-to-back and shallower than the dorsal fin (a real anal fin
+ * base is noticeably smaller than the dorsal one), and its peak sits further
+ * back, giving the pair the offset silhouette a real fish has rather than
+ * reading as one shape mirrored about the spine.
  */
 function buildAnalFinGeometry(halfLen: number, width: number, profile: THREE.Vector2[]): THREE.BufferGeometry {
-  const buryFraction = 0.9;
-  const finHeight = width * 0.24;
-
-  const frontRootY = halfLen * 0.0;
-  const backRootY = -halfLen * 0.55;
-  const frontRootZ = -latheBodyRadiusAt(frontRootY, profile) * BODY_HEIGHT_STRETCH * buryFraction;
-  const backRootZ = -latheBodyRadiusAt(backRootY, profile) * BODY_HEIGHT_STRETCH * buryFraction;
-
-  const frontRoot = new THREE.Vector3(0, frontRootY, frontRootZ);
-  const backRoot = new THREE.Vector3(0, backRootY, backRootZ);
-  const backTip = new THREE.Vector3(0, backRootY + halfLen * 0.08, backRootZ - finHeight * 0.6);
-  const frontTip = new THREE.Vector3(0, frontRootY - halfLen * 0.05, frontRootZ - finHeight);
-
-  const thickness = fishtankFinThickness(width);
-  return extrudeRingGeometryAlongX([frontRoot, backRoot, backTip, frontTip], thickness);
+  const margin: [number, number][] = [
+    [0.04, 0.18], [0.13, 0.44], [0.22, 0.58], [0.31, 0.72],
+    [0.40, 0.83], [0.49, 0.94], [0.58, 1.00], [0.67, 0.95],
+    [0.75, 0.83], [0.83, 0.66], [0.90, 0.45], [0.96, 0.22],
+  ];
+  return buildMedianFinGeometry({
+    width,
+    profile,
+    side: -1,
+    frontY: halfLen * 0.0,
+    backY: -halfLen * 0.55,
+    finHeight: width * 0.24,
+    margin,
+  });
 }
 
 /**
@@ -203,15 +298,38 @@ function buildAnalFinGeometry(halfLen: number, width: number, profile: THREE.Vec
  */
 function buildPectoralFinGeometry(length: number, span: number, chord: number, side: 1 | -1): THREE.BufferGeometry {
   const rootY = length * 0.08;
-  const tipX = span * side;
-  const leadingBulgeX = span * 0.55 * side;
-  const trailingBulgeX = span * 0.45 * side;
-  const root = new THREE.Vector3(0, rootY, 0);
-  const leadingBulge = new THREE.Vector3(leadingBulgeX, rootY + chord * 0.35, 0);
-  const tip = new THREE.Vector3(tipX, rootY - chord * 0.1, 0);
-  const trailingBulge = new THREE.Vector3(trailingBulgeX, rootY - chord * 0.5, 0);
+  // Forward rake: the blade's outboard end is carried toward the head, so the
+  // fin reads as held out from the gills rather than swept back toward the
+  // tail. Applied as a function of span fraction so the root stays put and
+  // only the outer blade swings forward.
+  const RAKE = 0.34;
+  const pt = (f: number, c: number) =>
+    new THREE.Vector3(span * f * side, rootY + chord * (c + RAKE * f), 0);
+  // A curved paddle rather than the previous 4-point kite, whose few long
+  // straight edges met at hard corners and read as a blocky card stuck to the
+  // flank: the root is narrow so the blade tapers into the body, the leading
+  // edge bows forward, the tip is rounded, and the trailing edge is lightly
+  // scalloped between ray tips.
+  //
+  // Every point stays at z = 0. The ring lies in the X/Y plane and
+  // extrudeRingGeometry thickens it along Z, so any Z variation in the outline
+  // would be indistinguishable from added thickness and would fatten the fin
+  // past its thickness budget.
+  const ring = [
+    pt(0, 0.12),
+    pt(0.30, 0.34),
+    pt(0.62, 0.38),
+    pt(0.87, 0.22),
+    pt(1.0, -0.04),
+    pt(0.88, -0.30),
+    pt(0.74, -0.24),
+    pt(0.58, -0.46),
+    pt(0.42, -0.38),
+    pt(0.22, -0.50),
+    pt(0.06, -0.26),
+  ];
   const thickness = fishtankFinThickness(chord);
-  return extrudeRingGeometry([root, leadingBulge, tip, trailingBulge], thickness);
+  return extrudeRingGeometry(ring, thickness);
 }
 
 /**

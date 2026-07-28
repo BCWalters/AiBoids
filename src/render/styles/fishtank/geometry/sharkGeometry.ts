@@ -4,7 +4,6 @@ import {
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
-  buildEyeDotsGeometry,
   swayingTailRig,
 } from '../../../geometry/sharedGeometry';
 import {
@@ -12,6 +11,10 @@ import {
   latheBodyRadiusAt,
   fishtankFinThickness,
   type FinThicknessSample,
+  buildFlankEyeDiscsGeometry,
+  FISH_EYE_SURFACE_OFFSET,
+  FISH_EYE_DISC_THICKNESS,
+  setScaleSuppressAttribute,
 } from './fishSharedGeometry';
 
 // Fish tank style: this file originally started as a duplicate of
@@ -136,20 +139,31 @@ function buildSharkBodyGeometry(length: number, width: number): THREE.BufferGeom
   const gillSlits = buildGillSlitsGeometry(length, width, profile);
 
   const eyeY = halfLen * 0.48;
-  const eyeRadius = width * 0.04;
-  // Sink the eye sphere so its center sits just inside the body surface at its
-  // row — only a small cap pokes out as the eye, instead of the whole sphere
-  // standing proud of the head.
-  const eyeSurfaceX = latheBodyRadiusAt(eyeY, profile) * BODY_SIDE_SQUASH;
-  const eyeX = eyeSurfaceX - eyeRadius * 0.5;
+  const eyeRadius = width * 0.024;
   const eyeZ = width * 0.01 * BODY_HEIGHT_STRETCH;
-  const eyes = buildEyeDotsGeometry(eyeX, eyeY, eyeZ, eyeRadius);
+  // A disc that follows the flank. The previous code sank a full sphere by half
+  // its radius to tame its bulge; nothing may be sunk now, since the disc is
+  // thin enough that any inward offset would bury it entirely.
+  const eyes = buildFlankEyeDiscsGeometry({
+    y: eyeY,
+    z: eyeZ,
+    radius: eyeRadius,
+    profile,
+    sideSquash: BODY_SIDE_SQUASH,
+    heightStretch: BODY_HEIGHT_STRETCH,
+    offset: eyeRadius * FISH_EYE_SURFACE_OFFSET,
+    thickness: eyeRadius * FISH_EYE_DISC_THICKNESS,
+  });
 
-  return mergeGeometriesWithColor([
-    { geometry: mergePositionOnlyGeometries([bodyShell, dorsalFins]), color: WHITE_VERTEX_COLOR },
-    { geometry: gillSlits, color: GILL_SLIT_COLOR },
-    { geometry: eyes, color: EYE_COLOR },
-  ]);
+  const parts = [
+    { geometry: mergePositionOnlyGeometries([bodyShell, dorsalFins]), color: WHITE_VERTEX_COLOR, suppress: false },
+    { geometry: gillSlits, color: GILL_SLIT_COLOR, suppress: false },
+    // The eye is not skin: without this the scale pattern tiles over the disc.
+    { geometry: eyes, color: EYE_COLOR, suppress: true },
+  ];
+  const merged = mergeGeometriesWithColor(parts);
+  setScaleSuppressAttribute(merged, parts);
+  return merged;
 }
 
 /**

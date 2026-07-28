@@ -87,6 +87,48 @@ export function computeFishUndulationOffsetSlope({
   return amplitude * (envelopeSlope * Math.sin(wavePhase) + envelope * Math.cos(wavePhase) * waveNumber);
 }
 
+/**
+ * Both the lateral displacement and its slope at one point on the spine, in a
+ * single envelope evaluation.
+ *
+ * The body is bent in the vertex shader, but the pectoral fins are separate
+ * instanced meshes posed by CPU matrices, so the renderer has to reproduce the
+ * shader's displacement exactly to keep a fin welded to the flank it grows
+ * from. This is the CPU mirror of `fishUndulationSample` in
+ * fishUndulationShader.ts — the two must stay in step.
+ *
+ * `lateralSlope` is d(offset)/d(axisPosition): the tangent of the angle the
+ * spine makes with the model's forward axis at this station.
+ */
+export function sampleFishUndulationDisplacement({
+  axisPosition,
+  headPosition,
+  tailPosition,
+  amplitude,
+  waveNumber,
+  phase,
+}: {
+  axisPosition: number;
+  headPosition: number;
+  tailPosition: number;
+  amplitude: number;
+  waveNumber: number;
+  phase: number;
+}): { lateralOffset: number; lateralSlope: number } {
+  const { envelope, envelopeSlope } = sampleFishUndulationEnvelope({
+    axisPosition,
+    headPosition,
+    tailPosition,
+  });
+  const wavePhase = waveNumber * axisPosition - phase;
+  const sin = Math.sin(wavePhase);
+  const cos = Math.cos(wavePhase);
+  return {
+    lateralOffset: amplitude * envelope * sin,
+    lateralSlope: amplitude * (envelopeSlope * sin + envelope * cos * waveNumber),
+  };
+}
+
 export function computeFishUndulationOmega({
   baseOmega,
   speedFraction,
