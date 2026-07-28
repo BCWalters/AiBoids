@@ -7,7 +7,11 @@
  */
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { applyWingUndulationShader, type WingUndulationConfig } from './wingUndulationShader';
+import {
+  UNSHAPED_WAVE,
+  applyWingUndulationShader,
+  type WingUndulationConfig,
+} from './wingUndulationShader';
 
 const BASE_CONFIG: WingUndulationConfig = {
   amplitudeFraction: 0.06,
@@ -32,8 +36,49 @@ describe('applyWingUndulationShader — cache-key integrity', () => {
     expect(rightKey).toBeTruthy();
     // Both keys must contain the undulation sentinel so a different amplitude
     // produces a different cache key, preventing stale-shader reuse.
-    expect(leftKey).toContain('aiboids-wing-undulation-v2');
-    expect(rightKey).toContain('aiboids-wing-undulation-v2');
+    expect(leftKey).toContain('aiboids-wing-undulation-v3');
+    expect(rightKey).toContain('aiboids-wing-undulation-v3');
+  });
+
+  it('customProgramCacheKey is distinct when only slapSharpness differs, since that changes the emitted GLSL', () => {
+    // slapSharpness reaches the GLSL through a uniform AND through a branch on
+    // `p == 1.0`, so two materials differing only in it must not share a
+    // compiled program. Every value that reaches the shader belongs in the key.
+    const leftA = makeWingMesh(2.0);
+    const rightA = makeWingMesh(2.0);
+    applyWingUndulationShader({
+      wingLeft: leftA,
+      wingRight: rightA,
+      config: { ...BASE_CONFIG, slapSharpness: 1 },
+    });
+    const leftB = makeWingMesh(2.0);
+    const rightB = makeWingMesh(2.0);
+    applyWingUndulationShader({
+      wingLeft: leftB,
+      wingRight: rightB,
+      config: { ...BASE_CONFIG, slapSharpness: 2 },
+    });
+    expect((leftA.material as THREE.MeshStandardMaterial).customProgramCacheKey?.()).not.toBe(
+      (leftB.material as THREE.MeshStandardMaterial).customProgramCacheKey?.(),
+    );
+  });
+
+  it('defaults slapSharpness to an unshaped sine, so fish fins keep their smooth scull', () => {
+    // The fishtank shares this shader and passes no slapSharpness. The default
+    // must be the identity, or adding a bird feature silently restyles the fish.
+    const left = makeWingMesh(2.0);
+    const right = makeWingMesh(2.0);
+    applyWingUndulationShader({ wingLeft: left, wingRight: right, config: BASE_CONFIG });
+    const withExplicitDefault = makeWingMesh(2.0);
+    const rightExplicit = makeWingMesh(2.0);
+    applyWingUndulationShader({
+      wingLeft: withExplicitDefault,
+      wingRight: rightExplicit,
+      config: { ...BASE_CONFIG, slapSharpness: UNSHAPED_WAVE },
+    });
+    expect((left.material as THREE.MeshStandardMaterial).customProgramCacheKey?.()).toBe(
+      (withExplicitDefault.material as THREE.MeshStandardMaterial).customProgramCacheKey?.(),
+    );
   });
 
   it('customProgramCacheKey is distinct when config amplitude differs, guarding against program cache collisions', () => {

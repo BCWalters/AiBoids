@@ -5,6 +5,7 @@ import {
   mergeGeometriesWithColor,
   singleLegPart,
   smoothNormalsByPosition,
+  subdivideGeometryWithAttributes,
   swayingTailRig,
 } from '../../../geometry/sharedGeometry';
 
@@ -20,13 +21,31 @@ import {
  * angle instead of vanishing edge-on. Deliberately much bigger than the
  * hawk predator geometry it replaces.
  */
+/**
+ * Spanwise subdivision of the dragon wing, so the undulation shader has enough
+ * vertices to bend. 4 takes the membrane from 37 distinct spanwise stations to
+ * ~148 and every finger bone from 2 rings to 8.
+ */
+const DRAGON_WING_WAVE_DIVISIONS = 4;
+
 export function createDragonGeometries(length: number, width: number): CreatureGeometries {
   const body = buildDragonBodyGeometry(length, width);
 
   const wingSpan = length * 1.5;
   const wingChord = length * 0.85;
-  const wingLeft = buildMembraneWingGeometry(wingSpan, wingChord, 1);
-  const wingRight = buildMembraneWingGeometry(wingSpan, wingChord, -1);
+  // Subdivided so the undulation wave has somewhere to bend. The membrane is a
+  // handful of big scallop triangles and each finger bone is a 2-ring tube, so
+  // unsubdivided the bones could only carry a straight line where the membrane
+  // was curving and visibly lagged it mid-stroke. Subdivision is exact on
+  // planar triangles, so the rest pose is untouched.
+  const wingLeft = subdivideGeometryWithAttributes(
+    buildMembraneWingGeometry(wingSpan, wingChord, 1),
+    DRAGON_WING_WAVE_DIVISIONS,
+  );
+  const wingRight = subdivideGeometryWithAttributes(
+    buildMembraneWingGeometry(wingSpan, wingChord, -1),
+    DRAGON_WING_WAVE_DIVISIONS,
+  );
 
   const tail = buildDragonTailGeometry(length, width);
   const legs = buildDragonLegsGeometry(length, width);

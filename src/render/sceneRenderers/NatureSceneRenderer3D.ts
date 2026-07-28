@@ -26,6 +26,7 @@ import {
   PARROT_FEATHER_CONFIG,
 } from '../styles/nature/birdFeatherShader';
 import {
+  UNSHAPED_WAVE,
   applyWingUndulationShader,
   type WingUndulationConfig,
   type WingUndulationInstanceState,
@@ -408,16 +409,51 @@ interface NatureSceneRendererDependencies {
   fireBreathEffects: FireBreathEffects;
 }
 
-// Wing-undulation config: 6 % tip amplitude, ~108° phase lag shoulder→tip.
-// Applied to ALL nature flying creatures (birds, hawks, parrots, dragons, unicorns).
-export const WING_UNDULATION_CONFIG: WingUndulationConfig = {
-  // Real birds' primaries trail the shoulder far more than the first pass
-  // suggested — the tip visibly whips through the stroke rather than gently
-  // bowing. Raised from 0.06 / 0.6π after review of the shipped motion.
+/**
+ * Wing undulation, per creature family.
+ *
+ * The undulation is the travelling wave that makes the flap roll out from the
+ * shoulder instead of the wing flipping as a rigid plate. How much of it each
+ * creature wants turns out NOT to be one number: the exaggerated slap that
+ * suits a big, slow, showy wing reads as wrong on a sparrow, whose real
+ * wingbeat is a fast blur with very little visible flex.
+ *
+ * Three tiers, all sharing the same shader:
+ *
+ * - STANDARD — small birds and the hawk. The long-shipped values. Real small
+ *   birds simply do not whip their wingtips through this large an arc.
+ * - MODERATE — parrot, dragon, unicorn. Halfway between standard and the full
+ *   slap on every axis, for wings big and slow enough to show the flex.
+ * - The full slap (0.34 / 0.7π / 2) is not currently used by anything. It was
+ *   built and looked at, and read as too much on every creature; the values are
+ *   recorded in git history rather than kept here as a tempting dead constant.
+ *
+ * `slapSharpness` is the k of tanh(k·sin θ)/tanh(k), so 0 is a plain sine.
+ */
+const STANDARD_WING_UNDULATION: WingUndulationConfig = {
   amplitudeFraction: 0.15,
   tipPhaseLagRad: Math.PI * 0.95,
+  slapSharpness: UNSHAPED_WAVE,
 };
 
+const MODERATE_WING_UNDULATION: WingUndulationConfig = {
+  amplitudeFraction: 0.24,
+  // Between the standard 0.95π and the slap's 0.7π. At 0.95π the tip is nearly
+  // ANTI-phase with the shoulder, so the wing writhes in an S rather than one
+  // stroke rolling outward; shortening the lag is as much of the extra drama as
+  // the amplitude is.
+  tipPhaseLagRad: Math.PI * 0.825,
+  // Squares the wave up a little, so the tip dwells at its extremes and crosses
+  // between them faster: peak tip speed without bowing the wing any further.
+  slapSharpness: 1,
+};
+
+/**
+ * Retained as the name the parrot wing-panel geometry test measures against, so
+ * that test keeps asserting about the configuration the parrot actually ships
+ * with rather than a copy that can rot independently of it.
+ */
+export const WING_UNDULATION_CONFIG = MODERATE_WING_UNDULATION;
 // Unicorn tail streaming config. "upBiasFraction" gives the steady upward
 // deflection at full horizontal speed; "amplitudeFraction" is the oscillation
 // on top of that. omega = angular frequency of the tail's own undulation.
@@ -973,14 +1009,42 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     }
   }
 
+  /**
+   * Small birds and the hawk keep the standard undulation; the parrot, dragon
+   * and unicorn get the moderate one. Dispatching on geometry identity is the
+   * same mechanism featherConfigFor uses — the wing meshes arrive without a
+   * species tag, but their geometry object is the one this renderer built.
+   *
+   * The fallback is STANDARD deliberately: a new creature added later should
+   * start on the conservative motion and be opted in to more, rather than
+   * inheriting the biggest wing movement in the scene by default.
+   */
+  private wingUndulationConfigFor(geometries: CreatureGeometries): WingUndulationConfig {
+    if (
+      geometries === this.dragonPredatorGeometries ||
+      geometries === this.unicornPredatorGeometries ||
+      geometries === this.parrotGeometries ||
+      geometries === this.parrotBlueGoldGeometries ||
+      geometries === this.parrotScarletGeometries ||
+      geometries === this.parrotPurpleLavenderGeometries ||
+      geometries === this.parrotNeutralGeometries
+    ) {
+      return MODERATE_WING_UNDULATION;
+    }
+    return STANDARD_WING_UNDULATION;
+  }
+
   setupWingUndulation(
     wingLeft: THREE.InstancedMesh,
     wingRight: THREE.InstancedMesh,
-    _geometries: CreatureGeometries,
+    geometries: CreatureGeometries,
   ): WingUndulationInstanceState {
-    // Applied to all nature flying creatures unconditionally.
     // patchWingMaterial already ran on each material; this chains on top.
-    return applyWingUndulationShader({ wingLeft, wingRight, config: WING_UNDULATION_CONFIG });
+    return applyWingUndulationShader({
+      wingLeft,
+      wingRight,
+      config: this.wingUndulationConfigFor(geometries),
+    });
   }
 
   setupTailUndulation(

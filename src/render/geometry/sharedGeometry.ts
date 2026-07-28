@@ -437,6 +437,87 @@ export function subdivideGeometryTriangles(
   return result;
 }
 
+/**
+ * {@link subdivideGeometryTriangles}, but carrying every attribute through
+ * instead of only position.
+ *
+ * ### Why this exists
+ * A vertex-shader displacement can only bend a surface where that surface has
+ * vertices. The wing-undulation wave runs a full 0.7π of phase from shoulder to
+ * tip, and a wing built from a handful of big triangles simply cannot represent
+ * it: the dragon's membrane had 37 distinct spanwise stations and its finger
+ * bones only 2 rings each, and the unicorn's whole wing was a 6-triangle fan
+ * with 7. The bones therefore carried a straight-line approximation of a curve
+ * the membrane was bending along, so they visibly lagged their own membrane,
+ * and the unicorn's wing snapped between poses instead of flexing. By
+ * comparison the bird wings carry 600–900 stations and read as smooth.
+ *
+ * Subdivision is geometrically EXACT here: every triangle is planar, so every
+ * lattice point it introduces lies in that triangle's own plane. The rest pose
+ * is unchanged to the last float — the new vertices only matter once something
+ * displaces them.
+ *
+ * Attributes are interpolated with the same barycentric weights as position.
+ * `normal` is renormalized afterwards, since interpolating unit vectors does
+ * not preserve unit length.
+ */
+export function subdivideGeometryWithAttributes(
+  geometry: THREE.BufferGeometry,
+  divisions: number,
+): THREE.BufferGeometry {
+  if (divisions <= 1) return geometry;
+  const source = geometry.index ? geometry.toNonIndexed() : geometry;
+  const names = Object.keys(source.attributes);
+  const result = new THREE.BufferGeometry();
+
+  for (const name of names) {
+    const attribute = source.getAttribute(name) as THREE.BufferAttribute;
+    const size = attribute.itemSize;
+    const out: number[] = [];
+    for (let base = 0; base + 2 < attribute.count; base += 3) {
+      const lattice = (i: number, j: number): number[] => {
+        const u = i / divisions;
+        const v = j / divisions;
+        const w = 1 - u - v;
+        const item: number[] = [];
+        for (let k = 0; k < size; k++) {
+          item.push(
+            attribute.array[(base + 0) * size + k] * w +
+              attribute.array[(base + 1) * size + k] * u +
+              attribute.array[(base + 2) * size + k] * v,
+          );
+        }
+        return item;
+      };
+      // Same corner order as the parent triangle, so the soup keeps its facing.
+      for (let i = 0; i < divisions; i++) {
+        for (let j = 0; i + j < divisions; j++) {
+          out.push(...lattice(i, j), ...lattice(i + 1, j), ...lattice(i, j + 1));
+          if (i + j < divisions - 1) {
+            out.push(...lattice(i + 1, j), ...lattice(i + 1, j + 1), ...lattice(i, j + 1));
+          }
+        }
+      }
+    }
+    result.setAttribute(name, new THREE.BufferAttribute(new Float32Array(out), size));
+  }
+
+  const normal = result.getAttribute('normal') as THREE.BufferAttribute | undefined;
+  if (normal) {
+    const v = new THREE.Vector3();
+    for (let i = 0; i < normal.count; i++) {
+      v.set(normal.getX(i), normal.getY(i), normal.getZ(i));
+      if (v.lengthSq() > 1e-12) v.normalize();
+      normal.setXYZ(i, v.x, v.y, v.z);
+    }
+    normal.needsUpdate = true;
+  }
+
+  if (source !== geometry) source.dispose();
+  result.computeBoundingSphere();
+  return result;
+}
+
 export function extrudeRingGeometry(ring: THREE.Vector3[], thickness: number): THREE.BufferGeometry {
   const n = ring.length;
   const half = thickness / 2;
