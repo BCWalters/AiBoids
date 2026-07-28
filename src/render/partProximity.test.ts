@@ -35,6 +35,7 @@ import {
 } from './CreatureInstanceRenderer';
 import type { ColorStrategy, MotionConfig } from './sceneRenderers/createSceneRendererHooks';
 import type { CreatureGeometries, CreatureLegPart } from './geometry/sharedGeometry';
+import type { Triple } from './motion/rig';
 // Nature geometries (unrestricted files)
 import { createParrotGeometries } from './styles/nature/geometry/parrotGeometry';
 import { createUnicornGeometries } from './styles/nature/geometry/unicornGeometry';
@@ -47,6 +48,12 @@ import { createButterflyfishGeometries } from './styles/fishtank/geometry/butter
 import { createSharkGeometries } from './styles/fishtank/geometry/sharkGeometry';
 import { createBarracudaGeometries } from './styles/fishtank/geometry/barracudaGeometry';
 import { createSeaHorseGeometries } from './styles/fishtank/geometry/seaHorseGeometry';
+// The shipped sway amplitudes, imported rather than copied: a local copy let
+// this harness keep exercising 0.5 rad long after the shark shipped 0.06.
+import {
+  SHARK_TAIL_SWAY_AMPLITUDE,
+  BARRACUDA_TAIL_SWAY_AMPLITUDE,
+} from './sceneRenderers/FishtankSceneRenderer3D';
 
 // -------------------------------------------------------------------
 // Shared test helpers
@@ -119,18 +126,59 @@ function bodyRadius(geom: CreatureGeometries): number {
 }
 
 /** Collect every optional part mesh in the batch as labelled entries. */
-function collectParts(batch: BoidRenderBatch): Array<{ label: string; mesh: THREE.InstancedMesh }> {
-  const parts: Array<{ label: string; mesh: THREE.InstancedMesh }> = [
+function collectParts(
+  batch: BoidRenderBatch,
+  geometries: CreatureGeometries,
+): Array<{ label: string; mesh: THREE.InstancedMesh; pivot?: Triple }> {
+  const parts: Array<{ label: string; mesh: THREE.InstancedMesh; pivot?: Triple }> = [
     { label: 'wingLeft', mesh: batch.wingLeft },
     { label: 'wingRight', mesh: batch.wingRight },
   ];
-  if (batch.tail) parts.push({ label: 'tail', mesh: batch.tail });
+  if (batch.tail) parts.push({ label: 'tail', mesh: batch.tail, pivot: geometries.tailRig?.pivot });
   if (batch.legs) {
-    batch.legs.forEach((legPart, i) => parts.push({ label: `leg[${i}]`, mesh: legPart.mesh }));
+    batch.legs.forEach((legPart, i) =>
+      parts.push({ label: `leg[${i}]`, mesh: legPart.mesh, pivot: geometries.legs?.[i]?.pivot }),
+    );
   }
   if (batch.beak) parts.push({ label: 'beak', mesh: batch.beak });
   return parts;
 }
+
+/**
+ * World-space position of a part's declared hinge point.
+ *
+ * This deliberately does NOT just read the instance matrix's translation
+ * column. That column is where the part's *model origin* lands, which tracks
+ * the part faithfully only while the transform is a rotation about that
+ * origin. Once a rig hinges a part about a pivot offset perpendicular to its
+ * sway axis — as the shark and barracuda caudal fins do since the axis fix —
+ * the origin swings on a long lever arm while the geometry stays welded at
+ * the pivot, and the translation column reports a large displacement for a
+ * fin that has barely moved.
+ *
+ * Transforming the declared pivot instead measures the one point that must
+ * stay attached to the body no matter how the part articulates. For parts
+ * with no pivot the pivot IS the model origin, so this reduces exactly to the
+ * original check and every previously-calibrated tolerance still applies.
+ */
+function partHingeWorldPosition({
+  mesh,
+  pivot,
+  index = 0,
+}: {
+  mesh: THREE.InstancedMesh;
+  pivot?: Triple;
+  index?: number;
+}): THREE.Vector3 {
+  const matrix = new THREE.Matrix4();
+  mesh.getMatrixAt(index, matrix);
+  const hinge = pivot
+    ? new THREE.Vector3(pivot[0], pivot[1], pivot[2])
+    : new THREE.Vector3();
+  return hinge.applyMatrix4(matrix);
+}
+
+/** Collect every optional part mesh in the batch as labelled entries. */
 
 // -------------------------------------------------------------------
 // Creature table
@@ -206,7 +254,7 @@ const FISHTANK_SHARK_MOTION: MotionConfig = {
   keepUpright: true,
   uprightStyle: 'shark',
   finRestBiasRad: 0.4,
-  tailSwayAmplitude: 0.5,
+  tailSwayAmplitude: SHARK_TAIL_SWAY_AMPLITUDE,
   tailSwayFrequency: 3.4,
   worldScale: TANK_VISUAL_SCALE,
   meshScaleBoost: 2.42,
@@ -220,7 +268,7 @@ const FISHTANK_BARRACUDA_MOTION: MotionConfig = {
   keepUpright: true,
   uprightStyle: 'shark',
   finRestBiasRad: 0.32,
-  tailSwayAmplitude: 0.44,
+  tailSwayAmplitude: BARRACUDA_TAIL_SWAY_AMPLITUDE,
   tailSwayFrequency: 3.9,
   worldScale: TANK_VISUAL_SCALE,
   meshScaleBoost: 1.936,
@@ -352,16 +400,14 @@ describe('part proximity invariant — every part stays near its body', () => {
         );
       }
 
-      // Read body position.
-      const bodyMat = new THREE.Matrix4();
-      batch.body.getMatrixAt(0, bodyMat);
-      const bodyPos = new THREE.Vector3().setFromMatrixPosition(bodyMat);
-
-      // Assert every part's instance matrix translation is close to the body's.
-      for (const { label, mesh } of collectParts(batch)) {
-        const partMat = new THREE.Matrix4();
-        mesh.getMatrixAt(0, partMat);
-        const partPos = new THREE.Vector3().setFromMatrixPosition(partMat);
+      // Assert every part's hinge point lands where the BODY places that same
+      // point. A part is attached exactly when its own transform and the
+      // body's agree about where the hinge is; how the part swings beyond the
+      // hinge is articulation, not detachment. Parts with no declared pivot
+      // use the model origin, which is the original form of this check.
+      for (const { label, mesh, pivot } of collectParts(batch, geom)) {
+        const bodyPos = partHingeWorldPosition({ mesh: batch.body, pivot });
+        const partPos = partHingeWorldPosition({ mesh, pivot });
         const dist = partPos.distanceTo(bodyPos);
         expect(
           dist,

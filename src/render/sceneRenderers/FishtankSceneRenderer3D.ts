@@ -41,6 +41,7 @@ import {
   type ScenePredatorInstanceConfig,
   type SpeciesColorSet,
   type CreatureLabels,
+  type FishUndulationConfig,
 } from './createSceneRendererHooks';
 
 // --- Fishtank creature sizing: every fishtank creature is a factor of this
@@ -142,7 +143,17 @@ const FISHTANK_SPECIES_CONFIG: Record<BoidSpecies, FishtankSpeciesConfig> = {
 const SHARK_FLAP_FREQUENCY = 2.2;
 const SHARK_FLAP_IDLE_AMPLITUDE = 0.05;
 const SHARK_FLAP_SPEED_AMPLITUDE = 0.09;
-const SHARK_TAIL_SWAY_AMPLITUDE = 0.5; // radians; a visibly wide side-to-side beat
+// Radians of caudal yaw. Deliberately small: since #219 the body undulation
+// carries the swimming motion, and the tail only needs to read as the end of
+// that wave rather than compete with it. At 0.06 the fin tip sweeps 0.65u,
+// about 0.5x the shark's 1.29u peak undulation amplitude.
+//
+// This was 0.5 while the rig rotated about the spine axis. Two things made
+// that untenable once undulation landed: the fin scissored into an X (see
+// sharkGeometry.ts), and a 29-degree rotation of the fin's instance matrix
+// broke the assumption that lets it share the body's undulation uniforms —
+// worst root-vertex seam error was 0.235u, now 0.029u.
+export const SHARK_TAIL_SWAY_AMPLITUDE = 0.06;
 const SHARK_TAIL_SWAY_FREQUENCY = 3.4; // faster than the subtle fin wobble — the main swimming motion
 const SHARK_FIN_REST_TILT_RAD = 0.4;
 const FISHTANK_FISH_MESH_BOOST = 2.2;
@@ -151,9 +162,30 @@ const FISHTANK_SHARK_MESH_BOOST = 1.1;
 const BARRACUDA_FLAP_FREQUENCY = 2.5;
 const BARRACUDA_FLAP_IDLE_AMPLITUDE = 0.04;
 const BARRACUDA_FLAP_SPEED_AMPLITUDE = 0.08;
-const BARRACUDA_TAIL_SWAY_AMPLITUDE = 0.44;
+// Chosen to preserve the barracuda's approved on-screen magnitude across the
+// axis fix, not to match the old number: the old spine-roll at 0.44 swept the
+// lobe tips 1.45u, and a true yaw reaches that same 1.47u at 0.14.
+export const BARRACUDA_TAIL_SWAY_AMPLITUDE = 0.14;
 const BARRACUDA_TAIL_SWAY_FREQUENCY = 3.9;
 const BARRACUDA_FIN_REST_TILT_RAD = 0.32;
+const FISHTANK_BOID_FISH_UNDULATION: FishUndulationConfig = {
+  amplitudeFraction: 0.033,
+  wavesPerBody: 0.65,
+  baseOmega: 3.4,
+  speedOmegaScale: 1.2,
+};
+export const FISHTANK_BARRACUDA_UNDULATION: FishUndulationConfig = {
+  amplitudeFraction: 0.03,
+  wavesPerBody: 0.45,
+  baseOmega: 2.9,
+  speedOmegaScale: 1.0,
+};
+export const FISHTANK_SHARK_UNDULATION: FishUndulationConfig = {
+  amplitudeFraction: 0.027,
+  wavesPerBody: 0.45,
+  baseOmega: 2.6,
+  speedOmegaScale: 0.9,
+};
 // Utility function for deterministic per-creature hashing (used for variant selection)
 function idHash(id: number, salt: number): number {
   const x = Math.sin(id * 12.9898 + salt * 78.233) * 43758.5453;
@@ -549,21 +581,21 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
   }
 
   getParrotProfileInstanceConfig(_profile: string, _flags: StyleFlags): SceneBoidInstanceConfig {
-    return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
+    return { geometries: this.butterflyfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
   }
 
   getBoidInstanceConfig(species: BoidSpecies, _flags: StyleFlags): SceneBoidInstanceConfig {
     switch (species) {
       case BoidSpecies.Gold:
-        return { geometries: this.goldfishGeometries, bodyVertexColors: true };
+        return { geometries: this.goldfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       case BoidSpecies.Red:
-        return { geometries: this.clownfishGeometries, bodyVertexColors: true };
+        return { geometries: this.clownfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       case BoidSpecies.Blue:
-        return { geometries: this.blueTangGeometries, bodyVertexColors: true };
+        return { geometries: this.blueTangGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       case BoidSpecies.Multicolor:
-        return { geometries: this.butterflyfishGeometries, bodyVertexColors: true };
+        return { geometries: this.butterflyfishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
       default:
-        return { geometries: this.plainFishGeometries, bodyVertexColors: true };
+        return { geometries: this.plainFishGeometries, bodyVertexColors: true, fishUndulation: FISHTANK_BOID_FISH_UNDULATION };
     }
   }
 
@@ -578,12 +610,14 @@ export class FishtankSceneRenderer3D implements SceneRendererHooks {
           geometries: this.barracudaPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
+          fishUndulation: FISHTANK_BARRACUDA_UNDULATION,
         };
       case PredatorSpecies.Monster:
         return {
           geometries: this.sharkPredatorGeometries,
           rainbowWings: false,
           bodyVertexColors: true,
+          fishUndulation: FISHTANK_SHARK_UNDULATION,
         };
       case PredatorSpecies.Horse:
         return {

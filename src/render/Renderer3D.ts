@@ -29,6 +29,7 @@ import {
   SCENE_PREDATOR_SPECIES,
   SCENE_STYLES,
   type SceneEnvironmentToggles,
+  type FishUndulationConfig,
   type SceneRendererHooks,
   type StyleFlags,
   type CreatureLabels,
@@ -38,6 +39,7 @@ import { isReducedGraphics } from './graphicsQuality';
 import { UfoRenderer } from './UfoRenderer';
 import { CameraController } from './CameraController';
 import { CreatureInstanceRenderer, type BoidRenderBatch, type LegPartMesh } from './CreatureInstanceRenderer';
+import { applyFishUndulationShader } from './styles/fishtank/fishUndulationShader';
 
 /**
  * Profile name for the "neutral" (non-focus-pattern) Multicolor boid batch —
@@ -207,15 +209,25 @@ export class Renderer3D {
     }
   }
 
-  private buildRenderBatch(
-    geometries: CreatureGeometries,
-    style: VisualStyle,
-    count: number,
-    isMonster: boolean = false,
-    rainbowWings: boolean = false,
-    bodyVertexColors: boolean = false,
-    bodyEmissiveOverride?: THREE.Color,
-  ): BoidRenderBatch {
+  private buildRenderBatch({
+    geometries,
+    style,
+    count,
+    isMonster = false,
+    rainbowWings = false,
+    bodyVertexColors = false,
+    bodyEmissiveOverride,
+    fishUndulation,
+  }: {
+    geometries: CreatureGeometries;
+    style: VisualStyle;
+    count: number;
+    isMonster?: boolean;
+    rainbowWings?: boolean;
+    bodyVertexColors?: boolean;
+    bodyEmissiveOverride?: THREE.Color;
+    fishUndulation?: FishUndulationConfig;
+  }): BoidRenderBatch {
     // Diffuse color starts white; the actual visible tint is driven entirely
     // per-instance via setColorAt in updateInstances (base <-> state color).
     const sceneRenderer = this.getSceneRenderer(style);
@@ -277,7 +289,6 @@ export class Renderer3D {
     wingRight.castShadow = true;
     wingRight.receiveShadow = true;
     this.scene.add(body, wingLeft, wingRight);
-
     let tail: THREE.InstancedMesh | undefined;
     if (geometries.tail) {
       const tailMaterial = wingMaterial.clone();
@@ -292,6 +303,9 @@ export class Renderer3D {
       tail.receiveShadow = true;
       this.scene.add(tail);
     }
+    const fishUndulationState = fishUndulation
+      ? applyFishUndulationShader({ mesh: body, tailMesh: tail, config: fishUndulation })
+      : undefined;
 
     let legs: LegPartMesh[] | undefined;
     if (geometries.legs?.length) {
@@ -327,7 +341,7 @@ export class Renderer3D {
       this.scene.add(beak);
     }
 
-    return { body, wingLeft, wingRight, tail, tailRig: geometries.tailRig, legs, beak };
+    return { body, wingLeft, wingRight, tail, tailRig: geometries.tailRig, legs, beak, fishUndulation: fishUndulationState };
   }
 
   private disposeRenderBatch(set: BoidRenderBatch | null): void {
@@ -343,6 +357,12 @@ export class Renderer3D {
     for (const mesh of meshes) {
       this.scene.remove(mesh);
       (mesh.material as THREE.Material).dispose();
+      mesh.customDepthMaterial?.dispose();
+      mesh.customDistanceMaterial?.dispose();
+    }
+    if (set.fishUndulation) {
+      (set.body.geometry as THREE.BufferGeometry).dispose();
+      if (set.tail) (set.tail.geometry as THREE.BufferGeometry).dispose();
     }
   }
 
@@ -518,10 +538,22 @@ export class Renderer3D {
       const key = `${count}:${style}`;
       if (this.speciesInstanceKeys.get(species) !== key) {
         this.disposeRenderBatch(this.speciesInstances.get(species) ?? null);
-        const { geometries, bodyVertexColors, bodyEmissiveOverride } = sceneRenderer.getBoidInstanceConfig(species, flags);
+        const {
+          geometries,
+          bodyVertexColors,
+          bodyEmissiveOverride,
+          fishUndulation,
+        } = sceneRenderer.getBoidInstanceConfig(species, flags);
         this.speciesInstances.set(
           species,
-          this.buildRenderBatch(geometries, style, count, false, false, bodyVertexColors, bodyEmissiveOverride),
+          this.buildRenderBatch({
+            geometries,
+            style,
+            count,
+            bodyVertexColors,
+            bodyEmissiveOverride,
+            fishUndulation,
+          }),
         );
         this.speciesInstanceKeys.set(species, key);
       }
@@ -590,14 +622,13 @@ export class Renderer3D {
       const neutralConfig = sceneRenderer.getParrotProfileInstanceConfig(MULTICOLOR_BOID_NEUTRAL_PROFILE, flags);
       this.speciesInstances.set(
         BoidSpecies.Multicolor,
-        this.buildRenderBatch(
-          neutralConfig.geometries,
+        this.buildRenderBatch({
+          geometries: neutralConfig.geometries,
           style,
-          neutralCount,
-          false,
-          false,
-          neutralConfig.bodyVertexColors,
-        ),
+          count: neutralCount,
+          bodyVertexColors: neutralConfig.bodyVertexColors,
+          fishUndulation: neutralConfig.fishUndulation,
+        }),
       );
       this.speciesInstanceKeys.set(BoidSpecies.Multicolor, neutralKey);
     }
@@ -609,14 +640,13 @@ export class Renderer3D {
         const profileConfig = sceneRenderer.getParrotProfileInstanceConfig(profile, flags);
         this.profiledSpeciesInstances.set(
           profile,
-          this.buildRenderBatch(
-            profileConfig.geometries,
+          this.buildRenderBatch({
+            geometries: profileConfig.geometries,
             style,
-            profileCount,
-            false,
-            false,
-            profileConfig.bodyVertexColors,
-          ),
+            count: profileCount,
+            bodyVertexColors: profileConfig.bodyVertexColors,
+            fishUndulation: profileConfig.fishUndulation,
+          }),
         );
         this.profiledSpeciesKeys.set(profile, profileKey);
       }
@@ -635,14 +665,15 @@ export class Renderer3D {
         const config = sceneRenderer.getPredatorInstanceConfig(species, flags, speciesRenderFlags);
         this.predatorInstances.set(
           species,
-          this.buildRenderBatch(
-            config.geometries,
+          this.buildRenderBatch({
+            geometries: config.geometries,
             style,
             count,
-            speciesRenderFlags.isMonster,
-            config.rainbowWings,
-            config.bodyVertexColors,
-          ),
+            isMonster: speciesRenderFlags.isMonster,
+            rainbowWings: config.rainbowWings,
+            bodyVertexColors: config.bodyVertexColors,
+            fishUndulation: config.fishUndulation,
+          }),
         );
         this.predatorInstanceKeys.set(species, instanceKey);
         this.creatureRenderer.resetPredatorOrientationCaches(species);

@@ -34,8 +34,13 @@ import {
   legSwingAngleFromPhase,
   tailSwayAngleFromPhase,
 } from './motion/flapMath';
+import {
+  advanceFishUndulationPhase,
+  computeFishUndulationOmega,
+} from './motion/fishUndulationMath';
 import { composeArticulationChain, composePartArticulation } from './motion/partTransform';
 import { resolveDriveAngle, type RigPartDeclaration } from './motion/rig';
+import type { FishUndulationInstanceState } from './styles/fishtank/fishUndulationShader';
 
 /** One creature's instanced meshes: a body plus optional wing/tail/legs/beak parts. */
 export interface BoidRenderBatch {
@@ -53,6 +58,7 @@ export interface BoidRenderBatch {
   legs?: LegPartMesh[];
   /** Small-bird-only: see CreatureGeometries.beak's doc comment. */
   beak?: THREE.InstancedMesh;
+  fishUndulation?: FishUndulationInstanceState;
 }
 
 /** A rig part declaration bound to the InstancedMesh that draws it. */
@@ -266,6 +272,7 @@ export class CreatureInstanceRenderer {
   };
   /** Per-creature accumulated flap phase (radians), integrated every frame. */
   private flapPhase = new WeakMap<Boid | Predator, number>();
+  private fishUndulationPhase = new WeakMap<Boid | Predator, number>();
 
   /**
    * Cached combined model-space bounding box per render batch (see
@@ -515,6 +522,38 @@ export class CreatureInstanceRenderer {
       set.beak.instanceMatrix.needsUpdate = true;
       if (set.beak.instanceColor) set.beak.instanceColor.needsUpdate = true;
     }
+    if (set.fishUndulation) set.fishUndulation.phaseAttribute.needsUpdate = true;
+  }
+
+  private updateFishUndulationPhase({
+    set,
+    index,
+    creature,
+    speed,
+    maxSpeed,
+    dt,
+  }: {
+    set: BoidRenderBatch;
+    index: number;
+    creature: Boid | Predator;
+    speed: number;
+    maxSpeed: number;
+    dt: number;
+  }): void {
+    const undulation = set.fishUndulation;
+    if (!undulation) return;
+    const omega = computeFishUndulationOmega({
+      baseOmega: undulation.baseOmega,
+      speedFraction: computeSpeedFraction({ speed, maxSpeed }),
+      speedScale: undulation.speedOmegaScale,
+    });
+    const phase = advanceFishUndulationPhase({
+      previousPhase: this.fishUndulationPhase.get(creature) ?? initialFlapPhase(creature.id),
+      omega,
+      dt,
+    });
+    this.fishUndulationPhase.set(creature, phase);
+    undulation.phaseAttribute.setX(index, phase);
   }
 
   private applyCreatureInstanceMatrices(args: CreatureInstanceMatrixArgs): void {
@@ -1043,7 +1082,6 @@ export class CreatureInstanceRenderer {
       }),
       pivot: this.tmpPivot,
     });
-
     if (tailFlareStrength <= 0 || maxFlapAngle <= 1e-5) return;
     // maxFlapAngle is the authored idle+speed envelope. State multipliers can
     // push the live flap angle above it (up to 1.24×), so clamp the ratio.
@@ -1225,6 +1263,7 @@ export class CreatureInstanceRenderer {
     const pos = creature.position;
     const vel = creature.velocity;
     const speed = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
+    this.updateFishUndulationPhase({ set, index, creature, speed, maxSpeed, dt });
     const entityScale = getScale(creature);
     const {
       blendStrength,

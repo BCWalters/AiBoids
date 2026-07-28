@@ -68,7 +68,13 @@ export function createBarracudaGeometries(rawLength: number, width: number): Cre
     tail,
     // Sweeps side-to-side about MODEL_UP, hinged at the fin's own root rather
     // than the model origin so the root stays buried in the peduncle.
-    tailRig: swayingTailRig({ pivot: [0, barracudaTailPivotY(rawLength), 0], axis: [0, 1, 0] }),
+    //
+    // MODEL_UP is (0,0,1). This used to pass (0,1,0) — the spine axis — which
+    // rolled the fin about its own length instead, scissoring the upper and
+    // lower lobes apart. The barracuda's fin is symmetric (z = +/-3.5) so the
+    // scissor read as a small flutter rather than the shark's obvious X, but
+    // it was the same bug. See sharkTailSway.test.ts.
+    tailRig: swayingTailRig({ pivot: [0, barracudaTailPivotY(rawLength), 0], axis: [0, 0, 1] }),
   };
 }
 
