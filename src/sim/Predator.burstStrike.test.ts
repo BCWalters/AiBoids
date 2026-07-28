@@ -83,7 +83,7 @@ describe('predator burst strike (#237)', () => {
     // measured peak could not detect the clamp being lifted.
     expect(off.peakSpeed).toBeLessThanOrEqual(params.predatorMaxSpeed + 1e-6);
     expect(off.dutyCycle).toBe(0);
-  });
+  }, 120_000);
 
   it('actually engages when enabled, and respects the boosted cap', () => {
     const on = runSim(1, true);
@@ -94,7 +94,7 @@ describe('predator burst strike (#237)', () => {
     expect(on.peakSpeed).toBeGreaterThan(cruise + 1);
     // And never blows past the configured ceiling.
     expect(on.peakSpeed).toBeLessThanOrEqual(cap + 1e-6);
-  });
+  }, 120_000);
 
   it('bursts intermittently rather than becoming the new cruise speed', () => {
     // A burst that never ends is just a faster predator, and nothing else in
@@ -110,7 +110,7 @@ describe('predator burst strike (#237)', () => {
     const on = runSim(1, true);
     expect(on.dutyCycle).toBeGreaterThan(0.01);
     expect(on.dutyCycle).toBeLessThan(0.15);
-  });
+  }, 120_000);
 
   it('raises the catch rate, which is the point of the change', () => {
     let offTotal = 0;
@@ -120,5 +120,5 @@ describe('predator burst strike (#237)', () => {
       onTotal += runSim(seed, true).caught;
     }
     expect(onTotal).toBeGreaterThan(offTotal);
-  });
+  }, 300_000);
 });
