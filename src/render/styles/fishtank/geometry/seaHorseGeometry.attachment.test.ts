@@ -36,7 +36,7 @@ import {
   createSeaHorseGeometries,
   FIN_ROOT_Y_FRAC,
   FIN_ROOT_Z_FRAC,
-  FIN_SURFACE_X_FRAC,
+  seaHorsePectoralRootX,
 } from './seaHorseGeometry';
 
 // ---------------------------------------------------------------------------
@@ -116,12 +116,16 @@ describe('seahorse geometry attachment invariants', () => {
 
   it('wing pivot X coordinate is the declared surface-X constant (absolute anchor)', () => {
     const geom = createSeaHorseGeometries(LENGTH, WIDTH);
-    // Import the shipped constant — copying the 0.15 literal here would be a
-    // scale-invariant anti-pattern. This detects a change to FIN_SURFACE_X_FRAC.
-    const expectedX = WIDTH * FIN_SURFACE_X_FRAC;
-    // expectedX ≈ 2.228 at the standard seahorse size — a concrete number,
-    // not expressed in terms of the value under test.
-    expect(expectedX).toBeGreaterThan(1.5);  // absolute lower bound
+    // Import the shipped root rather than copying a literal — a copied constant
+    // cannot detect a change to the original.
+    const expectedX = seaHorsePectoralRootX(LENGTH, WIDTH);
+    // Independent sanity bound, so this cannot pass vacuously if the root
+    // collapses to zero: the root must be a real distance out on the flank.
+    expect(expectedX).toBeGreaterThan(1.0);
+    // ...and it must be INSIDE the skin, which is the property that keeps the
+    // blade seated. A root proud of the flank is what made the fins look
+    // detached before.
+    expect(expectedX).toBeLessThan(WIDTH * 0.15);
     expect(geom.wingPivotLeft).toBeDefined();
     expect(geom.wingPivotRight).toBeDefined();
     expect(geom.wingPivotLeft![0]).toBeCloseTo(expectedX, 5);
@@ -150,7 +154,7 @@ describe('seahorse geometry attachment invariants', () => {
     // if the geometry changes.
     const finRootY = LENGTH * FIN_ROOT_Y_FRAC;
     const finRootZ = LENGTH * FIN_ROOT_Z_FRAC;
-    const surfaceX = WIDTH  * FIN_SURFACE_X_FRAC;
+    const surfaceX = seaHorsePectoralRootX(LENGTH, WIDTH);
 
     const pivotLeft  = new THREE.Vector3( surfaceX, finRootY, finRootZ);
     const pivotRight = new THREE.Vector3(-surfaceX, finRootY, finRootZ);
