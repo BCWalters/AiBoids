@@ -90,13 +90,19 @@ describe('dragon tail color tracks the body color', () => {
     }
   });
 
-  it('reproduces the original tip appearance when the body sits at its base color', () => {
+  it('preserves the original falloff shape of the gradient', () => {
     const { tip } = rootAndTipColors(tailGeometry());
-    const bodyBase = new THREE.Color(0x502a7f); // DRAGON_PREDATOR_BASE
+    // The palette the tail originally baked. DRAGON_PREDATOR_BASE has since
+    // been deepened, and deliberately is NOT used here: the point of the
+    // multiplier is that the falloff shape is independent of the palette, so
+    // this pins the shape while leaving the scene free to retune the color.
+    const legacyBase = new THREE.Color(0x502a7f);
     const legacyTip = new THREE.Color(0x080314);
+    const bodyBase = legacyBase;
 
-    // Multiplier * body base must land back on the color the tail shipped with,
-    // so this change is a re-parameterisation at rest, not a recolor.
+    // Multiplier * the old base must land back on the color the tail shipped
+    // with, so the multiplier is a faithful re-parameterisation of the
+    // original gradient rather than a new one.
     expect(tip.r * bodyBase.r).toBeCloseTo(legacyTip.r, 5);
     expect(tip.g * bodyBase.g).toBeCloseTo(legacyTip.g, 5);
     expect(tip.b * bodyBase.b).toBeCloseTo(legacyTip.b, 5);

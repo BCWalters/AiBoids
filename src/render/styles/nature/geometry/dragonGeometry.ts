@@ -679,6 +679,50 @@ function buildMembraneWingGeometry(span: number, chord: number, side: 1 | -1): T
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+
+  // Bake a root->wingtip lightening gradient, as a MULTIPLIER for the same
+  // reason the tail does (see buildDragonTailGeometry): 1 at the root so the
+  // membrane starts on exactly whatever color the body currently is, rising
+  // toward the tip. Absolute colors would pin the wings to one palette and
+  // reopen a seam at the shoulder the moment the body lerps toward its hunt
+  // tint.
+  //
+  // Lightening means factors ABOVE 1, which is legitimate here: vertex colors
+  // are stored linear and unclamped, and are multiplied into the diffuse term.
+  //
+  // The factor is derived from a reference PAIR rather than typed in directly,
+  // so the membrane keeps a consistent relationship to the body across palette
+  // retunes. Only the RATIO of the two matters, so they are chosen together
+  // and neither is meaningful alone.
+  //
+  // A near-white tip (a pair around 0x3e2064 -> 0xe4d4ff) was tried and is too
+  // strong: the outer third of the membrane washes out to white and stops
+  // reading as a wing. This gentler pair keeps the tip clearly lavender.
+  const wingRefBody = new THREE.Color(0x502a7f);
+  const wingRefTip = new THREE.Color(0xb08fd8); // light lavender at the wingtip
+  const tipFactor = new THREE.Color(
+    wingRefTip.r / wingRefBody.r,
+    wingRefTip.g / wingRefBody.g,
+    wingRefTip.b / wingRefBody.b,
+  );
+
+  const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+  // Distance outward from the body along the span axis, normalized by the
+  // furthest-out vertex. Uses the actual extent rather than the nominal span
+  // so the claw tips land exactly at 1 no matter how the outline is retuned.
+  let maxOut = 0;
+  for (let vi = 0; vi < posAttr.count; vi++) {
+    maxOut = Math.max(maxOut, Math.abs(posAttr.getX(vi)));
+  }
+  const colors = new Float32Array(posAttr.count * 3);
+  for (let vi = 0; vi < posAttr.count; vi++) {
+    const t = maxOut > 0 ? THREE.MathUtils.clamp(Math.abs(posAttr.getX(vi)) / maxOut, 0, 1) : 0;
+    colors[vi * 3]     = THREE.MathUtils.lerp(1, tipFactor.r, t);
+    colors[vi * 3 + 1] = THREE.MathUtils.lerp(1, tipFactor.g, t);
+    colors[vi * 3 + 2] = THREE.MathUtils.lerp(1, tipFactor.b, t);
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -787,7 +831,10 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   // The tip factor is derived from the two original colors rather than typed in
   // by hand, so the tip keeps the exact appearance it has today whenever the
   // body sits at its base color.
-  const legacyRootColor = new THREE.Color(0x502a7f); // the old baked root, equal to DRAGON_PREDATOR_BASE
+  // These two only set the SHAPE of the falloff (tip / root), never an absolute
+  // color, so the dragon's palette can be retuned in NatureSceneRenderer3D
+  // without touching the geometry.
+  const legacyRootColor = new THREE.Color(0x502a7f); // the old baked root
   const legacyTipColor = new THREE.Color(0x080314); // the old baked near-black tip
   const tipFactor = new THREE.Color(
     legacyTipColor.r / legacyRootColor.r,

@@ -251,8 +251,21 @@ const BLUEJAY_NATURE_PALETTE: SmallBirdPalette = {
 };
 
 // Dragon predator variant (nature style only): purple, leathery-winged
-const DRAGON_PREDATOR_BASE = new THREE.Color(0x502a7f); // slightly darker body purple (per issue #73); tail root is baked to match this
-const DRAGON_PREDATOR_HUNT = new THREE.Color(0x7b4fc2); // brighter chase tint while staying in the same palette
+// Deepened one quarter of the way from the former 0x502a7f/0x7b4fc2 pair
+// toward the near-black the tail fades to, which reads as a slightly richer
+// purple while staying clearly purple. Going a full half of that distance was
+// tried and is far too dark — at that point the whole dragon reads as black
+// against the nature sky, because the tail's dark end is very close to black
+// and the midpoint inherits most of that. Keep any further tuning well under
+// ~0.3 of this span. The hunt tint is scaled by the same per-channel ratio so
+// the rest/chase contrast is preserved rather than flattened by the darkening.
+//
+// These two now drive the whole dragon. The tail bakes a darkening MULTIPLIER
+// (1 at the rump) rather than absolute colors, so its root follows whatever
+// these resolve to and it darkens from there — no separate tail palette to
+// keep in sync.
+export const DRAGON_PREDATOR_BASE = new THREE.Color(0x3e2064); // deep body purple (per issue #73)
+const DRAGON_PREDATOR_HUNT = new THREE.Color(0x5f3c99); // brighter chase tint in the same palette
 
 // Unicorn predator (all styles): light lavender body, always upright
 const NATURE_UNICORN_BODY = new THREE.Color(0xc9a8f0); // light lavender
