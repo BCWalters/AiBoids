@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 /**
  * Configuration for the fin-ray lightening shader applied to fishtank fish fins.
@@ -217,97 +218,90 @@ export function applyFishFinRayShader(
 
   const cacheKey = `aiboids-fin-ray-v3:${frame.spanAxis}${frame.chordAxis}:${freq.toFixed(5)}:${rootSpan.toFixed(4)}:${rootChord.toFixed(4)}:${config.brightness.toFixed(4)}:${config.halfRayWidth.toFixed(4)}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      // --- Vertex shader ---
+      // Declare the varying at the top so it survives Three.js's GLSL version
+      // transform (varying → out in WebGL 2 / GLSL 300 ES).
+      shader.vertexShader =
+        `varying vec3 vFinRayPos;\n` + shader.vertexShader;
+      // Capture the REST-SPACE (pre-undulation) model position right before
+      // vColor is set. Using the rest position means the ray pattern stays
+      // fixed to the skin surface even when the fin mesh is animated.
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <color_vertex>',
+        `vFinRayPos = position;\n#include <color_vertex>`,
+      );
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
+      // --- Fragment shader ---
+      // Declare the varying (in) and uniforms at the top.
+      shader.fragmentShader =
+        `varying vec3 vFinRayPos;\nuniform float uFinRayFreq;\nuniform float uFinRayBrightness;\nuniform float uFinRayHalfWidth;\nuniform float uFinRayRootSpan;\nuniform float uFinRayRootChord;\nuniform float uFinRaySpanExtent;\n` +
+        shader.fragmentShader;
 
-    // --- Vertex shader ---
-    // Declare the varying at the top so it survives Three.js's GLSL version
-    // transform (varying → out in WebGL 2 / GLSL 300 ES).
-    shader.vertexShader =
-      `varying vec3 vFinRayPos;\n` + shader.vertexShader;
-    // Capture the REST-SPACE (pre-undulation) model position right before
-    // vColor is set. Using the rest position means the ray pattern stays
-    // fixed to the skin surface even when the fin mesh is animated.
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <color_vertex>',
-      `vFinRayPos = position;\n#include <color_vertex>`,
-    );
+      // Inject the ray pattern immediately after color_fragment, which has
+      // already folded vColor into diffuseColor. Writing to diffuseColor here
+      // is safe: it is a mutable local vec4 in all GLSL versions three.js
+      // targets. We never write to vColor (read-only `in` in GLSL 300 ES).
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+    {
+      // Fin-ray pattern: rays of constant ANGLE about the fin root, so they
+      // converge at the body seam and fan out toward the edge (issue #242).
+      // vFinRayPos is the rest-space (pre-undulation) vertex position, so the
+      // pattern stays welded to the fin skin regardless of animation.
+      //
+      // The span/chord components below are substituted per fin type: the
+      // pectoral fin runs out along +X with a Y chord, the caudal fin runs aft
+      // along -Y with a Z chord. Banding on a raw axis instead would give
+      // parallel lines, which read as corrugation rather than as rays.
+      // abs() makes this mirror-safe: the left and right fins of a pair span
+      // opposite directions from the same root, so a signed span would go negative
+      // across one of them and the root fade below would erase its rays.
+      float finSpan  = abs( FIN_SPAN_COMP - uFinRayRootSpan );
+      float finChord = FIN_CHORD_COMP - uFinRayRootChord;
+      // Angle subtended at the root. Clamping span to a small positive value
+      // keeps the few vertices exactly ON the seam (span == 0) from producing a
+      // ±PI/2 discontinuity that would draw a hard line down the attachment.
+      float finAngle = atan( finChord, max( finSpan, 1e-4 ) );
+      float t = fract( finAngle * uFinRayFreq );
+      // halfDist = 0 at each integer phase (= ray centre), 0.5 at mid-gap.
+      float halfDist = min( t, 1.0 - t );
+      // Smooth bright spike at each ray, zero in the membrane between rays.
+      float ray = smoothstep( uFinRayHalfWidth, 0.0, halfDist );
+      // Fade the rays out at the very root: all rays meet there, so at full
+      // strength the convergence point burns out into a bright blob.
+      ray *= smoothstep( 0.0, 0.12, finSpan / max( uFinRaySpanExtent, 1e-4 ) );
+      // Lighten diffuseColor at each ray. Adding brightness lifts toward white;
+      // clamped to [0,1] so we never blow out. Colours are in LINEAR space.
+      diffuseColor.rgb = min( vec3( 1.0 ), diffuseColor.rgb + uFinRayBrightness * ray );
+    }`,
+      );
 
-    // --- Fragment shader ---
-    // Declare the varying (in) and uniforms at the top.
-    shader.fragmentShader =
-      `varying vec3 vFinRayPos;\nuniform float uFinRayFreq;\nuniform float uFinRayBrightness;\nuniform float uFinRayHalfWidth;\nuniform float uFinRayRootSpan;\nuniform float uFinRayRootChord;\nuniform float uFinRaySpanExtent;\n` +
-      shader.fragmentShader;
+      // Substitute the per-fin axis components. These are compile-time swizzles
+      // rather than uniforms because they select which component is read; the
+      // chosen axes are part of customProgramCacheKey so three.js does not reuse
+      // another fin's compiled program (a cache collision here silently no-ops
+      // the whole change).
+      // replaceAll, not replace: these tokens must not survive anywhere in the
+      // source. A single leftover is a GLSL compile error that blacks out every
+      // patched fin, and shader-string tests do not catch it.
+      shader.fragmentShader = shader.fragmentShader
+        .replaceAll('FIN_SPAN_COMP', `vFinRayPos.${frame.spanAxis}`)
+        .replaceAll('FIN_CHORD_COMP', `vFinRayPos.${frame.chordAxis}`);
 
-    // Inject the ray pattern immediately after color_fragment, which has
-    // already folded vColor into diffuseColor. Writing to diffuseColor here
-    // is safe: it is a mutable local vec4 in all GLSL versions three.js
-    // targets. We never write to vColor (read-only `in` in GLSL 300 ES).
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <color_fragment>',
-      `#include <color_fragment>
-  {
-    // Fin-ray pattern: rays of constant ANGLE about the fin root, so they
-    // converge at the body seam and fan out toward the edge (issue #242).
-    // vFinRayPos is the rest-space (pre-undulation) vertex position, so the
-    // pattern stays welded to the fin skin regardless of animation.
-    //
-    // The span/chord components below are substituted per fin type: the
-    // pectoral fin runs out along +X with a Y chord, the caudal fin runs aft
-    // along -Y with a Z chord. Banding on a raw axis instead would give
-    // parallel lines, which read as corrugation rather than as rays.
-    // abs() makes this mirror-safe: the left and right fins of a pair span
-    // opposite directions from the same root, so a signed span would go negative
-    // across one of them and the root fade below would erase its rays.
-    float finSpan  = abs( FIN_SPAN_COMP - uFinRayRootSpan );
-    float finChord = FIN_CHORD_COMP - uFinRayRootChord;
-    // Angle subtended at the root. Clamping span to a small positive value
-    // keeps the few vertices exactly ON the seam (span == 0) from producing a
-    // ±PI/2 discontinuity that would draw a hard line down the attachment.
-    float finAngle = atan( finChord, max( finSpan, 1e-4 ) );
-    float t = fract( finAngle * uFinRayFreq );
-    // halfDist = 0 at each integer phase (= ray centre), 0.5 at mid-gap.
-    float halfDist = min( t, 1.0 - t );
-    // Smooth bright spike at each ray, zero in the membrane between rays.
-    float ray = smoothstep( uFinRayHalfWidth, 0.0, halfDist );
-    // Fade the rays out at the very root: all rays meet there, so at full
-    // strength the convergence point burns out into a bright blob.
-    ray *= smoothstep( 0.0, 0.12, finSpan / max( uFinRaySpanExtent, 1e-4 ) );
-    // Lighten diffuseColor at each ray. Adding brightness lifts toward white;
-    // clamped to [0,1] so we never blow out. Colours are in LINEAR space.
-    diffuseColor.rgb = min( vec3( 1.0 ), diffuseColor.rgb + uFinRayBrightness * ray );
-  }`,
-    );
-
-    // Substitute the per-fin axis components. These are compile-time swizzles
-    // rather than uniforms because they select which component is read; the
-    // chosen axes are part of customProgramCacheKey so three.js does not reuse
-    // another fin's compiled program (a cache collision here silently no-ops
-    // the whole change).
-    // replaceAll, not replace: these tokens must not survive anywhere in the
-    // source. A single leftover is a GLSL compile error that blacks out every
-    // patched fin, and shader-string tests do not catch it.
-    shader.fragmentShader = shader.fragmentShader
-      .replaceAll('FIN_SPAN_COMP', `vFinRayPos.${frame.spanAxis}`)
-      .replaceAll('FIN_CHORD_COMP', `vFinRayPos.${frame.chordAxis}`);
-
-    Object.assign(shader.uniforms, {
-      uFinRayFreq: { value: freq },
-      uFinRayBrightness: { value: config.brightness },
-      uFinRayHalfWidth: { value: config.halfRayWidth },
-      uFinRayRootSpan: { value: rootSpan },
-      uFinRayRootChord: { value: rootChord },
-      uFinRaySpanExtent: { value: spanExtent },
-    });
-  };
-
-  material.needsUpdate = true;
+      Object.assign(shader.uniforms, {
+        uFinRayFreq: { value: freq },
+        uFinRayBrightness: { value: config.brightness },
+        uFinRayHalfWidth: { value: config.halfRayWidth },
+        uFinRayRootSpan: { value: rootSpan },
+        uFinRayRootChord: { value: rootChord },
+        uFinRaySpanExtent: { value: spanExtent },
+      });
+    },
+  });
 }

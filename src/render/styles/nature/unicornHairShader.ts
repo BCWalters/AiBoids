@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 export interface UnicornHairConfig {
   /**
@@ -67,9 +68,9 @@ export const UNICORN_HAIR_CONFIG: UnicornHairConfig = {
  * at all creature scales: `strandsAcrossBodyWidth / xSpan` and
  * `clumpsAlongBodyLength / ySpan`.
  *
- * Composes safely with any previously-installed onBeforeCompile patch:
- * captures any existing onBeforeCompile and calls it first, and augments
- * customProgramCacheKey rather than replacing it.
+ * Composes safely with any previously-installed patch: installed via
+ * patchMaterial, which chains onBeforeCompile and composes the cache key. On the
+ * unicorn the body material also carries the horn's metal shading.
  *
  * GLSL safety: the injected fragment code writes only to diffuseColor (a
  * local vec4). It never writes to vColor: vColor is a read-only `in` under
@@ -108,89 +109,82 @@ export function applyUnicornHairShader(
   // the wrong program if frequencies change (e.g. at a different creature scale).
   const cacheKey = `aiboids-unicorn-hair-v2-manemask:${freqX.toFixed(5)}:${freqY.toFixed(5)}:${config.gapDarkness.toFixed(4)}:${config.clumpDarkness.toFixed(4)}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      // --- Vertex shader ---
+      // Declare the varying at the top so it survives Three.js's GLSL version
+      // transform (varying → out in WebGL 2 / GLSL 300 ES).
+      // `aHairMask` is 1 on mane vertices and 0 everywhere else (set in
+      // buildUnicornBodyGeometry). Three.js rewrites `attribute` -> `in` for
+      // GLSL 300 ES across the whole vertex shader, so declaring it this way is
+      // correct under both WebGL 1 and WebGL 2.
+      shader.vertexShader =
+        `varying vec3 vUnicornHairPos;\nvarying float vHairMask;\nattribute float aHairMask;\n` + shader.vertexShader;
+      // Capture the REST-space (pre-deformation) model position right before
+      // vColor is set. The rest position keeps the pattern fixed to the skin.
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <color_vertex>',
+        `vUnicornHairPos = position;\nvHairMask = aHairMask;\n#include <color_vertex>`,
+      );
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
+      // --- Fragment shader ---
+      // Declare the varying (in) and uniforms at the top.
+      shader.fragmentShader =
+        `varying vec3 vUnicornHairPos;\nvarying float vHairMask;\nuniform float uHairFreqX;\nuniform float uHairFreqY;\nuniform float uHairGapDarkness;\nuniform float uHairClumpDarkness;\n` +
+        shader.fragmentShader;
 
-    // --- Vertex shader ---
-    // Declare the varying at the top so it survives Three.js's GLSL version
-    // transform (varying → out in WebGL 2 / GLSL 300 ES).
-    // `aHairMask` is 1 on mane vertices and 0 everywhere else (set in
-    // buildUnicornBodyGeometry). Three.js rewrites `attribute` -> `in` for
-    // GLSL 300 ES across the whole vertex shader, so declaring it this way is
-    // correct under both WebGL 1 and WebGL 2.
-    shader.vertexShader =
-      `varying vec3 vUnicornHairPos;\nvarying float vHairMask;\nattribute float aHairMask;\n` + shader.vertexShader;
-    // Capture the REST-space (pre-deformation) model position right before
-    // vColor is set. The rest position keeps the pattern fixed to the skin.
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <color_vertex>',
-      `vUnicornHairPos = position;\nvHairMask = aHairMask;\n#include <color_vertex>`,
-    );
+      // Inject the hair pattern AFTER roughnessmap_fragment so diffuseColor
+      // already carries the folded-in vColor at this point (color_fragment runs
+      // before roughnessmap_fragment). diffuseColor is a mutable local — writing
+      // to it is valid in all GLSL versions. We never write to vColor (read-only
+      // `in` in GLSL 300 ES) or to roughness (a uniform).
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+    {
+      // Procedural hair-strand pattern on the XY model-space plane.
+      // X = across mane width (strand separation); Y = along neck (strand direction).
+      // Both axes vary substantially across the mane crest geometry so this 2D
+      // lookup does not degenerate into stripes.  Pattern uses rest-space
+      // vUnicornHairPos so it stays fixed to the skin.
 
-    // --- Fragment shader ---
-    // Declare the varying (in) and uniforms at the top.
-    shader.fragmentShader =
-      `varying vec3 vUnicornHairPos;\nvarying float vHairMask;\nuniform float uHairFreqX;\nuniform float uHairFreqY;\nuniform float uHairGapDarkness;\nuniform float uHairClumpDarkness;\n` +
-      shader.fragmentShader;
+      // Fractional position within each strand cell.  The +0.5 offset centres
+      // strand boundaries at ±0.5 so a strand midline falls at integer-X / freqX.
+      float strandFrac = fract(vUnicornHairPos.x * uHairFreqX + 0.5) - 0.5;
 
-    // Inject the hair pattern AFTER roughnessmap_fragment so diffuseColor
-    // already carries the folded-in vColor at this point (color_fragment runs
-    // before roughnessmap_fragment). diffuseColor is a mutable local — writing
-    // to it is valid in all GLSL versions. We never write to vColor (read-only
-    // `in` in GLSL 300 ES) or to roughness (a uniform).
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <roughnessmap_fragment>',
-      `#include <roughnessmap_fragment>
-  {
-    // Procedural hair-strand pattern on the XY model-space plane.
-    // X = across mane width (strand separation); Y = along neck (strand direction).
-    // Both axes vary substantially across the mane crest geometry so this 2D
-    // lookup does not degenerate into stripes.  Pattern uses rest-space
-    // vUnicornHairPos so it stays fixed to the skin.
+      // Along-strand modulation in Y: a sinusoidal wave shifts each strand edge
+      // by a small amount, breaking the uniformity of perfectly parallel lines
+      // and ensuring the Y coordinate contributes to the rendered result.
+      float alongY = vUnicornHairPos.y * uHairFreqY;
+      strandFrac += sin(alongY * 6.28318) * 0.06;
 
-    // Fractional position within each strand cell.  The +0.5 offset centres
-    // strand boundaries at ±0.5 so a strand midline falls at integer-X / freqX.
-    float strandFrac = fract(vUnicornHairPos.x * uHairFreqX + 0.5) - 0.5;
+      // Strand brightness mask: 1.0 inside the bright strand, 0.0 in the gap.
+      const float kStrandHW = 0.30;
+      float inStrand = 1.0 - smoothstep(kStrandHW - 0.08, kStrandHW + 0.06, abs(strandFrac));
 
-    // Along-strand modulation in Y: a sinusoidal wave shifts each strand edge
-    // by a small amount, breaking the uniformity of perfectly parallel lines
-    // and ensuring the Y coordinate contributes to the rendered result.
-    float alongY = vUnicornHairPos.y * uHairFreqY;
-    strandFrac += sin(alongY * 6.28318) * 0.06;
+      // Restrict the pattern to the mane. vHairMask is 1 on mane vertices and 0
+      // on the body/head/legs, so the strand texture stops at the crest instead
+      // of corrugating the entire creature.
+      float maneMask = clamp(vHairMask, 0.0, 1.0);
 
-    // Strand brightness mask: 1.0 inside the bright strand, 0.0 in the gap.
-    const float kStrandHW = 0.30;
-    float inStrand = 1.0 - smoothstep(kStrandHW - 0.08, kStrandHW + 0.06, abs(strandFrac));
+      // Gap darkening: darker gaps between adjacent hair bundles.
+      diffuseColor.rgb *= 1.0 - uHairGapDarkness * (1.0 - inStrand) * maneMask;
 
-    // Restrict the pattern to the mane. vHairMask is 1 on mane vertices and 0
-    // on the body/head/legs, so the strand texture stops at the crest instead
-    // of corrugating the entire creature.
-    float maneMask = clamp(vHairMask, 0.0, 1.0);
+      // Subtle clump-boundary shadow along each strand at periodic Y intervals.
+      float clumpShadow = (1.0 - smoothstep(0.3, 0.5, abs(fract(alongY * 0.5) - 0.5))) * inStrand;
+      diffuseColor.rgb *= 1.0 - uHairClumpDarkness * clumpShadow * maneMask;
+    }`,
+      );
 
-    // Gap darkening: darker gaps between adjacent hair bundles.
-    diffuseColor.rgb *= 1.0 - uHairGapDarkness * (1.0 - inStrand) * maneMask;
-
-    // Subtle clump-boundary shadow along each strand at periodic Y intervals.
-    float clumpShadow = (1.0 - smoothstep(0.3, 0.5, abs(fract(alongY * 0.5) - 0.5))) * inStrand;
-    diffuseColor.rgb *= 1.0 - uHairClumpDarkness * clumpShadow * maneMask;
-  }`,
-    );
-
-    Object.assign(shader.uniforms, {
-      uHairFreqX: { value: freqX },
-      uHairFreqY: { value: freqY },
-      uHairGapDarkness: { value: config.gapDarkness },
-      uHairClumpDarkness: { value: config.clumpDarkness },
-    });
-  };
-
-  material.needsUpdate = true;
+      Object.assign(shader.uniforms, {
+        uHairFreqX: { value: freqX },
+        uHairFreqY: { value: freqY },
+        uHairGapDarkness: { value: config.gapDarkness },
+        uHairClumpDarkness: { value: config.clumpDarkness },
+      });
+    },
+  });
 }

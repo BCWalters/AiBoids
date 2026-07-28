@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 export interface SeaHorsePlateConfig {
   /**
@@ -56,9 +57,8 @@ export const SEAHORSE_PLATE_CONFIG: SeaHorsePlateConfig = {
  * captured before undulation in the vertex shader) so the plate pattern does
  * not swim across the skin if undulation is ever applied.
  *
- * Composes safely with fishUndulationShader: captures any existing
- * onBeforeCompile and calls it first, and augments customProgramCacheKey
- * rather than replacing it.
+ * Composes safely with fishUndulationShader: installed via patchMaterial,
+ * which chains onBeforeCompile and composes the cache key.
  *
  * GLSL safety: the injected fragment code writes only to diffuseColor (a
  * local vec4) and roughnessFactor (a local float). It never writes to vColor:
@@ -83,99 +83,92 @@ export function applySeaHorsePlateShader(
   const freq = config.platesPerLength / zSpan;
   const cacheKey = `aiboids-seahorse-plate-v2:${freq.toFixed(5)}:${config.ridgeDarkness.toFixed(4)}:${config.plateGloss.toFixed(4)}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      // --- Vertex shader ---
+      // Declare the varying at the top so it survives Three.js's GLSL version
+      // transform (varying → out in WebGL 2 / GLSL 300 ES).
+      shader.vertexShader =
+        `varying vec3 vSeaHorsePlatePos;\nvarying float vPlateSuppress;\nattribute float aPlateSuppress;\n` +
+        shader.vertexShader;
+      // Capture the REST-space (pre-undulation) model position right before
+      // vColor is set. Using the rest position means the plate pattern stays
+      // fixed to the skin even if body undulation is applied.
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <color_vertex>',
+        `vSeaHorsePlatePos = position;\nvPlateSuppress = aPlateSuppress;\n#include <color_vertex>`,
+      );
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
+      // --- Fragment shader ---
+      // Declare the varying (in) and uniforms at the top.
+      shader.fragmentShader =
+        `varying vec3 vSeaHorsePlatePos;\nvarying float vPlateSuppress;\nuniform float uPlateFreq;\nuniform float uPlateRidgeDarkness;\nuniform float uPlateGloss;\n` +
+        shader.fragmentShader;
 
-    // --- Vertex shader ---
-    // Declare the varying at the top so it survives Three.js's GLSL version
-    // transform (varying → out in WebGL 2 / GLSL 300 ES).
-    shader.vertexShader =
-      `varying vec3 vSeaHorsePlatePos;\nvarying float vPlateSuppress;\nattribute float aPlateSuppress;\n` +
-      shader.vertexShader;
-    // Capture the REST-space (pre-undulation) model position right before
-    // vColor is set. Using the rest position means the plate pattern stays
-    // fixed to the skin even if body undulation is applied.
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <color_vertex>',
-      `vSeaHorsePlatePos = position;\nvPlateSuppress = aPlateSuppress;\n#include <color_vertex>`,
-    );
+      // Inject the plate pattern AFTER roughnessmap_fragment. That chunk sets
+      // roughnessFactor (a local float), which we can then reduce for gloss.
+      // roughnessmap_fragment comes after color_fragment, so diffuseColor
+      // already carries the folded-in vColor at this point.
+      //
+      // Both diffuseColor and roughnessFactor are mutable locals — writing to
+      // them is valid in all GLSL versions. We never write to vColor (read-only
+      // `in` in GLSL 300 ES) or to roughness (a uniform).
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+    if ( vPlateSuppress < 0.5 ) {
+      // Seahorse trunk armour: segmented BONY RINGS.
+      //
+      // Y = spine axis (tail to head); Z = dorsoventral axis.
+      //
+      // The previous pattern darkened a thin line wherever EITHER axis crossed a
+      // cell boundary. That draws a continuous lattice of straight lines in both
+      // directions at once, which reads as a net laid over the skin rather than
+      // as armour. Two things fix it: shade each plate as a raised SOLID instead
+      // of outlining it, and break up the second axis so its seams never form
+      // continuous straight lines.
+      vec2 pp = vec2( vSeaHorsePlatePos.y, vSeaHorsePlatePos.z ) * uPlateFreq;
 
-    // --- Fragment shader ---
-    // Declare the varying (in) and uniforms at the top.
-    shader.fragmentShader =
-      `varying vec3 vSeaHorsePlatePos;\nvarying float vPlateSuppress;\nuniform float uPlateFreq;\nuniform float uPlateRidgeDarkness;\nuniform float uPlateGloss;\n` +
-      shader.fragmentShader;
+      // Rings are the dominant real feature, so they stay coherent: one band per
+      // cell straight across the body.
+      float ringCoord = pp.x;
+      float ring = floor( ringCoord );
 
-    // Inject the plate pattern AFTER roughnessmap_fragment. That chunk sets
-    // roughnessFactor (a local float), which we can then reduce for gloss.
-    // roughnessmap_fragment comes after color_fragment, so diffuseColor
-    // already carries the folded-in vColor at this point.
-    //
-    // Both diffuseColor and roughnessFactor are mutable locals — writing to
-    // them is valid in all GLSL versions. We never write to vColor (read-only
-    // `in` in GLSL 300 ES) or to roughness (a uniform).
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <roughnessmap_fragment>',
-      `#include <roughnessmap_fragment>
-  if ( vPlateSuppress < 0.5 ) {
-    // Seahorse trunk armour: segmented BONY RINGS.
-    //
-    // Y = spine axis (tail to head); Z = dorsoventral axis.
-    //
-    // The previous pattern darkened a thin line wherever EITHER axis crossed a
-    // cell boundary. That draws a continuous lattice of straight lines in both
-    // directions at once, which reads as a net laid over the skin rather than
-    // as armour. Two things fix it: shade each plate as a raised SOLID instead
-    // of outlining it, and break up the second axis so its seams never form
-    // continuous straight lines.
-    vec2 pp = vec2( vSeaHorsePlatePos.y, vSeaHorsePlatePos.z ) * uPlateFreq;
+      // Facets around each ring are offset by a per-ring hash, so a facet seam on
+      // one ring does not line up with the seam on its neighbour. This is what
+      // stops the second axis reading as the other half of the net.
+      float jitter = fract( sin( ring * 12.9898 ) * 43758.5453 );
+      float facetCoord = pp.y * 0.62 + jitter;
 
-    // Rings are the dominant real feature, so they stay coherent: one band per
-    // cell straight across the body.
-    float ringCoord = pp.x;
-    float ring = floor( ringCoord );
+      float fRing  = fract( ringCoord ) - 0.5;
+      float fFacet = fract( facetCoord ) - 0.5;
 
-    // Facets around each ring are offset by a per-ring hash, so a facet seam on
-    // one ring does not line up with the seam on its neighbour. This is what
-    // stops the second axis reading as the other half of the net.
-    float jitter = fract( sin( ring * 12.9898 ) * 43758.5453 );
-    float facetCoord = pp.y * 0.62 + jitter;
+      // Each plate is a shallow raised dome that falls away to its seam, rather
+      // than a flat cell with a drawn border. Shading the interior is what makes
+      // it read as a bony scute catching light.
+      float ringBevel  = 1.0 - smoothstep( 0.24, 0.5, abs( fRing ) );
+      float facetBevel = 1.0 - smoothstep( 0.30, 0.5, abs( fFacet ) );
+      // Ring seams are cut deeper than facet seams, matching a real seahorse
+      // where the segmentation along the spine is far more pronounced.
+      float seam = 1.0 - ringBevel * mix( 0.55, 1.0, facetBevel );
 
-    float fRing  = fract( ringCoord ) - 0.5;
-    float fFacet = fract( facetCoord ) - 0.5;
+      // --- Colour: a gradient into each seam, not a drawn line ---
+      diffuseColor.rgb *= 1.0 - uPlateRidgeDarkness * seam;
 
-    // Each plate is a shallow raised dome that falls away to its seam, rather
-    // than a flat cell with a drawn border. Shading the interior is what makes
-    // it read as a bony scute catching light.
-    float ringBevel  = 1.0 - smoothstep( 0.24, 0.5, abs( fRing ) );
-    float facetBevel = 1.0 - smoothstep( 0.30, 0.5, abs( fFacet ) );
-    // Ring seams are cut deeper than facet seams, matching a real seahorse
-    // where the segmentation along the spine is far more pronounced.
-    float seam = 1.0 - ringBevel * mix( 0.55, 1.0, facetBevel );
+      // --- Reflectivity: the crown of each plate is raised and glossier ---
+      float crown = ringBevel * facetBevel;
+      roughnessFactor = clamp( roughnessFactor - uPlateGloss * crown, 0.0, 1.0 );
+    }`,
+      );
 
-    // --- Colour: a gradient into each seam, not a drawn line ---
-    diffuseColor.rgb *= 1.0 - uPlateRidgeDarkness * seam;
-
-    // --- Reflectivity: the crown of each plate is raised and glossier ---
-    float crown = ringBevel * facetBevel;
-    roughnessFactor = clamp( roughnessFactor - uPlateGloss * crown, 0.0, 1.0 );
-  }`,
-    );
-
-    Object.assign(shader.uniforms, {
-      uPlateFreq: { value: freq },
-      uPlateRidgeDarkness: { value: config.ridgeDarkness },
-      uPlateGloss: { value: config.plateGloss },
-    });
-  };
-
-  material.needsUpdate = true;
+      Object.assign(shader.uniforms, {
+        uPlateFreq: { value: freq },
+        uPlateRidgeDarkness: { value: config.ridgeDarkness },
+        uPlateGloss: { value: config.plateGloss },
+      });
+    },
+  });
 }

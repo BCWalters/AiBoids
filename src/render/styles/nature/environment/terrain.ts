@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../../patchMaterial';
 
 // Cheap hash-based 2D value noise (no external noise library) — smoothed
 // with a Hermite (smoothstep) interpolation between lattice corners so it
@@ -571,56 +572,66 @@ function applyGroundTextureBombing(material: THREE.MeshStandardMaterial): void {
     }
   `;
 
-  material.onBeforeCompile = (shader) => {
-    shader.fragmentShader = helperGLSL + shader.fragmentShader;
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <map_fragment>',
-      `
-      #ifdef USE_MAP
-        // Radial horizon vignette: beyond the mountain ring (UV radius ~15.24
-        // from center, where center = vec2(60,60) for repeat=120) the grass
-        // texture and blotches fade out, replaced by a flat blue-grey
-        // sea/horizon color that dissolves into the fog haze at the far edge.
-        // Derivation: mountain outer radius 6.1 flock-units / 30 / 1.6 * 120 ≈ 15.24.
-        float uvRadius = length( vMapUv - vec2( ${(GROUND_TEXTURE_REPEAT / 2).toFixed(1)}, ${(GROUND_TEXTURE_REPEAT / 2).toFixed(1)} ) );
-        float horizonBlend = smoothstep( 14.0, 26.0, uvRadius );
-        float horizonDepth = smoothstep( 14.0, 28.0, uvRadius );
-        // Blue-grey sea color at the inner transition edge, fading toward the
-        // pale fog-matching haze color (0xf2f5f4) at the outer limit — no hard
-        // seam even when scene fog is disabled.
-        vec3 horizonSeaColor = mix( vec3( 0.58, 0.70, 0.73 ), vec3( 0.949, 0.961, 0.957 ), horizonDepth );
+  // The ground is the one material in the scene that is patched but never
+  // shared, so this key exists to satisfy rule 2 rather than to fix a live
+  // defect: without it, three.js's program cache — which is global and keyed on
+  // the cache key alone — could hand this material a program compiled for some
+  // other MeshStandardMaterial that happens to produce the same parameters, or
+  // hand that material this one's bombed-UV ground shader.
+  patchMaterial({
+    material,
+    cacheKey: `aiboids-terrain-ground-v1:${GROUND_TEXTURE_REPEAT.toFixed(1)}`,
+    patch: (shader) => {
+      shader.fragmentShader = helperGLSL + shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `
+        #ifdef USE_MAP
+          // Radial horizon vignette: beyond the mountain ring (UV radius ~15.24
+          // from center, where center = vec2(60,60) for repeat=120) the grass
+          // texture and blotches fade out, replaced by a flat blue-grey
+          // sea/horizon color that dissolves into the fog haze at the far edge.
+          // Derivation: mountain outer radius 6.1 flock-units / 30 / 1.6 * 120 ≈ 15.24.
+          float uvRadius = length( vMapUv - vec2( ${(GROUND_TEXTURE_REPEAT / 2).toFixed(1)}, ${(GROUND_TEXTURE_REPEAT / 2).toFixed(1)} ) );
+          float horizonBlend = smoothstep( 14.0, 26.0, uvRadius );
+          float horizonDepth = smoothstep( 14.0, 28.0, uvRadius );
+          // Blue-grey sea color at the inner transition edge, fading toward the
+          // pale fog-matching haze color (0xf2f5f4) at the outer limit — no hard
+          // seam even when scene fog is disabled.
+          vec3 horizonSeaColor = mix( vec3( 0.58, 0.70, 0.73 ), vec3( 0.949, 0.961, 0.957 ), horizonDepth );
 
-        vec4 sampledDiffuseColor = texture2D( map, groundBombUV( vMapUv ) );
-        #ifdef DECODE_VIDEO_TEXTURE
-          sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
+          vec4 sampledDiffuseColor = texture2D( map, groundBombUV( vMapUv ) );
+          #ifdef DECODE_VIDEO_TEXTURE
+            sampledDiffuseColor = sRGBTransferEOTF( sampledDiffuseColor );
+          #endif
+          diffuseColor *= sampledDiffuseColor;
+
+          // Scale blotch intensity to zero in the outer zone so no grass-colored
+          // patches bleed through the horizon override.
+          float innerMask = 1.0 - horizonBlend;
+          vec4 groundBigBlotch = groundBigBlotchField( vMapUv * ${bigBlotchCellsPerRepeat.toFixed(8)} );
+          diffuseColor.rgb = mix( diffuseColor.rgb, groundBigBlotch.rgb, groundBigBlotch.a * 0.45 * innerMask );
+
+          vec4 groundBlotch = groundBlotchField( vMapUv * ${blotchCellsPerRepeat.toFixed(8)} );
+          diffuseColor.rgb = mix( diffuseColor.rgb, groundBlotch.rgb, groundBlotch.a * 0.6 * innerMask );
+
+          // Replace grass with the sea/horizon color in the outer zone.
+          diffuseColor.rgb = mix( diffuseColor.rgb, horizonSeaColor, horizonBlend );
         #endif
-        diffuseColor *= sampledDiffuseColor;
-
-        // Scale blotch intensity to zero in the outer zone so no grass-colored
-        // patches bleed through the horizon override.
-        float innerMask = 1.0 - horizonBlend;
-        vec4 groundBigBlotch = groundBigBlotchField( vMapUv * ${bigBlotchCellsPerRepeat.toFixed(8)} );
-        diffuseColor.rgb = mix( diffuseColor.rgb, groundBigBlotch.rgb, groundBigBlotch.a * 0.45 * innerMask );
-
-        vec4 groundBlotch = groundBlotchField( vMapUv * ${blotchCellsPerRepeat.toFixed(8)} );
-        diffuseColor.rgb = mix( diffuseColor.rgb, groundBlotch.rgb, groundBlotch.a * 0.6 * innerMask );
-
-        // Replace grass with the sea/horizon color in the outer zone.
-        diffuseColor.rgb = mix( diffuseColor.rgb, horizonSeaColor, horizonBlend );
-      #endif
-      `
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <roughnessmap_fragment>',
-      `
-      float roughnessFactor = roughness;
-      #ifdef USE_ROUGHNESSMAP
-        vec4 texelRoughness = texture2D( roughnessMap, groundBombUV( vRoughnessMapUv ) );
-        roughnessFactor *= texelRoughness.g;
-      #endif
-      `
-    );
-  };
+        `
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <roughnessmap_fragment>',
+        `
+        float roughnessFactor = roughness;
+        #ifdef USE_ROUGHNESSMAP
+          vec4 texelRoughness = texture2D( roughnessMap, groundBombUV( vRoughnessMapUv ) );
+          roughnessFactor *= texelRoughness.g;
+        #endif
+        `
+      );
+    },
+  });
 }
 
 /** Converts a grayscale height canvas into a tangent-space normal map via a Sobel-style gradient. */

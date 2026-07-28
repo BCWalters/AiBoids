@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { patchMaterial } from '../../patchMaterial';
 
 /**
  * Configuration for the wing-undulation vertex-shader displacement.
@@ -288,37 +289,30 @@ function patchOneMaterial(
   const cacheKey =
     `aiboids-wing-undulation-v3:${root.toFixed(5)}:${span.toFixed(5)}:${amplitude.toFixed(5)}:${waveNumber.toFixed(5)}:${sharpness.toFixed(5)}`;
 
-  const previousCompile = material.onBeforeCompile;
-  const previousCacheKey = material.customProgramCacheKey?.bind(material);
+  patchMaterial({
+    material,
+    cacheKey,
+    patch: (shader) => {
 
-  material.customProgramCacheKey = () => {
-    const base = previousCacheKey?.() ?? '';
-    return base.length ? `${base}|${cacheKey}` : cacheKey;
-  };
+      Object.assign(shader.uniforms, {
+        uWingRoot: { value: root },
+        uWingSpan: { value: span },
+        uWingUndulationAmplitude: { value: amplitude },
+        uWingUndulationWaveNumber: { value: waveNumber },
+        uWingSlapSharpness: { value: sharpness },
+      });
 
-  material.onBeforeCompile = (shader, renderer) => {
-    previousCompile?.(shader, renderer);
-
-    Object.assign(shader.uniforms, {
-      uWingRoot: { value: root },
-      uWingSpan: { value: span },
-      uWingUndulationAmplitude: { value: amplitude },
-      uWingUndulationWaveNumber: { value: waveNumber },
-      uWingSlapSharpness: { value: sharpness },
-    });
-
-    shader.vertexShader = vertexDeclarations() + shader.vertexShader;
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <beginnormal_vertex>',
-      `#include <beginnormal_vertex>\n${normalSnippet()}`,
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      `#include <begin_vertex>\n${vertexDisplacementSnippet()}`,
-    );
-  };
-
-  material.needsUpdate = true;
+      shader.vertexShader = vertexDeclarations() + shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>\n${normalSnippet()}`,
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>\n${vertexDisplacementSnippet()}`,
+      );
+    },
+  });
 }
 
 /**
@@ -376,9 +370,10 @@ function setupOneMesh(
  * ### Trap: clone FIRST, patch AFTER
  * `Renderer3D.buildRenderBatch` has already called `patchWingMaterial` on each
  * material (e.g. dragon-scale shader). Our patch is applied here, AFTER that,
- * and chains correctly: `previousCompile` calls the existing handler first,
- * then this handler adds the undulation on top. Both `onBeforeCompile` and
- * `customProgramCacheKey` are chained, never replaced.
+ * and chains correctly, because patchMaterial calls the existing handler first
+ * and then this one adds the undulation on top. Both `onBeforeCompile` and
+ * `customProgramCacheKey` are chained, never replaced — structurally, since the
+ * helper offers no way to express a replacement.
  */
 export function applyWingUndulationShader({
   wingLeft,
