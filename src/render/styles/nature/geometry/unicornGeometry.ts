@@ -154,18 +154,29 @@ function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGe
   const hornGeometry = buildUnicornHornGeometry(pollY, pollZ, pollRadius);
   const earsGeometry = buildUnicornEarsGeometry(pollY, pollZ, pollRadius);
   const eyesGeometry = buildUnicornEyesGeometry(headTop.y, headTop.z, headTop.radius);
-  const maneGeometry = buildUnicornManeGeometry(length, width);
+  const maneGeometry = buildUnicornManeGeometry(length, width, bodyGeometry);
   const merged = mergeGeometriesWithColor([
     { geometry: bodyGeometry, color: new THREE.Color(0xffffff) },
     { geometry: hornGeometry, color: UNICORN_HORN_COLOR },
     { geometry: earsGeometry, color: new THREE.Color(0xffffff) },
     { geometry: eyesGeometry, color: UNICORN_EYE_COLOR },
-    { geometry: maneGeometry, color: new THREE.Color(0xffffff) },
+    { geometry: maneGeometry, color: UNICORN_MANE_COLOR },
   ]);
   bodyGeometry.dispose();
   hornGeometry.dispose();
   earsGeometry.dispose();
   eyesGeometry.dispose();
+  // Tag which vertices belong to the mane so the hair shader can apply the
+  // strand pattern to the mane ONLY. Without this the pattern covers the whole
+  // creature and the body reads as corduroy rather than as a horse with a mane.
+  // The mane is merged last, so its vertices are the final maneVertexCount
+  // entries of the merged position attribute.
+  const maneVertexCount = maneGeometry.getAttribute('position').count;
+  const totalVertexCount = merged.getAttribute('position').count;
+  const hairMask = new Float32Array(totalVertexCount);
+  hairMask.fill(1, totalVertexCount - maneVertexCount);
+  merged.setAttribute('aHairMask', new THREE.BufferAttribute(hairMask, 1));
+
   maneGeometry.dispose();
   return merged;
 }
@@ -195,6 +206,12 @@ const UNICORN_LEG_HALF_WIDTH_FRAC = 0.09;
 const UNICORN_LEG_HALF_DEPTH_FRAC = 0.07;
 // Near-black "dark dot" eyes.
 const UNICORN_EYE_COLOR = new THREE.Color(0x101014);
+// Vertex colours here MULTIPLY the per-instance species tint, so a neutral
+// value below 1 darkens the mane to a deeper shade of whatever colour that
+// unicorn is, rather than forcing one fixed hue. Merged into the body
+// geometry, the mane would otherwise take the body tint exactly and be
+// invisible against the neck it sits on.
+const UNICORN_MANE_COLOR = new THREE.Color(0.62, 0.56, 0.72);
 // Multiplied against the lavender per-instance body tint (not an
 // absolute color) to make the muzzle read as a darker shade of purple
 // rather than just another lavender patch — see buildHorseBodyProfileGeometry.
@@ -1040,7 +1057,11 @@ function buildUnicornEarsGeometry(pollY: number, pollZ: number, pollRadius: numb
  * and ≈ 21 % body-length in Y — both are substantial fractions of the body
  * bounding box, so the XY-plane hair shader does not degenerate into stripes.
  */
-function buildUnicornManeGeometry(length: number, width: number): THREE.BufferGeometry {
+function buildUnicornManeGeometry(
+  length: number,
+  width: number,
+  bodyGeometry: THREE.BufferGeometry,
+): THREE.BufferGeometry {
   const halfLen = length * 0.5;
 
   // Neck spine points (exact copies of the body's neck section from
@@ -1057,13 +1078,35 @@ function buildUnicornManeGeometry(length: number, width: number): THREE.BufferGe
   // Cross-section profile at each spine point.  Width and height taper via
   // a sin envelope so the crest peaks at the upper-mid neck and tapers to
   // near-zero at each end rather than starting/stopping with a blunt edge.
+  // Highest Z on the body surface in a thin Y slab around `y`, within the
+  // crest's own X footprint. Returns -Infinity if the slab is empty, in which
+  // case the caller falls back to the spine estimate.
+  const bodyPos = bodyGeometry.getAttribute('position');
+  const surfaceTopZAt = (y: number, halfWidth: number): number => {
+    const slab = length * 0.03;
+    let top = -Infinity;
+    for (let i = 0; i < bodyPos.count; i++) {
+      if (Math.abs(bodyPos.getY(i) - y) > slab) continue;
+      if (Math.abs(bodyPos.getX(i)) > halfWidth * 1.3) continue;
+      top = Math.max(top, bodyPos.getZ(i));
+    }
+    return top;
+  };
+
   const N = spine.length;
   const rings = spine.map((pt, i): [THREE.Vector3, THREE.Vector3, THREE.Vector3] => {
     const t = i / (N - 1);
     const env = Math.sin(t * Math.PI) * 0.7 + 0.3; // 0.3 at ends, 1.0 in the middle
     const halfWidth = pt.radius * 0.75 * env;
-    const crewHeight = pt.radius * 0.90 * env;
-    const toplineZ = pt.z + pt.radius;
+    const crewHeight = pt.radius * 1.9 * env;
+    // Anchor the crest to the REAL neck surface, not to the spine radius.
+    // The rendered neck is fatter than `pt.radius` (the head/nose bulbs and
+    // profile smoothing widen it), so a crest placed at pt.z + pt.radius sits
+    // BURIED inside the body for most of its length — measured up to 1.6 wu
+    // below the surface, which is why the first version of this mane was
+    // invisible. Sampling the merged body silhouette makes the crest
+    // self-correcting if the neck profile is ever retuned.
+    const toplineZ = Math.max(pt.z + pt.radius, surfaceTopZAt(pt.y, halfWidth));
     return [
       new THREE.Vector3(-halfWidth, pt.y, toplineZ),          // [0] left base
       new THREE.Vector3(0,          pt.y, toplineZ + crewHeight), // [1] ridge tip
