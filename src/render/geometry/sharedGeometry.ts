@@ -608,3 +608,43 @@ export function smoothNormalsByPosition(
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   return geometry;
 }
+
+/**
+ * The station along the model's forward axis (Y) where a laterally-projecting
+ * part is rooted to the body — the mean Y of the vertices closest to the
+ * model's centreline.
+ *
+ * Used to decide which point of a swimming body's spine a pectoral fin should
+ * follow. The part's bounding-box centre is *not* a substitute: fins are raked,
+ * so the centre sits well aft of the attachment (1.3 units on the barracuda,
+ * whose fin is a delta rooted at a single apex), and the fin would then track a
+ * part of the body it isn't attached to.
+ *
+ * `bandFraction` widens the selection from the single closest vertex to a slice
+ * of the part's lateral extent, so a fin with a root *edge* rather than a root
+ * point averages over that whole edge.
+ */
+export function measureRootStation(
+  geometry: THREE.BufferGeometry,
+  bandFraction = 0.1,
+): number {
+  const position = geometry.getAttribute('position');
+  if (!position || position.count === 0) return 0;
+  let minAbsX = Infinity;
+  let maxAbsX = 0;
+  for (let i = 0; i < position.count; i++) {
+    const absX = Math.abs(position.getX(i));
+    if (absX < minAbsX) minAbsX = absX;
+    if (absX > maxAbsX) maxAbsX = absX;
+  }
+  const band = minAbsX + bandFraction * (maxAbsX - minAbsX);
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < position.count; i++) {
+    if (Math.abs(position.getX(i)) <= band) {
+      sum += position.getY(i);
+      count++;
+    }
+  }
+  return count > 0 ? sum / count : 0;
+}
