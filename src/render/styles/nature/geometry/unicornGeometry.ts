@@ -136,39 +136,37 @@ export function createUnicornGeometries(length: number, width: number): Creature
 
 /**
  * Horse-proportioned torso plus a small horn, small paired ears, a
- * flowing neck mane, and a rounded nose bulb merged onto the top/front
- * of the head/neck — see buildHorseBodyProfileGeometry /
- * buildUnicornHornGeometry / buildUnicornEarsGeometry /
- * buildUnicornManeGeometry / buildUnicornNoseGeometry. (An earlier pass
- * added ears that read wildly out of proportion and they were dropped;
- * this pass re-adds them at a much smaller scale — see
- * buildUnicornEarsGeometry's doc comment.) The horn is baked gold via
- * mergeGeometriesWithColor so it stands out against the lavender body —
+ * symmetric neck mane crest, and merged eye dots. The horn is baked gold
+ * via mergeGeometriesWithColor so it stands out against the lavender body —
  * see that helper's doc comment for why vertex colors (rather than a
  * second material) are needed here.
+ *
+ * The mane is a symmetric V-shaped crest running from the withers to the
+ * poll with a short forelock past it. It sits symmetrically on the neck
+ * topline — every vertex at (x, y, z) has a mirror at (−x, y, z) — so it
+ * passes the neck-symmetry regression test. See buildUnicornManeGeometry.
+ * The hair-strand texture is a procedural shader applied to the body
+ * material; see NatureSceneRenderer3D.patchBodyMaterial and
+ * unicornHairShader.ts.
  */
 function buildUnicornBodyGeometry(length: number, width: number): THREE.BufferGeometry {
   const { geometry: bodyGeometry, pollY, pollZ, pollRadius, headTop } = buildHorseBodyProfileGeometry(length, width);
   const hornGeometry = buildUnicornHornGeometry(pollY, pollZ, pollRadius);
   const earsGeometry = buildUnicornEarsGeometry(pollY, pollZ, pollRadius);
   const eyesGeometry = buildUnicornEyesGeometry(headTop.y, headTop.z, headTop.radius);
-  // The mane is deliberately absent. buildUnicornManeGeometry built a single
-  // chunky 4-sided box-section strand draped along +X only, so the neck read
-  // as smooth and round from the left and hard-edged and blocky from the
-  // right — an asymmetry that looked like a modelling defect rather than
-  // hair. A bare, smooth neck reads better than a one-sided blocky one, so
-  // it stays off until there's a real mane (many fine strands, or a shaped
-  // crest sitting symmetrically on the topline).
+  const maneGeometry = buildUnicornManeGeometry(length, width);
   const merged = mergeGeometriesWithColor([
     { geometry: bodyGeometry, color: new THREE.Color(0xffffff) },
     { geometry: hornGeometry, color: UNICORN_HORN_COLOR },
     { geometry: earsGeometry, color: new THREE.Color(0xffffff) },
     { geometry: eyesGeometry, color: UNICORN_EYE_COLOR },
+    { geometry: maneGeometry, color: new THREE.Color(0xffffff) },
   ]);
   bodyGeometry.dispose();
   hornGeometry.dispose();
   earsGeometry.dispose();
   eyesGeometry.dispose();
+  maneGeometry.dispose();
   return merged;
 }
 
@@ -1008,4 +1006,135 @@ function buildUnicornEarsGeometry(pollY: number, pollZ: number, pollRadius: numb
   }
 
   return mergePositionOnlyGeometries([buildEar(1), buildEar(-1)]);
+}
+
+
+/**
+ * A symmetric mane crest running along the neck topline from the withers
+ * to the poll, with a short forelock continuing past the poll toward the
+ * forehead.
+ *
+ * Cross-section at each spine point:
+ *
+ *        ridge tip  (0, y, toplineZ + crewHeight)
+ *            / \
+ *           /   \
+ *  left base     right base
+ *  (-hw, y, tz)  (+hw, y, tz)
+ *
+ * where toplineZ = spine.z + spine.radius (the topmost point of the neck
+ * ring at that point).  The crest width (hw) and height (crewHeight) taper
+ * smoothly: widest and tallest at the upper-mid neck, narrowest at the
+ * withers and forelock ends.
+ *
+ * Both the left and right panels are emitted with outward AND inward faces
+ * so the crest is visible from any camera angle without requiring
+ * DoubleSide on the body material.
+ *
+ * Symmetry: every vertex at (x, y, z) has a counterpart at (−x, y, z), so
+ * this geometry passes the existing neck-symmetry regression test. The
+ * central ridge tip sits on the midline (x = 0) and is excluded from that
+ * test's off-midline filter.
+ *
+ * Hair-shader axis variation: the crest spans roughly ±9 % body-width in X
+ * and ≈ 21 % body-length in Y — both are substantial fractions of the body
+ * bounding box, so the XY-plane hair shader does not degenerate into stripes.
+ */
+function buildUnicornManeGeometry(length: number, width: number): THREE.BufferGeometry {
+  const halfLen = length * 0.5;
+
+  // Neck spine points (exact copies of the body's neck section from
+  // buildHorseBodyProfileGeometry) plus a forelock point past the poll.
+  interface ManeSpinePoint { y: number; z: number; radius: number; }
+  const spine: ManeSpinePoint[] = [
+    { y: halfLen * 0.08,  z: length * 0.1,   radius: width * 0.22 }, // withers
+    { y: halfLen * 0.147, z: length * 0.193,  radius: width * 0.17 }, // lower-mid
+    { y: halfLen * 0.207, z: length * 0.287,  radius: width * 0.13 }, // upper-mid
+    { y: halfLen * 0.247, z: length * 0.353,  radius: width * 0.12 }, // poll
+    { y: halfLen * 0.285, z: length * 0.340,  radius: width * 0.09 }, // forelock
+  ];
+
+  // Cross-section profile at each spine point.  Width and height taper via
+  // a sin envelope so the crest peaks at the upper-mid neck and tapers to
+  // near-zero at each end rather than starting/stopping with a blunt edge.
+  const N = spine.length;
+  const rings = spine.map((pt, i): [THREE.Vector3, THREE.Vector3, THREE.Vector3] => {
+    const t = i / (N - 1);
+    const env = Math.sin(t * Math.PI) * 0.7 + 0.3; // 0.3 at ends, 1.0 in the middle
+    const halfWidth = pt.radius * 0.75 * env;
+    const crewHeight = pt.radius * 0.90 * env;
+    const toplineZ = pt.z + pt.radius;
+    return [
+      new THREE.Vector3(-halfWidth, pt.y, toplineZ),          // [0] left base
+      new THREE.Vector3(0,          pt.y, toplineZ + crewHeight), // [1] ridge tip
+      new THREE.Vector3(+halfWidth, pt.y, toplineZ),          // [2] right base
+    ];
+  });
+
+  const positions: number[] = [];
+  const pushTri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => {
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  };
+
+  // Outward-winding helper using an expected outward direction rather than a
+  // centroid-based check, which is more robust for thin panels.
+  const pushOutwardAlong = (
+    p0: THREE.Vector3,
+    p1: THREE.Vector3,
+    p2: THREE.Vector3,
+    outDir: THREE.Vector3,
+  ) => {
+    const e1 = new THREE.Vector3().subVectors(p1, p0);
+    const e2 = new THREE.Vector3().subVectors(p2, p0);
+    const normal = new THREE.Vector3().crossVectors(e1, e2);
+    if (normal.dot(outDir) < 0) {
+      pushTri(p0, p2, p1);
+    } else {
+      pushTri(p0, p1, p2);
+    }
+  };
+
+  const LEFT  = new THREE.Vector3(-1, 0, 0);
+  const RIGHT = new THREE.Vector3( 1, 0, 0);
+  const BACK  = new THREE.Vector3( 0,-1, 0);
+  const FWD   = new THREE.Vector3( 0, 1, 0);
+
+  // Build each band between adjacent rings.  Each panel (left and right) is
+  // emitted twice — once for the outer face and once for the inner face —
+  // so the crest is fully visible from all camera angles.
+  for (let i = 0; i < N - 1; i++) {
+    const a = rings[i];
+    const b = rings[i + 1];
+
+    // Outer left panel (faces leftward, −X)
+    pushOutwardAlong(a[0], b[0], b[1], LEFT);
+    pushOutwardAlong(a[0], b[1], a[1], LEFT);
+    // Inner left panel (faces rightward, +X — visible from inside the crest)
+    pushOutwardAlong(a[0], a[1], b[1], RIGHT);
+    pushOutwardAlong(a[0], b[1], b[0], RIGHT);
+
+    // Outer right panel (faces rightward, +X)
+    pushOutwardAlong(a[1], b[1], b[2], RIGHT);
+    pushOutwardAlong(a[1], b[2], a[2], RIGHT);
+    // Inner right panel (faces leftward, −X — visible from inside the crest)
+    pushOutwardAlong(a[1], a[2], b[2], LEFT);
+    pushOutwardAlong(a[1], b[2], b[1], LEFT);
+  }
+
+  // Start cap (withers end) faces backward (−Y).
+  pushOutwardAlong(rings[0][0], rings[0][1], rings[0][2], BACK);
+  pushOutwardAlong(rings[0][0], rings[0][2], rings[0][1], FWD);  // inner face
+
+  // End cap (forelock end) faces forward (+Y).
+  const last = rings[N - 1];
+  pushOutwardAlong(last[0], last[2], last[1], FWD);
+  pushOutwardAlong(last[0], last[1], last[2], BACK);  // inner face
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  // Smooth normals so the crest shades as a rounded surface rather than a
+  // collection of flat triangles.  The crease angle naturally keeps the ridge
+  // line and cap edges crisp.
+  smoothNormalsByPosition(geometry);
+  return geometry;
 }
