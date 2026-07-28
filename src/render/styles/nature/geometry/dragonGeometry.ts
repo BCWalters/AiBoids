@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
-import { buildDiscCapGeometry, mergeGeometriesWithColor, singleLegPart, swayingTailRig } from '../../../geometry/sharedGeometry';
+import {
+  buildDiscCapGeometry,
+  mergeGeometriesWithColor,
+  singleLegPart,
+  smoothNormalsByPosition,
+  swayingTailRig,
+} from '../../../geometry/sharedGeometry';
 
 /**
  * "Dragon" predator geometry: a bulkier, longer-necked lathed body with a
@@ -197,7 +203,12 @@ function applyNeckBend(
     pos.setXYZ(i, x, y, z);
   }
   pos.needsUpdate = true;
-  geometry.computeVertexNormals();
+  // Positions moved, so normals must be rebuilt. Smoothed rather than
+  // per-face: this body is a non-indexed merge, so computeVertexNormals()
+  // gave every triangle its own flat normal and the lathe's own analytic
+  // normals were lost. The crease rule keeps the frill, face details and
+  // end caps reading as separate hard-edged features.
+  smoothNormalsByPosition(geometry);
 }
 
 /**
@@ -789,7 +800,13 @@ function buildDragonTailGeometry(length: number, width: number): THREE.BufferGeo
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-  geometry.computeVertexNormals();
+  // Averaged rather than per-face normals. computeVertexNormals() on this
+  // non-indexed tube gave every triangle its own flat normal, so the tail
+  // stayed hard-faceted even after PR #267 raised DRAGON_TAIL_TUBE_SIDES from
+  // 6 to 10 — more sides only made the facets narrower, never smooth. The
+  // crease rule keeps the dorsal fins standing proud of the tube crisp
+  // instead of smearing them into it.
+  smoothNormalsByPosition(geometry);
   return geometry;
 }
 
