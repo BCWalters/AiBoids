@@ -147,4 +147,36 @@ describe('graphicsQuality', () => {
     expect(q.isReducedGraphics()).toBe(false);
     expect(q.isMobileDevice()).toBe(false);
   });
+
+  describe('pickGeometryDetail', () => {
+    const LEVELS = { desktop: 64, mobile: 24 };
+
+    it('gives a phone the coarse geometry', async () => {
+      const q = await loadWithEnv(IPHONE_13);
+      expect(q.pickGeometryDetail(LEVELS)).toBe(24);
+    });
+
+    it('leaves a desktop browser on full-detail geometry', async () => {
+      const q = await loadWithEnv(DESKTOP);
+      expect(q.pickGeometryDetail(LEVELS)).toBe(64);
+    });
+
+    it('keeps a phone coarse under ?lowfx=0, so the effects A/B moves one variable', async () => {
+      // The whole point of ?lowfx=0 is to re-enable effects on a phone and see
+      // what they cost. If it also restored full-detail geometry the comparison
+      // would conflate shading with vertex throughput and mean nothing.
+      const q = await loadWithEnv({ ...IPHONE_13, search: '?lowfx=0' });
+      expect(q.isReducedGraphics()).toBe(false);
+      expect(q.pickGeometryDetail(LEVELS)).toBe(24);
+    });
+
+    it('honours ?lowfx=1 on a desktop, which is how CI escapes SwiftShader', async () => {
+      // The e2e suite opts into this explicitly: full-detail geometry under
+      // software WebGL starves the main thread badly enough that a synchronous
+      // panel toggle stops responding within the poll budget.
+      const q = await loadWithEnv({ ...DESKTOP, search: '?lowfx=1' });
+      expect(q.pickGeometryDetail(LEVELS)).toBe(24);
+    });
+  });
+
 });

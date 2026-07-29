@@ -81,6 +81,25 @@ const pixelRatioOverride = readPixelRatioOverride();
 const mobile = detectMobileDevice();
 const reduced = lowFxOverride ?? mobile;
 
+/**
+ * Whether to build creatures from coarser source geometry.
+ *
+ * Deliberately *not* `reduced`. `?lowfx=0` exists so a phone can be A/B'd with
+ * effects back on while everything else is held constant; if that also restored
+ * full-detail geometry it would move two variables at once and the comparison
+ * would mean nothing. So the override can only ever lower detail, never raise
+ * it: a phone stays coarse either way, and `?lowfx=1` means "give me the
+ * cheapest path you have" on any device.
+ *
+ * That last case is what CI relies on. The e2e suite runs Chromium against
+ * SwiftShader on a runner with no GPU, where building and drawing full-detail
+ * lathes and subdivided wing panels is slow enough to starve the main thread —
+ * clicks and class updates end up queued behind multi-hundred-millisecond
+ * frames, which is how a trivially synchronous panel toggle came to time out
+ * (the core shard had grown to 13.4 minutes for twelve smoke tests).
+ */
+const coarseGeometry = mobile || lowFxOverride === true;
+
 /** True when the heavy optional effects (shadows, bloom, afterimage, depth of field, colour grading, antialiasing, fishtank water effects) should be skipped. */
 export function isReducedGraphics(): boolean {
   return reduced;
@@ -128,7 +147,7 @@ export function getMaxPixelRatio(): number {
  * a few pixels across.
  */
 export function pickGeometryDetail({ desktop, mobile }: { desktop: number; mobile: number }): number {
-  return isMobileDevice() ? mobile : desktop;
+  return coarseGeometry ? mobile : desktop;
 }
 /** Human-readable summary of the resolved tier, for the diagnostics overlay — the only practical way to confirm what is actually active on a phone screen. */
 export function describeGraphicsTier(): string {

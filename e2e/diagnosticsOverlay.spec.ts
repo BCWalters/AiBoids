@@ -23,9 +23,36 @@ import { test, expect } from '@playwright/test';
 
 const IPHONE_13_VIEWPORT = { width: 390, height: 664 };
 
+/**
+ * These tests are about wiring and legibility, not about how much scenery the
+ * renderer can chew through, so they load the smallest flock that still
+ * exercises the real render path. Without this they inherit the full desktop
+ * flock and were the slowest specs in the core shard under SwiftShader, where
+ * building full-detail creature geometry starves the main thread.
+ *
+ * `lowfx=1` is included for the same reason. It does not weaken anything below:
+ * the tier assertion accepts either tier by design, since the point is that the
+ * overlay reports whatever is actually active rather than what we assumed.
+ */
+function overlayUrl(query: string): string {
+  const state = {
+    params: {
+      boidCount: 8,
+      parrotCount: 0,
+      goldfinchCount: 0,
+      cardinalCount: 0,
+      bluejayCount: 0,
+      predatorCount: 1,
+      unicornCount: 1,
+    },
+  };
+  const separator = query.includes('?') ? '&' : '?';
+  return `${query}${separator}state=${encodeURIComponent(JSON.stringify(state))}&lowfx=1`;
+}
+
 test.describe('diagnostics overlay', () => {
   test('?debug=1 shows the rendering stats with the graphics tier', async ({ page }) => {
-    await page.goto('/?debug=1');
+    await page.goto(overlayUrl('/?debug=1'));
     const overlay = page.locator('.rendering-stats-overlay');
     await expect(overlay).toBeVisible();
 
@@ -41,20 +68,20 @@ test.describe('diagnostics overlay', () => {
   });
 
   test('?debug=0 keeps the overlay off', async ({ page }) => {
-    await page.goto('/?debug=0');
+    await page.goto(overlayUrl('/?debug=0'));
     await page.waitForTimeout(500);
     await expect(page.locator('.rendering-stats-overlay')).toBeHidden();
   });
 
   test('leaves the overlay off when no debug param is given', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(overlayUrl('/'));
     await page.waitForTimeout(500);
     await expect(page.locator('.rendering-stats-overlay')).toBeHidden();
   });
 
   test('keeps the overlay clear of the collapsed panel on a phone viewport', async ({ page }) => {
     await page.setViewportSize(IPHONE_13_VIEWPORT);
-    await page.goto('/?debug=1');
+    await page.goto(overlayUrl('/?debug=1'));
     const overlay = page.locator('.rendering-stats-overlay');
     await expect(overlay).toBeVisible();
 
