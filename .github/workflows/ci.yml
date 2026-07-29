@@ -50,6 +50,10 @@ jobs:
       # beside another with 3 tests and 23 seconds, so every run waited on the
       # unlucky group. Names still say what broke.
       #
+      # This is about as far as splitting is worth taking: each job pays ~17s
+      # of fixed setup, so once a shard is down to one or two tests, adding
+      # jobs mostly buys setup rather than speed.
+      #
       # Filters match on test title, which would be fragile on its own: rename
       # a test and it could quietly stop being run anywhere. scripts/
       # checkE2eShards.mjs fails the build unless these cover every test
@@ -69,12 +73,18 @@ jobs:
             filter: 'e2e/app.spec.ts --grep "Render color regression"'
           - name: layout-sizing
             filter: 'e2e/canvasSizing.spec.ts --grep "aspect ratio|fills the viewport width"'
-          - name: layout-panel
-            filter: 'e2e/canvasSizing.spec.ts --grep "does not shrink|follows the canvas"'
+          - name: layout-panel-expand
+            filter: 'e2e/canvasSizing.spec.ts --grep "does not shrink"'
+          - name: layout-panel-collapse
+            filter: 'e2e/canvasSizing.spec.ts --grep "follows the canvas"'
           - name: overlay
-            filter: e2e/diagnosticsOverlay.spec.ts
-          - name: shaders
-            filter: e2e/birdFeather.nature.test.ts e2e/wingUndulation.spec.ts
+            filter: 'e2e/diagnosticsOverlay.spec.ts --grep "debug=1 shows|overlay off unless"'
+          - name: overlay-phone
+            filter: 'e2e/diagnosticsOverlay.spec.ts --grep "clear of the collapsed panel"'
+          - name: shader-feather
+            filter: e2e/birdFeather.nature.test.ts
+          - name: shader-undulation
+            filter: e2e/wingUndulation.spec.ts
     steps:
       - uses: actions/checkout@v5
 
