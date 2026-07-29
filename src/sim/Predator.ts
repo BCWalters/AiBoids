@@ -50,6 +50,37 @@ export const DIGEST_WAIT_DURATION = 3.5;
 const PREDATOR_MUTUAL_SEPARATION_RADIUS = 60;
 const PREDATOR_MUTUAL_SEPARATION_WEIGHT = 2.2;
 
+/**
+ * Body length assumed for a predator whose species has no catch profile.
+ * Roughly the nature unicorn, i.e. mid-sized among current predators.
+ */
+export const DEFAULT_PREDATOR_BODY_LENGTH = 36;
+
+/**
+ * Mutual separation scales with the two bodies involved, at this fraction of
+ * their combined length.
+ *
+ * The flat 60 above was chosen purely as an anti-stacking floor, with no
+ * reference to how big the creatures actually are — and the nature dragon is
+ * 45 units long with a 67.5-unit wingspan. Two dragons sitting exactly at the
+ * floor therefore *still* overlap on screen, which is what issue #307 shows:
+ * a pile of wings and tails radiating from what looks like a single body.
+ * Correct spacing by the old rule was already a visual collision.
+ *
+ * 0.9 gives two dragons 81 units, comfortably clear of their wingspan, while
+ * the floor still governs the smaller predators (two hawks want only 28), so
+ * this widens the big creatures without re-spacing everyone else.
+ */
+const PREDATOR_SEPARATION_BODY_FRACTION = 0.9;
+
+/**
+ * How far apart two predators should stay, given their body lengths. Scales
+ * with size so a dragon is not allotted the same personal space as a hawk.
+ */
+export function mutualSeparationRadius(a: number, b: number): number {
+  return Math.max(PREDATOR_MUTUAL_SEPARATION_RADIUS, (a + b) * PREDATOR_SEPARATION_BODY_FRACTION);
+}
+
 /** Seconds the strike sprint ramps in over, so it reads as an acceleration
  *  rather than an instantaneous speed jump. */
 const STRIKE_RAMP_SECONDS = 0.35;
@@ -104,6 +135,14 @@ export class Predator {
   readonly species: PredatorSpecies;
   position: Vec3;
   velocity: Vec3;
+
+  /**
+   * Physical length in world units, used to size mutual separation so big
+   * creatures keep proportionally more room. Owned by the simulation, which
+   * copies it from the active scene's predator catch profiles — the sim has
+   * no other notion of how large a creature is drawn.
+   */
+  bodyLength = DEFAULT_PREDATOR_BODY_LENGTH;
 
   /**
    * Smoothed 0..1 "how locked-on am I right now" level, driven by how
@@ -322,7 +361,7 @@ export class Predator {
     for (const other of predators) {
       if (other === this) continue;
       const d = V.distance(this.position, other.position);
-      if (d < PREDATOR_MUTUAL_SEPARATION_RADIUS && d > 1e-6) {
+      if (d < mutualSeparationRadius(this.bodyLength, other.bodyLength) && d > 1e-6) {
         sepSum = V.add(sepSum, V.scale(V.sub(this.position, other.position), 1 / d));
         sepCount++;
       }

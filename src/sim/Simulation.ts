@@ -1,7 +1,7 @@
 import * as V from './vector';
 import { params } from './params';
 import { Boid, DYING_DURATION, BoidSpecies } from './Boid';
-import { Predator, PredatorSpecies } from './Predator';
+import { Predator, PredatorSpecies, DEFAULT_PREDATOR_BODY_LENGTH } from './Predator';
 import { clampToBounds, type WorldBounds } from './boundary';
 import { UFO, createUFO } from './UFO';
 import { SpatialGrid } from './spatialGrid';
@@ -73,6 +73,21 @@ export class Simulation {
 
   setPredatorCatchProfiles(profiles: PredatorCatchProfiles): void {
     this.predatorCatchProfiles = profiles;
+    this.applyPredatorBodyLengths();
+  }
+
+  /**
+   * Copies each predator's drawn body length out of the active scene's catch
+   * profiles, so steering that depends on physical size (mutual separation)
+   * matches what the renderer actually puts on screen. Re-applied whenever
+   * profiles change or predators are created, since switching scenes swaps a
+   * 45-unit dragon for a 15.6-unit hawk under the same species.
+   */
+  private applyPredatorBodyLengths(): void {
+    for (const predator of this.predators) {
+      predator.bodyLength =
+        this.predatorCatchProfiles[predator.species]?.bodyLength ?? DEFAULT_PREDATOR_BODY_LENGTH;
+    }
   }
 
   /** Current world bounds box, used for 3D wall steer-away. */
@@ -232,6 +247,7 @@ export class Simulation {
     this.syncPredatorSpecies(PredatorSpecies.Normal, params.predatorCount);
     this.syncPredatorSpecies(PredatorSpecies.Monster, params.monsterCount);
     this.syncPredatorSpecies(PredatorSpecies.Horse, params.horseCount);
+    this.applyPredatorBodyLengths();
   }
 
   /** Resets all entities to fresh random positions (used by the Reset button). */
