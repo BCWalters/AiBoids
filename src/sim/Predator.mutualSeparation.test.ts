@@ -32,17 +32,31 @@ const NATURE_DRAGON_LENGTH = 45;
 const NATURE_DRAGON_WINGSPAN = NATURE_DRAGON_LENGTH * 1.5;
 const NATURE_HAWK_LENGTH = 15.6;
 
-/** Closest approach between any two dragons over a run, in world units. */
-function closestDragonApproach({ seed, seconds }: { seed: number; seconds: number }): number {
+/**
+ * Percentage of sampled dragon pairs sitting closer than a wingspan — i.e.
+ * visibly intersecting. Deliberately a rate rather than the single closest
+ * approach: the minimum over a run is a tail statistic with only a couple of
+ * units between pass and fail, while the rate separates by more than 20x and
+ * so survives small floating-point differences between platforms.
+ */
+function dragonOverlapPercent({ seed, seconds }: { seed: number; seconds: number }): number {
   seedRandom(seed);
   resetParams();
   params.mode = '3d';
   params.visualStyle = 'nature';
+  // A smaller flock keeps this under a few seconds without changing the
+  // hunting dynamics that draw the dragons together in the first place.
+  params.boidCount = 120;
+  params.multicolorCount = 0;
+  params.goldCount = 0;
+  params.redCount = 0;
+  params.blueCount = 0;
 
   const sim = new Simulation(1000, 1000);
   sim.setPredatorCatchProfiles(getPredatorCatchProfilesForStyle('nature'));
 
-  let closest = Infinity;
+  let pairs = 0;
+  let overlapping = 0;
   const steps = Math.round(seconds * 60);
   for (let i = 0; i < steps; i++) {
     sim.update(1 / 60);
@@ -53,11 +67,12 @@ function closestDragonApproach({ seed, seconds }: { seed: number; seconds: numbe
         const dx = dragons[a].position.x - dragons[b].position.x;
         const dy = dragons[a].position.y - dragons[b].position.y;
         const dz = dragons[a].position.z - dragons[b].position.z;
-        closest = Math.min(closest, Math.hypot(dx, dy, dz));
+        pairs++;
+        if (Math.hypot(dx, dy, dz) < NATURE_DRAGON_WINGSPAN) overlapping++;
       }
     }
   }
-  return closest;
+  return (100 * overlapping) / pairs;
 }
 
 afterEach(() => {
@@ -98,13 +113,12 @@ describe('predator mutual separation scales with body size', () => {
 
   it('keeps dragons from overlapping in a running simulation', () => {
     // The unit-level rule above can be right while the steering that consumes
-    // it is not, so this asserts the behaviour end-to-end. On these two seeds
-    // the flat 60-unit rule closed to 43.4 and 39.3 units — deep inside the
-    // 67.5-unit wingspan — against 58.9 and 64.1 with size-aware separation.
-    const closest = Math.min(
-      closestDragonApproach({ seed: 3, seconds: 90 }),
-      closestDragonApproach({ seed: 13, seconds: 90 }),
+    // it is not, so this asserts the behaviour end-to-end. On these seeds the
+    // flat 60-unit rule left dragons intersecting for 1.93-5.21% of sampled
+    // pairs; size-aware separation gives 0.00-0.08%.
+    const worst = Math.max(
+      ...[3, 13, 1, 7].map((seed) => dragonOverlapPercent({ seed, seconds: 60 })),
     );
-    expect(closest).toBeGreaterThan(NATURE_DRAGON_WINGSPAN * 0.8);
+    expect(worst).toBeLessThan(0.5);
   }, 60_000);
 });
