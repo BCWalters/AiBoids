@@ -1,22 +1,42 @@
 # AiBoids
 
-A browser-based flocking ("Boids") simulation built entirely with an AI
-coding agent (GitHub Copilot CLI), used as a running exercise in
+**The most advanced Boids *visualisation* ever built** — and built entirely
+by an AI coding agent (GitHub Copilot CLI), as a running exercise in
 iterative, agent-driven development.
 
 Hosted on my projects site: [Ben's Page](https://victorious-forest-06eb42803.7.azurestaticapps.net/)
 
-Small "boids" (sparrows, parrots, goldfinches, cardinals, blue jays) flock
-together using the classic separation/alignment/cohesion rules, while
-predators (hawks, and optionally fire-breathing dragons or an alien
-invasion) hunt them and scatter the flock. Every parameter — population
-sizes, speeds, perception, flocking weights — is tunable live from an
-on-screen control panel, in both a simple 2D mode and a fully-3D mode
-with an orbiting camera, sky, ground, lakes, ocean, and fog.
+That is a deliberately strong claim, so here is exactly what it rests on.
+Classic Boids demos are a triangle, or a cone, or an imported mesh. This
+one renders:
+
+- **10 creature types, every vertex generated procedurally in code.**
+  There is not a single `.glb`, `.fbx`, `.obj`, texture file, or asset
+  loader anywhere in this repo — hawks, dragons, unicorns, parrots,
+  sharks, barracuda, seahorses and the rest are all built from maths at
+  runtime. Other 3D flocking projects import their art.
+- **10 hand-written GLSL shader modules** for feather barbs, dragon
+  scales, fish scales and fin rays, unicorn mane hair, and per-creature
+  wing undulation. For comparison, three.js's own well-known
+  `webgl_gpgpu_birds` demo draws each bird as 3 grey triangles and
+  animates the wings by moving two vertices on a sine wave.
+- **3 fully distinct scenes** — an arcade mode, a nature world with sky,
+  ground, lakes and fog, and a coral fishtank. Most projects have one.
+- **Per-species behaviour**, not one shared steering rule: predators have
+  individual catch profiles, and separation is aware of body size.
+
+Underneath, the flocking itself is the classic, honest
+separation/alignment/cohesion model — the ambition here is in the
+rendering. Every parameter (population sizes, speeds, perception,
+flocking weights) is tunable live from an on-screen control panel, in
+both a simple 2D mode and a fully-3D mode with an orbiting camera.
+
+If you know of a Boids visualisation that beats this one, please open an
+issue — that is a conversation worth having.
 
 ## Quick start
 
-Requires [Node.js](https://nodejs.org/) 20 or later.
+Requires [Node.js](https://nodejs.org/) 22 or later.
 
 ```bash
 npm install
