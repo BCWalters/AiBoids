@@ -83,11 +83,61 @@ describe('graphicsQuality', () => {
     expect(q.isMobileDevice()).toBe(false);
   });
 
-  it('lets ?lowfx=0 force the full-quality path back on for a phone', async () => {
+  it('keeps a phone recognised as mobile whatever ?lowfx says', async () => {
+    // Regression: deriving `mobile` from the override made ?lowfx=1 on a
+    // phone report the device as desktop, which handed it the full
+    // 460-creature flock (main.ts gates the reduced counts on
+    // isMobileDevice). The diagnostic switch became a heavier workload and
+    // masked the very effect it was meant to isolate.
+    for (const search of ['?lowfx=1', '?lowfx=0', '']) {
+      const q = await loadWithEnv({ ...IPHONE_13, search });
+      expect.soft(q.isMobileDevice(), `?lowfx should not change device class (${search || 'no param'})`).toBe(true);
+      // Pixel ratio is a property of the device, so an on-device A/B changes
+      // exactly one variable: the effects.
+      expect.soft(q.getMaxPixelRatio(), `pixel ratio should track the device (${search || 'no param'})`).toBe(1.5);
+    }
+  });
+
+  it('lets ?lowfx=0 turn the effects back on for an on-device comparison', async () => {
     const q = await loadWithEnv({ ...IPHONE_13, search: '?lowfx=0' });
     expect(q.isReducedGraphics()).toBe(false);
-    expect(q.isMobileDevice()).toBe(false);
-    expect(q.getMaxPixelRatio()).toBe(2);
+    // ...without pretending the phone is a desktop.
+    expect(q.isMobileDevice()).toBe(true);
+  });
+
+  it('lets ?dpr override the pixel-ratio cap for on-device fill-rate tests', async () => {
+    expect((await loadWithEnv({ ...IPHONE_13, search: '?dpr=1' })).getMaxPixelRatio()).toBe(1);
+    // Must beat the desktop cap upward too, or it can only ever confirm the
+    // direction we already suspect.
+    expect((await loadWithEnv({ ...DESKTOP, search: '?dpr=3' })).getMaxPixelRatio()).toBe(3);
+    // Surfaced in the overlay, so an A/B on the phone is self-describing.
+    expect((await loadWithEnv({ ...IPHONE_13, search: '?dpr=1' })).describeGraphicsTier()).toContain('?dpr=1');
+  });
+
+  it('clamps or ignores nonsense ?dpr values rather than trusting them', async () => {
+    // 0 or negative would produce a zero-area framebuffer; huge values would
+    // allocate an enormous one. Both are a typo away on a phone keyboard.
+    expect((await loadWithEnv({ ...IPHONE_13, search: '?dpr=0' })).getMaxPixelRatio()).toBe(1.5);
+    expect((await loadWithEnv({ ...IPHONE_13, search: '?dpr=-2' })).getMaxPixelRatio()).toBe(1.5);
+    expect((await loadWithEnv({ ...IPHONE_13, search: '?dpr=abc' })).getMaxPixelRatio()).toBe(1.5);
+    expect((await loadWithEnv({ ...IPHONE_13, search: '?dpr=99' })).getMaxPixelRatio()).toBe(3);
+  });
+
+  it('describes the resolved tier well enough to read off a phone screen', async () => {
+    const auto = await loadWithEnv(IPHONE_13);
+    expect(auto.describeGraphicsTier()).toContain('mobile');
+    expect(auto.describeGraphicsTier()).toContain('reduced');
+    expect(auto.describeGraphicsTier()).toContain('auto');
+
+    const forced = await loadWithEnv({ ...IPHONE_13, search: '?lowfx=0' });
+    // Must name the override, so "did my URL param take effect?" is
+    // answerable from the overlay alone.
+    expect(forced.describeGraphicsTier()).toContain('full');
+    expect(forced.describeGraphicsTier()).toContain('lowfx=0');
+
+    const desktop = await loadWithEnv(DESKTOP);
+    expect(desktop.describeGraphicsTier()).toContain('desktop');
+    expect(desktop.describeGraphicsTier()).toContain('full');
   });
 
   it('falls back to full quality when there is no window at all', async () => {
@@ -97,4 +147,36 @@ describe('graphicsQuality', () => {
     expect(q.isReducedGraphics()).toBe(false);
     expect(q.isMobileDevice()).toBe(false);
   });
+
+  describe('pickGeometryDetail', () => {
+    const LEVELS = { desktop: 64, mobile: 24 };
+
+    it('gives a phone the coarse geometry', async () => {
+      const q = await loadWithEnv(IPHONE_13);
+      expect(q.pickGeometryDetail(LEVELS)).toBe(24);
+    });
+
+    it('leaves a desktop browser on full-detail geometry', async () => {
+      const q = await loadWithEnv(DESKTOP);
+      expect(q.pickGeometryDetail(LEVELS)).toBe(64);
+    });
+
+    it('keeps a phone coarse under ?lowfx=0, so the effects A/B moves one variable', async () => {
+      // The whole point of ?lowfx=0 is to re-enable effects on a phone and see
+      // what they cost. If it also restored full-detail geometry the comparison
+      // would conflate shading with vertex throughput and mean nothing.
+      const q = await loadWithEnv({ ...IPHONE_13, search: '?lowfx=0' });
+      expect(q.isReducedGraphics()).toBe(false);
+      expect(q.pickGeometryDetail(LEVELS)).toBe(24);
+    });
+
+    it('honours ?lowfx=1 on a desktop, which is how CI escapes SwiftShader', async () => {
+      // The e2e suite opts into this explicitly: full-detail geometry under
+      // software WebGL starves the main thread badly enough that a synchronous
+      // panel toggle stops responding within the poll budget.
+      const q = await loadWithEnv({ ...DESKTOP, search: '?lowfx=1' });
+      expect(q.pickGeometryDetail(LEVELS)).toBe(24);
+    });
+  });
+
 });

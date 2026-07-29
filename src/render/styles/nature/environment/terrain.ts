@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { patchMaterial } from '../../../patchMaterial';
+import { isMobileDevice } from '../../../graphicsQuality';
 
 // Cheap hash-based 2D value noise (no external noise library) — smoothed
 // with a Hermite (smoothstep) interpolation between lattice corners so it
@@ -166,9 +167,19 @@ function biomeTintAt(fx: number, fy: number): THREE.Color {
  * against the tileable diffuse texture with genuinely non-repeating
  * large-scale color regions, and a small per-vertex UV warp so the
  * texture's own tile grid doesn't line up into visible straight seams.
+ * The segment count is the single largest geometry decision in the nature
+ * scene: at 200 this one mesh is 80,000 triangles, which measured as 91% of
+ * every triangle the scene submits per frame (nature 87,969 vs fishtank
+ * 1,807). On an iPhone 13 that showed up as ~21fps in nature against ~50fps
+ * in fishtank with identical creature counts, and — diagnostically — neither
+ * a lower pixel ratio nor disabling every optional effect moved it, because
+ * vertex throughput is independent of both. Phones therefore get a coarser
+ * grid. The displacement amplitude is unchanged, so the terrain keeps its
+ * shape and simply resolves it with fewer, larger facets; the outer skirt
+ * that most of these vertices are spent on is fog-hidden regardless.
  */
 export function createGroundGeometry(): THREE.PlaneGeometry {
-  const segments = 200;
+  const segments = isMobileDevice() ? 72 : 200;
   const geometry = new THREE.PlaneGeometry(1, 1, segments, segments);
   const position = geometry.attributes.position as THREE.BufferAttribute;
   const uv = geometry.attributes.uv as THREE.BufferAttribute;

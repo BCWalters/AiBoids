@@ -4,6 +4,7 @@ import { Renderer } from './render/Renderer';
 import { Renderer3D } from './render/Renderer3D';
 import { ControlPanel } from './ui/ControlPanel';
 import { Diagnostics } from './diagnostics/Diagnostics';
+import { readDebugOverlayOverride } from './diagnostics/debugOverlayFlag';
 import { CreatureGalleryController } from './gallery/CreatureGalleryController';
 import { FollowCamController } from './render/FollowCamController';
 import { getPredatorCatchProfilesForStyle } from './render/sceneRenderers/predatorCatchProfiles';
@@ -88,9 +89,17 @@ setupHeaderLanguageSelector();
 // `?state=` deep link and its explicit counts must win over these defaults.
 if (isMobileDevice()) installDefaultOverrides(mobileCreatureCounts);
 
+// Applied before the control panel is built, so the Diagnostics checkbox
+// renders already ticked and stays the source of truth from then on.
+// Targets showRenderingStats (the "Rendering stats" panel), NOT
+// showDebugOverlay — that is the separate 2D-renderer debug drawing.
+const debugOverlayOverride = readDebugOverlayOverride();
+if (debugOverlayOverride !== null) params.showRenderingStats = debugOverlayOverride;
+
 const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight || 600);
 sim.setPredatorCatchProfiles(getPredatorCatchProfilesForStyle(params.visualStyle));
 const diagnostics = new Diagnostics(sim, canvasStack);
+diagnostics.setRenderStatsProvider(() => (renderer3D ? renderer3D.getRenderStats() : null));
 
 let renderer2D: Renderer | null = null;
 let renderer3D: Renderer3D | null = null;

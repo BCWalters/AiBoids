@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pickGeometryDetail } from '../../../graphicsQuality';
 import type { CreatureGeometries, CreatureLegPart } from '../../../geometry/sharedGeometry';
 import {
   jointBarrelForBoxSection,
@@ -43,7 +44,7 @@ const UNICORN_KNEE_DRIVE: PartDrive = {
  * creatureSmoothness regression test can assert the exact resulting
  * triangle count against this constant.
  */
-export const UNICORN_BODY_RADIAL_SEGMENTS = 16;
+export const UNICORN_BODY_RADIAL_SEGMENTS = pickGeometryDetail({ desktop: 16, mobile: 10 });
 
 // Rainbow vertex-color gradients used only by the unicorn's pegasus
 // wings and rainbow tail (violet at the root, red at the tip), read by a

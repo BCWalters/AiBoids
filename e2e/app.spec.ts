@@ -192,8 +192,18 @@ test.describe('App smoke tests', () => {
     const toggle = page.locator('#control-panel-toggle');
     const initiallyCollapsed = await panel.evaluate((el) => el.classList.contains('collapsed'));
     await toggle.click();
+    // Read the class with page.evaluate rather than locator.evaluate. The
+    // click handler is synchronous, so the only way this can fail is if the
+    // predicate itself stalls — and locator methods apply actionability waits
+    // against a page whose render loop is saturating the main thread under
+    // software WebGL. That is how this timed out on CI while passing locally:
+    // not because the panel failed to toggle, but because asking it never
+    // returned within the budget.
     await expect
-      .poll(async () => panel.evaluate((el) => el.classList.contains('collapsed')))
+      .poll(
+        () => page.evaluate(() => document.querySelector('#control-panel')!.classList.contains('collapsed')),
+        { timeout: 30_000 },
+      )
       .toBe(!initiallyCollapsed);
   });
 

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pickGeometryDetail } from '../../../graphicsQuality';
 import { buildTuckedBirdLegs } from './birdSharedGeometry';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import { BIRD_FEATHER_MASK_ATTRIBUTE } from '../birdFeatherShader';
@@ -171,7 +172,7 @@ let ACTIVE_PARROT_PALETTE: ParrotPalette = GREEN_FOCUS_PARROT_PALETTE;
 // this single baked color works correctly across every macaw color
 // pattern in PARROT_COLOR_PATTERNS.
 const EYE_COLOR = new THREE.Color(0x0d0b08);
-const PARROT_BODY_LATHE_SEGMENTS = 32;
+const PARROT_BODY_LATHE_SEGMENTS = pickGeometryDetail({ desktop: 32, mobile: 16 });
 const PARROT_BODY_SLIM_SCALE = 0.8;
 const PARROT_HEAD_TILT_RAD = THREE.MathUtils.degToRad(-28);
 /**
@@ -375,7 +376,7 @@ const PARROT_FEATHER_SEAT_FRAC = 0.011;
  * sixth of the seat depth, and no feather breaches at any phase. The cost is
  * paid once at build time on a geometry every parrot instance shares.
  */
-const PARROT_WING_PANEL_DIVISIONS = 16;
+const PARROT_WING_PANEL_DIVISIONS = pickGeometryDetail({ desktop: 16, mobile: 6 });
 
 
 export type ParrotPaletteProfile =
@@ -521,7 +522,7 @@ function buildParrotBodyGeometry(length: number, width: number): THREE.BufferGeo
   // Spline-resample the authored silhouette so the flat-shaded lathe reads
   // as a smooth surface (many gently-varying facets) instead of a few long
   // banded ones; PARROT_BODY_LATHE_SEGMENTS is already raised to 32.
-  const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
+  const smoothProfile = new THREE.SplineCurve(profile).getPoints(pickGeometryDetail({ desktop: 64, mobile: 26 }));
   const torso = new THREE.LatheGeometry(smoothProfile, PARROT_BODY_LATHE_SEGMENTS);
   // Sampled here, before the rake and the head pitch, because the lathe radius
   // is what drives the smear and only an unrotated lathe has hypot(x, z) equal

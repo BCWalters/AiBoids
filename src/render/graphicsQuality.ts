@@ -46,18 +46,66 @@ function readLowFxOverride(): boolean | null {
   }
 }
 
+/**
+ * `?dpr=<n>` — override the pixel-ratio cap for on-device experiments.
+ *
+ * Device telemetry (791 frames, iPhone 13) put 41.5ms of a 53.7ms frame in
+ * `unaccountedMs` while our own JS totalled ~12ms, i.e. the frame is waiting
+ * on the GPU, not on us. Fragment cost scales with the square of this number,
+ * so it is the sharpest single lever available — and whether it helps tells
+ * us directly whether the scene is fill-bound. Clamped to a sane range so a
+ * typo cannot allocate a wildly oversized framebuffer.
+ */
+function readPixelRatioOverride(): number | null {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('dpr');
+    if (raw === null) return null;
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return Math.min(Math.max(value, 0.25), 3);
+  } catch {
+    return null;
+  }
+}
+
 // Resolved once at module load: the answer cannot change without a reload,
 // and callers (material construction, renderer setup) bake it into GPU state.
+//
+// `mobile` is a pure statement about the hardware, so the lowfx override must
+// not influence it. Deriving it from the override (as this originally did)
+// meant `?lowfx=1` on a phone reported the device as non-mobile, which handed
+// it the full 460-creature desktop flock — turning a diagnostic switch into a
+// heavier workload and masking the effect it was meant to isolate.
 const lowFxOverride = readLowFxOverride();
-const mobile = lowFxOverride === null && detectMobileDevice();
+const pixelRatioOverride = readPixelRatioOverride();
+const mobile = detectMobileDevice();
 const reduced = lowFxOverride ?? mobile;
+
+/**
+ * Whether to build creatures from coarser source geometry.
+ *
+ * Deliberately *not* `reduced`. `?lowfx=0` exists so a phone can be A/B'd with
+ * effects back on while everything else is held constant; if that also restored
+ * full-detail geometry it would move two variables at once and the comparison
+ * would mean nothing. So the override can only ever lower detail, never raise
+ * it: a phone stays coarse either way, and `?lowfx=1` means "give me the
+ * cheapest path you have" on any device.
+ *
+ * That last case is what CI relies on. The e2e suite runs Chromium against
+ * SwiftShader on a runner with no GPU, where building and drawing full-detail
+ * lathes and subdivided wing panels is slow enough to starve the main thread —
+ * clicks and class updates end up queued behind multi-hundred-millisecond
+ * frames, which is how a trivially synchronous panel toggle came to time out
+ * (the core shard had grown to 13.4 minutes for twelve smoke tests).
+ */
+const coarseGeometry = mobile || lowFxOverride === true;
 
 /** True when the heavy optional effects (shadows, bloom, afterimage, depth of field, colour grading, antialiasing, fishtank water effects) should be skipped. */
 export function isReducedGraphics(): boolean {
   return reduced;
 }
 
-/** True when running on a phone/tablet-class device. Distinct from `isReducedGraphics()`, which is also true for the forced `?lowfx=1` desktop/CI path — this one gates choices that only make sense for a real handheld device, such as smaller default creature populations. */
+/** True when running on a phone/tablet-class device. Independent of the effects tier: `?lowfx=0` turns the effects back on for an A/B comparison but does not pretend the phone is a desktop. */
 export function isMobileDevice(): boolean {
   return mobile;
 }
@@ -70,9 +118,43 @@ export function isMobileDevice(): boolean {
  * desktop path (which is already capped at 2) on far weaker hardware, so
  * phones get an intermediate cap: still sharper than 1:1, but a little over
  * half the fragments of the desktop cap.
+ *
+ * Keyed on the device rather than the effects tier, so toggling `?lowfx`
+ * changes exactly one variable and an on-device A/B stays interpretable.
  */
 export function getMaxPixelRatio(): number {
-  if (reduced && !mobile) return 1;
-  return mobile ? 1.5 : 2;
+  if (pixelRatioOverride !== null) return pixelRatioOverride;
+  if (mobile) return 1.5;
+  return reduced ? 1 : 2;
+}
+
+/**
+ * Picks a geometry detail level for the current device.
+ *
+ * Creature geometry is overwhelmingly the largest cost in the nature scene:
+ * a scene-graph walk on an iPhone 13 measured 2,562,376 triangles per frame,
+ * of which the ground plane was ~10k and essentially all the rest was
+ * creature bodies (4,320 tris each) and wings (3,096 each, before instancing
+ * across 30-60 birds per species). Fishtank, at 375,092, ran roughly twice as
+ * fast with the same flock size.
+ *
+ * That cost is vertex-bound, which is why neither `?dpr` nor `?lowfx` moved
+ * it: it is independent of both resolution and shading. Phones therefore get
+ * coarser source geometry. Callers pass both values explicitly rather than a
+ * scale factor, because the right mobile figure is a per-mesh judgement — a
+ * wing panel needs enough interior vertices for its undulation shader to bend
+ * convincingly, while a lathe's radial count only has to survive a silhouette
+ * a few pixels across.
+ */
+export function pickGeometryDetail({ desktop, mobile }: { desktop: number; mobile: number }): number {
+  return coarseGeometry ? mobile : desktop;
+}
+/** Human-readable summary of the resolved tier, for the diagnostics overlay — the only practical way to confirm what is actually active on a phone screen. */
+export function describeGraphicsTier(): string {
+  const device = mobile ? 'mobile' : 'desktop';
+  const effects = reduced ? 'reduced' : 'full';
+  const source = lowFxOverride === null ? 'auto' : `forced by ?lowfx=${lowFxOverride ? '1' : '0'}`;
+  const dpr = pixelRatioOverride === null ? '' : ` [?dpr=${pixelRatioOverride}]`;
+  return `${device} / effects ${effects} (${source})${dpr}`;
 }
 

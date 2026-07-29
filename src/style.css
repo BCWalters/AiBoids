@@ -503,3 +503,25 @@ body {
     display: none;
   }
 }
+
+/* The rendering-stats overlay is laid out with `white-space: pre` and lines
+ * such as "phase avg ms: sim ... | render ... | ui ... | post ..." that are
+ * comfortably over 60 characters. At 12px monospace that is ~430px, so on a
+ * phone the right-hand half of every long line ran off the edge of the screen
+ * with no way to scroll it back — the numbers were being drawn, just not
+ * where they could be read. Allow wrapping and tighten the type so the panel
+ * stays inside the viewport. */
+@media (max-width: 750px) {
+  .rendering-stats-overlay {
+    /* Clear the collapsed control panel, which is an absolutely-positioned
+     * overlay pinned to the right on narrow viewports and paints on top of
+     * these stats. 60px is its coarse-pointer width (44px otherwise) plus a
+     * 10px gap; without this the tail of every long line — the `post` phase
+     * timing, the total entity count — sits underneath it and is unreadable. */
+    right: 70px;
+    font-size: 10px;
+    line-height: 1.3;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}

@@ -1,6 +1,7 @@
 import { params, type SimMode, type SimParams } from '../sim/params';
 import type { Simulation } from '../sim/Simulation';
 import { DiagnosticsPanel } from '../ui/DiagnosticsPanel';
+import { describeGraphicsTier } from '../render/graphicsQuality';
 
 const FRAME_STATS_WINDOW = 120;
 const FRAME_STATS_WARMUP_MS = 4000;
@@ -92,6 +93,8 @@ interface PerformanceWithMemory extends Performance {
  */
 export class Diagnostics {
   private readonly sim: Simulation;
+  private readonly host: HTMLElement;
+  private renderStatsProvider: (() => { triangles: number; calls: number; shadows: boolean } | null) | null = null;
   private readonly panel: DiagnosticsPanel;
 
   private readonly frameDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
@@ -128,8 +131,46 @@ export class Diagnostics {
 
   constructor(sim: Simulation, host: HTMLElement) {
     this.sim = sim;
+    this.host = host;
     this.panel = new DiagnosticsPanel(host);
     this.setupRuntimeDiagnosticsObservers();
+  }
+
+  /**
+   * Describes the graphics tier actually in force, for the overlay.
+   *
+   * The resolved tier comes from graphicsQuality, but the pixel ratio is read
+   * back off the live canvas rather than reported as an intention: the buffer
+   * size is what the GPU is really filling, and it is the one number that
+   * confirms the tier reached `WebGLRenderer.setPixelRatio` instead of being
+   * decided and then dropped somewhere in between.
+   *
+   * Returned as two short lines rather than one long one so it stays legible
+   * on a phone, which is the only place the question usually matters.
+   */
+  /**
+   * Supplies live per-frame geometry counts. Injected rather than held as a
+   * renderer reference because the 3D renderer is created lazily and replaced
+   * on mode switches.
+   */
+  setRenderStatsProvider(provider: () => { triangles: number; calls: number; shadows: boolean } | null): void {
+    this.renderStatsProvider = provider;
+  }
+
+  private describeEffectsTier(): string[] {
+    const lines = [`fx: ${describeGraphicsTier()}`];
+    const canvas = this.host.querySelector<HTMLCanvasElement>('#sim-canvas-3d');
+    if (canvas && canvas.clientWidth > 0) {
+      const effectivePixelRatio = canvas.width / canvas.clientWidth;
+      lines.push(`buffer: ${canvas.width}x${canvas.height} @ ${effectivePixelRatio.toFixed(2)}x`);
+    }
+    const renderStats = this.renderStatsProvider?.() ?? null;
+    if (renderStats) {
+      lines.push(
+        `geometry: ${renderStats.triangles.toLocaleString()} tris | ${renderStats.calls} calls | shadows ${renderStats.shadows ? 'on' : 'off'}`,
+      );
+    }
+    return lines;
   }
 
   private classifyFrameGap(frameMs: number): FrameGapClass {
@@ -554,6 +595,7 @@ export class Diagnostics {
       return [
         'Rendering stats',
         `mode: ${params.mode}${params.mode === '3d' ? ` (${params.visualStyle})` : ''}`,
+        ...this.describeEffectsTier(),
         `warming up: ${(warmupRemainingMs / 1000).toFixed(1)}s`,
         `trace active: ${this.formatTraceElapsed(now)}`,
         `diagnostics: ${params.enableDiagnosticsCapture ? 'on' : 'off'} (frames ${this.diagnosticCount}/${DIAGNOSTIC_LOG_MAX_ENTRIES}, runtime ${this.diagnosticRuntimeEventCount}/${DIAGNOSTIC_RUNTIME_EVENT_MAX_ENTRIES})`,
@@ -581,6 +623,7 @@ export class Diagnostics {
     return [
       'Rendering stats',
       `mode: ${params.mode}${params.mode === '3d' ? ` (${params.visualStyle})` : ''}`,
+      ...this.describeEffectsTier(),
       `frame ms: avg ${averageFrameMs.toFixed(2)} | p95 ${p95FrameMs.toFixed(2)} | peak ${rollingPeakFrameMs.toFixed(2)}`,
       `fps: ${averageFps.toFixed(1)}`,
       `phase avg ms: sim ${simAvgMs.toFixed(2)} | render ${renderAvgMs.toFixed(2)} | ui ${uiAvgMs.toFixed(2)} | post ${postAvgMs.toFixed(2)}`,

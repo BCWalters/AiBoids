@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pickGeometryDetail } from '../../../graphicsQuality';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   mergeGeometriesWithColor,
@@ -320,8 +321,8 @@ function buildTaperedBodyGeometry(length: number, width: number, palette?: Small
   // Spline-resample the authored silhouette so the flat-shaded lathe reads
   // as a smooth surface (many gently-varying facets) instead of a few long
   // banded ones; raise radial segments to 32 for the same reason.
-  const profile = new THREE.SplineCurve(controlPoints).getPoints(64);
-  const body = new THREE.LatheGeometry(profile, 32);
+  const profile = new THREE.SplineCurve(controlPoints).getPoints(pickGeometryDetail({ desktop: 64, mobile: 24 }));
+  const body = new THREE.LatheGeometry(profile, pickGeometryDetail({ desktop: 32, mobile: 14 }));
   shapeBirdCrossSection(body, halfLen * HEAD_START_FRAC, halfLen * headFrac(0.72));
 
   if (palette?.dorsalGradient) {
@@ -639,7 +640,7 @@ const WING_FEATHER_SHINGLE_FRAC = 0.013;
  * through — the flicker that was reported on the parrot. See
  * PARROT_WING_PANEL_DIVISIONS for the full measurement.
  */
-const WING_PANEL_DIVISIONS = 12;
+const WING_PANEL_DIVISIONS = pickGeometryDetail({ desktop: 12, mobile: 5 });
 
 function buildSmallBirdWingGeometry(
   span: number,
