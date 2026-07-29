@@ -623,98 +623,135 @@ export function buildEyeDotsGeometry(
 
 
 /**
- * Dimensions for a barrel that hides the wedge which opens at an
- * articulated joint between two box-section segments.
+ * Appends a joint cover to a raw position/colour buffer: the spheroid swept
+ * by rotating a round limb's own end cross-section about the hinge axis.
  *
- * Two flat, square-cut faces are only flush at exactly one angle. Rotate
- * one and a wedge opens on the outside of the bend, widening with the
- * bend angle. Before the rig work the joints never moved, so this was
- * invisible; now that they articulate it shows.
+ * THE PROBLEM. Two flat, square-cut faces are only flush at exactly one
+ * angle. Rotate one and a wedge opens on the outside of the bend, widening
+ * with the bend angle. Before the rig work the joints never moved, so this
+ * was invisible; now that they articulate it shows.
  *
- * A cylinder *about the hinge axis* is invariant under the hinge rotation,
- * exactly as a sphere is, so it covers the joint identically at every bend
- * angle with nothing to tune against a maximum angle. But it is far
- * tighter. A sphere has to bulge to the moving face's half-*diagonal* in
- * order to swallow its corners, and it then carries that same fat radius
- * across the whole joint — including the middle, where the gap only ever
- * reaches the face's half-depth. That surplus in the middle is what reads
- * as a knee pad. A barrel separates the two requirements: `radius` covers
- * the fore-aft reach, `halfLength` covers the width, and neither has to
- * pay for the other.
+ * WHY A SURFACE OF REVOLUTION. Any surface of revolution about the hinge
+ * axis is invariant under the hinge rotation, so it covers the joint
+ * identically at every bend angle with nothing to tune against a maximum
+ * angle. That is the whole trick, and it is why the cover must be centred
+ * on, and aligned with, the rotation axis — off-axis it wobbles as the
+ * joint bends instead of sitting still, which is worse than the gap it was
+ * added to hide.
  *
- * `radius` is driven by the segment that *moves*, since only the moving
- * face can expose a see-through slot; where the stationary segment is
- * wider it simply presents a flat annulus of its own end face, which
- * reads as leg rather than as a hole. `halfLength` is driven by the
- * widest segment, so the barrel spans the joint's full width.
+ * WHY THIS PARTICULAR ONE. A surface of revolution is free to vary its
+ * radius along the axis, and the exactly-right profile falls out of the
+ * geometry rather than needing to be tuned. Take the limb's end
+ * cross-section — an ellipse, `axialSemiAxis` across the hinge axis by
+ * `radialSemiAxis` perpendicular to it — and sweep it through every angle
+ * the joint can reach. A point of that section sitting `x` along the axis
+ * and `s` off it traces a circle of radius `|s|`, so the swept solid is
+ * the spheroid
  *
- * Because the moving face's half-depth is typically no larger than the
- * stationary segment's, the barrel usually sits *within* the limb's
- * existing silhouette and adds no visible bulge at all.
+ *     (x / axialSemiAxis)^2 + (r / radialSemiAxis)^2 = 1
+ *
+ * This is the smallest shape that always covers the joint, and it has three
+ * properties that a cylinder does not:
+ *
+ *  - The limb's end rim lies exactly ON it, at every point, so the two
+ *    surfaces meet with no lip and no gap. The rim satisfies the equation
+ *    identically: a section point at angle t is (cos t * axialSemiAxis,
+ *    sin t * radialSemiAxis), and cos^2 t + sin^2 t = 1.
+ *  - Its radius tapers to zero exactly where the limb's silhouette does, so
+ *    it ends in a point rather than a rim. A cylinder instead runs at full
+ *    radius out to a flat cap; on the unicorn's knee that cap stood 1.85x
+ *    proud of the leg's own depth at that station, and a hard-edged disc
+ *    sticking out of a round leg is precisely what reads as a bolt head
+ *    holding a toy limb together.
+ *  - It never exceeds the limb's own cross-section anywhere, so it cannot
+ *    read as a swollen knee pad.
+ *
+ * Seen side-on it is the standard round join used for thick strokes in 2D
+ * vector graphics — a disc of exactly half the stroke width at the corner,
+ * tangent to both segments — which is why it reads as anatomy rather than
+ * as hardware.
+ *
+ * DO NOT inflate this with a safety margin. Scaling past 1 is what creates
+ * the visible lip the exact fit avoids, and there is no coverage to gain:
+ * the fit is already exact. A segment thinner than the section (a cannon
+ * bone below a knee) is strictly enclosed, which is correct — a carpus is
+ * genuinely wider than the cannon below it.
  */
-export function jointBarrelForBoxSection({
-  movingHalfDepth,
-  widestHalfWidth,
-  margin = 1.03,
-}: {
-  movingHalfDepth: number;
-  widestHalfWidth: number;
-  margin?: number;
-}): { radius: number; halfLength: number } {
-  return { radius: movingHalfDepth * margin, halfLength: widestHalfWidth * margin };
-}
-
-/**
- * Appends a low-poly barrel to a raw position/colour buffer, for use as a
- * joint cover (see jointBarrelForBoxSection).
- *
- * The caller is responsible for placing `center` on, and aligning `axis`
- * with, the joint's rotation axis. Off-axis and the cover wobbles as the
- * joint bends instead of sitting still, which is worse than the gap it
- * was added to hide.
- */
-export function pushJointBarrel(
+export function pushJointSpheroid(
   sink: { positions: number[]; colors: number[] },
   {
     center,
     axis,
-    radius,
-    halfLength,
+    axialSemiAxis,
+    radialSemiAxis,
     color,
-    segments = 10,
+    segments = 16,
+    rings = 8,
+    reference,
   }: {
     center: THREE.Vector3;
+    /** The joint's rotation axis. */
     axis: THREE.Vector3;
-    radius: number;
-    halfLength: number;
+    /** Limb half-extent ALONG the hinge axis (half-width, for a knee). */
+    axialSemiAxis: number;
+    /** Limb half-extent PERPENDICULAR to it (half-depth, for a knee). */
+    radialSemiAxis: number;
     color: THREE.Color;
+    /** Facets around the axis. Even, so both ends of `reference` are sampled. */
     segments?: number;
+    /** Bands along the axis, pole to pole. */
+    rings?: number;
+    /**
+     * The direction, perpendicular to the axis, in which the limb's own
+     * cross-section measures its radial semi-axis.
+     *
+     * Supplying it lines the cover's grid up with the limb's, so the limb's
+     * end rim is reproduced vertex for vertex instead of merely being lain
+     * on. That is what lets a position-welding normal pass treat the two as
+     * one surface: they are already tangent along that rim, so once the
+     * vertices coincide exactly the shading runs straight through the join.
+     * Leave the grids unaligned and the geometry still meets perfectly, but
+     * the normals cannot be averaged across it and a band of faceted shading
+     * appears right around the joint.
+     *
+     * For the vertices to land on each other `segments` must equal the limb's
+     * side count and `rings` must be half of it.
+     */
+    reference?: THREE.Vector3;
   },
 ): void {
   const forward = axis.clone().normalize();
-  // Any two vectors perpendicular to the axis will do; pick a seed that
-  // cannot be parallel to it, so the cross product never degenerates.
+  // Any two vectors perpendicular to the axis will do when the caller has no
+  // preference; pick a seed that cannot be parallel to the axis, so the cross
+  // product never degenerates.
   const seed = Math.abs(forward.x) > 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
-  const right = new THREE.Vector3().crossVectors(forward, seed).normalize();
+  const right = reference
+    ? reference.clone().projectOnPlane(forward).normalize()
+    : new THREE.Vector3().crossVectors(forward, seed).normalize();
   const up = new THREE.Vector3().crossVectors(forward, right).normalize();
 
-  const rim = (end: number, seg: number): THREE.Vector3 => {
+  // Rings are stepped by polar angle rather than linearly along the axis, so
+  // facets stay even into the poles instead of bunching where the radius
+  // collapses.
+  const at = (ring: number, seg: number): THREE.Vector3 => {
+    const phi = (ring / rings) * Math.PI;
     const theta = (seg / segments) * Math.PI * 2;
+    const radius = Math.sin(phi) * radialSemiAxis;
     return center
       .clone()
-      .addScaledVector(forward, end * halfLength)
+      .addScaledVector(forward, -Math.cos(phi) * axialSemiAxis)
       .addScaledVector(right, Math.cos(theta) * radius)
       .addScaledVector(up, Math.sin(theta) * radius);
   };
 
-  // Wind each triangle so its normal points away from the barrel's own
-  // surface, rather than trusting a hand-derived winding order to stay
-  // consistent across the wall and both end caps.
-  const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3, reference: THREE.Vector3) => {
+  // Wind each triangle so its normal points away from the centre, rather
+  // than trusting a hand-derived winding order. The spheroid is convex and
+  // centred on `center`, so that reference is correct for every face.
+  const pushOutward = (p0: THREE.Vector3, p1: THREE.Vector3, p2: THREE.Vector3) => {
     const normal = new THREE.Vector3()
       .subVectors(p1, p0)
       .cross(new THREE.Vector3().subVectors(p2, p0));
-    const outward = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3).sub(reference);
+    const outward = new THREE.Vector3().add(p0).add(p1).add(p2).divideScalar(3).sub(center);
     const [a, b, c] = normal.dot(outward) < 0 ? [p0, p2, p1] : [p0, p1, p2];
     for (const p of [a, b, c]) {
       sink.positions.push(p.x, p.y, p.z);
@@ -722,19 +759,24 @@ export function pushJointBarrel(
     }
   };
 
-  for (let seg = 0; seg < segments; seg++) {
-    const a = rim(-1, seg);
-    const b = rim(1, seg);
-    const c = rim(1, seg + 1);
-    const d = rim(-1, seg + 1);
-    // Wall faces point away from the axis, so reference the axis point
-    // level with the quad rather than the barrel's centre.
-    const onAxis = center.clone();
-    pushOutward(a, b, c, onAxis);
-    pushOutward(a, c, d, onAxis);
-    for (const end of [-1, 1] as const) {
-      const capCenter = center.clone().addScaledVector(forward, end * halfLength);
-      pushOutward(capCenter, rim(end, seg), rim(end, seg + 1), center);
+  for (let ring = 0; ring < rings; ring++) {
+    for (let seg = 0; seg < segments; seg++) {
+      const near0 = at(ring, seg);
+      const far0 = at(ring + 1, seg);
+      const far1 = at(ring + 1, seg + 1);
+      const near1 = at(ring, seg + 1);
+      // The end rings collapse to a point, so those bands are fans of
+      // triangles rather than quads. Emitting them as quads would add a
+      // zero-area triangle per segment, whose normal is undefined and
+      // would poison the smoothing average at the poles.
+      if (ring === 0) {
+        pushOutward(near0, far0, far1);
+      } else if (ring === rings - 1) {
+        pushOutward(near0, far0, near1);
+      } else {
+        pushOutward(near0, far0, far1);
+        pushOutward(near0, far1, near1);
+      }
     }
   }
 }

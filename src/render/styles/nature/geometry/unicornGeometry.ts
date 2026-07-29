@@ -2,10 +2,9 @@ import * as THREE from 'three';
 import { pickGeometryDetail } from '../../../graphicsQuality';
 import type { CreatureGeometries, CreatureLegPart } from '../../../geometry/sharedGeometry';
 import {
-  jointBarrelForBoxSection,
   mergeGeometriesWithColor,
   mergePositionOnlyGeometries,
-  pushJointBarrel,
+  pushJointSpheroid,
   smoothNormalsByPosition,
 } from '../../../geometry/sharedGeometry';
 import type { PartDrive, Triple } from '../../../motion/rig';
@@ -329,7 +328,11 @@ const UNICORN_LEG_SOCK_COLOR = new THREE.Color(0xffffff);
 // Number of sides on a leg segment's cross-section. A horse's leg is a round
 // column; the previous 4-sided box section kept hard 90-degree corners down
 // its whole length no matter how it was shaded.
-const UNICORN_LEG_SIDES = 12;
+//
+// Exported because the knee cover's own grid has to be derived from it — see
+// the pushJointSpheroid call in buildLeg — and because the joint-cover tests
+// reconstruct the thigh's end rim from it.
+export const UNICORN_LEG_SIDES = 12;
 // Leg cross-section, as fractions of body width. Module-level rather than
 // local so the front-leg placement below can be expressed in terms of the
 // leg's own front-to-back depth instead of a magic number that would drift
@@ -341,11 +344,15 @@ const UNICORN_LEG_SIDES = 12;
 export const UNICORN_TAIL_SIDES = 10;
 export const UNICORN_TAIL_SEGMENTS = 7; // 6 internal joints between root and tip
 // Leg cross-section, as fractions of body width — thinned by 25% per direct
-// feedback. The knee barrel is derived from these rather than tuned on its
+// feedback. The knee cover is derived from these rather than tuned on its
 // own, so it follows the legs down automatically and cannot end up looking
 // like a swollen joint on a slimmer limb.
-const UNICORN_LEG_HALF_WIDTH_FRAC = 0.0675;
-const UNICORN_LEG_HALF_DEPTH_FRAC = 0.0525;
+//
+// Exported so the knee-cover test can derive the expected spheroid from the
+// shipped values, rather than hard-coding numbers that would silently stop
+// meaning anything if the legs were ever resized.
+export const UNICORN_LEG_HALF_WIDTH_FRAC = 0.0675;
+export const UNICORN_LEG_HALF_DEPTH_FRAC = 0.0525;
 
 /**
  * Where the two hip sockets sit along the body's forward axis.
@@ -1165,9 +1172,17 @@ function buildUnicornLegParts(length: number, width: number, bodyColor: THREE.Co
   // circular (halfX across, halfY fore-aft) because a real cannon bone is
   // deeper than it is wide.
   //
-  // The ring basis is exact rather than arbitrary: every leg segment lies in
-  // the Y-Z plane, so model X is always perpendicular to the segment axis and
-  // can seed the frame directly with no chance of degenerating.
+  // The ring basis is exact rather than arbitrary: model X is the swing axis
+  // for every joint, so it can seed the frame directly with no chance of
+  // degenerating.
+  //
+  // Note it is NOT perpendicular to the segment axis: the leg flares outward
+  // from hip to knee, so the thigh has a small X component and its rings are
+  // slightly oblique to its own sweep. That is harmless here, and it is
+  // actively useful at the knee — because `along` is a cross product with X
+  // it stays perpendicular to X whatever the flare, so the ring's off-axis
+  // offset is purely radial about the hinge. That is what puts the thigh's
+  // end rim exactly on the knee cover's surface.
   function pushTubeSegment(
     a: THREE.Vector3,
     b: THREE.Vector3,
@@ -1280,38 +1295,46 @@ function buildUnicornLegParts(length: number, width: number, bodyColor: THREE.Co
     sink = upperBuffer;
     pushTubeSegment(hip, knee, legHalfWidth, legHalfDepth, true, false, legColorAt);
 
-    // Knee barrel, covering the wedge that opens between the thigh's flat
-    // end face and the cannon bone's flat top face once the knee bends.
+    // Knee cover, hiding the wedge that opens between the thigh's open end
+    // and the cannon bone's top face once the knee bends.
     //
-    // A cylinder about the hinge axis, not a sphere. Both are invariant
-    // under the knee's rotation, but a sphere large enough to swallow the
-    // moving face's corners carries that radius through the middle of the
-    // joint too, where nothing needs covering — which reads as a knee pad
-    // rather than a knee. Sized off the cannon bone's half-depth, the
-    // barrel comes out slimmer fore-aft than the thigh itself, so it
-    // vanishes into the leg's existing silhouette.
+    // The spheroid swept by rotating the thigh's own end cross-section about
+    // the hinge axis — see pushJointSpheroid for the derivation. Sized
+    // directly from the leg's cross-section, with no tuning factor, because
+    // that IS the exact answer: the thigh's end rim lands on the cover's
+    // surface at every point, so the two meet with no lip and no gap, and
+    // the cover tapers to a point exactly where the leg's silhouette does.
+    //
+    // This replaced a cylinder about the same axis. A cylinder is equally
+    // invariant under the bend, but it runs at full radius out to a flat
+    // cap: measured on the shipped values that cap stood 1.85x proud of the
+    // leg's own depth at that station, so each knee wore a hard-edged disc
+    // on both sides. That is what read as the bolt through a toy limb's
+    // joint, and no amount of resizing fixes it — a smaller cylinder just
+    // gives a smaller disc, and a larger one gapes.
     //
     // It goes in the *upper* buffer deliberately. Its axis is the knee's
     // rotation axis, so the knee's own bend cannot move it — but it must
     // still follow the thigh when the hip swings, which is what living in
     // the thigh's part gives us.
-    // Radius and length have both been pulled in repeatedly per direct
-    // feedback — the goal is a knee you notice only when it bends, not a
-    // visible hinge. Both dimensions stay tied to the leg's own cross-section,
-    // so the barrel tracked the 25% leg thinning without needing re-tuning.
-    const kneeBarrel = jointBarrelForBoxSection({
-      movingHalfDepth: legHalfDepth * 0.882,
-      widestHalfWidth: legHalfWidth * 0.846,
-    });
-    pushJointBarrel(sink, {
+    pushJointSpheroid(sink, {
       center: knee,
       axis: new THREE.Vector3(1, 0, 0),
-      radius: kneeBarrel.radius,
-      halfLength: kneeBarrel.halfLength,
+      axialSemiAxis: legHalfWidth,
+      radialSemiAxis: legHalfDepth,
       color: legColorAt(knee),
-      // 20 rather than the default 10, so the barrel's facets are 18 degrees
-      // apart instead of 36 and it reads as a turned cylinder.
-      segments: 20,
+      // Line the cover's grid up with the thigh's own so the thigh's end rim
+      // is reproduced vertex for vertex rather than merely lain on, letting
+      // smoothNormalsByPosition weld the two into one shading surface. The
+      // rim is not the cover's equator — it runs pole to pole, tracing
+      // (cos t * halfWidth, sin t * halfDepth) — so it is the RING count that
+      // has to be half the side count, with the reference direction naming
+      // the plane it sweeps in.
+      segments: UNICORN_LEG_SIDES,
+      rings: UNICORN_LEG_SIDES / 2,
+      reference: new THREE.Vector3()
+        .crossVectors(new THREE.Vector3().subVectors(knee, hip).normalize(), new THREE.Vector3(1, 0, 0))
+        .normalize(),
     });
 
     // Cannon bone and hoof: rotate about the knee, on top of whatever the
@@ -1363,11 +1386,15 @@ function buildUnicornLegParts(length: number, width: number, bodyColor: THREE.Co
     geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(buffer.colors), 3));
     // Crease-aware averaging rather than computeVertexNormals(). On this
     // non-indexed buffer computeVertexNormals gives every triangle its own
-    // flat normal, which left the knee barrel shading as a ring of flat
-    // strips — it read as a blocky rectangular hub rather than a cylinder,
-    // however many segments it had. The 60-degree crease threshold smooths
-    // the barrel's 18-degree facets while leaving the leg boxes' 90-degree
-    // edges crisp, so the limbs keep their squared-off silhouette.
+    // flat normal, which left the knee cover shading as a ring of flat
+    // strips — it read as a blocky rectangular hub rather than a rounded
+    // joint, however many segments it had. The 60-degree crease threshold
+    // smooths the cover's fine facets while leaving the leg's own edges
+    // crisp, so the limbs keep their squared-off silhouette.
+    //
+    // It also stitches the cover to the thigh: the cover's poles land on the
+    // thigh rim's own vertices and both surfaces have normal +/-X there, so
+    // the averaged normal is continuous across the join.
     smoothNormalsByPosition(geometry);
     return geometry;
   };
