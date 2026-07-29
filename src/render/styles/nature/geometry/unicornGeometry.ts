@@ -378,8 +378,8 @@ const UNICORN_EYE_COLOR = new THREE.Color(0x101014);
 // reproduces the body colour exactly and there is no constant that means
 // "white" on its own. Reaching white takes the reciprocal of the species
 // body colour (NATURE_UNICORN_BODY, 0xc9a8f0 = 0.788/0.659/0.941), which is
-// what this is — the same above-1 trick UNICORN_TOP_TINT uses to lighten the
-// topline. Used for the whites of the eyes and for the bottom of the legs.
+// what this is — the same above-1 trick UNICORN_BELLY_TINT uses to pale the
+// underside. Used for the whites of the eyes and for the bottom of the legs.
 const UNICORN_WHITEN_TINT = new THREE.Color(1.269, 1.518, 1.063);
 // Dark, slightly purple — reads as an opening in the muzzle rather than a
 // black sticker, once multiplied against the lavender body tint.
@@ -400,14 +400,57 @@ const UNICORN_MANE_COLOR = new THREE.Color(0.62, 0.56, 0.72);
 const UNICORN_MUZZLE_TINT = new THREE.Color(0.55, 0.35, 0.75);
 // Neutral multiplier (no tint) for spine rings without an explicit color.
 const WHITE_VERTEX_COLOR = new THREE.Color(0xffffff);
-// Top-of-body tint for the vertical body gradient. Multiplied against the
-// per-instance lavender (0xc9a8f0), so components above 1 lighten rather than
-// darken. Red and green are lifted well past 1 while blue is left almost
-// alone, which walks the lavender toward a very light pink over the topline
-// while the underside keeps the body color exactly as it is. Applied per
-// vertex by height within each body ring, not per ring, so the transition is
-// smooth around the barrel rather than banded along the spine.
-const UNICORN_TOP_TINT = new THREE.Color(1.42, 1.3, 1.04);
+// Endpoints of the vertical body gradient (countershading): the back keeps a
+// deeper lavender and the belly pales to pink, which is how countershading
+// actually works on an animal. Both are multiplied against the per-instance
+// lavender (0xc9a8f0 = 0.788/0.659/0.941), so values below 1 darken and values
+// above 1 lighten.
+//
+// The ramp is deliberately TWO-SIDED rather than neutral-to-pale, because the
+// renderer tone-maps with ACESFilmic at 0.65 exposure and ACES compresses
+// highlights hard. A belly-only ramp from neutral to a near-white #ffeef4
+// looks like a strong gradient in authored values (1.84x luminance) but
+// arrives on screen at only 1.28x — and ACES desaturates as it compresses, so
+// the pale end landed on grey (#a6a0a3) and read as a stray highlight rather
+// than as pink. Pinning the top end at neutral caps the whole effect, since
+// all the contrast has to come out of one side and the bright end is exactly
+// where ACES takes the most away.
+//
+// Deepening the top by ~18% costs little (it still reads as the body colour)
+// and buys back most of the range: post-tone-map luminance ratio 1.28 -> 1.78,
+// and red-over-green in the belly +14 -> +27, so the pink survives.
+// Do not "simplify" either endpoint back toward neutral without re-checking
+// the tone-mapped result — the authored numbers are misleading on their own.
+const UNICORN_TOPLINE_TINT = new THREE.Color(0.82, 0.78, 0.88);
+// Belly: a warm off-white. The multiplier looks strange in isolation because
+// what it has to be shaped like is the RECIPROCAL of the linear body colour,
+// and the body is purple, so green — the body's weakest channel — needs the
+// biggest multiplier to come back up to neutral.
+//
+// 0xc9a8f0 is (0.584, 0.392, 0.871) in LINEAR space (which is where three.js
+// does the multiply), so the tint that paints pure white is (1.712, 2.554,
+// 1.148). This is that, with red nudged up ~12% and blue down ~8% to leave a
+// pink cast: it paints #fff9f6.
+//
+// Getting this shape wrong is not a subtle error. An earlier attempt used
+// (2.05, 1.80, 1.45) — red-highest, which "looks pink" as a triplet but
+// against a low-green body paints clipped MAGENTA (#ffdaff), with two
+// channels pinned. Read this constant as tint x body, never on its own.
+//
+// NB: UNICORN_WHITEN_TINT below is NOT this value — it is the reciprocal of
+// the sRGB components rather than the linear ones, so it does not actually
+// paint white. Left alone here because the eyes and hooves are toleranced
+// against how they look today, not against being neutral.
+const UNICORN_BELLY_TINT = new THREE.Color(1.917, 2.426, 1.056);
+// How far down each body ring the lavender holds before the belly tint starts
+// coming in. 0 ramps across the whole flank; 1 would confine the pale to the
+// very lowest point. Measured from the spine, so 0.5 is the widest point of
+// the barrel and anything above that keeps the entire visible side lavender.
+//
+// Set past the midline on purpose: countershading on a real animal is a white
+// UNDERSIDE, not a top-to-bottom fade. Ramping across the full height spread
+// the pale up over the flank and read as a two-tone horse.
+const UNICORN_BELLY_ONSET = 0.55;
 
 
 /**
@@ -564,27 +607,43 @@ function buildHorseBodyProfileGeometry(
   const ringColors: THREE.Color[] = spine.map((point) => point.color ?? WHITE_VERTEX_COLOR);
 
   /**
-   * Vertical body gradient: the underside keeps the per-instance body color
-   * exactly, and the topline fades to a very light pink.
+   * Vertical body gradient (countershading): the topline sits at a slightly
+   * deeper lavender than the per-instance body color, and the underside fades
+   * to a pale pink. See UNICORN_TOPLINE_TINT / UNICORN_BELLY_TINT for why both
+   * ends are pushed rather than just the belly — ACES tone mapping eats most
+   * of a one-sided ramp.
    *
    * Graded per vertex by its height *within its own ring* rather than by
    * absolute Z. The spine rises and falls a lot between rump, withers and
    * muzzle, so an absolute-Z ramp would put the light end on the head and the
    * dark end on the tail — a front-to-back gradient, not a top-to-bottom one.
    * Normalising against each ring's own half-height instead means every
-   * cross-section runs body-color at its belly to pink at its spine, all the
-   * way along the horse.
+   * cross-section runs deep lavender at its spine to pale pink at its belly,
+   * all the way along the horse.
    *
    * Each ring's own tint (the muzzle's darker purple, say) is preserved and
    * the height tint multiplies on top of it, so the muzzle still reads darker
-   * while still catching light along its bridge.
+   * while still paling underneath.
    */
   const smoothstep01 = (t: number) => t * t * (3 - 2 * t);
   const gradedColorAt = (base: THREE.Color, vertex: THREE.Vector3, point: SpinePoint): THREE.Color => {
     const halfHeight = point.radius * (point.zScale ?? 1);
     if (halfHeight < 1e-6) return base;
+    // 0 at the ring's belly, 1 at its spine, so the ramp runs from the topline
+    // tint at the back down to the belly tint underneath.
     const t = THREE.MathUtils.clamp(0.5 + (0.5 * (vertex.z - point.z)) / halfHeight, 0, 1);
-    const tint = WHITE_VERTEX_COLOR.clone().lerp(UNICORN_TOP_TINT, smoothstep01(t));
+    // How far DOWN the vertex sits: 0 at the spine, 1 at the belly.
+    const depth = 1 - t;
+    // Hold the body colour down past the widest point of the barrel, then run
+    // the whole transition through the lower part of the ring. A plain
+    // smoothstep over the full height spreads the pale across the entire
+    // flank, which reads as a two-tone horse rather than a white belly.
+    const rampedDepth = THREE.MathUtils.clamp(
+      (depth - UNICORN_BELLY_ONSET) / (1 - UNICORN_BELLY_ONSET),
+      0,
+      1,
+    );
+    const tint = UNICORN_TOPLINE_TINT.clone().lerp(UNICORN_BELLY_TINT, smoothstep01(rampedDepth));
     return base.clone().multiply(tint);
   };
   const ringVertexColors: THREE.Color[][] = rings.map((ring, i) =>

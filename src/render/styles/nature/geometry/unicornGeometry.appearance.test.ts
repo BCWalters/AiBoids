@@ -231,10 +231,20 @@ describe('unicorn legs fade from body color at the hip to white at the hoof', ()
 });
 
 /**
- * Vertical body gradient: body color underneath fading to a very light pink
- * over the topline. Vertex colors multiply the per-instance lavender, so
- * "lighter" means components above 1 and "pinker" means red rising faster than
- * blue.
+ * Vertical body gradient: a deepened lavender along the topline fading to a
+ * pale pink underneath — countershading, the way it sits on a real animal.
+ * Vertex colors multiply the per-instance lavender, so "lighter" means
+ * components above 1 and "pinker" means red rising faster than blue.
+ *
+ * This deliberately runs belly-light. It used to run the other way (pink
+ * topline, plain underside), so these assertions are directional on purpose:
+ * a revert would flip the sign and fail rather than merely weaken.
+ *
+ * The separation bound is deliberately well above "any difference at all".
+ * An earlier version of this gradient passed a weaker bound while being
+ * invisible on screen, because ACES tone mapping compressed the authored
+ * 1.84x luminance spread down to 1.28x. These thresholds are set against the
+ * tone-mapped result, not the raw numbers — see UNICORN_TOPLINE_TINT.
  *
  * Sampled from the barrel only (behind the withers), because the head and
  * muzzle carry their own tint and the horn is baked gold.
@@ -256,26 +266,107 @@ describe('unicorn body has a vertical gradient', () => {
     return { top: mean(top), bottom: mean(bottom), topN: top.length, bottomN: bottom.length };
   };
 
-  it('the topline is lighter than the underside', () => {
+  it('the underside is lighter than the topline', () => {
     const { top, bottom, topN, bottomN } = sampleBarrel(geoms().body);
     expect(topN, 'expected topline samples').toBeGreaterThan(20);
     expect(bottomN, 'expected underside samples').toBeGreaterThan(20);
     const lum = (c: THREE.Color) => c.r + c.g + c.b;
-    expect(lum(top)).toBeGreaterThan(lum(bottom) * 1.15);
+    // 1.15 was the old bound and the old gradient cleared it while being
+    // invisible in the render. The two-sided ramp authors ~1.9x here, so hold
+    // the line well above the level that was already known to be too weak.
+    expect(lum(bottom)).toBeGreaterThan(lum(top) * 1.6);
   });
 
-  it('the underside keeps the body color unchanged', () => {
-    const { bottom } = sampleBarrel(geoms().body);
-    expect(bottom.r).toBeCloseTo(1, 1);
-    expect(bottom.g).toBeCloseTo(1, 1);
-    expect(bottom.b).toBeCloseTo(1, 1);
+  it('the topline is deepened, but still reads as the body color', () => {
+    const { top } = sampleBarrel(geoms().body);
+    // The ramp is two-sided: the topline is pushed below neutral so ACES tone
+    // mapping has range to work with (see UNICORN_TOPLINE_TINT). But it must
+    // stay close enough to neutral to still read as the unicorn's own colour
+    // rather than as a second, darker species.
+    for (const ch of ['r', 'g', 'b'] as const) {
+      expect(top[ch], `topline ${ch} should be darker than neutral`).toBeLessThan(0.97);
+      expect(top[ch], `topline ${ch} should not be a wholly different colour`).toBeGreaterThan(0.6);
+    }
+    // Still recognisably the lavender body hue: blue stays the strongest
+    // channel and green the weakest, as in 0xc9a8f0.
+    expect(top.b).toBeGreaterThan(top.r);
+    expect(top.r).toBeGreaterThan(top.g);
   });
 
-  it('the topline shifts toward pink, not just toward white', () => {
+  it('the pale is confined to the underside, not spread up the flank', () => {
+    // Countershading is a white BELLY, not a top-to-bottom fade. The tint is
+    // held off until past the widest point of each ring (UNICORN_BELLY_ONSET),
+    // so the whole visible side of the horse stays lavender and only the
+    // underside goes pale. Dropping the onset makes this a two-tone horse.
+    //
+    // Sampled by depth within each ring rather than by absolute Z, because the
+    // spine rises and falls between rump and withers — the same reason
+    // gradedColorAt normalises per ring.
+    const body = geoms().body;
+    const pos = body.getAttribute('position') as THREE.BufferAttribute;
+    const col = body.getAttribute('color') as THREE.BufferAttribute;
+
+    const rings = new Map<string, number[]>();
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) > 0) continue; // barrel/rump only
+      const key = pos.getY(i).toFixed(4);
+      if (!rings.has(key)) rings.set(key, []);
+      rings.get(key)!.push(i);
+    }
+
+    let midFlank = 0;
+    let belly = 0;
+    const neutral = new THREE.Color(1, 1, 1);
+    for (const idx of rings.values()) {
+      if (idx.length < 4) continue;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const i of idx) {
+        lo = Math.min(lo, pos.getZ(i));
+        hi = Math.max(hi, pos.getZ(i));
+      }
+      if (hi - lo < 1e-6) continue;
+      for (const i of idx) {
+        const depth = 1 - (pos.getZ(i) - lo) / (hi - lo); // 0 spine, 1 belly
+        const lightened = col.getX(i) > neutral.r;
+        // At and just above the midline the body colour must still hold.
+        if (depth <= 0.5) {
+          expect(lightened, `vertex at depth ${depth.toFixed(2)} should not be paled`).toBe(false);
+          midFlank++;
+        }
+        if (depth > 0.9) belly++;
+      }
+    }
+    expect(midFlank, 'expected mid-flank samples').toBeGreaterThan(50);
+    expect(belly, 'expected belly samples').toBeGreaterThan(20);
+  });
+
+  it('the underside shifts toward pink, not just toward white', () => {
+    // Vertex colors are MULTIPLIERS against the per-instance body tint, and the
+    // multiply happens in LINEAR space, so a ratio taken on the raw tint says
+    // nothing about the colour that gets drawn. An earlier belly tint was
+    // red-highest — which reads as "pink" as a bare triplet and passed a
+    // raw-tint check — but against this low-green body it painted clipped
+    // magenta. Convert to linear and multiply through before judging hue.
     const { top, bottom } = sampleBarrel(geoms().body);
-    // Red must gain on blue: a purely brighter (white) topline would keep the
-    // same red/blue ratio and fail this.
-    expect(top.r / top.b).toBeGreaterThan((bottom.r / bottom.b) * 1.1);
+    // NB: no convertSRGBToLinear here. THREE.ColorManagement is enabled, so
+    // constructing from a hex literal already yields linear components
+    // (0xc9a8f0 -> 0.584/0.392/0.871). Converting again double-applies the
+    // transfer function and skews the hue toward blue.
+    const body = new THREE.Color(0xc9a8f0);
+    const painted = (c: THREE.Color) => c.clone().multiply(body);
+    const litTop = painted(top);
+    const litBottom = painted(bottom);
+    // Warm: red must sit above blue, so the belly leans pink rather than cool.
+    expect(litBottom.r).toBeGreaterThan(litBottom.b);
+    // ...but only just. If red runs far ahead of blue the belly has gone
+    // magenta rather than off-white, which is the failure mode above.
+    expect(litBottom.r / litBottom.b).toBeLessThan(1.3);
+    // And it must be a genuine lightening, not a hue swap: every channel of
+    // the belly has to outrun the topline.
+    for (const ch of ['r', 'g', 'b'] as const) {
+      expect(litBottom[ch], `belly ${ch} should exceed topline`).toBeGreaterThan(litTop[ch]);
+    }
   });
 });
 
