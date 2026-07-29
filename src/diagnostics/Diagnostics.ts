@@ -94,6 +94,7 @@ interface PerformanceWithMemory extends Performance {
 export class Diagnostics {
   private readonly sim: Simulation;
   private readonly host: HTMLElement;
+  private renderStatsProvider: (() => { triangles: number; calls: number; shadows: boolean } | null) | null = null;
   private readonly panel: DiagnosticsPanel;
 
   private readonly frameDurationsMs = new Array<number>(FRAME_STATS_WINDOW);
@@ -147,12 +148,27 @@ export class Diagnostics {
    * Returned as two short lines rather than one long one so it stays legible
    * on a phone, which is the only place the question usually matters.
    */
+  /**
+   * Supplies live per-frame geometry counts. Injected rather than held as a
+   * renderer reference because the 3D renderer is created lazily and replaced
+   * on mode switches.
+   */
+  setRenderStatsProvider(provider: () => { triangles: number; calls: number; shadows: boolean } | null): void {
+    this.renderStatsProvider = provider;
+  }
+
   private describeEffectsTier(): string[] {
     const lines = [`fx: ${describeGraphicsTier()}`];
     const canvas = this.host.querySelector<HTMLCanvasElement>('#sim-canvas-3d');
     if (canvas && canvas.clientWidth > 0) {
       const effectivePixelRatio = canvas.width / canvas.clientWidth;
       lines.push(`buffer: ${canvas.width}x${canvas.height} @ ${effectivePixelRatio.toFixed(2)}x`);
+    }
+    const renderStats = this.renderStatsProvider?.() ?? null;
+    if (renderStats) {
+      lines.push(
+        `geometry: ${renderStats.triangles.toLocaleString()} tris | ${renderStats.calls} calls | shadows ${renderStats.shadows ? 'on' : 'off'}`,
+      );
     }
     return lines;
   }

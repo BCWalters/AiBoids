@@ -109,6 +109,27 @@ export function getMaxPixelRatio(): number {
   return reduced ? 1 : 2;
 }
 
+/**
+ * Picks a geometry detail level for the current device.
+ *
+ * Creature geometry is overwhelmingly the largest cost in the nature scene:
+ * a scene-graph walk on an iPhone 13 measured 2,562,376 triangles per frame,
+ * of which the ground plane was ~10k and essentially all the rest was
+ * creature bodies (4,320 tris each) and wings (3,096 each, before instancing
+ * across 30-60 birds per species). Fishtank, at 375,092, ran roughly twice as
+ * fast with the same flock size.
+ *
+ * That cost is vertex-bound, which is why neither `?dpr` nor `?lowfx` moved
+ * it: it is independent of both resolution and shading. Phones therefore get
+ * coarser source geometry. Callers pass both values explicitly rather than a
+ * scale factor, because the right mobile figure is a per-mesh judgement — a
+ * wing panel needs enough interior vertices for its undulation shader to bend
+ * convincingly, while a lathe's radial count only has to survive a silhouette
+ * a few pixels across.
+ */
+export function pickGeometryDetail({ desktop, mobile }: { desktop: number; mobile: number }): number {
+  return isMobileDevice() ? mobile : desktop;
+}
 /** Human-readable summary of the resolved tier, for the diagnostics overlay — the only practical way to confirm what is actually active on a phone screen. */
 export function describeGraphicsTier(): string {
   const device = mobile ? 'mobile' : 'desktop';

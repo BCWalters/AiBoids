@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pickGeometryDetail } from '../../../graphicsQuality';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import { BIRD_FEATHER_MASK_ATTRIBUTE } from '../birdFeatherShader';
 import { mergeGeometriesWithColor, mergePositionOnlyGeometries, buildDiscCapGeometry, singleLegPart, swayingTailRig, mirrorGeometryAcrossX } from '../../../geometry/sharedGeometry';
@@ -389,8 +390,14 @@ function buildHawkBodyGeometry(length: number, width: number): THREE.BufferGeome
   const headProfile = profile.slice(5); // nape through face (shares the seam vertex)
   // Spline-resample each sub-profile so the flat-shaded lathes read as
   // smooth surfaces; raise radial segments to 32 for the same reason.
-  const torso = new THREE.LatheGeometry(new THREE.SplineCurve(torsoProfile).getPoints(48), 32);
-  const head = new THREE.LatheGeometry(new THREE.SplineCurve(headProfile).getPoints(32), 32);
+  const torso = new THREE.LatheGeometry(
+    new THREE.SplineCurve(torsoProfile).getPoints(pickGeometryDetail({ desktop: 48, mobile: 20 })),
+    pickGeometryDetail({ desktop: 32, mobile: 14 }),
+  );
+  const head = new THREE.LatheGeometry(
+    new THREE.SplineCurve(headProfile).getPoints(pickGeometryDetail({ desktop: 32, mobile: 14 })),
+    pickGeometryDetail({ desktop: 32, mobile: 14 }),
+  );
   // Both halves must be shaped with the same parameters, or the section jumps
   // at the colour seam and draws a visible crease around the neck.
   const keelFadeStartY = halfLen * 0.16;

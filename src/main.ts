@@ -99,6 +99,7 @@ if (debugOverlayOverride !== null) params.showRenderingStats = debugOverlayOverr
 const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight || 600);
 sim.setPredatorCatchProfiles(getPredatorCatchProfilesForStyle(params.visualStyle));
 const diagnostics = new Diagnostics(sim, canvasStack);
+diagnostics.setRenderStatsProvider(() => (renderer3D ? renderer3D.getRenderStats() : null));
 
 let renderer2D: Renderer | null = null;
 let renderer3D: Renderer3D | null = null;

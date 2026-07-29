@@ -34,7 +34,10 @@ test.describe('diagnostics overlay', () => {
     await expect(overlay).toContainText(/fx: (mobile|desktop) \/ effects (reduced|full)/);
     // Buffer dimensions are read back off the canvas, so they confirm the
     // pixel-ratio cap reached the renderer rather than merely being computed.
-    await expect(overlay).toContainText(/buffer: \d+x\d+ @ [\d.]+x/);
+    // Generous timeout: the overlay reports these only once the renderer has
+    // warmed up, and warm-up is frame-paced, so on a loaded CI worker sharing
+    // a GPU with other specs it can take far longer than the 5s default.
+    await expect(overlay).toContainText(/buffer: \d+x\d+ @ [\d.]+x/, { timeout: 30_000 });
   });
 
   test('?debug=0 keeps the overlay off', async ({ page }) => {

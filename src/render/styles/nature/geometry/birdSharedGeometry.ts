@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pickGeometryDetail } from '../../../graphicsQuality';
 import {
   extrudeRingGeometry,
   mergePositionOnlyGeometries,
@@ -96,7 +97,7 @@ const FEATHER_SHINGLE_FRAC = 0.014;
  * plane; without them the panel swings out from under its own feathers as the
  * wing flaps.
  */
-const WING_PANEL_DIVISIONS = 14;
+const WING_PANEL_DIVISIONS = pickGeometryDetail({ desktop: 14, mobile: 5 });
 
 export interface FeatheredWingParams {
   /** Root-to-tip extent, along +X for the left wing. */

@@ -137,6 +137,9 @@ export class Renderer3D {
     const reducedGraphics = isReducedGraphics();
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !reducedGraphics, logarithmicDepthBuffer: true });
+    // Accumulate draw statistics across all passes in a frame rather than
+    // resetting per render() call; Renderer3D.render() resets them explicitly.
+    this.renderer.info.autoReset = false;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, getMaxPixelRatio()));
     // ACES tone mapping keeps the physically-based Sky shader from blowing
     // out to solid white and gives the nature-style earth tones more depth.
@@ -764,6 +767,22 @@ export class Renderer3D {
     }
   }
 
+  /**
+   * Per-frame geometry counts straight from the WebGL renderer, for the
+   * diagnostics overlay.
+   *
+   * Exposed because "is the mobile path actually active on this device?" kept
+   * being answered by inference rather than evidence. `three` resets these
+   * counters each `render()`, so they describe the frame just drawn.
+   */
+  getRenderStats(): { triangles: number; calls: number; shadows: boolean } {
+    return {
+      triangles: this.renderer.info.render.triangles,
+      calls: this.renderer.info.render.calls,
+      shadows: this.renderer.shadowMap.enabled,
+    };
+  }
+
   resize(width: number, height: number): void {
     this.renderer.setSize(width, height, false);
     this.composer.setSize(width, height);
@@ -1275,6 +1294,10 @@ export class Renderer3D {
     const sceneRenderer = this.getSceneRenderer(style);
     this.ensureScene(sim, style, flags);
     const { elapsed, dt } = this.getRenderTiming();
+    // Counters accumulate across every pass this frame (see getRenderStats);
+    // autoReset would leave them describing only the composer's final
+    // fullscreen quad, which reads as a 1-triangle scene.
+    this.renderer.info.reset();
     this.renderFrame(sim, sceneRenderer, elapsed, dt, flags);
   }
 

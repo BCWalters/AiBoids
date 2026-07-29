@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { pickGeometryDetail } from '../../../graphicsQuality';
 import type { CreatureGeometries } from '../../../geometry/sharedGeometry';
 import {
   buildDiscCapGeometry,
@@ -77,7 +78,7 @@ export function createDragonGeometries(length: number, width: number): CreatureG
  * creatureSmoothness regression test can assert the exact resulting
  * triangle count against this constant (issue #262).
  */
-export const DRAGON_BODY_RADIAL_SEGMENTS = 48;
+export const DRAGON_BODY_RADIAL_SEGMENTS = pickGeometryDetail({ desktop: 48, mobile: 20 });
 
 /**
  * Cross-section sides for the dragon tail tube.  Raising from 6 → 10 makes
@@ -350,7 +351,7 @@ function buildDragonBodyProfile(halfLen: number, width: number): THREE.Vector2[]
 export const EYE_STANDOFF_SCALE = 0.012; // standoff fraction of width
 export function dragonBodyRadiusAtY(y: number, halfLen: number, width: number): number {
   const profile = buildDragonBodyProfile(halfLen, width);
-  const samples = new THREE.SplineCurve(profile).getPoints(128);
+  const samples = new THREE.SplineCurve(profile).getPoints(pickGeometryDetail({ desktop: 128, mobile: 48 }));
   // Profile Y increases monotonically (rump → snout), so a simple linear scan
   // works; binary search would be faster but the 17 iris+pupil vertices per
   // side call this at most ~34 times per geometry build, so it is not a hotspot.
@@ -549,7 +550,7 @@ function buildDragonBodyGeometry(length: number, width: number): THREE.BufferGeo
   // as a smooth surface (many gently-varying facets) instead of a few long
   // banded ones; raise radial segments to DRAGON_BODY_RADIAL_SEGMENTS for
   // the same reason.
-  const smoothProfile = new THREE.SplineCurve(profile).getPoints(64);
+  const smoothProfile = new THREE.SplineCurve(profile).getPoints(pickGeometryDetail({ desktop: 64, mobile: 26 }));
   const latheGeometry = new THREE.LatheGeometry(smoothProfile, DRAGON_BODY_RADIAL_SEGMENTS);
   // Seal the open snout-tip lathe ring with a disc cap so it no longer reads
   // as a see-through hole viewed straight on from the front.
