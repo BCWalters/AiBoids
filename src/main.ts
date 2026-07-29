@@ -7,7 +7,8 @@ import { Diagnostics } from './diagnostics/Diagnostics';
 import { CreatureGalleryController } from './gallery/CreatureGalleryController';
 import { FollowCamController } from './render/FollowCamController';
 import { getPredatorCatchProfilesForStyle } from './render/sceneRenderers/predatorCatchProfiles';
-import { params, type SimMode } from './sim/params';
+import { params, mobileCreatureCounts, installDefaultOverrides, type SimMode } from './sim/params';
+import { isMobileDevice } from './render/graphicsQuality';
 import { onLanguageChange, getLanguage, setLanguage, SUPPORTED_LANGUAGES, type Language } from './i18n/language';
 import { t } from './i18n/translations';
 
@@ -80,12 +81,25 @@ function setupHeaderLanguageSelector(): void {
 
 setupHeaderLanguageSelector();
 
+// Phone/tablet-class devices start with a smaller flock (see
+// mobileCreatureCounts). Installed as overrides rather than assigned directly
+// so the control panel's Reset button restores these too. Applied before
+// CreatureGalleryController is constructed below, because that reads any
+// `?state=` deep link and its explicit counts must win over these defaults.
+if (isMobileDevice()) installDefaultOverrides(mobileCreatureCounts);
+
 const sim = new Simulation(canvas2D.clientWidth || 800, canvas2D.clientHeight || 600);
 sim.setPredatorCatchProfiles(getPredatorCatchProfilesForStyle(params.visualStyle));
 const diagnostics = new Diagnostics(sim, canvasStack);
 
 let renderer2D: Renderer | null = null;
 let renderer3D: Renderer3D | null = null;
+
+// Last box resizeCanvases() actually applied, used to skip redundant work.
+// Declared here rather than beside resizeCanvases because applySmartPanelDefault()
+// runs (and resizes) well before that point in module evaluation.
+let lastCanvasWidth = -1;
+let lastCanvasHeight = -1;
 
 // Creature View follow-cam controller — manages click-to-select, per-frame
 // orbit-lock damping, and the creature inspector HUD overlay. Constructed
@@ -110,12 +124,23 @@ const creatureGallery = new CreatureGalleryController({
 
 // Once the user manually toggles the panel, their choice is respected on
 // future resizes — only before that do we keep auto-collapsing/expanding
-// based on the 40%-of-viewport-width rule below.
+// based on the narrow-layout rule below.
 let userToggledPanel = false;
 
-// The panel's own natural (expanded) width, read once from CSS rather
-// than hardcoded, so this stays correct if the stylesheet width changes.
-const EXPANDED_PANEL_WIDTH = 300;
+/**
+ * The viewport width at or below which the layout is considered "narrow".
+ *
+ * This must stay identical to the `max-width` of the narrow-layout block at
+ * the bottom of style.css, which floats the panel over the scene instead of
+ * giving it a share of the flex row. When the two disagreed (JS collapsed
+ * below 750px, CSS overlaid below 700px) viewports in the 701–749px band got
+ * an auto-collapsing panel that still stole canvas width — the same defect
+ * class as issue #304, just in a narrower band.
+ *
+ * 750px is where the panel's natural 300px width reaches 40% of the viewport,
+ * which is the proportion the previous arithmetic rule used.
+ */
+const NARROW_LAYOUT_MEDIA_QUERY = '(max-width: 750px)';
 
 function setPanelCollapsed(collapsed: boolean): void {
   controlPanel_el.classList.toggle('collapsed', collapsed);
@@ -128,15 +153,17 @@ function isPanelCollapsed(): boolean {
 }
 
 /**
- * Auto-collapses the controls panel when it would cover more than 40% of
- * the viewport's horizontal width (e.g. testing in a half-width browser
- * window) so the 3D scene is still usable without the user needing to
- * find and click the toggle first. Only runs before the user has ever
- * manually toggled the panel, so it never fights a deliberate choice.
+ * Auto-collapses the controls panel on narrow layouts (a phone, or a
+ * half-width desktop window) so the 3D scene is usable without the user
+ * needing to find and click the toggle first. Only runs before the user has
+ * ever manually toggled the panel, so it never fights a deliberate choice.
+ *
+ * Uses the same media query as the stylesheet's narrow-layout block so the
+ * two can never drift apart — see NARROW_LAYOUT_MEDIA_QUERY.
  */
 function applySmartPanelDefault(): void {
   if (userToggledPanel) return;
-  const shouldCollapse = EXPANDED_PANEL_WIDTH / window.innerWidth > 0.4;
+  const shouldCollapse = window.matchMedia(NARROW_LAYOUT_MEDIA_QUERY).matches;
   if (shouldCollapse !== isPanelCollapsed()) setPanelCollapsed(shouldCollapse);
 }
 
@@ -156,13 +183,23 @@ function applyMode(mode: SimMode): void {
   } else {
     if (!renderer2D) renderer2D = new Renderer(canvas2D);
   }
-  resizeCanvases();
+  resizeCanvases(true);
 }
 
-function resizeCanvases(): void {
+function resizeCanvases(force = false): void {
   const rect = canvasStack.getBoundingClientRect();
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
+
+  // The observer below fires on every animation frame of the panel's 0.15s
+  // width transition. Reallocating the composer's render targets that often
+  // is a visible hitch on mobile GPUs, so ignore repeats of a size we have
+  // already applied. `force` exists for callers that changed something other
+  // than the box — notably applyMode, which may have just constructed a
+  // renderer that has never been sized at all.
+  if (!force && width === lastCanvasWidth && height === lastCanvasHeight) return;
+  lastCanvasWidth = width;
+  lastCanvasHeight = height;
 
   canvas2D.width = width;
   canvas2D.height = height;
@@ -170,6 +207,25 @@ function resizeCanvases(): void {
 
   sim.resize(width, height);
 }
+
+/**
+ * The canvas stack's size is not knowable synchronously at every point we'd
+ * like to react to it. The controls panel animates its width over 0.15s
+ * (see style.css), so measuring immediately after toggling `.collapsed`
+ * reads the *pre*-transition layout. On a narrow viewport that is not a
+ * cosmetic error: the panel occupies 300 of an iPhone's 390 CSS px, so the
+ * canvas measured 90px wide while it ended up 330px. Both the WebGL drawing
+ * buffer (stretched horizontally across the real canvas) and the simulation's
+ * world bounds (a 90-unit-wide vertical slab the flock could not leave) were
+ * sized from that stale number — issue #304.
+ *
+ * A ResizeObserver reports the settled box whenever it actually changes, so
+ * it covers the panel transition, window resizes, orientation changes, and
+ * iOS Safari's dynamic URL bar collapsing on scroll — none of which reliably
+ * produce a correctly-timed `resize` event.
+ */
+const canvasStackResizeObserver = new ResizeObserver(() => resizeCanvases());
+canvasStackResizeObserver.observe(canvasStack);
 
 const controlPanel = new ControlPanel(
   controlPanelBody,
