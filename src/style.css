@@ -453,3 +453,53 @@ body {
     height: 24px;
   }
 }
+
+/* Narrow viewports (phones in portrait, and half-width desktop windows):
+ * float the controls panel over the scene instead of letting it take a
+ * share of the flex row.
+ *
+ * In the normal side-by-side layout the panel's 300px comes straight out of
+ * the canvas. On a 390px-wide iPhone that leaves a 90px sliver — and because
+ * the simulation's world bounds track the canvas box, the flock would be
+ * squeezed into a 90-unit-wide vertical slab whenever the panel was open
+ * (issue #304). Overlaying keeps the canvas, and therefore the world, at
+ * full width in both panel states.
+ *
+ * The max-width below must stay identical to NARROW_LAYOUT_MEDIA_QUERY in
+ * main.ts, which uses it to decide when to auto-collapse the panel. If the
+ * two drift apart, viewports in between get an auto-collapsing panel that
+ * still takes its width out of the canvas. */
+@media (max-width: 750px) {
+  #app-main {
+    position: relative;
+  }
+
+  #control-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    max-width: 85vw;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Short viewports — chiefly a phone held in landscape, where the usable
+ * height is ~390px and Safari's own chrome has already taken a slice. The
+ * full-size header costs roughly a fifth of what's left, so trim it back to
+ * leave that height to the scene. Keyed on height alone so it does not
+ * affect a tall phone in portrait, which has room to spare. */
+@media (max-height: 500px) {
+  #app-header {
+    padding: 6px 14px;
+  }
+
+  #app-header h1 {
+    font-size: 16px;
+  }
+
+  #app-header .subtitle {
+    display: none;
+  }
+}

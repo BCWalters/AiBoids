@@ -275,6 +275,53 @@ export const defaultParams: SimParams = {
 /** Mutable shared params instance. Mutate fields directly; do not reassign. */
 export const params: SimParams = { ...defaultParams };
 
+/**
+ * Population defaults for phone/tablet-class devices (issue #304).
+ *
+ * The desktop defaults total 460 creatures. Flocking evaluates neighbours
+ * pairwise, so the CPU cost falls roughly with the square of the count while
+ * draw/skinning cost falls linearly — taking the total to 184 cuts the
+ * steering work to about 16% of desktop and the per-creature GPU work to
+ * about 40%. The reduced world of a narrow viewport is also physically
+ * smaller (bounds track the canvas), so the desktop counts read as
+ * uncomfortably dense there even when the frame rate holds up.
+ *
+ * These are only *defaults*: they seed the control panel's sliders, so a
+ * phone user who wants the full flock can still drag them back up.
+ */
+export const mobileCreatureCounts: Partial<SimParams> = {
+  boidCount: 60,
+  multicolorCount: 30,
+  goldCount: 30,
+  redCount: 30,
+  blueCount: 30,
+  monsterCount: 2,
+  horseCount: 2,
+};
+
+/**
+ * What "Reset" restores to. Starts as the plain desktop defaults and is
+ * replaced at startup on devices that need different ones — see
+ * installDefaultOverrides.
+ */
+let activeDefaults: SimParams = defaultParams;
+
+/**
+ * Permanently swaps in a different set of starting values, applying them to
+ * the live params immediately.
+ *
+ * Overrides have to affect `resetParams` too, not just startup: otherwise a
+ * phone user who taps Reset gets handed the full 460-creature desktop flock
+ * that the mobile defaults exist to avoid.
+ *
+ * Kept as an injection point rather than having this module detect the device
+ * itself, so `sim/` does not need to depend on `render/`.
+ */
+export function installDefaultOverrides(overrides: Partial<SimParams>): void {
+  activeDefaults = { ...defaultParams, ...overrides };
+  Object.assign(params, overrides);
+}
+
 export function resetParams(): void {
-  Object.assign(params, defaultParams);
+  Object.assign(params, activeDefaults);
 }

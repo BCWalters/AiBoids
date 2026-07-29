@@ -35,7 +35,7 @@ import {
   type CreatureLabels,
 } from './sceneRenderers/createSceneRendererHooks';
 import { createRendererSceneAssets, disposeRendererSceneAssets, type RendererSceneAssets } from './rendererSceneAssets';import { createRendererSceneRenderers } from './sceneRendererFactory';
-import { isReducedGraphics } from './graphicsQuality';
+import { isReducedGraphics, getMaxPixelRatio } from './graphicsQuality';
 import { UfoRenderer } from './UfoRenderer';
 import { CameraController } from './CameraController';
 import { CreatureInstanceRenderer, type BoidRenderBatch, type LegPartMesh } from './CreatureInstanceRenderer';
@@ -137,7 +137,7 @@ export class Renderer3D {
     const reducedGraphics = isReducedGraphics();
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !reducedGraphics, logarithmicDepthBuffer: true });
-    this.renderer.setPixelRatio(reducedGraphics ? 1 : Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, getMaxPixelRatio()));
     // ACES tone mapping keeps the physically-based Sky shader from blowing
     // out to solid white and gives the nature-style earth tones more depth.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
