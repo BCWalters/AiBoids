@@ -7,7 +7,7 @@ import { PredatorSpecies } from '../../sim/Predator';
 import type { Boid, BoidSpecies } from '../../sim/Boid';
 import type { CreatureGeometries } from '../geometry/sharedGeometry';
 import type { WingUndulationInstanceState } from '../styles/nature/wingUndulationShader';
-import type { UnicornTailUndulationInstanceState } from '../styles/nature/unicornTailUndulationShader';
+import type { TailUndulationInstanceState } from '../styles/nature/tailUndulationShader';
 
 export { PredatorSpecies };
 
@@ -368,7 +368,7 @@ export interface SceneRendererHooks {
   setupTailUndulation?: (
    tail: THREE.InstancedMesh,
    geometries: CreatureGeometries,
-  ) => UnicornTailUndulationInstanceState | undefined;
+  ) => TailUndulationInstanceState | undefined;
 
   dispose: () => void;
 }
