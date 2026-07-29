@@ -76,25 +76,33 @@ function addRainbowVertexColors(geometry: THREE.BufferGeometry, span: number): T
 }
 
 /**
- * Same idea as addRainbowVertexColors, but the gradient follows straight-
- * line distance from a given root point (e.g. where the tail meets the
- * rump) rather than |x| — needed for parts like the tail whose "root to
- * tip" axis isn't a simple left-right span.
+ * Same idea as addRainbowVertexColors, but the gradient follows root-to-tip
+ * progress along the tail's Y axis rather than |x| — needed for parts like
+ * the tail whose "root to tip" axis isn't a simple left-right span.
  */
 function addRainbowVertexColorsByDistance(
   geometry: THREE.BufferGeometry,
   root: THREE.Vector3,
-  maxDistance: number,
+  tip: THREE.Vector3,
 ): THREE.BufferGeometry {
   const position = geometry.getAttribute('position');
   const colors = new Float32Array(position.count * 3);
   const color = new THREE.Color();
   const vertex = new THREE.Vector3();
+  const tailSpan = Math.max(1e-6, root.y - tip.y);
   for (let i = 0; i < position.count; i++) {
     vertex.set(position.getX(i), position.getY(i), position.getZ(i));
-    const t = THREE.MathUtils.clamp(vertex.distanceTo(root) / maxDistance, 0, 1);
-    const hue = THREE.MathUtils.lerp(0.78, 0, t); // violet (root) -> red (tip)
-    color.setHSL(hue, 0.85, 0.62);
+    const t = THREE.MathUtils.clamp((root.y - vertex.y) / tailSpan, 0, 1);
+    const easedT = t * t * (3 - 2 * t);
+    const hue = THREE.MathUtils.lerp(0.78, 0, easedT); // violet (root) -> red (tip)
+    // HSL at constant L has wildly different perceived brightness across hues:
+    // yellow-green (~H=0.25) is ~3x brighter than blue (~H=0.67) at the same L.
+    // Compensate by lowering L for the bright mid-spectrum hues so adjacent
+    // rings don't pop with brightness jumps. The correction is a cosine dip
+    // centred on hue 0.25 (yellow-green) where perceived luminance peaks.
+    const hueRad = hue * Math.PI * 2;
+    const brightnessCompensation = 0.10 * Math.max(0, Math.cos(hueRad * 1.5 - 0.5));
+    color.setHSL(hue, 0.80, 0.62 - brightnessCompensation);
     colors[i * 3] = color.r;
     colors[i * 3 + 1] = color.g;
     colors[i * 3 + 2] = color.b;
@@ -173,8 +181,13 @@ export function createUnicornGeometries(
   // fine for a dragon, but that reads as too dragon-like here.
   const { frontY, backY } = unicornHipYs(length, width);
   const wingRootY = THREE.MathUtils.lerp(backY, frontY, 0.5 + UNICORN_WING_FORWARD_BIAS);
-  wingLeft.translate(0, wingRootY, 0);
-  wingRight.translate(0, wingRootY, 0);
+  // Raise the wing root to the top of the back. The barrel cross-section
+  // radius at the attachment point is ~width*0.364, giving a full
+  // belly-to-spine height of ~width*0.728. 25% of that is width*0.18,
+  // which seats the root at the withers ridge rather than at body centre.
+  const wingRootZ = width * 0.18;
+  wingLeft.translate(0, wingRootY, wingRootZ);
+  wingRight.translate(0, wingRootY, wingRootZ);
 
   const tail = buildUnicornTailGeometry(length, width);
   const legs = buildUnicornLegParts(length, width, bodyColor);
@@ -1355,7 +1368,8 @@ function buildUnicornLegParts(length: number, width: number, bodyColor: THREE.Co
  * down, ending pointing mostly straight down (and very slightly forward,
  * curling under) by the tip. Built from several segments (7, giving 6
  * internal joints) so the curve reads as a smooth arc rather than a
- * single rigid straight or bent piece. Tinted with the same violet-root
+ * single rigid straight or bent piece, and so the rainbow gradient has
+ * more interpolation stations instead of reading as discrete bands. Tinted with the same violet-root
  * -> red-tip rainbow gradient as the wings (see
  * addRainbowVertexColorsByDistance) for a more dramatic look than a flat
  * tint, and tapers from a thicker root to a thin tip.
@@ -1502,17 +1516,21 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
     prev = next;
   }
 
-  // Base halved and tip taken down by a quarter, per direct feedback — the
-  // old root was thick enough to read as a beaver's tail rather than a
-  // horse's dock.
-  const rootHalfWidth = width * 0.075;
-  const tipHalfWidth = width * 0.0225;
-  // Taper continuously across each segment (start radius -> end radius) rather
-  // than holding one radius per segment. The old per-segment constant width
-  // left a visible step at every joint, which read as extra blockiness on top
-  // of the square cross-section.
-  const halfWidthAt = (i: number) =>
-    THREE.MathUtils.lerp(rootHalfWidth, tipHalfWidth, i / (points.length - 1));
+  // Profile: small disc at the base → flare in the first third → taper to a
+  // near-point at the tip. Uses the smoothstep already in scope so each
+  // transition eases in/out rather than kinking at the control points.
+  const baseHalfWidth = width * 0.033;   // tight little disc where it exits the haunch
+  const peakHalfWidth = width * 0.145;   // widest bulk of the plume, ~35% along
+  const tipHalfWidth  = width * 0.004;   // taper to near-point at the end
+  const peakT = 0.35;
+  const halfWidthAt = (i: number) => {
+    const t = i / (points.length - 1);
+    if (t <= peakT) {
+      return THREE.MathUtils.lerp(baseHalfWidth, peakHalfWidth, smoothstep(t / peakT));
+    } else {
+      return THREE.MathUtils.lerp(peakHalfWidth, tipHalfWidth, smoothstep((t - peakT) / (1 - peakT)));
+    }
+  };
 
   // One ring per point. At an interior joint the ring uses the average of the
   // incoming and outgoing directions so it mitres between the two segments
@@ -1539,7 +1557,7 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
   smoothNormalsByPosition(geometry);
 
   const tip = points[points.length - 1];
-  addRainbowVertexColorsByDistance(geometry, root, root.distanceTo(tip));
+  addRainbowVertexColorsByDistance(geometry, root, tip);
   return geometry;
 }
 

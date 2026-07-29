@@ -322,6 +322,28 @@ export interface SceneRendererHooks {
   patchWingMaterial?: (material: THREE.MeshStandardMaterial, geometries: CreatureGeometries) => void;
 
   /**
+   * Optional hook to patch a leg part's MeshStandardMaterial.
+   *
+   * IMPORTANT: like patchWingMaterial, this is invoked once per leg part
+   * material INSTANCE, not once per creature. Renderer3D clones the BODY
+   * material for each leg part so the legs pick up matching per-instance
+   * tinting — and THREE.Material.clone() copies neither onBeforeCompile nor
+   * customProgramCacheKey. That means any patch installed by
+   * patchBodyMaterial is dropped on the way to the legs, and a surface
+   * treatment meant to run over the whole creature stops abruptly at the hip
+   * unless it is re-applied here.
+   *
+   * The leg part's own geometry is passed as well as the creature's, because
+   * each part is a separate mesh posed about its own joint and a pattern keyed
+   * on the body's axis will not line up with it.
+   */
+  patchLegMaterial?: (
+    material: THREE.MeshStandardMaterial,
+    geometries: CreatureGeometries,
+    legGeometry: THREE.BufferGeometry,
+  ) => void;
+
+  /**
   * Called after both wing InstancedMeshes have been created (and after
   * patchWingMaterial has already been applied to each wing material).
   * Should clone the wing geometries, attach a shared per-instance phase
