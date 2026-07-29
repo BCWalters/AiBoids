@@ -6,8 +6,11 @@ export interface UnicornHairConfig {
    * Number of hair strands counted across the full body width (body X span).
    * Normalising to the body's own X span (not the narrower mane) keeps the
    * strand count consistent as the creature scales: at the shipped value of 25
-   * roughly 7 strands are visible across the mane crest. The rest of the body
-   * surface gets a finer coat texture at the same frequency.
+   * roughly 7 strands are visible across the mane crest.
+   *
+   * This applies to the MANE ONLY — the strand pattern is masked to mane
+   * vertices via `aHairMask`. The body surface is textured separately by
+   * `coatStrandsAroundBody` below.
    */
   strandsAcrossBodyWidth: number;
   /**
@@ -27,6 +30,28 @@ export interface UnicornHairConfig {
    * 0 = no clumping; typically 0.1–0.3 for a natural feel.
    */
   clumpDarkness: number;
+  /**
+   * Horse coat texture on the BODY (everywhere `aHairMask` is 0).
+   *
+   * Deliberately a separate, much higher frequency than the mane: an earlier
+   * revision ran the mane's strand pattern unmasked across the whole creature
+   * and it read as corrugation rather than hair, which is why the mane mask
+   * was introduced. A real coat is short, fine, and near-uniform — closer to a
+   * sheen than to strands — so this wants a high count and a very low
+   * darkness.
+   */
+  coatStrandsAroundBody: number;
+  /**
+   * Number of along-body waver cycles over the body's Y span, so the coat
+   * strands are not perfectly straight rings around the barrel.
+   */
+  coatWaversAlongBody: number;
+  /**
+   * Contrast of the body coat. Very low by design (~0.03–0.08): high enough to
+   * catch the light and break up a flat lavender surface, low enough that it
+   * never reads as stripes. 0 skips the coat entirely.
+   */
+  coatDarkness: number;
 }
 
 /**
@@ -44,6 +69,9 @@ export const UNICORN_HAIR_CONFIG: UnicornHairConfig = {
   clumpsAlongBodyLength: 20,
   gapDarkness: 0.42,
   clumpDarkness: 0.18,
+  coatStrandsAroundBody: 150,
+  coatWaversAlongBody: 26,
+  coatDarkness: 0.07,
 };
 
 /**
@@ -103,11 +131,16 @@ export function applyUnicornHairShader(
   const ySpan = Math.max(1e-6, bb.max.y - bb.min.y);
   const freqX = config.strandsAcrossBodyWidth / xSpan;
   const freqY = config.clumpsAlongBodyLength / ySpan;
+  // theta is already normalised to [0,1) around the barrel, so the strand
+  // count is used directly — no span division. The along-body waver still
+  // normalises to ySpan so it scales with the creature.
+  const coatStrands = config.coatStrandsAroundBody;
+  const coatFreqY = config.coatWaversAlongBody / ySpan;
 
   // freqX and freqY must both be in the cache key: three.js reuses a compiled
   // program whenever the key matches, so omitting either would silently reuse
   // the wrong program if frequencies change (e.g. at a different creature scale).
-  const cacheKey = `aiboids-unicorn-hair-v2-manemask:${freqX.toFixed(5)}:${freqY.toFixed(5)}:${config.gapDarkness.toFixed(4)}:${config.clumpDarkness.toFixed(4)}`;
+  const cacheKey = `aiboids-unicorn-hair-v4-cylcoat:${coatStrands.toFixed(5)}:${coatFreqY.toFixed(5)}:${config.coatDarkness.toFixed(4)}:${freqX.toFixed(5)}:${freqY.toFixed(5)}:${config.gapDarkness.toFixed(4)}:${config.clumpDarkness.toFixed(4)}`;
 
   patchMaterial({
     material,
@@ -133,7 +166,7 @@ export function applyUnicornHairShader(
       // --- Fragment shader ---
       // Declare the varying (in) and uniforms at the top.
       shader.fragmentShader =
-        `varying vec3 vUnicornHairPos;\nvarying float vHairMask;\nuniform float uHairFreqX;\nuniform float uHairFreqY;\nuniform float uHairGapDarkness;\nuniform float uHairClumpDarkness;\n` +
+        `varying vec3 vUnicornHairPos;\nvarying float vHairMask;\nuniform float uHairFreqX;\nuniform float uHairFreqY;\nuniform float uHairGapDarkness;\nuniform float uHairClumpDarkness;\nuniform float uCoatStrands;\nuniform float uCoatFreqY;\nuniform float uCoatDarkness;\n` +
         shader.fragmentShader;
 
       // Inject the hair pattern AFTER roughnessmap_fragment so diffuseColor
@@ -176,6 +209,38 @@ export function applyUnicornHairShader(
       // Subtle clump-boundary shadow along each strand at periodic Y intervals.
       float clumpShadow = (1.0 - smoothstep(0.3, 0.5, abs(fract(alongY * 0.5) - 0.5))) * inStrand;
       diffuseColor.rgb *= 1.0 - uHairClumpDarkness * clumpShadow * maneMask;
+
+      // --- Body coat (everywhere the mane is not) ---
+      // Much finer and far lower contrast than the mane.
+      //
+      // Uses CYLINDRICAL coordinates, not the mane's flat XY plane. The mane
+      // is a narrow crest where X varies fast across its width, so a planar
+      // fract(x) reads as clean strands there. The barrel does not behave that
+      // way: X turns over and mirrors about x = 0, so on the flanks — where the
+      // surface is nearly parallel to X — the same lookup collapses into wide
+      // bands that meet in a diamond at the centreline and radiate outward.
+      // This is the same planarity failure as the dragon wing (see
+      // dragonScaleShader.ts's DragonScalePlane doc), just on a curved surface
+      // instead of a flat one.
+      //
+      // Wrapping the separation around the barrel's circumference via
+      // atan(x, z) instead makes the coordinate advance smoothly all the way
+      // around the body, so strand density is even on the flanks, back and
+      // neck alike, with no mirror seam.
+      float bodyMask = 1.0 - maneMask;
+      // Angle around the body's long (Y) axis, normalised to [0,1). Strand
+      // separation runs around the barrel; strand direction runs along Y.
+      float theta = atan(vUnicornHairPos.x, vUnicornHairPos.z) / 6.28318 + 0.5;
+      float coatFrac = fract(theta * uCoatStrands) - 0.5;
+      // Along-body waver so the strands are not perfectly straight rings.
+      coatFrac += sin(vUnicornHairPos.y * uCoatFreqY) * 0.10;
+      float coatFine = 1.0 - smoothstep(0.16, 0.34, abs(coatFrac));
+      // Second octave along the body length, at an unrelated multiple so the
+      // two never align into a visible repeat.
+      float coatFrac2 = fract(vUnicornHairPos.y * uCoatFreqY * 0.61 + 0.25) - 0.5;
+      float coatOct2 = 1.0 - smoothstep(0.20, 0.40, abs(coatFrac2));
+      float coat = mix(coatFine, coatFine * 0.5 + coatOct2 * 0.5, 0.45);
+      diffuseColor.rgb *= 1.0 - uCoatDarkness * (1.0 - coat) * bodyMask;
     }`,
       );
 
@@ -184,6 +249,9 @@ export function applyUnicornHairShader(
         uHairFreqY: { value: freqY },
         uHairGapDarkness: { value: config.gapDarkness },
         uHairClumpDarkness: { value: config.clumpDarkness },
+        uCoatStrands: { value: coatStrands },
+        uCoatFreqY: { value: coatFreqY },
+        uCoatDarkness: { value: config.coatDarkness },
       });
     },
   });

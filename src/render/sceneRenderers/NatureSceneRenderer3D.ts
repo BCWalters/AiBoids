@@ -942,6 +942,9 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
    */
   private featherConfigFor(geometries: CreatureGeometries): BirdFeatherConfig {
     if (geometries === this.predatorGeometries) return HAWK_FEATHER_CONFIG;
+    // The unicorn's wings are the hawk's shape from the same builder, so they
+    // take the hawk's big, strongly separated flight-feather config.
+    if (geometries === this.unicornPredatorGeometries) return HAWK_FEATHER_CONFIG;
     if (
       geometries === this.parrotGeometries ||
       geometries === this.parrotBlueGoldGeometries ||
@@ -1001,7 +1004,17 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       // would freeze the pattern's second coordinate and render stripes
       // running out along the span instead of scales.
       applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG, 'yx');
-    } else if (this.allBirdGeometries?.has(geometries)) {
+    } else if (this.allBirdGeometries?.has(geometries) || geometries === this.unicornPredatorGeometries) {
+      // The unicorn is not a bird, but its wings are built by the same
+      // buildFeatheredWingGeometry as the hawk's, so they carry real primaries
+      // and secondaries that read as bare panels without the barb shader.
+      //
+      // Composing with the rainbow gradient is safe: the feather shader only
+      // ever does `diffuseColor.rgb *=`, so it modulates the vertex-colour
+      // gradient rather than replacing it. The wings also carry no
+      // aFeatherMask attribute, which the shader handles — it gates the masked
+      // GLSL (and the cache key) on the attribute's presence.
+      //
       // Bird wings are near-flat panels in XY.  Measure Z vs X spans of the
       // wing geometry and select 'yx' when X dominates (the expected case for
       // all bird wings) to avoid the pattern degenerating into stripes.
