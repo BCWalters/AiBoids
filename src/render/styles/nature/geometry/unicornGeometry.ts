@@ -181,8 +181,13 @@ export function createUnicornGeometries(
   // fine for a dragon, but that reads as too dragon-like here.
   const { frontY, backY } = unicornHipYs(length, width);
   const wingRootY = THREE.MathUtils.lerp(backY, frontY, 0.5 + UNICORN_WING_FORWARD_BIAS);
-  wingLeft.translate(0, wingRootY, 0);
-  wingRight.translate(0, wingRootY, 0);
+  // Raise the wing root to the top of the back. The barrel cross-section
+  // radius at the attachment point is ~width*0.364, giving a full
+  // belly-to-spine height of ~width*0.728. 25% of that is width*0.18,
+  // which seats the root at the withers ridge rather than at body centre.
+  const wingRootZ = width * 0.18;
+  wingLeft.translate(0, wingRootY, wingRootZ);
+  wingRight.translate(0, wingRootY, wingRootZ);
 
   const tail = buildUnicornTailGeometry(length, width);
   const legs = buildUnicornLegParts(length, width, bodyColor);
