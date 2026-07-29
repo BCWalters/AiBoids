@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForFrames } from './waitForFrames';
 
 /**
  * Cover for the diagnostics overlay as a *field instrument*.
@@ -67,16 +68,21 @@ test.describe('diagnostics overlay', () => {
     await expect(overlay).toContainText(/buffer: \d+x\d+ @ [\d.]+x/, { timeout: 30_000 });
   });
 
-  test('?debug=0 keeps the overlay off', async ({ page }) => {
-    await page.goto(overlayUrl('/?debug=0'));
-    await page.waitForTimeout(500);
-    await expect(page.locator('.rendering-stats-overlay')).toBeHidden();
-  });
-
-  test('leaves the overlay off when no debug param is given', async ({ page }) => {
-    await page.goto(overlayUrl('/'));
-    await page.waitForTimeout(500);
-    await expect(page.locator('.rendering-stats-overlay')).toBeHidden();
+  // `?debug=0` and "no param at all" are the same assertion about the same
+  // default, and each was paying a full page load — which under software WebGL
+  // is several seconds of shader compilation for a check that reads one class.
+  // Kept as distinct navigations because the two inputs really are different
+  // (an explicit off switch versus an absent one), but folded into a single
+  // test so the fixture is paid once.
+  test('keeps the overlay off unless debug is explicitly on', async ({ page }) => {
+    for (const query of ['/?debug=0', '/']) {
+      await page.goto(overlayUrl(query));
+      // One rendered frame proves the app booted far enough to have shown the
+      // overlay if it were going to; without that this asserts "not yet" and
+      // would pass on a page that had not started.
+      await waitForFrames(page, 1);
+      await expect(page.locator('.rendering-stats-overlay')).toBeHidden();
+    }
   });
 
   test('keeps the overlay clear of the collapsed panel on a phone viewport', async ({ page }) => {

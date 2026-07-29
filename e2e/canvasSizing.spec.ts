@@ -38,9 +38,44 @@ async function gotoNarrowApp(page: Page): Promise<void> {
   const state = { params: SMALL_POPULATION };
   await page.goto(`/?lowfx=1&state=${encodeURIComponent(JSON.stringify(state))}`);
   await expect(page.locator('#sim-canvas-3d')).toBeVisible();
-  // The panel's width transition is 0.15s; allow it to settle plus a few
-  // frames for the ResizeObserver to deliver the final box.
-  await page.waitForTimeout(1000);
+  await settleCanvasMetrics(page);
+}
+
+/**
+ * Waits until the canvas geometry stops changing.
+ *
+ * The panel has a 0.15s width transition and the drawing buffer is resized
+ * from a ResizeObserver, so metrics read too early are mid-animation. The
+ * suite used to allow for that with a flat 1s sleep, which is both slower than
+ * needed once the layout has settled and no guarantee at all on a loaded CI
+ * runner, where a 0.15s transition can take considerably longer to be
+ * delivered. Two consecutive identical reads is the property actually wanted.
+ *
+ * The panel's own width is part of the sampled state, not just the canvas.
+ * Two of the callers assert that a metric is *unchanged* across a toggle, so a
+ * probe that could return before the transition began would let those tests
+ * pass without ever observing the thing they exist to catch.
+ */
+async function settleCanvasMetrics(page: Page): Promise<CanvasMetrics> {
+  let previous = '';
+  let stable: CanvasMetrics | undefined;
+  await expect
+    .poll(
+      async () => {
+        const metrics = await readCanvasMetrics(page);
+        const panelWidth = await page.evaluate(
+          () => document.querySelector('#control-panel')!.getBoundingClientRect().width,
+        );
+        const serialised = JSON.stringify({ metrics, panelWidth });
+        const unchanged = serialised === previous;
+        previous = serialised;
+        if (unchanged) stable = metrics;
+        return unchanged;
+      },
+      { timeout: 30_000, intervals: [100, 100, 150, 250] },
+    )
+    .toBe(true);
+  return stable!;
 }
 
 interface CanvasMetrics {
@@ -97,8 +132,7 @@ test.describe('narrow viewport layout', () => {
     const collapsed = await readCanvasMetrics(page);
 
     await page.click('#control-panel-toggle');
-    await page.waitForTimeout(1000);
-    const expanded = await readCanvasMetrics(page);
+    const expanded = await settleCanvasMetrics(page);
 
     // On a narrow viewport the panel overlays the scene (see style.css's
     // max-width: 700px block) rather than taking 300px out of a 390px row,
@@ -125,17 +159,15 @@ test.describe('panel toggle at desktop width', () => {
     const state = { params: SMALL_POPULATION };
     await page.goto(`/?lowfx=1&state=${encodeURIComponent(JSON.stringify(state))}`);
     await expect(page.locator('#sim-canvas-3d')).toBeVisible();
-    await page.waitForTimeout(1000);
 
-    const before = await readCanvasMetrics(page);
+    const before = await settleCanvasMetrics(page);
     // This viewport is wide enough that the panel starts expanded and shares
     // the flex row, so collapsing it really does hand width to the canvas.
     expect(before.cssWidth).toBeLessThan(1000 * 0.85);
 
     await page.click('#control-panel-toggle');
-    await page.waitForTimeout(1000);
 
-    const after = await readCanvasMetrics(page);
+    const after = await settleCanvasMetrics(page);
     expect(after.cssWidth).toBeGreaterThan(before.cssWidth);
     expect(after.bufferWidth / after.bufferHeight).toBeGreaterThan((after.cssWidth / after.cssHeight) * 0.98);
     expect(after.bufferWidth / after.bufferHeight).toBeLessThan((after.cssWidth / after.cssHeight) * 1.02);

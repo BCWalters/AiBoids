@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { waitForFrames } from './waitForFrames';
 
 /**
  * Key end-to-end smoke tests, run at PR time (see .github/workflows/ci.yml
@@ -66,7 +67,9 @@ async function gotoGalleryCreature(
   };
   await page.goto(`/?state=${encodeURIComponent(JSON.stringify(state))}&lowfx=1`);
   await expect.poll(async () => page.evaluate(() => (window as unknown as { __debugPosed?: boolean }).__debugPosed === true)).toBe(true);
-  await page.waitForTimeout(300);
+  // The pose flag is set *during* a frame; give the renderer a couple more so
+  // the posed creature is actually on screen before anything samples pixels.
+  await waitForFrames(page, 2);
 }
 
 /** Fails the test if the page logs a console error or an uncaught exception. */
@@ -181,9 +184,12 @@ test.describe('App smoke tests', () => {
     await gotoApp(page);
     await expect(page).toHaveTitle(/AiBoids/);
     await expect(page.locator('#sim-canvas-3d')).toHaveClass(/active/);
-    // Give the render loop a few frames to draw sky/ground/creatures.
-    await page.waitForTimeout(1000);
-    expect(await canvasHasVisibleContent(page, '#sim-canvas-3d')).toBe(true);
+    // Poll rather than sleep-then-check: this returns the moment the scene is
+    // actually on screen, and waits longer than any fixed sleep would if the
+    // runner is slow.
+    await expect
+      .poll(() => canvasHasVisibleContent(page, '#sim-canvas-3d'), { timeout: 60_000 })
+      .toBe(true);
   });
 
   test('control panel toggle button shows and hides the panel', async ({ page }) => {
@@ -222,8 +228,9 @@ test.describe('App smoke tests', () => {
       const styleSelect = page.locator('#param-visual-style');
       await expect(styleSelect.locator(`option[value="${style}"]`)).toHaveCount(1);
       await styleSelect.selectOption(style);
-      await page.waitForTimeout(500);
-      expect(await canvasHasVisibleContent(page, '#sim-canvas-3d')).toBe(true);
+      await expect
+        .poll(() => canvasHasVisibleContent(page, '#sim-canvas-3d'), { timeout: 90_000 })
+        .toBe(true);
     });
   }
 
@@ -234,13 +241,15 @@ test.describe('App smoke tests', () => {
 
     await modeSelect.selectOption('2d');
     await expect(page.locator('#sim-canvas-2d')).toHaveClass(/active/);
-    await page.waitForTimeout(500);
-    expect(await canvasHasVisibleContent(page, '#sim-canvas-2d')).toBe(true);
+    await expect
+      .poll(() => canvasHasVisibleContent(page, '#sim-canvas-2d'), { timeout: 60_000 })
+      .toBe(true);
 
     await modeSelect.selectOption('3d');
     await expect(page.locator('#sim-canvas-3d')).toHaveClass(/active/);
-    await page.waitForTimeout(500);
-    expect(await canvasHasVisibleContent(page, '#sim-canvas-3d')).toBe(true);
+    await expect
+      .poll(() => canvasHasVisibleContent(page, '#sim-canvas-3d'), { timeout: 60_000 })
+      .toBe(true);
   });
 
   test('language switcher updates visible UI text', async ({ page }) => {

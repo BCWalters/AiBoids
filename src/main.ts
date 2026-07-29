@@ -300,6 +300,20 @@ document.addEventListener('keydown', (e) => {
 let lastTime = performance.now();
 let lastPredatorCatchStyle = params.visualStyle;
 
+/**
+ * Count of frames the render loop has completed, published for the e2e suite.
+ *
+ * Specs need to know "has the renderer actually drawn yet?" before asserting
+ * on pixels, or before asserting that no shader error appeared. The only tool
+ * available for that was a fixed `waitForTimeout`, which is wrong in both
+ * directions: on a developer GPU it sleeps long after the scene is up, and
+ * under CI's software WebGL — where shader compilation alone runs to several
+ * seconds — it can elapse before a single frame has been drawn, making the
+ * check pass for want of anything to look at. A frame count is the honest
+ * signal, and it costs one increment per frame.
+ */
+let framesRendered = 0;
+
 function syncPredatorCatchProfiles(): void {
   if (lastPredatorCatchStyle === params.visualStyle) return;
   sim.setPredatorCatchProfiles(getPredatorCatchProfilesForStyle(params.visualStyle));
@@ -354,6 +368,8 @@ function loop(now: number): void {
   diagnostics.captureRecord(now, rawFrameMs, simMs, uiMs, renderMs, postMs, unaccountedMs);
   diagnostics.recordPhases(now, simMs, uiMs, renderMs, postMs, unaccountedMs);
   diagnostics.syncOverlay(now);
+
+  (window as unknown as { __aiboidsFrames?: number }).__aiboidsFrames = ++framesRendered;
 
   requestAnimationFrame(loop);
 }

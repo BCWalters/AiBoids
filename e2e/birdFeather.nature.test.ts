@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForFrames } from './waitForFrames';
 
 /**
  * E2E smoke tests for the bird feather shader.
@@ -60,8 +61,10 @@ test.describe('Bird feather shader — nature scene smoke tests', () => {
         `/?state=${encodeURIComponent(JSON.stringify(state))}&lowfx=1`,
       );
 
-      // Allow several frames for shaders to compile and creatures to render.
-      await page.waitForTimeout(4000);
+      // Wait for real frames rather than a fixed sleep: a GLSL link failure
+      // only surfaces on the frame that first uses the program, so frames
+      // drawn is what makes the error assertion below mean anything.
+      await waitForFrames(page, 10, 120_000);
 
       // Confirm 0 WebGL / shader errors — a GLSL link error blacks out the
       // scene entirely but does NOT throw a JS exception, so only the console
