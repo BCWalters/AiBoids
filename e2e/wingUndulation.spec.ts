@@ -14,6 +14,7 @@
  * the default 30 s is not enough.
  */
 import { test, expect, type Page } from '@playwright/test';
+import { waitForFrames } from './waitForFrames';
 
 const WEBGL_ERROR_RE =
   /l-value|ERROR: \d|failed to compile|failed to link|INVALID_OPERATION|THREE\.WebGLProgram/i;
@@ -77,9 +78,13 @@ test.describe('Wing and tail undulation shaders — nature scene smoke', () => {
 
       const errors = await collectWebGLErrors(page, async () => {
         await page.goto(url);
-        // Wait long enough for the render loop to compile shaders and draw
-        // several frames — under SwiftShader this can take 5–15 s.
-        await page.waitForTimeout(8000);
+        // Wait for real rendered frames rather than a fixed sleep. A shader
+        // compile or link failure surfaces on the first frame that tries to
+        // use the program, so frames drawn — not milliseconds elapsed — is
+        // what makes this assertion meaningful. Under SwiftShader the old
+        // 8s sleep was sometimes barely enough to reach the first frame, in
+        // which case "no errors" only meant "nothing had run yet".
+        await waitForFrames(page, 10, 120_000);
       });
 
       // Assert: zero WebGL / shader errors

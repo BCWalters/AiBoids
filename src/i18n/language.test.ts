@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Needs a real DOM: the default environment is `node` so the ~86 pure-logic
+ * suites do not each pay jsdom setup (see vitest.config.ts).
+ */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { getLanguage, setLanguage, onLanguageChange, SUPPORTED_LANGUAGES } from './language';
 

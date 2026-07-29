@@ -17,55 +17,71 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
       - run: npm run build
       - run: npm test
+      # Cheap guard against an e2e spec that no CI shard happens to select.
+      # Lives here rather than in an e2e job so it runs once, and off the
+      # critical path of the jobs it is checking.
+      - run: node scripts/checkE2eShards.mjs
+        name: every e2e test belongs to exactly one shard
 
   e2e:
     name: e2e (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
-      # Split the Playwright suite into named jobs by scene rather than by an
-      # opaque numeric shard. The tests run on software WebGL (SwiftShader) with
-      # no GPU, and every test pays its own scene shader-compile, so cost tracks
-      # which 3D scene a test loads. Grouping by scene keeps each job short and
-      # self-documenting: a PR that touches nothing fishtank-related can ignore a
-      # slow "fishtank" run, etc. The "core" job catches the cheap, untagged
-      # non-scene tests (2D mode, language, panel toggle, default load). Each
-      # runner still uses workers:1 (see playwright.config.ts) to avoid
-      # SwiftShader contexts starving each other. To rebalance, move a spec's
-      # @scene tag rather than renumbering shards.
+      # Split the Playwright suite into named jobs, each one short enough to
+      # keep the critical path near the 90s target in #308.
+      #
+      # Sharding is by cost, measured, not by category. Under software WebGL
+      # (SwiftShader, no GPU) every test pays its own page load, and that load
+      # is ~3s of shader compilation locally and roughly three times that on a
+      # CI runner — which is why cost tracks the *number* of page loads far
+      # more than what any individual test asserts. Grouping purely by scene
+      # left one job with 12 tests at 4 minutes next to another with 3 at 23
+      # seconds, so the whole run waited on the unlucky group.
+      #
+      # Names still say what broke. Scene jobs stay scene-tagged; the rest are
+      # split by the concern their spec file covers.
+      #
+      # scripts/checkE2eShards.mjs fails the build if these filters stop
+      # covering every test exactly once, which is the failure mode that
+      # matters here: a spec no filter selects is never run and never missed.
       fail-fast: false
       matrix:
         include:
-          - name: fishtank
-            filter: --grep @fishtank
+          - name: app
+            filter: 'e2e/app.spec.ts --grep-invert "@nature|@arcade|@fishtank"'
+          - name: layout
+            filter: e2e/canvasSizing.spec.ts
+          - name: overlay
+            filter: e2e/diagnosticsOverlay.spec.ts
           - name: nature
-            filter: --grep @nature
-          - name: arcade
-            filter: --grep @arcade
-          - name: core
-            filter: '--grep-invert "@fishtank|@nature|@arcade"'
+            filter: 'e2e/app.spec.ts --grep "@nature"'
+          - name: nature-shaders
+            filter: e2e/birdFeather.nature.test.ts e2e/wingUndulation.spec.ts
+          - name: arcade-fishtank
+            filter: 'e2e/app.spec.ts --grep "@arcade|@fishtank"'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
@@ -80,7 +96,7 @@ jobs:
       - run: npm run test:e2e -- ${{ matrix.filter }}
         env:
           CI: true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: failure()
         with:
           name: playwright-report-${{ matrix.name }}
