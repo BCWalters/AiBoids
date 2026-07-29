@@ -5,6 +5,7 @@ import {
   mergePositionOnlyGeometries,
   mergeGeometriesWithColor,
   buildEyeDotsGeometry,
+  buildDiscCapGeometry,
 } from '../../../geometry/sharedGeometry';
 import {
   extrudeRingGeometryAlongX,
@@ -112,7 +113,23 @@ function buildButterflyfishBodyGeometry(length: number, width: number): THREE.Bu
   const smoothProfile = new THREE.SplineCurve(controlProfile)
     .getPoints(32)
     .map((p) => new THREE.Vector2(Math.max(0, p.x), p.y));
-  const body = new THREE.LatheGeometry(smoothProfile, 24);
+  const lathe = new THREE.LatheGeometry(smoothProfile, 24);
+  // The profile starts and ends at a non-zero radius (width * 0.03), so the
+  // lathe leaves an open ring at each end — 24 boundary edges at the peduncle
+  // and 24 at the mouth. Unsealed they read as see-through holes into the
+  // hollow body, which is especially visible here because the body is squashed
+  // to 0.18 in X: head-on, the nose hole is most of what there is to see.
+  //
+  // Capped before the squash/stretch below, so each disc inherits the body's
+  // elliptical cross-section rather than staying circular and standing proud of
+  // the flank. Same treatment, and same reason, as the shark's snout cap.
+  const rumpRing = smoothProfile[0];
+  const noseRing = smoothProfile[smoothProfile.length - 1];
+  const body = mergePositionOnlyGeometries([
+    lathe,
+    buildDiscCapGeometry(rumpRing.y, rumpRing.x, 24),
+    buildDiscCapGeometry(noseRing.y, noseRing.x, 24),
+  ]);
   body.scale(BODY_SIDE_SQUASH, 1, BODY_HEIGHT_STRETCH);
 
   const dorsalFin = buildDorsalFinGeometry(halfLen, width, controlProfile);
