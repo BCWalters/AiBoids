@@ -327,6 +327,12 @@ export class Renderer3D {
       : undefined;
 
     const wingUndulationState = sceneRenderer.setupWingUndulation?.(wingLeft, wingRight, geometries);
+    if (wingUndulationState) {
+      // The unicorn mane rides the same wing flap phase as the wings.
+      // Reuse the same per-instance attribute on the body geometry so the
+      // hair shader can read it directly on the body mesh.
+      body.geometry.setAttribute('wingUndulationPhase', wingUndulationState.phaseAttribute);
+    }
     const tailUndulationState = tail
       ? sceneRenderer.setupTailUndulation?.(tail, geometries)
       : undefined;
@@ -339,6 +345,10 @@ export class Renderer3D {
       // it can be posed about its own joint.
       legs = geometries.legs.map((part) => {
         const legsMaterial = bodyMaterial.clone();
+        // clone() drops onBeforeCompile and customProgramCacheKey, so whatever
+        // patchBodyMaterial installed above is NOT on this clone. Re-apply per
+        // clone, or body surface treatments stop at the hip.
+        sceneRenderer.patchLegMaterial?.(legsMaterial, geometries, part.geometry);
         const mesh = new THREE.InstancedMesh(part.geometry, legsMaterial, Math.max(count, 1));
         mesh.count = count;
         mesh.frustumCulled = false;

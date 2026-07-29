@@ -39,8 +39,10 @@ export interface UnicornTailUndulationConfig {
    * expressed as a fraction of the tail's Y span.
    */
   upBiasFraction: number;
-  /** Oscillation amplitude at the tip, as a fraction of the tail's Y span. */
+  /** Side-to-side oscillation amplitude at the tip, as a fraction of Y span. */
   amplitudeFraction: number;
+  /** Vertical oscillation amplitude at the tip, as a fraction of Y span. */
+  verticalAmplitudeFraction: number;
   /** Phase lag from root to tip in radians (traveling-wave). */
   tipPhaseLagRad: number;
   /** Angular frequency of the tail's own undulation clock (rad/s). */
@@ -67,6 +69,7 @@ uniform float uTailRootY;
 uniform float uTailTipY;
 uniform float uTailUpBias;
 uniform float uTailAmplitude;
+uniform float uTailVerticalAmplitude;
 uniform float uTailWaveNumber;
 `;
 }
@@ -78,10 +81,15 @@ function vertexDisplacementSnippet(): string {
     if (tailSpan > 1e-6) {
       float tailProgress = clamp((uTailRootY - position.y) / tailSpan, 0.0, 1.0);
       float tailEnvelope = tailProgress * tailProgress * (3.0 - 2.0 * tailProgress);
-      float dz = uTailUpBias * unicornTailSpeedFraction * tailEnvelope
-               + uTailAmplitude * tailEnvelope
-                 * sin(unicornTailPhase - uTailWaveNumber * tailProgress);
-      transformed.z += dz;
+      // Speed-based lift stays vertical (Z = model-up): faster flight streams
+      // the tail higher, matching the upward flight pose.
+      transformed.z += uTailUpBias * unicornTailSpeedFraction * tailEnvelope;
+      float tailWave = sin(unicornTailPhase - uTailWaveNumber * tailProgress);
+      // Side-to-side swish (X = model-right).
+      transformed.x += uTailAmplitude * tailEnvelope * tailWave;
+      // Added vertical oscillation on top of the steady speed-lift, for a
+      // more dramatic up/down tail motion while still staying flowy.
+      transformed.z += uTailVerticalAmplitude * tailEnvelope * tailWave;
     }
   }
 `;
@@ -96,11 +104,12 @@ function patchTailMaterial(
   const tailSpan = rootY - tipY;
   const upBias = tailSpan * config.upBiasFraction;
   const amplitude = tailSpan * config.amplitudeFraction;
+  const verticalAmplitude = tailSpan * config.verticalAmplitudeFraction;
   const waveNumber = config.tipPhaseLagRad;
 
   const cacheKey =
-    `aiboids-unicorn-tail-undulation-v1:${rootY.toFixed(4)}:${tipY.toFixed(4)}:` +
-    `${upBias.toFixed(4)}:${amplitude.toFixed(4)}:${waveNumber.toFixed(4)}`;
+    `aiboids-unicorn-tail-undulation-v3:${rootY.toFixed(4)}:${tipY.toFixed(4)}:` +
+    `${upBias.toFixed(4)}:${amplitude.toFixed(4)}:${verticalAmplitude.toFixed(4)}:${waveNumber.toFixed(4)}`;
 
   patchMaterial({
     material,
@@ -112,6 +121,7 @@ function patchTailMaterial(
         uTailTipY: { value: tipY },
         uTailUpBias: { value: upBias },
         uTailAmplitude: { value: amplitude },
+        uTailVerticalAmplitude: { value: verticalAmplitude },
         uTailWaveNumber: { value: waveNumber },
       });
 

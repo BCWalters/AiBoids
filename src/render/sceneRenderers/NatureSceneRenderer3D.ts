@@ -461,6 +461,7 @@ export const WING_UNDULATION_CONFIG = MODERATE_WING_UNDULATION;
 const UNICORN_TAIL_UNDULATION_CONFIG: UnicornTailUndulationConfig = {
   upBiasFraction: 0.12,
   amplitudeFraction: 0.08,
+  verticalAmplitudeFraction: 0.16,
   tipPhaseLagRad: Math.PI * 0.8,
   omega: 2.56,
 };
@@ -961,7 +962,10 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
     if (geometries === this.dragonPredatorGeometries) {
       applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG);
     } else if (geometries === this.unicornPredatorGeometries) {
-      applyUnicornHairShader(material, geometries.body, UNICORN_HAIR_CONFIG);
+      applyUnicornHairShader(material, geometries.body, UNICORN_HAIR_CONFIG, {
+        maneWaveAmplitudeFraction: 0.04,
+        maneWaveLagRad: Math.PI * 0.75,
+      });
       // Both patches land on the same material. Each chains the previous
       // onBeforeCompile and composes the cache key, so order is not load-bearing
       // — but they must both be applied to the SAME instance and exactly once,
@@ -971,6 +975,36 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       // Bird feathers use the body's dorsoventral (Z) axis — 'yz' plane.
       applyBirdFeatherShader(material, geometries.body, this.featherConfigFor(geometries), 'yz');
     }
+  }
+
+  /**
+   * Legs get the same coat as the body. Renderer3D clones the body material
+   * per leg part and clone() drops the patch, so this re-applies it rather
+   * than inheriting anything from patchBodyMaterial.
+   *
+   * Only the unicorn is handled. The dragon and the birds also have legs and
+   * also lose their body patch to the same clone — that is a real pre-existing
+   * gap, but restoring dragon scales or bird plumage on legs is a visual change
+   * to those creatures that should be looked at on its own merits (bird legs
+   * are bare keratin and probably should NOT be feathered), so it is not
+   * silently folded in here.
+   */
+  patchLegMaterial(
+    material: THREE.MeshStandardMaterial,
+    geometries: CreatureGeometries,
+    legGeometry: THREE.BufferGeometry,
+  ): void {
+    if (geometries !== this.unicornPredatorGeometries) return;
+    // Each leg is a thin column set off to one side of the barrel. Measured
+    // against the body's axis its whole surface would fall inside a narrow
+    // wedge of theta and the coat would smear into a couple of wide bands, so
+    // wrap the strands around the part's own axis instead.
+    if (!legGeometry.boundingBox) legGeometry.computeBoundingBox();
+    const lbb = legGeometry.boundingBox!;
+    applyUnicornHairShader(material, geometries.body, UNICORN_HAIR_CONFIG, {
+      axisCenterX: (lbb.min.x + lbb.max.x) / 2,
+      axisCenterZ: (lbb.min.z + lbb.max.z) / 2,
+    });
   }
 
   patchTailMaterial(material: THREE.MeshStandardMaterial, geometries: CreatureGeometries): void {
@@ -986,6 +1020,21 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
       // makes the scale rows run continuously from body onto tail rather than
       // restarting at the seam.
       applyDragonScaleShader(material, geometries.body, DRAGON_SCALE_CONFIG);
+    } else if (geometries === this.unicornPredatorGeometries) {
+      // The unicorn's tail is long flowing hair, the same material as the mane
+      // — not coat. forceManeMask gives it the mane's strand pattern across its
+      // whole surface: the tail is its own mesh and carries no aHairMask, so
+      // the attribute would read 0 and the mane pattern would be masked off
+      // entirely, leaving the tail bare.
+      //
+      // Passes the BODY geometry for the same shared-frequency reason as the
+      // dragon above: both are authored in the same model space, so the strand
+      // width matches the mane's rather than restarting at its own scale.
+      applyUnicornHairShader(material, geometries.body, UNICORN_HAIR_CONFIG, {
+        forceManeMask: true,
+        strandFreqMultiplier: 1.85,
+        clumpDarknessMultiplier: 0,  // suppresses along-Y shadow bands that trace geometry rings
+      });
     } else if (this.allBirdGeometries?.has(geometries)) {
       // Bird tail: same 'yz' plane as the body.  Pass the tail's own geometry
       // so feather cell size is derived from its actual Z span and the tail
