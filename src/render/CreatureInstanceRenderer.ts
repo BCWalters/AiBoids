@@ -45,7 +45,7 @@ import { measureRootStation } from './geometry/sharedGeometry';
 import { resolveDriveAngle, type RigPartDeclaration, type Triple } from './motion/rig';
 import type { FishUndulationInstanceState } from './styles/fishtank/fishUndulationShader';
 import type { WingUndulationInstanceState } from './styles/nature/wingUndulationShader';
-import type { UnicornTailUndulationInstanceState } from './styles/nature/unicornTailUndulationShader';
+import type { TailUndulationInstanceState } from './styles/nature/tailUndulationShader';
 
 /** One creature's instanced meshes: a body plus optional wing/tail/legs/beak parts. */
 export interface BoidRenderBatch {
@@ -67,7 +67,7 @@ export interface BoidRenderBatch {
   /** Per-instance phase buffer driving the wing-undulation vertex shader. */
   wingUndulation?: WingUndulationInstanceState;
   /** Per-instance phase + speed buffers for the unicorn tail streaming shader. */
-  tailUndulation?: UnicornTailUndulationInstanceState;
+  tailUndulation?: TailUndulationInstanceState;
   /** Wing pivot declarations — mirrors CreatureGeometries.wingPivotLeft/Right.
    * When set, each wing articulates about its own root rather than the model
    * origin, keeping the fin root welded to the body through the flap cycle. */
@@ -299,7 +299,7 @@ export class CreatureInstanceRenderer {
   /** Where along the spine each batch's pectoral fins attach — see fishFinAxisPosition. */
   private fishFinAxisPositions = new WeakMap<BoidRenderBatch, number>();
   /** Per-unicorn accumulated tail undulation phase (radians), integrated every frame. */
-  private unicornTailPhase = new WeakMap<Boid | Predator, number>();
+  private tailUndulationPhase = new WeakMap<Boid | Predator, number>();
 
   /**
    * Cached combined model-space bounding box per render batch (see
@@ -675,10 +675,11 @@ export class CreatureInstanceRenderer {
       tailFlareStrength,
     });
 
-    // Unicorn tail streaming — vertex-shader undulation biased upward by
-    // horizontal speed. Only runs when the batch carries a tailUndulation state.
+    // Tail undulation — a vertex-shader flex along the tail's length, optionally
+    // biased upward by horizontal speed. Only runs when the batch carries a
+    // tailUndulation state.
     if (set.tailUndulation) {
-      this.updateUnicornTailUndulation({
+      this.updateTailUndulation({
         set,
         index,
         creature,
@@ -1182,16 +1183,17 @@ export class CreatureInstanceRenderer {
   }
 
   /**
-   * Advances the unicorn-tail undulation phase and writes both the phase and
-   * the horizontal speed fraction to the per-instance attributes consumed by
-   * the vertex shader.
+   * Advances the tail undulation phase and writes both the phase and the
+   * horizontal speed fraction to the per-instance attributes consumed by the
+   * vertex shader.
    *
-   * Called unconditionally when `set.tailUndulation` is defined (unicorn only).
+   * Called unconditionally when `set.tailUndulation` is defined — in the nature
+   * scene that is every creature with a tail.
    *
    * "Horizontal speed" = √(vel.x² + vel.z²) in world space — Y is altitude,
    * not horizontal. This matches the axis note in the problem statement.
    */
-  private updateUnicornTailUndulation({
+  private updateTailUndulation({
     set,
     index,
     creature,
@@ -1207,9 +1209,9 @@ export class CreatureInstanceRenderer {
     dt: number;
   }): void {
     const state = set.tailUndulation!;
-    const previousPhase = this.unicornTailPhase.get(creature) ?? initialFlapPhase(creature.id);
+    const previousPhase = this.tailUndulationPhase.get(creature) ?? initialFlapPhase(creature.id);
     const phase = previousPhase + state.omega * dt;
-    this.unicornTailPhase.set(creature, phase);
+    this.tailUndulationPhase.set(creature, phase);
     state.phaseAttribute.setX(index, phase);
     const horizSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
     const speedFraction = maxSpeed > 0 ? THREE.MathUtils.clamp(horizSpeed / maxSpeed, 0, 1) : 0;

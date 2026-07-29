@@ -2,12 +2,22 @@ import * as THREE from 'three';
 import { patchMaterial } from '../../patchMaterial';
 
 /**
- * Vertex-shader undulation for the unicorn's streaming tail (issue #251).
+ * Vertex-shader undulation for streaming / whipping tails (issue #251).
+ *
+ * Originally written for the unicorn's rainbow tail, this is creature-agnostic:
+ * it needs only a tail mesh whose geometry sweeps along −Y from root to tip,
+ * which is the convention every nature-scene tail is built to. The unicorn,
+ * the dragon and every bird use it with different configs.
  *
  * The tail is welded to the body by the unconditional tail-weld in
  * CreatureInstanceRenderer (see line ~722) — that is intentional and is NOT
  * changed here. Instead, a wave is injected at the vertex level so the tail
  * appears to stream and flex while the rig matrix itself stays the body transform.
+ *
+ * This composes with, rather than replaces, a rigid `tailRig` sway: the rig
+ * rotates the whole tail about its root via the instance matrix, while this
+ * shader displaces vertices in model space beforehand. The dragon and the birds
+ * use both — a slow rigid sweep carrying a faster flex along the tail's length.
  *
  * Axis conventions (critical — see problem statement):
  *   MODEL_UP  = +Z   ← "upwards" for issue #251
@@ -33,7 +43,7 @@ import { patchMaterial } from '../../patchMaterial';
  * error is comparable to the displacement fraction, which is small enough
  * (~10 % of tail span) to be invisible at the flap/undulation rates used.
  */
-export interface UnicornTailUndulationConfig {
+export interface TailUndulationConfig {
   /**
    * Steady upward deflection at the tip when flying at full horizontal speed,
    * expressed as a fraction of the tail's Y span.
@@ -50,7 +60,7 @@ export interface UnicornTailUndulationConfig {
 }
 
 /** Held in BoidRenderBatch; updated every frame by CreatureInstanceRenderer. */
-export interface UnicornTailUndulationInstanceState {
+export interface TailUndulationInstanceState {
   /** Per-instance accumulated phase for the undulation wave. */
   phaseAttribute: THREE.InstancedBufferAttribute;
   /** Per-instance horizontal speed fraction ∈ [0, 1]. */
@@ -63,8 +73,8 @@ export interface UnicornTailUndulationInstanceState {
 
 function vertexDeclarations(): string {
   return `
-attribute float unicornTailPhase;
-attribute float unicornTailSpeedFraction;
+attribute float tailUndulationPhase;
+attribute float tailUndulationSpeedFraction;
 uniform float uTailRootY;
 uniform float uTailTipY;
 uniform float uTailUpBias;
@@ -83,8 +93,8 @@ function vertexDisplacementSnippet(): string {
       float tailEnvelope = tailProgress * tailProgress * (3.0 - 2.0 * tailProgress);
       // Speed-based lift stays vertical (Z = model-up): faster flight streams
       // the tail higher, matching the upward flight pose.
-      transformed.z += uTailUpBias * unicornTailSpeedFraction * tailEnvelope;
-      float tailWave = sin(unicornTailPhase - uTailWaveNumber * tailProgress);
+      transformed.z += uTailUpBias * tailUndulationSpeedFraction * tailEnvelope;
+      float tailWave = sin(tailUndulationPhase - uTailWaveNumber * tailProgress);
       // Side-to-side swish (X = model-right).
       transformed.x += uTailAmplitude * tailEnvelope * tailWave;
       // Added vertical oscillation on top of the steady speed-lift, for a
@@ -99,7 +109,7 @@ function patchTailMaterial(
   material: THREE.MeshStandardMaterial,
   rootY: number,
   tipY: number,
-  config: UnicornTailUndulationConfig,
+  config: TailUndulationConfig,
 ): void {
   const tailSpan = rootY - tipY;
   const upBias = tailSpan * config.upBiasFraction;
@@ -108,7 +118,7 @@ function patchTailMaterial(
   const waveNumber = config.tipPhaseLagRad;
 
   const cacheKey =
-    `aiboids-unicorn-tail-undulation-v3:${rootY.toFixed(4)}:${tipY.toFixed(4)}:` +
+    `aiboids-tail-undulation-v4:${rootY.toFixed(4)}:${tipY.toFixed(4)}:` +
     `${upBias.toFixed(4)}:${amplitude.toFixed(4)}:${verticalAmplitude.toFixed(4)}:${waveNumber.toFixed(4)}`;
 
   patchMaterial({
@@ -135,23 +145,27 @@ function patchTailMaterial(
 }
 
 /**
- * Applies the unicorn-tail vertex-shader patch and returns the per-instance
+ * Applies the tail-undulation vertex-shader patch and returns the per-instance
  * state buffers for CreatureInstanceRenderer to update every frame.
  *
- * Patching is applied AFTER `patchTailMaterial` has already set the dragon-
- * scale shader (which is a no-op for unicorn geometry), so the chain is:
+ * Patching is applied AFTER the scene's `patchTailMaterial` hook has run, so
+ * the chain is:
  *   previously-applied patches → this tail-undulation patch
+ *
+ * That ordering matters for the dragon, whose tail carries the scale shader.
+ * The scale pattern is looked up from `position` while this displaces
+ * `transformed`, so the scales stay glued to the surface as it flexes.
  *
  * Clone-first semantics: the tail geometry is cloned so its instanced
  * attributes belong to this batch alone.
  */
-export function applyUnicornTailUndulationShader({
+export function applyTailUndulationShader({
   tailMesh,
   config,
 }: {
   tailMesh: THREE.InstancedMesh;
-  config: UnicornTailUndulationConfig;
-}): UnicornTailUndulationInstanceState {
+  config: TailUndulationConfig;
+}): TailUndulationInstanceState {
   // Clone geometry so the instanced attributes belong to this batch.
   const geometry = tailMesh.geometry.clone();
   tailMesh.geometry = geometry;
@@ -174,8 +188,8 @@ export function applyUnicornTailUndulationShader({
   );
   speedFractionAttribute.setUsage(THREE.DynamicDrawUsage);
 
-  geometry.setAttribute('unicornTailPhase', phaseAttribute);
-  geometry.setAttribute('unicornTailSpeedFraction', speedFractionAttribute);
+  geometry.setAttribute('tailUndulationPhase', phaseAttribute);
+  geometry.setAttribute('tailUndulationSpeedFraction', speedFractionAttribute);
 
   patchTailMaterial(
     tailMesh.material as THREE.MeshStandardMaterial,

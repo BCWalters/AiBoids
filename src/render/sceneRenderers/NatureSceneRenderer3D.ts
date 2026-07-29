@@ -33,10 +33,10 @@ import {
   type WingUndulationInstanceState,
 } from '../styles/nature/wingUndulationShader';
 import {
-  applyUnicornTailUndulationShader,
-  type UnicornTailUndulationConfig,
-  type UnicornTailUndulationInstanceState,
-} from '../styles/nature/unicornTailUndulationShader';
+  applyTailUndulationShader,
+  type TailUndulationConfig,
+  type TailUndulationInstanceState,
+} from '../styles/nature/tailUndulationShader';
 import { type CreatureSize, createCreatureSizer } from './creatureSizing';
 import {
   PredatorSpecies,
@@ -458,12 +458,46 @@ export const WING_UNDULATION_CONFIG = MODERATE_WING_UNDULATION;
 // Unicorn tail streaming config. "upBiasFraction" gives the steady upward
 // deflection at full horizontal speed; "amplitudeFraction" is the oscillation
 // on top of that. omega = angular frequency of the tail's own undulation.
-const UNICORN_TAIL_UNDULATION_CONFIG: UnicornTailUndulationConfig = {
+const UNICORN_TAIL_UNDULATION_CONFIG: TailUndulationConfig = {
   upBiasFraction: 0.12,
   amplitudeFraction: 0.08,
   verticalAmplitudeFraction: 0.16,
   tipPhaseLagRad: Math.PI * 0.8,
   omega: 2.56,
+};
+
+// Dragon whip tail. Where the unicorn's tail is hair — streaming in the wind,
+// so it earns a large speed-proportional lift and a loose lateral swish — the
+// dragon's is muscle and bone, and has to read as driven rather than blown.
+// Hence: vertical dominant (matching the existing tailRig pitch about X),
+// horizontal deliberately subtle, and almost no speed lift, since a heavy tail
+// does not stream upward the way hair does.
+//
+// The tail is length * 1.75, far longer than the unicorn's, so the phase lag is
+// pushed past a half-period: a full S-curve is visible travelling down it at
+// once instead of the whole tail swinging as one.
+const DRAGON_TAIL_UNDULATION_CONFIG: TailUndulationConfig = {
+  upBiasFraction: 0.03,
+  amplitudeFraction: 0.045,
+  verticalAmplitudeFraction: 0.11,
+  tipPhaseLagRad: Math.PI * 1.15,
+  omega: 1.9,
+};
+
+// Bird tail fans. These are short control surfaces, not streamers, and they
+// already pitch bodily on their tailRig — this adds the flex *along* the
+// feathers that a rigid rotation cannot produce.
+//
+// The phase lag is kept well under a half-period on purpose: a rectrix is only
+// ~6 vertices from root to tip, so a longer lag would alias into a visible kink
+// rather than a smooth bend. No speed lift at all; the tail's angle of attack
+// is the rig's job.
+const BIRD_TAIL_UNDULATION_CONFIG: TailUndulationConfig = {
+  upBiasFraction: 0,
+  amplitudeFraction: 0.03,
+  verticalAmplitudeFraction: 0.1,
+  tipPhaseLagRad: Math.PI * 0.45,
+  omega: 3.2,
 };
 
 export class NatureSceneRenderer3D implements SceneRendererHooks {
@@ -1118,10 +1152,22 @@ export class NatureSceneRenderer3D implements SceneRendererHooks {
   setupTailUndulation(
     tail: THREE.InstancedMesh,
     geometries: CreatureGeometries,
-  ): UnicornTailUndulationInstanceState | undefined {
-    // Only unicorns get the streaming-tail shader.
-    if (geometries !== this.unicornPredatorGeometries) return undefined;
-    return applyUnicornTailUndulationShader({ tailMesh: tail, config: UNICORN_TAIL_UNDULATION_CONFIG });
+  ): TailUndulationInstanceState | undefined {
+    return applyTailUndulationShader({
+      tailMesh: tail,
+      config: this.tailUndulationConfigFor(geometries),
+    });
+  }
+
+  /**
+   * Every nature creature with a tail undulates it; only the character of the
+   * motion differs. Falls back to the bird config because every geometry set
+   * that is not the dragon or the unicorn is a bird.
+   */
+  private tailUndulationConfigFor(geometries: CreatureGeometries): TailUndulationConfig {
+    if (geometries === this.unicornPredatorGeometries) return UNICORN_TAIL_UNDULATION_CONFIG;
+    if (geometries === this.dragonPredatorGeometries) return DRAGON_TAIL_UNDULATION_CONFIG;
+    return BIRD_TAIL_UNDULATION_CONFIG;
   }
 
   dispose(): void {

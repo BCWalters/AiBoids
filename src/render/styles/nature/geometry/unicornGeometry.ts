@@ -1496,7 +1496,7 @@ function buildUnicornTailGeometry(length: number, width: number): THREE.BufferGe
   // segment is buried in the haunch and the tail simply emerges from it.
   //
   // Nothing else needs updating to match: the undulation shader derives its
-  // root from the geometry's own bounding box (see applyUnicornTailUndulation-
+  // root from the geometry's own bounding box (see applyTailUndulation-
   // Shader), so the weld point follows this automatically.
   const root = new THREE.Vector3(0, -halfLen * 0.68, width * 0.05);
   const points: THREE.Vector3[] = [root];
