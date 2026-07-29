@@ -37,38 +37,44 @@ jobs:
     name: e2e (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
-      # Split the Playwright suite into named jobs, each one short enough to
-      # keep the critical path near the 90s target in #308.
+      # Split the Playwright suite into named jobs, sized to keep the critical
+      # path near the 90s target in #308.
       #
-      # Sharding is by cost, measured, not by category. Under software WebGL
-      # (SwiftShader, no GPU) every test pays its own page load, and that load
-      # is ~3s of shader compilation locally and roughly three times that on a
-      # CI runner — which is why cost tracks the *number* of page loads far
-      # more than what any individual test asserts. Grouping purely by scene
-      # left one job with 12 tests at 4 minutes next to another with 3 at 23
-      # seconds, so the whole run waited on the unlucky group.
+      # Sharding is by measured cost, not by category. Under software WebGL
+      # (SwiftShader, no GPU) roughly 78% of a page load is shader compilation,
+      # so a test costs what it costs to *load the page* — about 27s here —
+      # almost regardless of what it then asserts. Cost therefore tracks the
+      # number of tests in a shard, and the practical ceiling is 2-3 of them.
       #
-      # Names still say what broke. Scene jobs stay scene-tagged; the rest are
-      # split by the concern their spec file covers.
+      # Grouping by scene alone had left one job with 12 tests and 4 minutes
+      # beside another with 3 tests and 23 seconds, so every run waited on the
+      # unlucky group. Names still say what broke.
       #
-      # scripts/checkE2eShards.mjs fails the build if these filters stop
-      # covering every test exactly once, which is the failure mode that
-      # matters here: a spec no filter selects is never run and never missed.
+      # Filters match on test title, which would be fragile on its own: rename
+      # a test and it could quietly stop being run anywhere. scripts/
+      # checkE2eShards.mjs fails the build unless these cover every test
+      # exactly once, which turns that into an ordinary red build.
       fail-fast: false
       matrix:
         include:
-          - name: app
-            filter: 'e2e/app.spec.ts --grep-invert "@nature|@arcade|@fishtank"'
-          - name: layout
-            filter: e2e/canvasSizing.spec.ts
+          - name: app-smoke
+            filter: 'e2e/app.spec.ts --grep "loads without console errors|control panel toggle"'
+          - name: app-modes
+            filter: 'e2e/app.spec.ts --grep "switching to 2D mode|language switcher"'
+          - name: style-fishtank
+            filter: 'e2e/app.spec.ts --grep "visual style .fishtank"'
+          - name: style-arcade-nature
+            filter: 'e2e/app.spec.ts --grep "visual style .(arcade|nature)"'
+          - name: colors
+            filter: 'e2e/app.spec.ts --grep "Render color regression"'
+          - name: layout-sizing
+            filter: 'e2e/canvasSizing.spec.ts --grep "aspect ratio|fills the viewport width"'
+          - name: layout-panel
+            filter: 'e2e/canvasSizing.spec.ts --grep "does not shrink|follows the canvas"'
           - name: overlay
             filter: e2e/diagnosticsOverlay.spec.ts
-          - name: nature
-            filter: 'e2e/app.spec.ts --grep "@nature"'
-          - name: nature-shaders
+          - name: shaders
             filter: e2e/birdFeather.nature.test.ts e2e/wingUndulation.spec.ts
-          - name: arcade-fishtank
-            filter: 'e2e/app.spec.ts --grep "@arcade|@fishtank"'
     steps:
       - uses: actions/checkout@v5
 
@@ -86,12 +92,25 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
 
-      # On a cache hit the browser binary is already present, but the apt
-      # system libraries it links against are not, so still install those.
       - run: npx playwright install --with-deps chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-      - run: npx playwright install-deps chromium
+
+      # On a cache hit the browser binary is restored but the apt libraries it
+      # links against are not guaranteed to be present, so this used to run
+      # `install-deps` unconditionally. That was 12-29s — the single largest
+      # setup cost, and the main source of variance, since parallel jobs
+      # contend for the apt mirror.
+      #
+      # The runner image ships most of those libraries already, so ask the
+      # browser instead of assuming: launching it is a ~2s definitive answer,
+      # and the fallback still runs whenever it is genuinely needed. If a
+      # future runner image drops a library this repairs itself rather than
+      # failing.
+      - name: Install apt deps only if Chromium cannot launch without them
         if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: |
+          node -e "require('playwright').chromium.launch().then(b => b.close())" \
+            || npx playwright install-deps chromium
 
       - run: npm run test:e2e -- ${{ matrix.filter }}
         env:

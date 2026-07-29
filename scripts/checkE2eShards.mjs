@@ -42,11 +42,19 @@ function readShards() {
 }
 
 function listTests(args) {
-  const out = execFileSync(
-    'npx',
-    ['playwright', 'test', ...args, '--list', '--reporter=json'],
-    { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-  );
+  let out;
+  try {
+    out = execFileSync(
+      'npx',
+      ['playwright', 'test', ...args, '--list', '--reporter=json'],
+      { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+  } catch (error) {
+    // Usually a malformed --grep. Playwright reports it inside the JSON on
+    // stdout, so surface that one line rather than the whole config dump.
+    const reason = JSON.parse(error.stdout ?? '{}').errors?.[0]?.message ?? error.message;
+    throw new Error(`\`playwright test ${args.join(' ')} --list\` failed: ${reason}`);
+  }
   const report = JSON.parse(out);
   const ids = [];
   const walk = (suite) => {
@@ -64,7 +72,9 @@ const seen = new Map();
 for (const shard of shards) {
   // Mirrors how the workflow invokes it: `npm run test:e2e -- <filter>`.
   const args = (shard.filter.match(/"[^"]*"|\S+/g) ?? []).map((a) => a.replace(/^"|"$/g, ''));
-  for (const id of listTests(args)) {
+  const ids = listTests(args);
+  console.log(`  ${shard.name}: ${ids.length} test(s)`);
+  for (const id of ids) {
     seen.set(id, [...(seen.get(id) ?? []), shard.name]);
   }
 }
