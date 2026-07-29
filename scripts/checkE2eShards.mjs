@@ -1,4 +1,5 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,14 +42,20 @@ function readShards() {
   return shards;
 }
 
-function listTests(args) {
+// Each `--list` spends a second or two loading the Playwright config and the
+// spec files, and there is one per shard. Serially that grew with the shard
+// count and put this check on the critical path it exists to protect; these
+// are independent read-only processes, so run them together.
+const execFileAsync = promisify(execFile);
+
+async function listTests(args) {
   let out;
   try {
-    out = execFileSync(
+    ({ stdout: out } = await execFileAsync(
       'npx',
       ['playwright', 'test', ...args, '--list', '--reporter=json'],
-      { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
-    );
+      { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+    ));
   } catch (error) {
     // Usually a malformed --grep. Playwright reports it inside the JSON on
     // stdout, so surface that one line rather than the whole config dump.
@@ -66,16 +73,19 @@ function listTests(args) {
 }
 
 const shards = readShards();
-const all = listTests([]);
-const seen = new Map();
-
-for (const shard of shards) {
+const [all, ...perShard] = await Promise.all([
+  listTests([]),
   // Mirrors how the workflow invokes it: `npm run test:e2e -- <filter>`.
-  const args = (shard.filter.match(/"[^"]*"|\S+/g) ?? []).map((a) => a.replace(/^"|"$/g, ''));
-  const ids = listTests(args);
-  console.log(`  ${shard.name}: ${ids.length} test(s)`);
+  ...shards.map((shard) =>
+    listTests((shard.filter.match(/"[^"]*"|\S+/g) ?? []).map((a) => a.replace(/^"|"$/g, ''))),
+  ),
+]);
+
+const seen = new Map();
+for (const [i, ids] of perShard.entries()) {
+  console.log(`  ${shards[i].name}: ${ids.length} test(s)`);
   for (const id of ids) {
-    seen.set(id, [...(seen.get(id) ?? []), shard.name]);
+    seen.set(id, [...(seen.get(id) ?? []), shards[i].name]);
   }
 }
 
